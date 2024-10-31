@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 328 85% 58%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 262 83% 68%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 187 75% 53%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 328 85% 58%;
+    --radius: 1rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.brand-marquee-container {
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.98));
+  backdrop-filter: blur(8px);
+  mask: linear-gradient(90deg, transparent, white 5%, white 95%, transparent);
+}
+
+@keyframes scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-50%));
+  }
+}
+
+.brand-scroll {
+  display: flex;
+  animation: scroll 40s linear infinite;
+  width: fit-content;
+}
+
+.brand-scroll:hover {
+  animation-play-state: paused;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, hsl(328 85% 58%), hsl(262 83% 68%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-gradient {
+  background: linear-gradient(135deg, 
+    rgba(255, 82, 164, 0.2),
+    rgba(130, 91, 245, 0.2),
+    rgba(87, 204, 153, 0.2)
+  );
+}
