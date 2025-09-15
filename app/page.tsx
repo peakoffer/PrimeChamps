@@ -1,9 +1,9 @@
-import BrandMarquee from "@/components/brand-marquee";
-import CommunitySection from "@/components/community-section";
-import HeroSection from "@/components/hero-section";
-import ImageGallery from "@/components/image-gallery";
-import ServicesSection from "@/components/services-section";
-import StatsSection from "@/components/stats-section";
+import BrandMarquee from "@/components/brand-marquee"
+import CommunitySection from "@/components/community-section"
+import HeroSection from "@/components/hero-section"
+import ImageGallery from "@/components/image-gallery"
+import ServicesSection from "@/components/services-section"
+import StatsSection from "@/components/stats-section"
 
 export default function Home() {
   return (
@@ -25,5 +25,5 @@ export default function Home() {
       <CommunitySection />
       <StatsSection />
     </>
-  );
+  )
 }

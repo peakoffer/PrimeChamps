@@ -1,34 +1,34 @@
-"use client";
+"use client"
 
-import Image from "next/image";
+import Image from "next/image"
 
 const images = [
   {
     src: "https://cdn.onefc.com/wp-content/uploads/2021/04/Adriano-Moraes-Demetrious-Johnson-ONE-on-TNT-I-25.jpg",
     size: "large",
-    alt: "MMA fight action shot"
+    alt: "MMA fight action shot",
   },
   {
     src: "https://external-preview.redd.it/onlyfans-confirmed-as-2024-title-sponsor-of-moto2s-american-v0-aaj46_AQ2fztGFGlxY7VonRwHbSzZpgN-r0GABhP9LY.jpg?auto=webp&s=5e5b0eedbb476e9dab5530bdc33c6e049ea7bdf5",
     size: "small",
-    alt: "OnlyFans motorsport sponsorship"
+    alt: "OnlyFans motorsport sponsorship",
   },
   {
     src: "https://lushpalm.com/wp-content/uploads/2017/11/volcom-pipe-pro.jpg",
     size: "medium",
-    alt: "Professional surfing competition"
+    alt: "Professional surfing competition",
   },
   {
     src: "https://cdn.pixabay.com/photo/2018/09/23/13/52/rugby-3697512_1280.jpg",
     size: "small",
-    alt: "Rugby match action"
+    alt: "Rugby match action",
   },
   {
     src: "https://snworksceo.imgix.net/ufa/11db96eb-82f6-49a5-a188-f05964a103b8.sized-1000x1000.JPG?h=900&dpr=2",
     size: "large",
-    alt: "Female athlete in action"
-  }
-];
+    alt: "Female athlete in action",
+  },
+]
 
 export default function ImageGallery() {
   return (
@@ -39,13 +39,15 @@ export default function ImageGallery() {
             <div
               key={index}
               className={`relative rounded-xl overflow-hidden transform hover:scale-105 transition-transform duration-300 shadow-xl ${
-                image.size === 'large' ? 'col-span-2 row-span-2 h-[600px]' :
-                image.size === 'medium' ? 'h-[400px]' :
-                'h-[300px]'
+                image.size === "large"
+                  ? "col-span-2 row-span-2 h-[600px]"
+                  : image.size === "medium"
+                    ? "h-[400px]"
+                    : "h-[300px]"
               }`}
             >
               <Image
-                src={image.src}
+                src={image.src || "/placeholder.svg"}
                 alt={image.alt}
                 fill
                 className="object-cover"
@@ -58,5 +60,5 @@ export default function ImageGallery() {
         </div>
       </div>
     </div>
-  );
+  )
 }

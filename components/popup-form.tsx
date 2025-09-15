@@ -1,182 +1,202 @@
-"use client";
+"use client"
 
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { useToast } from '@/components/ui/use-toast';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-  FormDescription,
-} from '@/components/ui/form';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { useState } from "react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import * as z from "zod"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/use-toast"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { AlertCircle, CheckCircle2 } from "lucide-react"
 
+// Enhanced validation schemas with better error messages
 const athleteFormSchema = z.object({
-  type: z.literal('athlete'),
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
-  phone: z.string().min(10, 'Please enter a valid phone number'),
-  sport: z.string().min(1, 'Please select or specify your sport'),
-  otherSport: z.string().optional(),
-  experience: z.string().min(1, 'Please select your experience level'),
-  socialFollowing: z.string().min(1, 'Please select your following range'),
+  type: z.literal("athlete"),
+  name: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long"),
+  email: z.string().email("Please enter a valid email address"),
+  phone: z
+    .string()
+    .min(10, "Phone number must be at least 10 digits")
+    .regex(/^[0-9+\-\s()]*$/, "Please enter a valid phone number format"),
+  sport: z.string().min(1, "Please select your primary sport"),
+  otherSport: z
+    .string()
+    .optional()
+    .refine((val) => val !== "" || val === undefined, {
+      message: "Please specify your sport",
+      path: ["otherSport"],
+    }),
+  experience: z.string().min(1, "Please select your experience level"),
+  socialFollowing: z.string().min(1, "Please select your following range"),
   instagram: z.string().optional(),
   tiktok: z.string().optional(),
   youtube: z.string().optional(),
   twitter: z.string().optional(),
-  achievements: z.string().min(10, 'Please list your notable achievements'),
+  achievements: z
+    .string()
+    .min(10, "Please provide at least a brief description of your achievements")
+    .max(1000, "Please keep your achievements under 1000 characters"),
   sponsorships: z.string().optional(),
-  goals: z.string().min(10, 'Please describe your goals'),
+  goals: z
+    .string()
+    .min(10, "Please provide at least a brief description of your goals")
+    .max(1000, "Please keep your goals under 1000 characters"),
   message: z.string().optional(),
-});
+  // Honeypot field - should remain empty
+  website_url: z.string().optional(),
+})
 
 const brandFormSchema = z.object({
-  type: z.literal('brand'),
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
-  phone: z.string().min(10, 'Please enter a valid phone number'),
-  company: z.string().min(2, 'Company name must be at least 2 characters'),
-  role: z.string().min(2, 'Please specify your role'),
-  website: z.string().url('Please enter a valid URL').optional(),
-  industry: z.string().min(1, 'Please select your industry'),
-  budget: z.string().min(1, 'Please select your budget range'),
-  targetSports: z.string().min(1, 'Please specify target sports'),
-  campaignGoals: z.string().min(10, 'Please describe your campaign goals'),
-  targetAudience: z.string().min(10, 'Please describe your target audience'),
-  timeline: z.string().min(1, 'Please select your timeline'),
+  type: z.literal("brand"),
+  name: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long"),
+  email: z.string().email("Please enter a valid email address"),
+  phone: z
+    .string()
+    .min(10, "Phone number must be at least 10 digits")
+    .regex(/^[0-9+\-\s()]*$/, "Please enter a valid phone number format"),
+  company: z.string().min(2, "Company name must be at least 2 characters").max(100, "Company name is too long"),
+  role: z.string().min(2, "Please specify your role").max(100, "Role is too long"),
+  website: z.string().url("Please enter a valid URL").optional().or(z.literal("")),
+  industry: z.string().min(1, "Please select your industry"),
+  budget: z.string().min(1, "Please select your budget range"),
+  targetSports: z
+    .string()
+    .min(1, "Please specify target sports")
+    .max(500, "Please keep your target sports under 500 characters"),
+  campaignGoals: z
+    .string()
+    .min(10, "Please provide at least a brief description of your campaign goals")
+    .max(1000, "Please keep your campaign goals under 1000 characters"),
+  targetAudience: z
+    .string()
+    .min(10, "Please provide at least a brief description of your target audience")
+    .max(1000, "Please keep your target audience under 1000 characters"),
+  timeline: z.string().min(1, "Please select your timeline"),
   message: z.string().optional(),
-});
+  // Honeypot field - should remain empty
+  website_url: z.string().optional(),
+})
 
-const formSchema = z.discriminatedUnion('type', [
-  athleteFormSchema,
-  brandFormSchema,
-]);
+const formSchema = z.discriminatedUnion("type", [athleteFormSchema, brandFormSchema])
 
 const defaultAthleteValues = {
-  type: 'athlete' as const,
-  name: '',
-  email: '',
-  phone: '',
-  sport: '',
-  otherSport: '',
-  experience: '',
-  socialFollowing: '',
-  instagram: '',
-  tiktok: '',
-  youtube: '',
-  twitter: '',
-  achievements: '',
-  sponsorships: '',
-  goals: '',
-  message: '',
-};
+  type: "athlete" as const,
+  name: "",
+  email: "",
+  phone: "",
+  sport: "",
+  otherSport: "",
+  experience: "",
+  socialFollowing: "",
+  instagram: "",
+  tiktok: "",
+  youtube: "",
+  twitter: "",
+  achievements: "",
+  sponsorships: "",
+  goals: "",
+  message: "",
+  website_url: "",
+}
 
 const defaultBrandValues = {
-  type: 'brand' as const,
-  name: '',
-  email: '',
-  phone: '',
-  company: '',
-  role: '',
-  website: '',
-  industry: '',
-  budget: '',
-  targetSports: '',
-  campaignGoals: '',
-  targetAudience: '',
-  timeline: '',
-  message: '',
-};
+  type: "brand" as const,
+  name: "",
+  email: "",
+  phone: "",
+  company: "",
+  role: "",
+  website: "",
+  industry: "",
+  budget: "",
+  targetSports: "",
+  campaignGoals: "",
+  targetAudience: "",
+  timeline: "",
+  message: "",
+  website_url: "",
+}
 
 interface PopupFormProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
-  const [formType, setFormType] = useState<'athlete' | 'brand'>('athlete');
-  const { toast } = useToast();
+  const [formType, setFormType] = useState<"athlete" | "brand">("athlete")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { toast } = useToast()
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
-    defaultValues: formType === 'athlete' ? defaultAthleteValues : defaultBrandValues,
-  });
+    defaultValues: formType === "athlete" ? defaultAthleteValues : defaultBrandValues,
+    mode: "onChange", // Enable validation on change for immediate feedback
+  })
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     try {
-      const response = await fetch('/api/submit-form', {
-        method: 'POST',
+      setIsSubmitting(true)
+
+      // Submit the form data
+      const response = await fetch("/api/submit-form", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(data),
-      });
+      })
+
+      const result = await response.json()
 
       if (!response.ok) {
-        throw new Error('Failed to submit form');
+        throw new Error(result.message || "Failed to submit form")
       }
 
+      // Show success toast
       toast({
-        title: 'Success!',
-        description: 'Your form has been submitted successfully.',
-      });
+        title: "Success!",
+        description: "Your form has been submitted successfully. We'll be in touch soon!",
+        icon: <CheckCircle2 className="h-5 w-5 text-green-500" />,
+      })
 
-      form.reset(formType === 'athlete' ? defaultAthleteValues : defaultBrandValues);
-      onOpenChange(false);
+      // Reset form and close dialog
+      form.reset(formType === "athlete" ? defaultAthleteValues : defaultBrandValues)
+      onOpenChange(false)
     } catch (error) {
+      // Show error toast
       toast({
-        title: 'Error',
-        description: 'Failed to submit form. Please try again.',
-        variant: 'destructive',
-      });
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to submit form. Please try again.",
+        variant: "destructive",
+        icon: <AlertCircle className="h-5 w-5" />,
+      })
+    } finally {
+      setIsSubmitting(false)
     }
-  };
+  }
 
-  const switchFormType = (type: 'athlete' | 'brand') => {
-    setFormType(type);
-    form.reset(type === 'athlete' ? defaultAthleteValues : defaultBrandValues);
-  };
+  const switchFormType = (type: "athlete" | "brand") => {
+    setFormType(type)
+    form.reset(type === "athlete" ? defaultAthleteValues : defaultBrandValues)
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold text-center mb-4">
-            Partner with Us
-          </DialogTitle>
+          <DialogTitle className="text-2xl font-bold text-center mb-4">Partner with Us</DialogTitle>
         </DialogHeader>
 
         <div className="mb-6 space-x-4 flex justify-center">
-          <Button
-            variant={formType === 'athlete' ? 'default' : 'outline'}
-            onClick={() => switchFormType('athlete')}
-          >
+          <Button variant={formType === "athlete" ? "default" : "outline"} onClick={() => switchFormType("athlete")}>
             I'm an Athlete
           </Button>
-          <Button
-            variant={formType === 'brand' ? 'default' : 'outline'}
-            onClick={() => switchFormType('brand')}
-          >
+          <Button variant={formType === "brand" ? "default" : "outline"} onClick={() => switchFormType("brand")}>
             I'm a Brand
           </Button>
         </div>
@@ -189,7 +209,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Full Name</FormLabel>
+                  <FormLabel>
+                    Full Name <span className="text-destructive">*</span>
+                  </FormLabel>
                   <FormControl>
                     <Input {...field} />
                   </FormControl>
@@ -204,7 +226,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                 name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email</FormLabel>
+                    <FormLabel>
+                      Email <span className="text-destructive">*</span>
+                    </FormLabel>
                     <FormControl>
                       <Input type="email" {...field} />
                     </FormControl>
@@ -218,7 +242,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Phone</FormLabel>
+                    <FormLabel>
+                      Phone <span className="text-destructive">*</span>
+                    </FormLabel>
                     <FormControl>
                       <Input type="tel" {...field} />
                     </FormControl>
@@ -228,14 +254,32 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
               />
             </div>
 
-            {formType === 'athlete' ? (
+            {/* Honeypot field - hidden from users but visible to bots */}
+            <div className="hidden" aria-hidden="true">
+              <FormField
+                control={form.control}
+                name="website_url"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Website</FormLabel>
+                    <FormControl>
+                      <Input {...field} tabIndex={-1} autoComplete="off" />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {formType === "athlete" ? (
               <>
                 <FormField
                   control={form.control}
                   name="sport"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Primary Sport</FormLabel>
+                      <FormLabel>
+                        Primary Sport <span className="text-destructive">*</span>
+                      </FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -261,13 +305,15 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   )}
                 />
 
-                {form.watch('sport') === 'other' && (
+                {form.watch("sport") === "other" && (
                   <FormField
                     control={form.control}
                     name="otherSport"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Specify Sport</FormLabel>
+                        <FormLabel>
+                          Specify Sport <span className="text-destructive">*</span>
+                        </FormLabel>
                         <FormControl>
                           <Input {...field} placeholder="Enter your sport" />
                         </FormControl>
@@ -282,7 +328,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="experience"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Experience Level</FormLabel>
+                      <FormLabel>
+                        Experience Level <span className="text-destructive">*</span>
+                      </FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -302,7 +350,8 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                 />
 
                 <div className="space-y-4">
-                  <FormLabel>Social Media Profiles</FormLabel>
+                  {/* Using regular Label instead of FormLabel outside of FormField */}
+                  <Label>Social Media Profiles</Label>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
@@ -363,7 +412,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="socialFollowing"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Total Social Media Following</FormLabel>
+                      <FormLabel>
+                        Total Social Media Following <span className="text-destructive">*</span>
+                      </FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -389,10 +440,10 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="achievements"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Notable Achievements</FormLabel>
-                      <FormDescription>
-                        List your top competitions, awards, records, or recognition
-                      </FormDescription>
+                      <FormLabel>
+                        Notable Achievements <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormDescription>List your top competitions, awards, records, or recognition</FormDescription>
                       <FormControl>
                         <Textarea
                           {...field}
@@ -411,9 +462,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Current/Past Sponsorships</FormLabel>
-                      <FormDescription>
-                        List any brand partnerships or sponsorships (if applicable)
-                      </FormDescription>
+                      <FormDescription>List any brand partnerships or sponsorships (if applicable)</FormDescription>
                       <FormControl>
                         <Textarea
                           {...field}
@@ -431,10 +480,10 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="goals"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Career Goals</FormLabel>
-                      <FormDescription>
-                        What are your athletic and brand partnership goals?
-                      </FormDescription>
+                      <FormLabel>
+                        Career Goals <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormDescription>What are your athletic and brand partnership goals?</FormDescription>
                       <FormControl>
                         <Textarea
                           {...field}
@@ -455,7 +504,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                     name="company"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Company Name</FormLabel>
+                        <FormLabel>
+                          Company Name <span className="text-destructive">*</span>
+                        </FormLabel>
                         <FormControl>
                           <Input {...field} />
                         </FormControl>
@@ -469,7 +520,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                     name="role"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Your Role</FormLabel>
+                        <FormLabel>
+                          Your Role <span className="text-destructive">*</span>
+                        </FormLabel>
                         <FormControl>
                           <Input {...field} placeholder="e.g., Marketing Director" />
                         </FormControl>
@@ -498,7 +551,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="industry"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Industry</FormLabel>
+                      <FormLabel>
+                        Industry <span className="text-destructive">*</span>
+                      </FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -528,7 +583,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="budget"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Annual Partnership Budget</FormLabel>
+                      <FormLabel>
+                        Annual Partnership Budget <span className="text-destructive">*</span>
+                      </FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -554,16 +611,12 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="targetSports"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Target Sports</FormLabel>
-                      <FormDescription>
-                        Which sports align with your brand?
-                      </FormDescription>
+                      <FormLabel>
+                        Target Sports <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormDescription>Which sports align with your brand?</FormDescription>
                       <FormControl>
-                        <Textarea
-                          {...field}
-                          placeholder="e.g., MMA, Skateboarding, Surfing..."
-                          className="h-24"
-                        />
+                        <Textarea {...field} placeholder="e.g., MMA, Skateboarding, Surfing..." className="h-24" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -575,10 +628,10 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="campaignGoals"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Campaign Goals</FormLabel>
-                      <FormDescription>
-                        What are your main objectives for athlete partnerships?
-                      </FormDescription>
+                      <FormLabel>
+                        Campaign Goals <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormDescription>What are your main objectives for athlete partnerships?</FormDescription>
                       <FormControl>
                         <Textarea
                           {...field}
@@ -596,16 +649,12 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="targetAudience"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Target Audience</FormLabel>
-                      <FormDescription>
-                        Describe your ideal customer demographic
-                      </FormDescription>
+                      <FormLabel>
+                        Target Audience <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormDescription>Describe your ideal customer demographic</FormDescription>
                       <FormControl>
-                        <Textarea
-                          {...field}
-                          placeholder="e.g., Age range, interests, location..."
-                          className="h-24"
-                        />
+                        <Textarea {...field} placeholder="e.g., Age range, interests, location..." className="h-24" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -617,7 +666,9 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                   name="timeline"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Partnership Timeline</FormLabel>
+                      <FormLabel>
+                        Partnership Timeline <span className="text-destructive">*</span>
+                      </FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -652,12 +703,16 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
               )}
             />
 
-            <Button type="submit" className="w-full">
-              Submit Application
+            <div className="text-sm text-muted-foreground mb-4">
+              <span className="text-destructive">*</span> Required fields
+            </div>
+
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? "Submitting..." : "Submit Application"}
             </Button>
           </form>
         </Form>
       </DialogContent>
     </Dialog>
-  );
+  )
 }

@@ -1,10 +1,11 @@
-import { Shield, Trophy, Users, Zap } from "lucide-react";
+import { Shield, Trophy, Users, Zap } from "lucide-react"
 
 const services = [
   {
     icon: Users,
     title: "Brand Matchmaking",
-    description: "Strategic pairing with brands that align with your values and audience for authentic, lucrative partnerships.",
+    description:
+      "Strategic pairing with brands that align with your values and audience for authentic, lucrative partnerships.",
   },
   {
     icon: Zap,
@@ -21,7 +22,7 @@ const services = [
     title: "Growth Acceleration",
     description: "Proven strategies to increase your market value and attract premium brand opportunities.",
   },
-];
+]
 
 export default function ServicesSection() {
   return (
@@ -50,5 +51,5 @@ export default function ServicesSection() {
         </div>
       </div>
     </section>
-  );
+  )
 }

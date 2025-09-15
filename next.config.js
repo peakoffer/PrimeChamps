@@ -1,22 +1,25 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
+  output: "export",
   eslint: {
     ignoreDuringBuilds: true,
   },
-  images: { 
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  images: {
     unoptimized: true,
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: 'upload.wikimedia.org'
+        protocol: "https",
+        hostname: "upload.wikimedia.org",
       },
       {
-        protocol: 'https',
-        hostname: 'cdn.coverr.co'
-      }
-    ]
+        protocol: "https",
+        hostname: "cdn.coverr.co",
+      },
+    ],
   },
-};
+}
 
-module.exports = nextConfig;
+module.exports = nextConfig

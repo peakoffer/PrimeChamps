@@ -68,9 +68,5 @@
 }
 
 .hero-gradient {
-  background: linear-gradient(135deg, 
-    rgba(255, 82, 164, 0.2),
-    rgba(130, 91, 245, 0.2),
-    rgba(87, 204, 153, 0.2)
-  );
+  background: linear-gradient(135deg, rgba(255, 82, 164, 0.2), rgba(130, 91, 245, 0.2), rgba(87, 204, 153, 0.2));
 }

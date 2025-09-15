@@ -1,4 +1,4 @@
-import { Instagram } from 'lucide-react';
+import { Instagram } from "lucide-react"
 
 export default function Footer() {
   return (
@@ -11,27 +11,27 @@ export default function Footer() {
               Representing and developing the next generation of sporting excellence.
             </p>
           </div>
-          
+
           <div className="space-y-2 text-muted-foreground">
             <p>info@prime-champs.com</p>
           </div>
-          
+
           <div className="flex justify-center">
-            <a 
-              href="https://www.instagram.com/primechamps/" 
-              target="_blank" 
-              rel="noopener noreferrer" 
+            <a
+              href="https://www.instagram.com/primechamps/"
+              target="_blank"
+              rel="noopener noreferrer"
               className="hover:text-primary transition-colors"
             >
               <Instagram size={24} />
             </a>
           </div>
         </div>
-        
+
         <div className="mt-12 pt-8 border-t text-center text-muted-foreground">
           <p>&copy; {new Date().getFullYear()} Prime Champs. All rights reserved.</p>
         </div>
       </div>
     </footer>
-  );
+  )
 }
