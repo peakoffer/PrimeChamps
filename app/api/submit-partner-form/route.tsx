@@ -73,7 +73,7 @@ export async function POST(request: Request) {
 
     // Send email notification
     await resend.emails.send({
-      from: "Prime Champs <forms@your-domain.com>", // Update with your domain
+      from: "Prime Champs <onboarding@resend.dev>", // Use default for now
       to: "zac@prime-champs.com", // Your email address
       subject: "New Partnership Inquiry",
       html: `
