@@ -46,7 +46,7 @@ export default async function SubmissionDetailPage({ params }: { params: { id: s
               </div>
               <div>
                 <span className="text-muted-foreground">Phone:</span>
-                <p className="font-medium">{submission.phone}</p>
+                <p className="font-medium">{submission.phone || "Not provided"}</p>
               </div>
               {submission.message && (
                 <div>
@@ -133,48 +133,44 @@ export default async function SubmissionDetailPage({ params }: { params: { id: s
                     </div>
                   )}
                 </>
+              ) : submission.type === "brand" ? (
+                <>
+                  <div>
+                    <span className="text-muted-foreground">Company:</span>
+                    <p className="font-medium">{submission.company}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Role:</span>
+                    <p className="font-medium">{submission.role}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Industry:</span>
+                    <p className="font-medium">{submission.industry}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Budget:</span>
+                    <p className="font-medium">{submission.budget}</p>
+                  </div>
+                  {submission.website && (
+                    <div>
+                      <span className="text-muted-foreground">Website:</span>
+                      <a
+                        href={submission.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block font-medium text-primary hover:underline"
+                      >
+                        {submission.website}
+                      </a>
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
-                  {submission.type === "brand" ? (
-                    <>
-                      <div>
-                        <span className="text-muted-foreground">Company:</span>
-                        <p className="font-medium">{submission.company}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Role:</span>
-                        <p className="font-medium">{submission.role}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Industry:</span>
-                        <p className="font-medium">{submission.industry}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Budget:</span>
-                        <p className="font-medium">{submission.budget}</p>
-                      </div>
-                      {submission.website && (
-                        <div>
-                          <span className="text-muted-foreground">Website:</span>
-                          <a
-                            href={submission.website}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block font-medium text-primary hover:underline"
-                          >
-                            {submission.website}
-                          </a>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <span className="text-muted-foreground">Interest:</span>
-                        <p className="font-medium">{submission.goals?.replace("Interest: ", "") || "Not specified"}</p>
-                      </div>
-                    </>
-                  )}
+                  <div>
+                    <span className="text-muted-foreground">Interest:</span>
+                    <p className="font-medium">{submission.goals?.replace("Interest: ", "") || "Not specified"}</p>
+                  </div>
                 </>
               )}
             </div>
@@ -233,6 +229,10 @@ export default async function SubmissionDetailPage({ params }: { params: { id: s
                 <div>
                   <span className="text-muted-foreground">Interest:</span>
                   <p className="font-medium">{submission.goals?.replace("Interest: ", "") || "Not specified"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Message:</span>
+                  <p className="font-medium whitespace-pre-wrap">{submission.message}</p>
                 </div>
               </div>
             </div>

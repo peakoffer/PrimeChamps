@@ -35,6 +35,11 @@ export type FormSubmission = {
   target_audience?: string | null
   timeline?: string | null
 
+  // Partner specific fields (we'll use existing fields creatively)
+  // firstName + lastName = name
+  // interest = stored in goals field
+  // phone is optional for partners
+
   // Metadata
   ip_address?: string | null
   user_agent?: string | null

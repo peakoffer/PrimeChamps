@@ -64,8 +64,8 @@ export async function POST(request: Request) {
       user_agent: userAgent,
       referrer: referrer,
       status: "new",
-      // Store partner-specific data in the message field or create new fields
-      goals: `Interest: ${formData.interest}`, // Reusing the goals field for interest
+      // Store partner-specific data in the goals field for interest
+      goals: `Interest: ${formData.interest}`,
     }
 
     // Save to Supabase
