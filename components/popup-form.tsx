@@ -2,8 +2,6 @@
 
 import { useState } from "react"
 import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import * as z from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -14,78 +12,61 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { AlertCircle, CheckCircle2 } from "lucide-react"
 
-// Enhanced validation schemas with better error messages
-const athleteFormSchema = z.object({
-  type: z.literal("athlete"),
-  name: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long"),
-  email: z.string().email("Please enter a valid email address"),
-  phone: z
-    .string()
-    .min(10, "Phone number must be at least 10 digits")
-    .regex(/^[0-9+\-\s()]*$/, "Please enter a valid phone number format"),
-  sport: z.string().min(1, "Please select your primary sport"),
-  otherSport: z
-    .string()
-    .optional()
-    .refine((val) => val !== "" || val === undefined, {
-      message: "Please specify your sport",
-      path: ["otherSport"],
-    }),
-  experience: z.string().min(1, "Please select your experience level"),
-  socialFollowing: z.string().min(1, "Please select your following range"),
-  instagram: z.string().optional(),
-  tiktok: z.string().optional(),
-  youtube: z.string().optional(),
-  twitter: z.string().optional(),
-  achievements: z
-    .string()
-    .min(10, "Please provide at least a brief description of your achievements")
-    .max(1000, "Please keep your achievements under 1000 characters"),
-  sponsorships: z.string().optional(),
-  goals: z
-    .string()
-    .min(10, "Please provide at least a brief description of your goals")
-    .max(1000, "Please keep your goals under 1000 characters"),
-  message: z.string().optional(),
-  // Honeypot field - should remain empty
-  website_url: z.string().optional(),
-})
+// Simple validation functions
+const validateEmail = (email: string) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return emailRegex.test(email)
+}
 
-const brandFormSchema = z.object({
-  type: z.literal("brand"),
-  name: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long"),
-  email: z.string().email("Please enter a valid email address"),
-  phone: z
-    .string()
-    .min(10, "Phone number must be at least 10 digits")
-    .regex(/^[0-9+\-\s()]*$/, "Please enter a valid phone number format"),
-  company: z.string().min(2, "Company name must be at least 2 characters").max(100, "Company name is too long"),
-  role: z.string().min(2, "Please specify your role").max(100, "Role is too long"),
-  website: z.string().url("Please enter a valid URL").optional().or(z.literal("")),
-  industry: z.string().min(1, "Please select your industry"),
-  budget: z.string().min(1, "Please select your budget range"),
-  targetSports: z
-    .string()
-    .min(1, "Please specify target sports")
-    .max(500, "Please keep your target sports under 500 characters"),
-  campaignGoals: z
-    .string()
-    .min(10, "Please provide at least a brief description of your campaign goals")
-    .max(1000, "Please keep your campaign goals under 1000 characters"),
-  targetAudience: z
-    .string()
-    .min(10, "Please provide at least a brief description of your target audience")
-    .max(1000, "Please keep your target audience under 1000 characters"),
-  timeline: z.string().min(1, "Please select your timeline"),
-  message: z.string().optional(),
-  // Honeypot field - should remain empty
-  website_url: z.string().optional(),
-})
+const validatePhone = (phone: string) => {
+  if (!phone) return true // Optional field
+  const phoneRegex = /^[0-9+\-\s()]*$/
+  return phoneRegex.test(phone) && phone.replace(/\D/g, "").length >= 10
+}
 
-const formSchema = z.discriminatedUnion("type", [athleteFormSchema, brandFormSchema])
+// Form data types
+type AthleteFormData = {
+  type: "athlete"
+  name: string
+  email: string
+  phone: string
+  sport: string
+  otherSport?: string
+  experience: string
+  socialFollowing: string
+  instagram?: string
+  tiktok?: string
+  youtube?: string
+  twitter?: string
+  achievements: string
+  sponsorships?: string
+  goals: string
+  message?: string
+  website_url?: string
+}
 
-const defaultAthleteValues = {
-  type: "athlete" as const,
+type BrandFormData = {
+  type: "brand"
+  name: string
+  email: string
+  phone: string
+  company: string
+  role: string
+  website?: string
+  industry: string
+  budget: string
+  targetSports: string
+  campaignGoals: string
+  targetAudience: string
+  timeline: string
+  message?: string
+  website_url?: string
+}
+
+type FormData = AthleteFormData | BrandFormData
+
+const defaultAthleteValues: AthleteFormData = {
+  type: "athlete",
   name: "",
   email: "",
   phone: "",
@@ -104,8 +85,8 @@ const defaultAthleteValues = {
   website_url: "",
 }
 
-const defaultBrandValues = {
-  type: "brand" as const,
+const defaultBrandValues: BrandFormData = {
+  type: "brand",
   name: "",
   email: "",
   phone: "",
@@ -132,15 +113,96 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<FormData>({
     defaultValues: formType === "athlete" ? defaultAthleteValues : defaultBrandValues,
-    mode: "onChange", // Enable validation on change for immediate feedback
+    mode: "onChange",
   })
 
-  const onSubmit = async (data: z.infer<typeof formSchema>) => {
+  // Custom validation
+  const validateForm = (data: FormData): string[] => {
+    const errors: string[] = []
+
+    if (!data.name || data.name.length < 2) {
+      errors.push("Name must be at least 2 characters")
+    }
+
+    if (!validateEmail(data.email)) {
+      errors.push("Please enter a valid email address")
+    }
+
+    if (!validatePhone(data.phone)) {
+      errors.push("Please enter a valid phone number")
+    }
+
+    if (data.type === "athlete") {
+      const athleteData = data as AthleteFormData
+      if (!athleteData.sport) {
+        errors.push("Please select your primary sport")
+      }
+      if (athleteData.sport === "other" && !athleteData.otherSport) {
+        errors.push("Please specify your sport")
+      }
+      if (!athleteData.experience) {
+        errors.push("Please select your experience level")
+      }
+      if (!athleteData.socialFollowing) {
+        errors.push("Please select your following range")
+      }
+      if (!athleteData.achievements || athleteData.achievements.length < 10) {
+        errors.push("Please provide at least a brief description of your achievements")
+      }
+      if (!athleteData.goals || athleteData.goals.length < 10) {
+        errors.push("Please provide at least a brief description of your goals")
+      }
+    } else if (data.type === "brand") {
+      const brandData = data as BrandFormData
+      if (!brandData.company || brandData.company.length < 2) {
+        errors.push("Company name must be at least 2 characters")
+      }
+      if (!brandData.role || brandData.role.length < 2) {
+        errors.push("Please specify your role")
+      }
+      if (brandData.website && !brandData.website.startsWith("http")) {
+        errors.push("Please enter a valid URL")
+      }
+      if (!brandData.industry) {
+        errors.push("Please select your industry")
+      }
+      if (!brandData.budget) {
+        errors.push("Please select your budget range")
+      }
+      if (!brandData.targetSports || brandData.targetSports.length < 1) {
+        errors.push("Please specify target sports")
+      }
+      if (!brandData.campaignGoals || brandData.campaignGoals.length < 10) {
+        errors.push("Please provide at least a brief description of your campaign goals")
+      }
+      if (!brandData.targetAudience || brandData.targetAudience.length < 10) {
+        errors.push("Please provide at least a brief description of your target audience")
+      }
+      if (!brandData.timeline) {
+        errors.push("Please select your timeline")
+      }
+    }
+
+    return errors
+  }
+
+  const onSubmit = async (data: FormData) => {
     try {
       setIsSubmitting(true)
+
+      // Validate form
+      const validationErrors = validateForm(data)
+      if (validationErrors.length > 0) {
+        toast({
+          title: "Validation Error",
+          description: validationErrors[0],
+          variant: "destructive",
+          icon: <AlertCircle className="h-5 w-5" />,
+        })
+        return
+      }
 
       // Submit the form data
       const response = await fetch("/api/submit-form", {
@@ -213,7 +275,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                     Full Name <span className="text-destructive">*</span>
                   </FormLabel>
                   <FormControl>
-                    <Input {...field} />
+                    <Input {...field} required />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -230,7 +292,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                       Email <span className="text-destructive">*</span>
                     </FormLabel>
                     <FormControl>
-                      <Input type="email" {...field} />
+                      <Input type="email" {...field} required />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -246,7 +308,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                       Phone <span className="text-destructive">*</span>
                     </FormLabel>
                     <FormControl>
-                      <Input type="tel" {...field} />
+                      <Input type="tel" {...field} required />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -315,7 +377,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                           Specify Sport <span className="text-destructive">*</span>
                         </FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="Enter your sport" />
+                          <Input {...field} placeholder="Enter your sport" required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -350,7 +412,6 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                 />
 
                 <div className="space-y-4">
-                  {/* Using regular Label instead of FormLabel outside of FormField */}
                   <Label>Social Media Profiles</Label>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField
@@ -449,6 +510,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                           {...field}
                           placeholder="e.g., 2023 National Champion, World Record Holder, Featured in Sports Magazine..."
                           className="h-24"
+                          required
                         />
                       </FormControl>
                       <FormMessage />
@@ -489,6 +551,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                           {...field}
                           placeholder="Share your short-term and long-term goals..."
                           className="h-24"
+                          required
                         />
                       </FormControl>
                       <FormMessage />
@@ -508,7 +571,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                           Company Name <span className="text-destructive">*</span>
                         </FormLabel>
                         <FormControl>
-                          <Input {...field} />
+                          <Input {...field} required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -524,7 +587,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                           Your Role <span className="text-destructive">*</span>
                         </FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="e.g., Marketing Director" />
+                          <Input {...field} placeholder="e.g., Marketing Director" required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -616,7 +679,12 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                       </FormLabel>
                       <FormDescription>Which sports align with your brand?</FormDescription>
                       <FormControl>
-                        <Textarea {...field} placeholder="e.g., MMA, Skateboarding, Surfing..." className="h-24" />
+                        <Textarea
+                          {...field}
+                          placeholder="e.g., MMA, Skateboarding, Surfing..."
+                          className="h-24"
+                          required
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -637,6 +705,7 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                           {...field}
                           placeholder="e.g., Brand awareness, Product launches, Content creation..."
                           className="h-24"
+                          required
                         />
                       </FormControl>
                       <FormMessage />
@@ -654,7 +723,12 @@ export default function PopupForm({ open, onOpenChange }: PopupFormProps) {
                       </FormLabel>
                       <FormDescription>Describe your ideal customer demographic</FormDescription>
                       <FormControl>
-                        <Textarea {...field} placeholder="e.g., Age range, interests, location..." className="h-24" />
+                        <Textarea
+                          {...field}
+                          placeholder="e.g., Age range, interests, location..."
+                          className="h-24"
+                          required
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

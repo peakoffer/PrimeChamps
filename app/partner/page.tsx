@@ -2,8 +2,6 @@
 
 import { useState } from "react"
 import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import * as z from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -12,29 +10,31 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AlertCircle, CheckCircle2 } from "lucide-react"
 
-// Schema for the partner form - simplified version
-const partnerFormSchema = z.object({
-  type: z.literal("partner"), // We'll use "partner" as a new type
-  firstName: z.string().min(2, "First name must be at least 2 characters").max(50, "First name is too long"),
-  lastName: z.string().min(2, "Last name must be at least 2 characters").max(50, "Last name is too long"),
-  email: z.string().email("Please enter a valid email address"),
-  phone: z
-    .string()
-    .min(10, "Phone number must be at least 10 digits")
-    .regex(/^[0-9+\-\s()]*$/, "Please enter a valid phone number format")
-    .optional()
-    .or(z.literal("")),
-  interest: z.string().min(1, "Please select your area of interest"),
-  message: z
-    .string()
-    .min(10, "Please provide at least a brief message")
-    .max(1000, "Please keep your message under 1000 characters"),
-  // Honeypot field
-  website_url: z.string().optional(),
-})
+// Simple validation functions
+const validateEmail = (email: string) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return emailRegex.test(email)
+}
 
-const defaultValues = {
-  type: "partner" as const,
+const validatePhone = (phone: string) => {
+  if (!phone) return true // Optional field
+  const phoneRegex = /^[0-9+\-\s()]*$/
+  return phoneRegex.test(phone) && phone.replace(/\D/g, "").length >= 10
+}
+
+type PartnerFormData = {
+  type: "partner"
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string
+  interest: string
+  message: string
+  website_url?: string
+}
+
+const defaultValues: PartnerFormData = {
+  type: "partner",
   firstName: "",
   lastName: "",
   email: "",
@@ -48,15 +48,57 @@ export default function PartnerPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
-  const form = useForm<z.infer<typeof partnerFormSchema>>({
-    resolver: zodResolver(partnerFormSchema),
+  const form = useForm<PartnerFormData>({
     defaultValues,
     mode: "onChange",
   })
 
-  const onSubmit = async (data: z.infer<typeof partnerFormSchema>) => {
+  // Custom validation
+  const validateForm = (data: PartnerFormData): string[] => {
+    const errors: string[] = []
+
+    if (!data.firstName || data.firstName.length < 2) {
+      errors.push("First name must be at least 2 characters")
+    }
+
+    if (!data.lastName || data.lastName.length < 2) {
+      errors.push("Last name must be at least 2 characters")
+    }
+
+    if (!validateEmail(data.email)) {
+      errors.push("Please enter a valid email address")
+    }
+
+    if (data.phone && !validatePhone(data.phone)) {
+      errors.push("Please enter a valid phone number")
+    }
+
+    if (!data.interest) {
+      errors.push("Please select your area of interest")
+    }
+
+    if (!data.message || data.message.length < 10) {
+      errors.push("Please provide at least a brief message")
+    }
+
+    return errors
+  }
+
+  const onSubmit = async (data: PartnerFormData) => {
     try {
       setIsSubmitting(true)
+
+      // Validate form
+      const validationErrors = validateForm(data)
+      if (validationErrors.length > 0) {
+        toast({
+          title: "Validation Error",
+          description: validationErrors[0],
+          variant: "destructive",
+          icon: <AlertCircle className="h-5 w-5" />,
+        })
+        return
+      }
 
       // Submit the form data to our existing API endpoint
       const response = await fetch("/api/submit-partner-form", {
@@ -115,7 +157,7 @@ export default function PartnerPage() {
                     First Name <span className="text-destructive">*</span>
                   </FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder="Your first name" />
+                    <Input {...field} placeholder="Your first name" required />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -131,7 +173,7 @@ export default function PartnerPage() {
                     Last Name <span className="text-destructive">*</span>
                   </FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder="Your last name" />
+                    <Input {...field} placeholder="Your last name" required />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -148,7 +190,7 @@ export default function PartnerPage() {
                   Email <span className="text-destructive">*</span>
                 </FormLabel>
                 <FormControl>
-                  <Input {...field} type="email" placeholder="Your email address" />
+                  <Input {...field} type="email" placeholder="Your email address" required />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -204,7 +246,12 @@ export default function PartnerPage() {
                   Message <span className="text-destructive">*</span>
                 </FormLabel>
                 <FormControl>
-                  <Textarea {...field} placeholder="Tell us more about your inquiry" className="min-h-[150px]" />
+                  <Textarea
+                    {...field}
+                    placeholder="Tell us more about your inquiry"
+                    className="min-h-[150px]"
+                    required
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
