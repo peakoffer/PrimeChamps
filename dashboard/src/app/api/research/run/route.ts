@@ -1,0 +1,2005 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const APIFY_API_KEY = process.env.APIFY_API_KEY;
+const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY;
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface ResearchConfig {
+  sportFocus: string;
+  customContext?: string; // e.g., "Winter Olympics 2026 hopefuls"
+  followerMin: number;
+  followerMax: number;
+  resultCount: number;
+  targetRegions?: string[];
+  scoringModel?: string;
+}
+
+interface DiscoveredAthlete {
+  name: string;
+  sport: string;
+  context: string; // Why they were found (e.g., "WSL Championship Tour competitor")
+  source: string;  // Where we found them
+}
+
+interface EnrichedAthlete extends DiscoveredAthlete {
+  instagram_handle?: string;
+  instagram_url?: string;
+  profile_pic_url?: string;
+  follower_count?: number;
+  following_count?: number;
+  posts_count?: number;
+  bio?: string;
+  verified?: boolean;
+  is_private?: boolean;
+}
+
+interface ScoredAthlete extends EnrichedAthlete {
+  score: number;
+  reasoning: string;
+  concerns: string[];
+  is_minor?: boolean;
+}
+
+interface SuccessProfile {
+  totalConversions: number;
+  sportBreakdown: Record<string, number>;
+  successPatterns: string[];
+  exclusionHandles: Set<string>; // IG handles to exclude (historical + rejected)
+  exampleConversions: Array<{
+    name: string;
+    sport: string;
+    igHandle: string;
+  }>;
+}
+
+// Cache for historical data (loaded once per server restart)
+let cachedSuccessProfile: SuccessProfile | null = null;
+let successProfileLoadedAt: number = 0;
+const SUCCESS_PROFILE_CACHE_MS = 1000 * 60 * 60; // 1 hour cache
+
+// ============================================================================
+// LOGGING
+// ============================================================================
+
+let logBuffer: string[] = [];
+let startTime = Date.now();
+
+function log(message: string, data?: unknown) {
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  const logLine = `[Research +${elapsed}s] ${message}`;
+  console.log(logLine);
+  logBuffer.push(logLine);
+  if (data) {
+    const dataStr = JSON.stringify(data, null, 2);
+    console.log(dataStr);
+    logBuffer.push(dataStr);
+  }
+}
+
+// ============================================================================
+// HISTORICAL DATA & SUCCESS PROFILE
+// ============================================================================
+
+async function loadSuccessProfile(): Promise<SuccessProfile> {
+  // Check cache
+  if (cachedSuccessProfile && Date.now() - successProfileLoadedAt < SUCCESS_PROFILE_CACHE_MS) {
+    return cachedSuccessProfile;
+  }
+
+  log("Loading historical success profile from database...");
+
+  // Load ALL historical athletes from database - this is our source of truth
+  const { data: historicalAthletes, error } = await supabase
+    .from("athletes")
+    .select("id, name, sport, instagram_handle, follower_count, notes, source, pipeline_stage, created_at")
+    .eq("is_historical", true);
+
+  if (error) {
+    log(`Error loading historical athletes: ${error.message}`);
+  }
+
+  // Also load rejected athletes (we don't want to contact them again)
+  const { data: rejectedAthletes } = await supabase
+    .from("athletes")
+    .select("instagram_handle")
+    .eq("pipeline_stage", "rejected");
+
+  // Build the success profile from database
+  const profile = buildSuccessProfileFromDB(historicalAthletes || [], rejectedAthletes || []);
+
+  // Cache it
+  cachedSuccessProfile = profile;
+  successProfileLoadedAt = Date.now();
+
+  log(`Success profile built: ${profile.totalConversions} conversions, ${profile.exclusionHandles.size} exclusions`);
+
+  return profile;
+}
+
+interface DBHistoricalAthlete {
+  id: string;
+  name: string;
+  sport: string;
+  instagram_handle: string;
+  follower_count: number | null;
+  notes: string | null;
+  source: string;
+  pipeline_stage: string | null;
+  created_at: string;
+}
+
+function buildSuccessProfileFromDB(
+  historicalAthletes: DBHistoricalAthlete[],
+  rejectedAthletes: Array<{ instagram_handle: string }>
+): SuccessProfile {
+  const sportBreakdown: Record<string, number> = {};
+  const exclusionHandles = new Set<string>();
+  const followerRanges: number[] = [];
+
+  // Process historical athletes from database
+  for (const athlete of historicalAthletes) {
+    // Track sport breakdown
+    if (athlete.sport) {
+      const sport = athlete.sport.toLowerCase();
+      // Normalize sport names
+      let category = athlete.sport;
+      if (sport.includes("mma") || sport.includes("ufc") || sport.includes("boxing") || sport.includes("combat")) {
+        category = "Combat Sports";
+      } else if (sport.includes("surf") || sport.includes("skate") || sport.includes("snowboard") || sport.includes("bmx")) {
+        category = "Action Sports";
+      } else if (sport.includes("golf") || sport.includes("tennis") || sport.includes("football") || sport.includes("soccer")) {
+        category = "Ball Sports";
+      } else if (sport.includes("racing") || sport.includes("motor") || sport.includes("nascar")) {
+        category = "Motorsports";
+      }
+      sportBreakdown[category] = (sportBreakdown[category] || 0) + 1;
+    }
+
+    // Add to exclusion list
+    if (athlete.instagram_handle) {
+      exclusionHandles.add(athlete.instagram_handle.toLowerCase());
+    }
+
+    // Track follower counts for analysis
+    if (athlete.follower_count && athlete.follower_count > 0) {
+      followerRanges.push(athlete.follower_count);
+    }
+  }
+
+  // Add rejected athletes to exclusion list
+  for (const athlete of rejectedAthletes) {
+    if (athlete.instagram_handle) {
+      exclusionHandles.add(athlete.instagram_handle.toLowerCase());
+    }
+  }
+
+  // Calculate follower insights
+  const avgFollowers = followerRanges.length > 0
+    ? Math.round(followerRanges.reduce((a, b) => a + b, 0) / followerRanges.length)
+    : 0;
+  const minFollowers = followerRanges.length > 0 ? Math.min(...followerRanges) : 0;
+  const maxFollowers = followerRanges.length > 0 ? Math.max(...followerRanges) : 0;
+
+  // Build success patterns from database analysis
+  const successPatterns = buildSuccessPatternsFromDB(
+    historicalAthletes.length,
+    sportBreakdown,
+    avgFollowers,
+    minFollowers,
+    maxFollowers
+  );
+
+  // Get example conversions from database
+  const exampleConversions = getExampleConversionsFromDB(historicalAthletes);
+
+  return {
+    totalConversions: historicalAthletes.length,
+    sportBreakdown,
+    successPatterns,
+    exclusionHandles,
+    exampleConversions,
+  };
+}
+
+function buildSuccessPatternsFromDB(
+  totalConversions: number,
+  sportBreakdown: Record<string, number>,
+  avgFollowers: number,
+  minFollowers: number,
+  maxFollowers: number
+): string[] {
+  const patterns: string[] = [];
+
+  // Overall stats
+  patterns.push(`We have ${totalConversions} athletes in our historical database.`);
+
+  // Sport breakdown insights
+  const sortedSports = Object.entries(sportBreakdown).sort((a, b) => b[1] - a[1]);
+  if (sortedSports.length > 0) {
+    const topSport = sortedSports[0];
+    patterns.push(`Our strongest category is ${topSport[0]} with ${topSport[1]} athletes.`);
+
+    // List all categories
+    const sportSummary = sortedSports.map(([sport, count]) => `${sport}: ${count}`).join(", ");
+    patterns.push(`Sport breakdown: ${sportSummary}`);
+  }
+
+  // Follower insights
+  if (avgFollowers > 0) {
+    patterns.push(`Follower range of our athletes: ${minFollowers.toLocaleString()} - ${maxFollowers.toLocaleString()} (avg: ${avgFollowers.toLocaleString()})`);
+  }
+
+  // Cross-sport applicability
+  patterns.push(`Combat sports athletes have been highly successful - similar traits (personal brand, fitness focus, competitive mindset) apply to action sports and individual athletes.`);
+
+  // Key success factors
+  patterns.push(`Key success factors from our data:`);
+  patterns.push(`- Individual athletes with personal brand presence`);
+  patterns.push(`- Active Instagram with fitness/lifestyle content`);
+  patterns.push(`- Follower sweet spot: 50K-500K (engaged and accessible)`);
+  patterns.push(`- Professional but not mega-famous`);
+
+  // What to avoid
+  patterns.push(`AVOID: Already on OnlyFans, team-only presence, inactive accounts, minors.`);
+
+  return patterns;
+}
+
+function getExampleConversionsFromDB(athletes: DBHistoricalAthlete[]): Array<{ name: string; sport: string; igHandle: string }> {
+  const examples: Array<{ name: string; sport: string; igHandle: string }> = [];
+  const seenSports = new Set<string>();
+
+  // Get one example per sport (max 5)
+  for (const athlete of athletes) {
+    if (athlete.name && athlete.sport && !seenSports.has(athlete.sport)) {
+      examples.push({
+        name: athlete.name,
+        sport: athlete.sport,
+        igHandle: athlete.instagram_handle || "",
+      });
+      seenSports.add(athlete.sport);
+      if (examples.length >= 5) break;
+    }
+  }
+
+  return examples;
+}
+
+function formatSuccessProfileForPrompt(profile: SuccessProfile, targetSport: string): string {
+  const lines: string[] = [];
+
+  lines.push("=== HISTORICAL SUCCESS CONTEXT ===");
+  lines.push(`Our team has ${profile.totalConversions} athletes in our historical database.`);
+  lines.push("");
+
+  // Sport relevance
+  const targetCategory = profile.sportBreakdown[targetSport] || 0;
+  if (targetCategory > 0) {
+    lines.push(`We have ${targetCategory} ${targetSport} athletes already.`);
+  } else {
+    lines.push(`${targetSport} is a new category for us, but patterns from our database apply:`);
+  }
+  lines.push("");
+
+  // Success patterns
+  lines.push("KEY SUCCESS PATTERNS FROM OUR DATA:");
+  for (const pattern of profile.successPatterns.slice(0, 8)) {
+    lines.push(`• ${pattern}`);
+  }
+  lines.push("");
+
+  // Example conversions
+  if (profile.exampleConversions.length > 0) {
+    lines.push("EXAMPLE ATHLETES FROM OUR DATABASE:");
+    for (const example of profile.exampleConversions.slice(0, 3)) {
+      lines.push(`• ${example.name} (${example.sport}) - @${example.igHandle}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("Use these patterns to identify similar high-potential candidates in the target sport.");
+
+  return lines.join("\n");
+}
+
+function isExcludedAthlete(
+  instagramHandle: string,
+  profile: SuccessProfile
+): { excluded: boolean; reason?: string } {
+  const handle = instagramHandle.toLowerCase().replace("@", "");
+
+  if (profile.exclusionHandles.has(handle)) {
+    return { excluded: true, reason: "Already in our historical database (previously contacted or signed)" };
+  }
+
+  return { excluded: false };
+}
+
+// ============================================================================
+// STEP 1: SPORT CONTEXT DISCOVERY (Perplexity + Caching)
+// ============================================================================
+
+interface SportContext {
+  leagues: string[];
+  competitions: string[];
+  governingBodies: string[];
+  searchQueries: string[];
+}
+
+const CACHE_DURATION_DAYS = 30;
+
+async function getCachedSportContext(sport: string): Promise<SportContext | null> {
+  try {
+    const { data } = await supabase
+      .from("sport_context_cache")
+      .select("context, cached_at")
+      .eq("sport", sport.toLowerCase())
+      .single();
+
+    if (data) {
+      const cachedAt = new Date(data.cached_at);
+      const now = new Date();
+      const daysSinceCached = (now.getTime() - cachedAt.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (daysSinceCached < CACHE_DURATION_DAYS) {
+        log(`Using cached sport context for "${sport}" (cached ${daysSinceCached.toFixed(1)} days ago)`);
+        return data.context as SportContext;
+      }
+    }
+  } catch {
+    // Cache table might not exist yet, continue without cache
+  }
+  return null;
+}
+
+async function cacheSportContext(sport: string, context: SportContext): Promise<void> {
+  try {
+    await supabase
+      .from("sport_context_cache")
+      .upsert({
+        sport: sport.toLowerCase(),
+        context,
+        cached_at: new Date().toISOString(),
+      }, { onConflict: "sport" });
+    log(`Cached sport context for "${sport}"`);
+  } catch {
+    // Non-critical, continue without caching
+  }
+}
+
+async function discoverSportContext(sport: string, customContext?: string): Promise<SportContext> {
+  log(`Step 1: Discovering context for "${sport}"${customContext ? ` with focus on "${customContext}"` : ""}`);
+
+  // Check cache first (only if no custom context - custom contexts are unique)
+  if (!customContext) {
+    const cached = await getCachedSportContext(sport);
+    if (cached) return cached;
+  }
+
+  if (!PERPLEXITY_API_KEY) {
+    throw new Error("Perplexity API key not configured");
+  }
+
+  const prompt = `You are researching the sport: ${sport}${customContext ? `. Focus area: ${customContext}` : ""}.
+
+Provide a JSON response with:
+1. Major professional leagues and tours for this sport (especially women's leagues)
+2. Key competitions and championships
+3. Governing bodies
+4. 5 specific search queries that would find rising female athletes in this sport
+
+Focus on finding sources of REAL professional athletes, not amateur or recreational.
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "leagues": ["League 1", "League 2"],
+  "competitions": ["Competition 1", "Competition 2"],
+  "governingBodies": ["Body 1"],
+  "searchQueries": [
+    "top female ${sport} athletes 2025",
+    "rising ${sport} stars to watch",
+    "...3 more specific queries..."
+  ]
+}`;
+
+  try {
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.1,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      log(`Perplexity error: ${response.status} - ${errorText}`);
+      throw new Error(`Perplexity API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+
+    log("Perplexity response received", { content: content.slice(0, 500) });
+
+    // Parse JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      log("Sport context discovered", parsed);
+      const context: SportContext = {
+        leagues: parsed.leagues || [],
+        competitions: parsed.competitions || [],
+        governingBodies: parsed.governingBodies || [],
+        searchQueries: parsed.searchQueries || [
+          `top female ${sport} athletes 2025`,
+          `rising ${sport} stars`,
+          `best women ${sport} players`,
+        ],
+      };
+
+      // Cache for future use (only if no custom context)
+      if (!customContext) {
+        await cacheSportContext(sport, context);
+      }
+
+      return context;
+    }
+  } catch (error) {
+    log(`Sport context discovery error: ${error}`);
+  }
+
+  // Fallback
+  return {
+    leagues: [],
+    competitions: [],
+    governingBodies: [],
+    searchQueries: [
+      `top female ${sport} athletes 2025`,
+      `rising ${sport} stars to watch`,
+      `best women's ${sport} players`,
+      `${sport} athletes instagram`,
+      `professional female ${sport} competitors`,
+    ],
+  };
+}
+
+// ============================================================================
+// STEP 2: ATHLETE DISCOVERY (Perplexity)
+// ============================================================================
+
+async function discoverAthletes(
+  sport: string,
+  sportContext: SportContext,
+  customContext?: string,
+  targetCount: number = 20,
+  successProfile?: SuccessProfile
+): Promise<DiscoveredAthlete[]> {
+  log(`Step 2: Discovering athletes for "${sport}"`);
+
+  if (!PERPLEXITY_API_KEY) {
+    throw new Error("Perplexity API key not configured");
+  }
+
+  const athletes: DiscoveredAthlete[] = [];
+  const seenNames = new Set<string>();
+
+  // Build a comprehensive search prompt
+  const contextInfo = [
+    sportContext.leagues.length > 0 ? `Major leagues: ${sportContext.leagues.join(", ")}` : "",
+    sportContext.competitions.length > 0 ? `Key competitions: ${sportContext.competitions.join(", ")}` : "",
+    customContext ? `Focus: ${customContext}` : "",
+  ].filter(Boolean).join("\n");
+
+  // Build historical success context
+  const historicalContext = successProfile
+    ? formatSuccessProfileForPrompt(successProfile, sport)
+    : "";
+
+  const prompt = `Find ${targetCount + 10} real professional ${sport} athletes who are active on Instagram.
+
+${contextInfo}
+
+${historicalContext ? `\n${historicalContext}\n` : ""}
+
+Requirements:
+- Must be REAL professional athletes (not influencers who do the sport casually)
+- Should be active competitors or recently retired (last 2-3 years)
+- Include a mix of established stars and rising talents
+- Focus on athletes aged 18-35 with personal brands and engaged fanbases
+- Prefer athletes similar to our successful conversions: individual competitors with fitness/lifestyle content
+- AVOID: athletes already on OnlyFans, minors, inactive accounts
+
+For each athlete, provide:
+- Full name
+- Why they're notable (achievements, team, ranking)
+- Their source (which league/competition they compete in)
+
+Respond ONLY with valid JSON array:
+[
+  {
+    "name": "Full Name",
+    "context": "Notable achievement or position (e.g., '2024 WSL Championship Tour competitor, ranked #5')",
+    "source": "League or competition name"
+  }
+]
+
+Return at least ${targetCount} athletes. Only include athletes you are confident are real professional competitors.`;
+
+  try {
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 4000,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      log(`Perplexity error: ${response.status} - ${errorText}`);
+      throw new Error(`Perplexity API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+
+    log("Athlete discovery response received", { length: content.length });
+
+    // Parse JSON array from response with robust error handling
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      let jsonStr = jsonMatch[0];
+
+      // Try to fix common JSON issues
+      // 1. Remove trailing commas before ] or }
+      jsonStr = jsonStr.replace(/,(\s*[\]\}])/g, '$1');
+      // 2. If truncated, try to close the array
+      if (!jsonStr.trim().endsWith(']')) {
+        // Find last complete object and close array
+        const lastCompleteObj = jsonStr.lastIndexOf('}');
+        if (lastCompleteObj > 0) {
+          jsonStr = jsonStr.substring(0, lastCompleteObj + 1) + ']';
+        }
+      }
+
+      try {
+        const parsed = JSON.parse(jsonStr);
+
+        for (const athlete of parsed) {
+          const name = athlete.name?.trim();
+          if (name && !seenNames.has(name.toLowerCase())) {
+            seenNames.add(name.toLowerCase());
+            athletes.push({
+              name,
+              sport,
+              context: athlete.context || "",
+              source: athlete.source || "Perplexity Discovery",
+            });
+          }
+        }
+      } catch (parseError) {
+        log(`JSON parse failed, trying regex extraction: ${parseError}`);
+
+        // Fallback: Extract athlete names using regex
+        const nameMatches = content.matchAll(/"name"\s*:\s*"([^"]+)"/g);
+        for (const match of nameMatches) {
+          const name = match[1].trim();
+          if (name && !seenNames.has(name.toLowerCase())) {
+            seenNames.add(name.toLowerCase());
+            athletes.push({
+              name,
+              sport,
+              context: "Extracted from partial response",
+              source: "Perplexity Discovery (fallback)",
+            });
+          }
+        }
+        log(`Extracted ${athletes.length} athletes via regex fallback`);
+      }
+    }
+
+    log(`Discovered ${athletes.length} unique athletes`, athletes.slice(0, 5));
+
+  } catch (error) {
+    log(`Athlete discovery error: ${error}`);
+  }
+
+  // If we didn't get enough, try additional queries
+  if (athletes.length < targetCount && sportContext.searchQueries.length > 0) {
+    log("Running additional discovery queries...");
+
+    for (const query of sportContext.searchQueries.slice(0, 2)) {
+      if (athletes.length >= targetCount) break;
+
+      try {
+        const supplementalPrompt = `Search query: "${query}"
+
+Find female professional ${sport} athletes matching this query. Return only athletes not already in this list: ${athletes.map(a => a.name).join(", ")}.
+
+Respond with JSON array:
+[{"name": "Full Name", "context": "Achievement", "source": "Competition/League"}]`;
+
+        const response = await fetch("https://api.perplexity.ai/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "sonar",
+            messages: [{ role: "user", content: supplementalPrompt }],
+            max_tokens: 2000,
+            temperature: 0.2,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content || "";
+          const jsonMatch = content.match(/\[[\s\S]*\]/);
+
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            for (const athlete of parsed) {
+              const name = athlete.name?.trim();
+              if (name && !seenNames.has(name.toLowerCase())) {
+                seenNames.add(name.toLowerCase());
+                athletes.push({
+                  name,
+                  sport,
+                  context: athlete.context || "",
+                  source: athlete.source || query,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Continue with other queries
+      }
+    }
+  }
+
+  log(`Total athletes discovered: ${athletes.length}`);
+  return athletes;
+}
+
+// ============================================================================
+// STEP 3: INSTAGRAM LOOKUP (Perplexity + Google Search)
+// ============================================================================
+
+async function findInstagramHandleViaPerplexity(athleteName: string, sport: string): Promise<string | null> {
+  if (!PERPLEXITY_API_KEY) return null;
+
+  const prompt = `What is the Instagram handle/username for ${athleteName}, the professional ${sport} athlete?
+
+If you know their exact Instagram username, respond with ONLY the username (without @).
+If you're not sure or they don't have Instagram, respond with "UNKNOWN".
+
+Examples of valid responses:
+- surfergirl123
+- maria.verschoor
+- UNKNOWN`;
+
+  try {
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 100,
+        temperature: 0.1,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim() || "";
+
+      // Clean up the response
+      const handle = content
+        .replace(/^@/, "")
+        .replace(/['"]/g, "")
+        .split(/[\s\n]/)[0]
+        .toLowerCase();
+
+      if (handle && handle !== "unknown" && handle.length > 1 && handle.length < 31) {
+        return handle;
+      }
+    }
+  } catch (error) {
+    log(`Perplexity Instagram lookup error for ${athleteName}: ${error}`);
+  }
+
+  return null;
+}
+
+async function findInstagramHandleViaGoogle(athleteName: string, sport: string): Promise<string | null> {
+  // Use Perplexity to search Google-style for Instagram
+  if (!PERPLEXITY_API_KEY) return null;
+
+  const prompt = `Search for: "${athleteName} ${sport} instagram"
+
+Find the official Instagram username for this athlete. Look at search results and identify their real Instagram handle.
+
+Respond with ONLY the Instagram username (without @), or "UNKNOWN" if you can't find it.`;
+
+  try {
+    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 100,
+        temperature: 0.1,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim() || "";
+
+      // Extract handle from response
+      // Look for patterns like @username or instagram.com/username
+      const igUrlMatch = content.match(/instagram\.com\/([a-zA-Z0-9_.]+)/i);
+      if (igUrlMatch) {
+        return igUrlMatch[1].toLowerCase();
+      }
+
+      const atMatch = content.match(/@([a-zA-Z0-9_.]+)/);
+      if (atMatch) {
+        return atMatch[1].toLowerCase();
+      }
+
+      // Try to extract clean username
+      const handle = content
+        .replace(/^@/, "")
+        .replace(/['"]/g, "")
+        .split(/[\s\n]/)[0]
+        .toLowerCase();
+
+      if (handle && handle !== "unknown" && handle.length > 1 && handle.length < 31 && !handle.includes(".com")) {
+        return handle;
+      }
+    }
+  } catch (error) {
+    log(`Google-style Instagram lookup error for ${athleteName}: ${error}`);
+  }
+
+  return null;
+}
+
+async function findInstagramHandleViaSerpAPI(athleteName: string, sport: string): Promise<string | null> {
+  if (!SERPAPI_API_KEY) return null;
+
+  try {
+    const query = encodeURIComponent(`${athleteName} ${sport} instagram`);
+    const url = `https://serpapi.com/search.json?q=${query}&api_key=${SERPAPI_API_KEY}&num=5`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      log(`SerpAPI error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const results = data.organic_results || [];
+
+    // Look for Instagram links in search results
+    for (const result of results) {
+      const link = result.link || "";
+      const title = result.title || "";
+      const snippet = result.snippet || "";
+
+      // Check if it's an Instagram profile link
+      const igMatch = link.match(/instagram\.com\/([a-zA-Z0-9_.]+)\/?$/);
+      if (igMatch) {
+        const handle = igMatch[1].toLowerCase();
+        // Skip common non-profile pages
+        if (!["p", "reel", "stories", "explore", "accounts"].includes(handle)) {
+          return handle;
+        }
+      }
+
+      // Check title/snippet for @username pattern
+      const atMatch = (title + " " + snippet).match(/@([a-zA-Z0-9_.]{2,30})/);
+      if (atMatch) {
+        return atMatch[1].toLowerCase();
+      }
+    }
+  } catch (error) {
+    log(`SerpAPI Instagram lookup error for ${athleteName}: ${error}`);
+  }
+
+  return null;
+}
+
+async function findInstagramHandle(athleteName: string, sport: string): Promise<string | null> {
+  // Try Perplexity first (faster, uses knowledge)
+  let handle = await findInstagramHandleViaPerplexity(athleteName, sport);
+
+  // If not found, try Perplexity with Google-style search
+  if (!handle) {
+    handle = await findInstagramHandleViaGoogle(athleteName, sport);
+  }
+
+  // If still not found, try SerpAPI (actual Google search)
+  if (!handle && SERPAPI_API_KEY) {
+    handle = await findInstagramHandleViaSerpAPI(athleteName, sport);
+    if (handle) {
+      log(`    Found via SerpAPI: @${handle}`);
+    }
+  }
+
+  return handle;
+}
+
+async function scrapeInstagramProfile(username: string): Promise<{
+  followers: number;
+  following: number;
+  posts: number;
+  bio: string;
+  fullName: string;
+  profilePicUrl: string;
+  verified: boolean;
+  isPrivate: boolean;
+} | null> {
+  if (!APIFY_API_KEY) return null;
+
+  try {
+    log(`Scraping Instagram profile: @${username}`);
+
+    const runResponse = await fetch(
+      `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs?token=${APIFY_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          usernames: [username],
+        }),
+      }
+    );
+
+    if (!runResponse.ok) {
+      log(`Profile scraper failed for @${username}: ${runResponse.status}`);
+      return null;
+    }
+
+    const runData = await runResponse.json();
+    const runId = runData.data?.id;
+    const datasetId = runData.data?.defaultDatasetId;
+
+    if (!datasetId) return null;
+
+    // Wait for completion (max 30 seconds)
+    let attempts = 0;
+    let status = "RUNNING";
+
+    while (status === "RUNNING" || status === "READY") {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      attempts++;
+
+      const statusRes = await fetch(
+        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
+      );
+      const statusData = await statusRes.json();
+      status = statusData.data?.status || "UNKNOWN";
+
+      if (attempts >= 15 || status === "SUCCEEDED" || status === "FAILED") break;
+    }
+
+    if (status !== "SUCCEEDED") return null;
+
+    // Fetch results
+    const dataResponse = await fetch(
+      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=1`
+    );
+
+    if (!dataResponse.ok) return null;
+
+    const profiles = await dataResponse.json();
+    const profile = profiles[0];
+
+    if (!profile) return null;
+
+    return {
+      followers: profile.followersCount || 0,
+      following: profile.followingCount || 0,
+      posts: profile.postsCount || 0,
+      bio: profile.biography || "",
+      fullName: profile.fullName || "",
+      profilePicUrl: profile.profilePicUrl || "",
+      verified: profile.verified || false,
+      isPrivate: profile.private || false,
+    };
+  } catch (error) {
+    log(`Profile scrape error for @${username}: ${error}`);
+    return null;
+  }
+}
+
+async function enrichAthletesWithInstagram(
+  athletes: DiscoveredAthlete[],
+  config: ResearchConfig
+): Promise<EnrichedAthlete[]> {
+  log(`Step 3: Looking up Instagram for ${athletes.length} athletes`);
+
+  const enriched: EnrichedAthlete[] = [];
+  const batchSize = 5; // Process in batches to avoid rate limits
+
+  for (let i = 0; i < athletes.length; i += batchSize) {
+    const batch = athletes.slice(i, i + batchSize);
+    log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(athletes.length / batchSize)}`);
+
+    const batchResults = await Promise.all(
+      batch.map(async (athlete) => {
+        // Find Instagram handle
+        const handle = await findInstagramHandle(athlete.name, athlete.sport);
+
+        if (!handle) {
+          log(`  No Instagram found for ${athlete.name}`);
+          return null;
+        }
+
+        log(`  Found @${handle} for ${athlete.name}`);
+
+        // Scrape profile
+        const profile = await scrapeInstagramProfile(handle);
+
+        if (!profile) {
+          log(`  Could not scrape profile @${handle}`);
+          return null;
+        }
+
+        // Filter by follower count
+        // Treat 0 or missing max as "no upper limit"
+        const effectiveMax = config.followerMax > 0 ? config.followerMax : 999999999;
+        const effectiveMin = config.followerMin || 0;
+
+        if (profile.followers < effectiveMin || profile.followers > effectiveMax) {
+          log(`  @${handle} has ${profile.followers.toLocaleString()} followers (outside ${effectiveMin.toLocaleString()}-${effectiveMax === 999999999 ? '∞' : effectiveMax.toLocaleString()} range)`);
+          return null;
+        }
+
+        // Skip private accounts
+        if (profile.isPrivate) {
+          log(`  @${handle} is private, skipping`);
+          return null;
+        }
+
+        const enrichedAthlete: EnrichedAthlete = {
+          ...athlete,
+          instagram_handle: handle,
+          instagram_url: `https://instagram.com/${handle}`,
+          profile_pic_url: profile.profilePicUrl,
+          follower_count: profile.followers,
+          following_count: profile.following,
+          posts_count: profile.posts,
+          bio: profile.bio,
+          verified: profile.verified,
+          is_private: profile.isPrivate,
+        };
+
+        log(`  ✓ ${athlete.name}: @${handle} (${profile.followers.toLocaleString()} followers)`);
+        return enrichedAthlete;
+      })
+    );
+
+    enriched.push(...batchResults.filter((a): a is EnrichedAthlete => a !== null));
+
+    // Small delay between batches
+    if (i + batchSize < athletes.length) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  log(`Successfully enriched ${enriched.length} athletes with Instagram data`);
+  return enriched;
+}
+
+// ============================================================================
+// STEP 4: QUALIFICATION & SCORING
+// ============================================================================
+
+// Look up athlete's age via Google search when AI can't determine it
+async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
+  age: number | null;
+  birthYear: number | null;
+  isMinor: boolean | null;
+  source: string | null;
+}> {
+  if (!SERPAPI_API_KEY) {
+    return { age: null, birthYear: null, isMinor: null, source: null };
+  }
+
+  try {
+    const query = encodeURIComponent(`${athleteName} ${sport} athlete age birthday born`);
+    const url = `https://serpapi.com/search.json?q=${query}&api_key=${SERPAPI_API_KEY}&num=5`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return { age: null, birthYear: null, isMinor: null, source: null };
+    }
+
+    const data = await response.json();
+
+    // Check knowledge graph first (most reliable)
+    if (data.knowledge_graph) {
+      const kg = data.knowledge_graph;
+
+      // Look for age directly
+      if (kg.age) {
+        const ageMatch = String(kg.age).match(/(\d+)/);
+        if (ageMatch) {
+          const age = parseInt(ageMatch[1]);
+          return {
+            age,
+            birthYear: new Date().getFullYear() - age,
+            isMinor: age < 18,
+            source: "Google Knowledge Graph"
+          };
+        }
+      }
+
+      // Look for born/birthday
+      if (kg.born) {
+        const yearMatch = String(kg.born).match(/(\d{4})/);
+        if (yearMatch) {
+          const birthYear = parseInt(yearMatch[1]);
+          const age = new Date().getFullYear() - birthYear;
+          return {
+            age,
+            birthYear,
+            isMinor: age < 18,
+            source: "Google Knowledge Graph (birth year)"
+          };
+        }
+      }
+    }
+
+    // Check organic results for age mentions
+    const results = data.organic_results || [];
+    for (const result of results) {
+      const text = `${result.title || ""} ${result.snippet || ""}`;
+
+      // Look for "X years old" pattern
+      const ageMatch = text.match(/(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
+      if (ageMatch) {
+        const age = parseInt(ageMatch[1]);
+        if (age >= 10 && age <= 50) { // Reasonable athlete age range
+          return {
+            age,
+            birthYear: new Date().getFullYear() - age,
+            isMinor: age < 18,
+            source: result.link || "Google Search"
+          };
+        }
+      }
+
+      // Look for birth year pattern (born 2005, b. 2003, etc.)
+      const birthMatch = text.match(/(?:born|b\.|birth(?:day)?)[:\s]*(?:\w+\s+\d{1,2},?\s+)?(\d{4})/i);
+      if (birthMatch) {
+        const birthYear = parseInt(birthMatch[1]);
+        if (birthYear >= 1970 && birthYear <= 2010) {
+          const age = new Date().getFullYear() - birthYear;
+          return {
+            age,
+            birthYear,
+            isMinor: age < 18,
+            source: result.link || "Google Search (birth year)"
+          };
+        }
+      }
+
+      // Look for "(age XX)" pattern common in Wikipedia snippets
+      const parenAgeMatch = text.match(/\(age\s*(\d{1,2})\)/i);
+      if (parenAgeMatch) {
+        const age = parseInt(parenAgeMatch[1]);
+        if (age >= 10 && age <= 50) {
+          return {
+            age,
+            birthYear: new Date().getFullYear() - age,
+            isMinor: age < 18,
+            source: result.link || "Google Search"
+          };
+        }
+      }
+    }
+
+    return { age: null, birthYear: null, isMinor: null, source: null };
+
+  } catch (error) {
+    log(`    Age lookup error for ${athleteName}: ${error}`);
+    return { age: null, birthYear: null, isMinor: null, source: null };
+  }
+}
+
+async function scoreAthletes(
+  athletes: EnrichedAthlete[],
+  config: ResearchConfig,
+  successProfile?: SuccessProfile
+): Promise<ScoredAthlete[]> {
+  log(`Step 4: Scoring ${athletes.length} athletes`);
+
+  const scored: ScoredAthlete[] = [];
+
+  for (const athlete of athletes) {
+    let score = await scoreAthlete(athlete, config, successProfile);
+
+    // Check if age is uncertain and needs verification
+    const ageUncertain =
+      score.is_minor === undefined ||
+      score.is_minor === null ||
+      (score.concerns || []).some((c: string) =>
+        c.toLowerCase().includes("age") ||
+        c.toLowerCase().includes("minor") ||
+        c.toLowerCase().includes("verify")
+      );
+
+    // If age is uncertain and athlete has a good score, verify via Google
+    if (ageUncertain && score.score >= 40) {
+      log(`    🔍 Age uncertain for ${athlete.name}, doing Google lookup...`);
+
+      const ageInfo = await lookupAthleteAge(athlete.name, athlete.sport);
+
+      if (ageInfo.age !== null) {
+        log(`    📅 Found age: ${ageInfo.age} (from ${ageInfo.source})`);
+
+        if (ageInfo.isMinor === true) {
+          // MINOR CONFIRMED - block them
+          score = {
+            ...score,
+            score: 0,
+            is_minor: true,
+            reasoning: `${score.reasoning} [BLOCKED: Google search confirmed age is ${ageInfo.age} - minor]`,
+            concerns: [...(score.concerns || []), `Age verified as ${ageInfo.age} via Google - MINOR`],
+          };
+          log(`    ⛔ MINOR CONFIRMED: ${athlete.name} is ${ageInfo.age} years old`);
+        } else {
+          // Adult confirmed - update reasoning with verified age
+          score = {
+            ...score,
+            is_minor: false,
+            reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]`,
+            concerns: (score.concerns || []).filter((c: string) =>
+              !c.toLowerCase().includes("age") && !c.toLowerCase().includes("verify")
+            ),
+          };
+          log(`    ✅ Adult confirmed: ${athlete.name} is ${ageInfo.age} years old`);
+        }
+      } else {
+        log(`    ⚠️ Could not verify age for ${athlete.name}`);
+        // Keep the original score but add a concern
+        score = {
+          ...score,
+          concerns: [...(score.concerns || []), "Age could not be verified via Google - manual verification required"],
+        };
+      }
+    }
+
+    scored.push(score);
+    log(`  ${athlete.name}: Score ${score.score}/100 - ${score.reasoning.slice(0, 100)}`);
+  }
+
+  // Sort by score descending
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored;
+}
+
+async function scoreAthlete(
+  athlete: EnrichedAthlete,
+  config: ResearchConfig,
+  successProfile?: SuccessProfile
+): Promise<ScoredAthlete> {
+  // Build historical success context for scoring
+  const historicalBoost = successProfile && successProfile.totalConversions > 0
+    ? `\nHISTORICAL SUCCESS CONTEXT:
+We have successfully converted ${successProfile.totalConversions} professional athletes to OnlyFans partnerships.
+Our most successful conversions share these traits:
+- Individual athletes with strong personal brands
+- Active Instagram with fitness/lifestyle content
+- Follower sweet spot: 50K-500K
+- Comfortable with fan engagement
+- Not already on OnlyFans
+
+Give a SCORING BOOST (+5-10 points) if this athlete matches these success patterns.`
+    : "";
+
+  const prompt = `You are evaluating an athlete for potential OnlyFans partnership recruitment.
+
+ATHLETE PROFILE:
+- Name: ${athlete.name}
+- Sport: ${athlete.sport}
+- Why notable: ${athlete.context}
+- Source: ${athlete.source}
+- Instagram: @${athlete.instagram_handle}
+- Followers: ${athlete.follower_count?.toLocaleString() || "unknown"}
+- Following: ${athlete.following_count?.toLocaleString() || "unknown"}
+- Posts: ${athlete.posts_count || "unknown"}
+- Bio: ${athlete.bio || "No bio"}
+- Verified: ${athlete.verified ? "Yes" : "No"}
+${historicalBoost}
+
+EVALUATION CRITERIA:
+
+⚠️ CRITICAL AGE REQUIREMENT ⚠️
+- Athletes MUST be 18 years or older
+- If the athlete is under 18, or if their age suggests they might be a minor, score them 0
+- Look for age indicators in bio, context, or if they're described as "junior", "youth", "teen", etc.
+- When in doubt about age, note it as a concern
+
+1. LEGITIMACY (Is this a real professional athlete?)
+   - Verified account is strong signal
+   - Bio mentions sport/team/achievements
+   - Follower/following ratio reasonable for athlete
+
+2. FOLLOWER SWEET SPOT (50K-300K is ideal)
+   - Too small (<30K): May not have enough reach
+   - Sweet spot (50K-300K): Engaged audience, responsive to outreach
+   - Large (300K-500K): Harder to reach but valuable
+   - Too large (>500K): Unlikely to respond
+
+3. PARTNERSHIP FIT
+   - Content style (fitness/lifestyle content works well)
+   - Engagement indicators (active posting)
+   - MUST be 18+ (this is non-negotiable)
+   - Ideal age range: 21-35
+   - Not already on OnlyFans
+
+4. OUTREACH LIKELIHOOD
+   - Active account (recent posts)
+   - Accessible (not too famous)
+   - English-speaking market preferred
+
+Score 0-100 where:
+- 0: MUST be given if athlete is under 18 or likely a minor
+- 80-100: Excellent candidate, prioritize outreach
+- 60-79: Good candidate, worth pursuing
+- 40-59: Marginal, might be worth a try
+- Below 40: Skip
+
+Respond with ONLY valid JSON:
+{
+  "score": <number 0-100>,
+  "reasoning": "<2-3 sentence explanation>",
+  "concerns": ["<concern 1>", "<concern 2 if any>"],
+  "is_minor": <true if under 18 or likely minor, false otherwise>
+}`;
+
+  try {
+    // Use Claude for scoring
+    if (ANTHROPIC_API_KEY) {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: config.scoringModel === "claude-opus"
+            ? "claude-opus-4-20250514"
+            : "claude-3-5-haiku-20241022",
+          max_tokens: 300,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.content[0]?.text || "";
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            ...athlete,
+            score: Math.min(100, Math.max(0, parsed.score || 50)),
+            reasoning: parsed.reasoning || "Evaluated by AI",
+            concerns: parsed.concerns || [],
+            is_minor: parsed.is_minor === true,
+          };
+        }
+      }
+    }
+
+    // Fallback: OpenAI
+    if (OPENAI_API_KEY) {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 300,
+          temperature: 0.3,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices[0]?.message?.content || "";
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            ...athlete,
+            score: Math.min(100, Math.max(0, parsed.score || 50)),
+            reasoning: parsed.reasoning || "Evaluated by AI",
+            concerns: parsed.concerns || [],
+            is_minor: parsed.is_minor === true,
+          };
+        }
+      }
+    }
+  } catch (error) {
+    log(`Scoring error for ${athlete.name}: ${error}`);
+  }
+
+  // Rule-based fallback
+  let score = 50;
+  const concerns: string[] = [];
+
+  if (athlete.follower_count) {
+    if (athlete.follower_count >= 50000 && athlete.follower_count <= 300000) {
+      score += 25;
+    } else if (athlete.follower_count >= 30000 && athlete.follower_count <= 500000) {
+      score += 10;
+    } else {
+      concerns.push("Follower count outside ideal range");
+    }
+  }
+
+  if (athlete.verified) {
+    score += 15;
+  }
+
+  if (athlete.context && athlete.context.length > 20) {
+    score += 10;
+  }
+
+  return {
+    ...athlete,
+    score: Math.min(100, score),
+    reasoning: "[Rule-based] Scored based on follower count and verification status. Age not verified.",
+    concerns: [...concerns, "Age not verified - manual review required"],
+    is_minor: false, // Unknown, requires manual verification
+  };
+}
+
+// ============================================================================
+// STORAGE HELPERS
+// ============================================================================
+
+async function downloadAndStoreProfilePic(
+  profilePicUrl: string,
+  athleteId: string
+): Promise<string | null> {
+  if (!profilePicUrl) return null;
+
+  try {
+    const response = await fetch(profilePicUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+    const filePath = `${athleteId}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("profile-pics")
+      .upload(filePath, buffer, {
+        contentType,
+        upsert: true,
+      });
+
+    if (uploadError) return null;
+
+    const { data: urlData } = supabase.storage
+      .from("profile-pics")
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// INSTAGRAM PHOTOS HELPER
+// ============================================================================
+
+async function fetchInstagramPhotosForAthlete(
+  athleteId: string,
+  instagramHandle: string,
+  limit: number = 10
+): Promise<{ success: boolean; photoCount: number; error?: string }> {
+  if (!APIFY_API_KEY) {
+    return { success: false, photoCount: 0, error: "Apify API key not configured" };
+  }
+
+  try {
+    log(`  📸 Fetching Instagram photos for @${instagramHandle}...`);
+
+    // Use the Instagram Post Scraper actor
+    const runResponse = await fetch(
+      `https://api.apify.com/v2/acts/apify~instagram-post-scraper/runs?token=${APIFY_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: [instagramHandle],
+          resultsLimit: limit,
+          searchType: "user",
+        }),
+      }
+    );
+
+    if (!runResponse.ok) {
+      log(`    Photo scraper failed: ${runResponse.status}`);
+      return { success: false, photoCount: 0, error: `API error: ${runResponse.status}` };
+    }
+
+    const runData = await runResponse.json();
+    const runId = runData.data?.id;
+    const datasetId = runData.data?.defaultDatasetId;
+
+    if (!datasetId) {
+      return { success: false, photoCount: 0, error: "No dataset ID returned" };
+    }
+
+    // Wait for completion (max 60 seconds for photos)
+    let attempts = 0;
+    let status = "RUNNING";
+
+    while (status === "RUNNING" || status === "READY") {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      attempts++;
+
+      const statusRes = await fetch(
+        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
+      );
+      const statusData = await statusRes.json();
+      status = statusData.data?.status || "UNKNOWN";
+
+      if (attempts >= 24 || status === "SUCCEEDED" || status === "FAILED" || status === "ABORTED") {
+        break;
+      }
+    }
+
+    if (status !== "SUCCEEDED") {
+      log(`    Photo scraper did not complete: ${status}`);
+      return { success: false, photoCount: 0, error: `Scraper ${status}` };
+    }
+
+    // Fetch results
+    const dataResponse = await fetch(
+      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=${limit}`
+    );
+
+    if (!dataResponse.ok) {
+      return { success: false, photoCount: 0, error: "Failed to fetch results" };
+    }
+
+    const posts = await dataResponse.json();
+
+    if (!posts || posts.length === 0) {
+      await supabase
+        .from("athletes")
+        .update({ posts_scraped_at: new Date().toISOString() })
+        .eq("id", athleteId);
+      return { success: true, photoCount: 0 };
+    }
+
+    // Process and store each photo
+    let savedCount = 0;
+
+    for (const post of posts) {
+      const postId = post.shortCode || post.id || `post_${Date.now()}_${savedCount}`;
+      const imageUrl = post.displayUrl || post.imageUrl || post.thumbnailUrl;
+
+      if (!imageUrl) continue;
+
+      // Download and store the image
+      try {
+        const imgResponse = await fetch(imageUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+        });
+
+        if (!imgResponse.ok) continue;
+
+        const contentType = imgResponse.headers.get("content-type") || "image/jpeg";
+        const arrayBuffer = await imgResponse.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+        const filePath = `${athleteId}/${postId}.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("athlete-posts")
+          .upload(filePath, buffer, {
+            contentType,
+            upsert: true,
+          });
+
+        if (uploadError) continue;
+
+        const { data: urlData } = supabase.storage
+          .from("athlete-posts")
+          .getPublicUrl(filePath);
+
+        // Parse timestamp safely
+        let postedAt: string | null = null;
+        if (post.timestamp) {
+          try {
+            const ts = typeof post.timestamp === 'string'
+              ? (post.timestamp.includes('T') ? new Date(post.timestamp) : new Date(parseInt(post.timestamp) * 1000))
+              : new Date(post.timestamp * 1000);
+            if (!isNaN(ts.getTime())) {
+              postedAt = ts.toISOString();
+            }
+          } catch {
+            // Invalid timestamp
+          }
+        }
+
+        // Save to database
+        const { error } = await supabase.from("athlete_posts").upsert({
+          athlete_id: athleteId,
+          post_id: postId,
+          post_url: post.url || `https://instagram.com/p/${postId}`,
+          image_url: urlData.publicUrl,
+          caption: (post.caption || "").slice(0, 2000) || null,
+          likes_count: post.likesCount || 0,
+          comments_count: post.commentsCount || 0,
+          post_type: post.type || "image",
+          posted_at: postedAt,
+        }, { onConflict: "athlete_id,post_id" });
+
+        if (!error) {
+          savedCount++;
+        }
+      } catch {
+        // Skip this post
+      }
+    }
+
+    // Update athlete to mark posts as scraped
+    await supabase
+      .from("athletes")
+      .update({ posts_scraped_at: new Date().toISOString() })
+      .eq("id", athleteId);
+
+    log(`    ✅ Saved ${savedCount} photos for @${instagramHandle}`);
+    return { success: true, photoCount: savedCount };
+
+  } catch (error) {
+    log(`    Photo fetch error: ${error}`);
+    return { success: false, photoCount: 0, error: String(error) };
+  }
+}
+
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
+
+export async function POST(request: NextRequest) {
+  startTime = Date.now();
+  logBuffer = [];
+  let researchLogId: string | null = null;
+
+  try {
+    const config: ResearchConfig = await request.json();
+
+    log("═══════════════════════════════════════════════════════════════");
+    log("🔬 PRIME CHAMPS RESEARCH AGENT v2.0");
+    log("═══════════════════════════════════════════════════════════════");
+    log("Configuration:", {
+      sport: config.sportFocus,
+      context: config.customContext,
+      followers: `${config.followerMin.toLocaleString()} - ${config.followerMax.toLocaleString()}`,
+      targetResults: config.resultCount,
+    });
+
+    // Validate
+    if (!config.sportFocus) {
+      return NextResponse.json({ error: "Sport is required" }, { status: 400 });
+    }
+
+    // LOAD HISTORICAL SUCCESS PROFILE - for context and exclusions
+    log("Loading historical success profile...");
+    const successProfile = await loadSuccessProfile();
+    log(`Historical context: ${successProfile.totalConversions} conversions, ${successProfile.exclusionHandles.size} exclusions`);
+
+    // CREATE A "RUNNING" LOG IMMEDIATELY - so it persists even if user navigates away
+    try {
+      const { data: newLog } = await supabase
+        .from("research_logs")
+        .insert({
+          status: "running",
+          config_used: config,
+          context_summary: {
+            sport: config.sportFocus,
+            customContext: config.customContext,
+          },
+          raw_results: [],
+          scoring_details: [],
+          final_results: [],
+          stats: {
+            discovered: 0,
+            enriched: 0,
+            scored: 0,
+            returned: 0,
+            added: 0,
+          },
+        })
+        .select("id")
+        .single();
+
+      if (newLog) {
+        researchLogId = newLog.id;
+        log(`Created research log: ${researchLogId}`);
+      }
+    } catch (logError) {
+      log(`Warning: Could not create research log: ${logError}`);
+    }
+
+    // STEP 1: Discover sport context
+    const sportContext = await discoverSportContext(config.sportFocus, config.customContext);
+
+    // STEP 2: Discover athletes (with historical context)
+    const discoveredAthletes = await discoverAthletes(
+      config.sportFocus,
+      sportContext,
+      config.customContext,
+      config.resultCount * 3, // Get 3x more than needed to account for filtering
+      successProfile
+    );
+
+    if (discoveredAthletes.length === 0) {
+      log("No athletes discovered");
+
+      // Update the research log
+      if (researchLogId) {
+        try {
+          await supabase.from("research_logs").update({
+            status: "completed",
+            context_summary: {
+              sport: config.sportFocus,
+              customContext: config.customContext,
+              sportContext,
+            },
+            error_message: "No athletes found for this sport",
+            completed_at: new Date().toISOString(),
+          }).eq("id", researchLogId);
+        } catch {
+          // Non-critical
+        }
+      }
+
+      return NextResponse.json({
+        success: false,
+        error: "No athletes found for this sport. Try a different search.",
+        results: [],
+        runId: researchLogId,
+        stats: { discovered: 0, enriched: 0, scored: 0, returned: 0 },
+      });
+    }
+
+    // STEP 3: Enrich with Instagram
+    const enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config);
+
+    if (enrichedAthletes.length === 0) {
+      log("No athletes with valid Instagram profiles found");
+
+      // Update the research log
+      if (researchLogId) {
+        try {
+          await supabase.from("research_logs").update({
+            status: "completed",
+            context_summary: {
+              sport: config.sportFocus,
+              customContext: config.customContext,
+              sportContext,
+            },
+            raw_results: discoveredAthletes,
+            stats: {
+              discovered: discoveredAthletes.length,
+              enriched: 0,
+              scored: 0,
+              returned: 0,
+              added: 0,
+            },
+            error_message: "Found athletes but none matched follower criteria or had valid Instagram",
+            completed_at: new Date().toISOString(),
+          }).eq("id", researchLogId);
+        } catch {
+          // Non-critical
+        }
+      }
+
+      return NextResponse.json({
+        success: false,
+        error: "Found athletes but couldn't find their Instagram profiles. Try adjusting follower range.",
+        results: [],
+        runId: researchLogId,
+        stats: { discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0 },
+      });
+    }
+
+    // STEP 4: Score athletes (with historical success context)
+    const scoredAthletes = await scoreAthletes(enrichedAthletes, config, successProfile);
+
+    // Take top N results
+    const finalResults = scoredAthletes.slice(0, config.resultCount);
+
+    log("═══════════════════════════════════════════════════════════════");
+    log(`✅ RESEARCH COMPLETE`);
+    log("═══════════════════════════════════════════════════════════════");
+    log("Final Results:", finalResults.map(a => ({
+      name: a.name,
+      instagram: a.instagram_handle,
+      followers: a.follower_count,
+      score: a.score,
+    })));
+
+    // Save to database
+    let addedCount = 0;
+    for (const athlete of finalResults) {
+      try {
+        // Check if already exists (use maybeSingle to avoid error when no match)
+        const { data: existingList } = await supabase
+          .from("athletes")
+          .select("id")
+          .eq("instagram_handle", athlete.instagram_handle)
+          .limit(1);
+
+        const existing = existingList && existingList.length > 0 ? existingList[0] : null;
+
+        if (existing) {
+          log(`  Skipping ${athlete.name} (@${athlete.instagram_handle}) - already in database`);
+          continue;
+        }
+
+        if (!athlete.instagram_handle) {
+          log(`  Skipping ${athlete.name} - no Instagram handle`);
+          continue;
+        }
+
+        // CHECK HISTORICAL EXCLUSIONS - don't contact athletes we've already worked with
+        const exclusionCheck = isExcludedAthlete(athlete.instagram_handle, successProfile);
+        if (exclusionCheck.excluded) {
+          log(`  ⏭️ EXCLUDED ${athlete.name} (@${athlete.instagram_handle}) - ${exclusionCheck.reason}`);
+          continue;
+        }
+
+        // CRITICAL: Block minors from being added
+        // Check multiple indicators: explicit is_minor flag, score of 0, or minor-related keywords in reasoning
+        const reasoningLower = (athlete.reasoning || "").toLowerCase();
+        const isLikelyMinor = athlete.is_minor === true ||
+          athlete.score === 0 ||
+          (athlete.score < 30 && (
+            reasoningLower.includes("under 18") ||
+            reasoningLower.includes("minor") ||
+            reasoningLower.includes("17 years") ||
+            reasoningLower.includes("16 years") ||
+            reasoningLower.includes("15 years") ||
+            reasoningLower.includes("14 years") ||
+            reasoningLower.includes("year old") && reasoningLower.match(/1[4-7]\s*year/i)
+          ));
+
+        if (isLikelyMinor) {
+          log(`  ⛔ BLOCKED ${athlete.name} (@${athlete.instagram_handle}) - flagged as minor (score: ${athlete.score}, is_minor: ${athlete.is_minor})`);
+          continue;
+        }
+
+        log(`  Adding ${athlete.name} (@${athlete.instagram_handle}) to approval queue`);
+        const { data: newAthlete, error: createError } = await supabase
+            .from("athletes")
+            .insert({
+              name: athlete.name,
+              sport: athlete.sport,
+              instagram_handle: athlete.instagram_handle,
+              instagram_url: athlete.instagram_url,
+              profile_pic_url: athlete.profile_pic_url,
+              follower_count: athlete.follower_count,
+              notes: JSON.stringify({
+                bio: athlete.bio,
+                context: athlete.context,
+                discovery_source: athlete.source,
+                discovered_at: new Date().toISOString(),
+                research_score: athlete.score,
+                research_reasoning: athlete.reasoning,
+                concerns: athlete.concerns,
+                verified: athlete.verified,
+              }),
+              source: "research_agent",
+              pipeline_stage: "approval",
+              enrichment_status: "enriched",
+              is_historical: false,
+            })
+            .select("id")
+            .single();
+
+        if (!createError && newAthlete) {
+          addedCount++;
+
+          // Store profile pic in Supabase
+          if (athlete.profile_pic_url) {
+            const storedPicUrl = await downloadAndStoreProfilePic(
+              athlete.profile_pic_url,
+              newAthlete.id
+            );
+            if (storedPicUrl) {
+              await supabase
+                .from("athletes")
+                .update({ profile_pic_url: storedPicUrl })
+                .eq("id", newAthlete.id);
+            }
+          }
+
+          // Auto-fetch 10 Instagram photos for approval review
+          if (athlete.instagram_handle) {
+            await fetchInstagramPhotosForAthlete(
+              newAthlete.id,
+              athlete.instagram_handle,
+              10
+            );
+          }
+        } else if (createError) {
+          log(`  Error adding ${athlete.name}: ${createError.message}`);
+        }
+      } catch (e) {
+        log(`Error saving athlete ${athlete.name}: ${e}`);
+      }
+    }
+
+    log(`Added ${addedCount} new athletes to approval queue`);
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    log(`Total time: ${totalTime}s`);
+
+    // Update the research log with final results
+    if (researchLogId) {
+      try {
+        await supabase.from("research_logs").update({
+          status: "completed",
+          context_summary: {
+            sport: config.sportFocus,
+            customContext: config.customContext,
+            sportContext,
+          },
+          raw_results: discoveredAthletes,
+          scoring_details: scoredAthletes.map(a => ({
+            name: a.name,
+            handle: a.instagram_handle,
+            score: a.score,
+            reasoning: a.reasoning,
+          })),
+          final_results: finalResults,
+          stats: {
+            discovered: discoveredAthletes.length,
+            enriched: enrichedAthletes.length,
+            scored: scoredAthletes.length,
+            returned: finalResults.length,
+            added: addedCount,
+          },
+          completed_at: new Date().toISOString(),
+        }).eq("id", researchLogId);
+      } catch (logError) {
+        log(`Warning: Could not update research log: ${logError}`);
+      }
+    }
+
+    // ALWAYS create a notification on completion (so it appears in notification center)
+    try {
+      const notificationMessage = addedCount > 0
+        ? `Found ${addedCount} new ${config.sportFocus} athletes. Check the Approval tab to review.`
+        : `Research complete for ${config.sportFocus}. No new athletes matched criteria.`;
+
+      await supabase.from("activity_notifications").insert({
+        type: "research_completed",
+        title: "Research Complete",
+        message: notificationMessage,
+        metadata: {
+          addedCount,
+          sport: config.sportFocus,
+          runId: researchLogId,
+          discovered: discoveredAthletes.length,
+          enriched: enrichedAthletes.length,
+        },
+        read: false,
+      });
+      log("Created completion notification");
+    } catch (notifError) {
+      log(`Warning: Could not create notification: ${notifError}`);
+    }
+
+    return NextResponse.json({
+      success: true,
+      runId: researchLogId,
+      results: finalResults,
+      stats: {
+        discovered: discoveredAthletes.length,
+        enriched: enrichedAthletes.length,
+        scored: scoredAthletes.length,
+        returned: finalResults.length,
+        added: addedCount,
+        timeSeconds: parseFloat(totalTime),
+      },
+      logs: logBuffer,
+    });
+
+  } catch (error) {
+    log(`Research error: ${error}`);
+
+    // Update log to error status if we have one
+    if (researchLogId) {
+      try {
+        await supabase.from("research_logs").update({
+          status: "error",
+          error_message: error instanceof Error ? error.message : "Research failed",
+          completed_at: new Date().toISOString(),
+        }).eq("id", researchLogId);
+      } catch {
+        // Non-critical
+      }
+    }
+
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Research failed",
+        runId: researchLogId,
+        logs: logBuffer,
+      },
+      { status: 500 }
+    );
+  }
+}

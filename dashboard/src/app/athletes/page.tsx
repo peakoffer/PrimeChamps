@@ -1,0 +1,200 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase, type Athlete } from "@/lib/supabase";
+import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
+
+export default function AthletesPage() {
+  const router = useRouter();
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sportFilter, setSportFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [sortBy, setSortBy] = useState<string>("followers");
+  const [sports, setSports] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function fetchAthletes() {
+      try {
+        let query = supabase.from("athletes").select("*");
+
+        // Apply sorting
+        if (sortBy === "followers") {
+          query = query.order("follower_count", { ascending: false, nullsFirst: false });
+        } else if (sortBy === "name") {
+          query = query.order("name", { ascending: true });
+        } else {
+          query = query.order("created_at", { ascending: false });
+        }
+
+        if (sportFilter) {
+          query = query.eq("sport", sportFilter);
+        }
+        if (statusFilter) {
+          query = query.eq("enrichment_status", statusFilter);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        setAthletes(data || []);
+
+        // Extract unique sports
+        const uniqueSports = [...new Set((data || []).map((a) => a.sport))];
+        setSports(uniqueSports);
+      } catch (error) {
+        console.error("Error fetching athletes:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchAthletes();
+  }, [sportFilter, statusFilter, sortBy]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-800">Loading athletes...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-900">Athletes</h1>
+        <div className="flex space-x-4">
+          <select
+            value={sportFilter}
+            onChange={(e) => setSportFilter(e.target.value)}
+            className="border rounded-md px-3 py-2 text-sm"
+          >
+            <option value="">All Sports</option>
+            {sports.map((sport) => (
+              <option key={sport} value={sport}>
+                {sport}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border rounded-md px-3 py-2 text-sm"
+          >
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="enriched">Enriched</option>
+            <option value="failed">Failed</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="border rounded-md px-3 py-2 text-sm"
+          >
+            <option value="followers">Sort by Followers</option>
+            <option value="name">Sort by Name</option>
+            <option value="recent">Sort by Recent</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="bg-white shadow rounded-lg overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
+                Athlete
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
+                Sport
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
+                Instagram
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
+                Followers
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
+                Added
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {athletes.map((athlete) => (
+              <tr
+                key={athlete.id}
+                onClick={() => router.push(`/athletes/${athlete.id}`)}
+                className="hover:bg-blue-50 cursor-pointer transition-colors"
+              >
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="flex items-center">
+                    {athlete.profile_pic_url ? (
+                      <img
+                        src={athlete.profile_pic_url}
+                        alt={athlete.name}
+                        className="flex-shrink-0 h-10 w-10 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                        <span className="text-gray-800 font-medium">
+                          {athlete.name.charAt(0)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="ml-4">
+                      <div className="text-sm font-medium text-gray-900">{athlete.name}</div>
+                      <div className="text-sm text-gray-800">{athlete.email || "No email"}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                  {athlete.sport}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {athlete.instagram_handle ? (
+                    <a
+                      href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-sm text-blue-600 hover:text-blue-800"
+                    >
+                      @{athlete.instagram_handle}
+                    </a>
+                  ) : (
+                    <span className="text-sm text-gray-800">—</span>
+                  )}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                  {formatNumber(athlete.follower_count)}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(athlete.enrichment_status)}`}>
+                    {athlete.enrichment_status}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
+                  {formatDate(athlete.created_at)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {athletes.length === 0 && (
+          <div className="px-6 py-12 text-center text-gray-800">
+            No athletes found. Import seed data to get started.
+          </div>
+        )}
+      </div>
+
+      <div className="text-sm text-gray-800">
+        Showing {athletes.length} athletes
+      </div>
+    </div>
+  );
+}
