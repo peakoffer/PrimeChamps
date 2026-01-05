@@ -1,0 +1,148 @@
+# Prime Champs
+
+Automated athlete outreach CRM for managing partnerships with athletes. Features Instagram enrichment, Fit Score benchmarking against historical data, and a full pipeline management system.
+
+## Features
+
+- **Pipeline Management** - Kanban-style board with stages: Research → Approval → Reach Out → Response → Appointment → Contract
+- **Instagram Enrichment** - Automated profile scraping via Apify (followers, engagement rate, posts, ratio)
+- **Fit Score** - Compare athletes against historical benchmarks with A/B/C/D grading
+- **Research Agent** - AI-powered athlete discovery by sport/criteria
+- **Bulk Operations** - Batch enrichment, approval, and photo fetching
+- **Photo Storage** - Instagram posts saved to Supabase storage
+
+## Tech Stack
+
+- **Frontend**: Next.js 15, React, Tailwind CSS
+- **Backend**: Python (agents), Next.js API routes
+- **Database**: Supabase (PostgreSQL)
+- **APIs**: Apify (Instagram scraping), OpenAI/Anthropic (research agent)
+- **Storage**: Supabase Storage (profile pics, post images)
+
+## Project Structure
+
+```
+├── dashboard/           # Next.js frontend
+│   ├── src/
+│   │   ├── app/        # Pages and API routes
+│   │   ├── components/ # React components
+│   │   └── lib/        # Utilities (supabase, auth)
+│   └── scripts/        # Batch processing scripts
+├── backend/            # Python agents
+│   ├── agents/         # Research, enrichment, scoring agents
+│   └── sources/        # Data source integrations
+├── scripts/            # Database migrations and utilities
+└── supabase/           # Supabase migrations
+```
+
+## Setup
+
+### 1. Environment Variables
+
+Copy the example env files:
+
+```bash
+cp .env.example .env
+cp dashboard/.env.local.example dashboard/.env.local
+```
+
+Required variables:
+
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_KEY=your_service_key
+
+# Apify (Instagram scraping)
+APIFY_API_KEY=your_apify_key
+
+# Auth
+AUTH_PASSWORD=your_dashboard_password
+```
+
+### 2. Database Setup
+
+Run the migrations in order:
+
+```bash
+# Core schema
+psql -f scripts/schema.sql
+
+# Research tables
+psql -f scripts/create_research_tables.sql
+
+# Pipeline additions
+psql -f scripts/migration_v3_pipeline.sql
+psql -f scripts/migration_v4_add_rejected_stage.sql
+psql -f scripts/migration_v5_athlete_posts.sql
+```
+
+### 3. Install Dependencies
+
+```bash
+# Dashboard
+cd dashboard
+npm install
+
+# Backend (optional - for Python agents)
+cd backend
+pip install -r requirements.txt
+```
+
+### 4. Run Development Server
+
+```bash
+cd dashboard
+npm run dev
+```
+
+Visit http://localhost:3000
+
+## Key Features
+
+### Fit Score Benchmarking
+
+Athletes are scored against historical data:
+
+| Metric | Calculation |
+|--------|-------------|
+| Followers | 25th-75th percentile = ideal range |
+| Ratio | Follower/following ratio vs median |
+| Engagement | (likes + comments) / followers × 100 |
+| Posts | Activity level vs average |
+
+Grades: A (85%+), B (70%+), C (55%+), D (<55%)
+
+### Pipeline Stages
+
+1. **Research** - AI discovers potential athletes
+2. **Approval** - Review and approve/reject candidates
+3. **Reach Out** - Generate and send outreach messages
+4. **Response** - Track replies and conversations
+5. **Appointment** - Schedule calls/meetings
+6. **Contract** - Finalize partnerships
+
+### Batch Scripts
+
+```bash
+# Enrich all historical athletes with Instagram data
+node dashboard/scripts/batch-enrich-historical.js
+
+# Fetch photos for all athletes
+node dashboard/scripts/batch-fetch-photos.js
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/benchmarks` | GET | Get benchmark metrics from historical data |
+| `/api/athletes/[id]/enrich` | POST | Enrich athlete with Instagram data |
+| `/api/pipeline/athletes` | GET | Get athletes by pipeline stage |
+| `/api/research/run` | POST | Run research agent for a sport |
+| `/api/instagram/photos` | GET/POST | Fetch/load athlete photos |
+
+## License
+
+Private - All rights reserved
