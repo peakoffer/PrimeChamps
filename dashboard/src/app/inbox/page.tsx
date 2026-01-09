@@ -1,273 +1,525 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { formatDate } from "@/lib/utils";
+import { Suspense, useEffect, useState, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import {
+  ConversationList,
+  ConversationThread,
+  ConversationHeader,
+  ComposeBox,
+  OutcomeModal,
+} from "@/components/conversations";
+
+interface Athlete {
+  id: string;
+  name: string;
+  sport: string;
+  instagram_handle?: string;
+  instagram_url?: string;
+  follower_count?: number;
+  profile_pic_url?: string;
+  pipeline_stage?: string;
+}
+
+interface ConversationOutcome {
+  id?: string;
+  outcome: string;
+  outcome_at?: string;
+  notes?: string;
+}
+
+interface Message {
+  id: string;
+  conversation_id: string;
+  direction: "outbound" | "inbound";
+  content: string;
+  source?: string;
+  sent_by?: string;
+  sent_at: string;
+  read_at?: string;
+  template_id?: string;
+}
 
 interface ConversationWithAthlete {
   id: string;
   athlete_id: string;
-  last_message_at: string | null;
-  last_message_preview: string | null;
+  last_message_at?: string;
+  last_message_preview?: string;
   unread_count: number;
-  is_archived: boolean;
-  athletes: {
-    id: string;
-    name: string;
-    sport: string;
-    instagram_handle: string | null;
-    follower_count: number | null;
-    profile_pic_url: string | null;
-  };
-  conversation_outcomes: Array<{
-    outcome: string;
-  }>;
+  status?: string;
+  is_archived?: boolean;
+  athletes?: Athlete;
+  conversation_outcomes?: ConversationOutcome[];
 }
 
 type FilterType = "all" | "unread" | "positive" | "negative" | "no_response";
 
 export default function InboxPage() {
+  return (
+    <Suspense fallback={<InboxLoading />}>
+      <InboxPageContent />
+    </Suspense>
+  );
+}
+
+function InboxLoading() {
+  return (
+    <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
+      <div className="text-gray-500">Loading inbox...</div>
+    </div>
+  );
+}
+
+function InboxPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // State
   const [conversations, setConversations] = useState<ConversationWithAthlete[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<ConversationWithAthlete | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [outcome, setOutcome] = useState<ConversationOutcome | null>(null);
   const [loading, setLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [filter, setFilter] = useState<FilterType>("all");
+  const [showOutcomeModal, setShowOutcomeModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Fetch conversations
+  const fetchConversations = useCallback(async () => {
+    try {
+      const response = await fetch("/api/conversations");
+      const data = await response.json();
+      setConversations(data.conversations || []);
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    async function fetchConversations() {
-      try {
-        const response = await fetch("/api/conversations");
-        const data = await response.json();
-        setConversations(data.conversations || []);
-      } catch (error) {
-        console.error("Error fetching conversations:", error);
-      } finally {
-        setLoading(false);
+    fetchConversations();
+  }, [fetchConversations]);
+
+  // Handle URL param for pre-selected conversation
+  useEffect(() => {
+    const conversationId = searchParams.get("id");
+    if (conversationId && conversations.length > 0) {
+      const conv = conversations.find((c) => c.id === conversationId);
+      if (conv) {
+        handleSelectConversation(conv);
+      }
+    }
+  }, [searchParams, conversations]);
+
+  // Fetch messages for selected conversation
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    setMessagesLoading(true);
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}`);
+      const data = await response.json();
+
+      setMessages(data.messages || []);
+      setOutcome(data.outcome || null);
+
+      // Update the conversation's unread count in the list
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId ? { ...c, unread_count: 0 } : c
+        )
+      );
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
+
+  const handleSelectConversation = (conv: ConversationWithAthlete) => {
+    setSelectedConversation(conv);
+    fetchMessages(conv.id);
+
+    // Update URL without navigation
+    const url = new URL(window.location.href);
+    url.searchParams.set("id", conv.id);
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  const handleSendMessage = async (
+    content: string,
+    direction: "outbound" | "inbound",
+    templateId?: string
+  ) => {
+    if (!selectedConversation) return;
+
+    // Optimistic update
+    const tempMessage: Message = {
+      id: `temp-${Date.now()}`,
+      conversation_id: selectedConversation.id,
+      direction,
+      content,
+      source: "manual",
+      sent_by: "User",
+      sent_at: new Date().toISOString(),
+      template_id: templateId,
+    };
+    setMessages((prev) => [...prev, tempMessage]);
+
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedConversation.id}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content,
+            direction,
+            source: "manual",
+            sentBy: "User",
+            templateId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.message) {
+        // Replace temp message with real one
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempMessage.id ? data.message : m))
+        );
+
+        // Update conversation preview in list
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === selectedConversation.id
+              ? {
+                  ...c,
+                  last_message_at: data.message.sent_at,
+                  last_message_preview: content.substring(0, 100),
+                }
+              : c
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+      // Remove temp message on error
+      setMessages((prev) => prev.filter((m) => m.id !== tempMessage.id));
+    }
+  };
+
+  const handleSetOutcome = async (
+    outcomeValue: string,
+    notes: string,
+    followUpDate?: string
+  ) => {
+    if (!selectedConversation) return;
+
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedConversation.id}/outcome`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            outcome: outcomeValue,
+            notes,
+            followUpDate,
+            markedBy: "User",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.outcome) {
+        setOutcome(data.outcome);
+
+        // Update conversation in list
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === selectedConversation.id
+              ? {
+                  ...c,
+                  conversation_outcomes: [{ outcome: outcomeValue, outcome_at: new Date().toISOString() }],
+                }
+              : c
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Error setting outcome:", error);
+      throw error;
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!selectedConversation) return;
+
+    if (!confirm("Are you sure you want to archive this conversation?")) return;
+
+    try {
+      await fetch(`/api/conversations/${selectedConversation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_archived: true }),
+      });
+
+      // Remove from list
+      setConversations((prev) =>
+        prev.filter((c) => c.id !== selectedConversation.id)
+      );
+      setSelectedConversation(null);
+      setMessages([]);
+    } catch (error) {
+      console.error("Error archiving conversation:", error);
+    }
+  };
+
+  // Filter and search conversations
+  const filteredConversations = conversations.filter((conv) => {
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const name = conv.athletes?.name?.toLowerCase() || "";
+      const handle = conv.athletes?.instagram_handle?.toLowerCase() || "";
+      const sport = conv.athletes?.sport?.toLowerCase() || "";
+      if (!name.includes(query) && !handle.includes(query) && !sport.includes(query)) {
+        return false;
       }
     }
 
-    fetchConversations();
-  }, []);
-
-  const filteredConversations = conversations.filter((conv) => {
-    if (filter === "all") return true;
+    // Status filter
+    if (filter === "all") return !conv.is_archived;
     if (filter === "unread") return conv.unread_count > 0;
 
-    const outcome = conv.conversation_outcomes?.[0]?.outcome;
-    if (filter === "positive") return outcome === "positive" || outcome === "converted";
-    if (filter === "negative") return outcome === "negative";
-    if (filter === "no_response") return !outcome || outcome === "no_response";
+    const convOutcome = conv.conversation_outcomes?.[0]?.outcome;
+    if (filter === "positive")
+      return convOutcome === "positive" || convOutcome === "converted";
+    if (filter === "negative") return convOutcome === "negative";
+    if (filter === "no_response")
+      return !convOutcome || convOutcome === "no_response";
 
     return true;
   });
 
+  // Stats
   const stats = {
-    total: conversations.length,
+    total: conversations.filter((c) => !c.is_archived).length,
     unread: conversations.filter((c) => c.unread_count > 0).length,
     positive: conversations.filter(
-      (c) => c.conversation_outcomes?.[0]?.outcome === "positive" ||
-             c.conversation_outcomes?.[0]?.outcome === "converted"
+      (c) =>
+        c.conversation_outcomes?.[0]?.outcome === "positive" ||
+        c.conversation_outcomes?.[0]?.outcome === "converted"
     ).length,
     negative: conversations.filter(
       (c) => c.conversation_outcomes?.[0]?.outcome === "negative"
     ).length,
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading inbox...</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Inbox</h1>
-        <div className="text-sm text-gray-800">
-          {stats.total} conversations
-          {stats.unread > 0 && (
-            <span className="ml-2 bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
-              {stats.unread} unread
-            </span>
+    <div className="h-[calc(100vh-64px)] flex flex-col">
+      {/* Header */}
+      <div className="flex-shrink-0 bg-white border-b px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold text-gray-900">Inbox</h1>
+            <div className="text-sm text-gray-600">
+              {stats.total} conversations
+              {stats.unread > 0 && (
+                <span className="ml-2 bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
+                  {stats.unread} unread
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search conversations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+          </div>
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="flex gap-2 mt-4">
+          <FilterButton
+            label="All"
+            count={stats.total}
+            active={filter === "all"}
+            onClick={() => setFilter("all")}
+          />
+          <FilterButton
+            label="Unread"
+            count={stats.unread}
+            active={filter === "unread"}
+            onClick={() => setFilter("unread")}
+            color="red"
+          />
+          <FilterButton
+            label="Positive"
+            count={stats.positive}
+            active={filter === "positive"}
+            onClick={() => setFilter("positive")}
+            color="green"
+          />
+          <FilterButton
+            label="Negative"
+            count={stats.negative}
+            active={filter === "negative"}
+            onClick={() => setFilter("negative")}
+            color="yellow"
+          />
+          <FilterButton
+            label="No Response"
+            count={
+              conversations.filter(
+                (c) =>
+                  !c.conversation_outcomes?.[0]?.outcome ||
+                  c.conversation_outcomes?.[0]?.outcome === "no_response"
+              ).length
+            }
+            active={filter === "no_response"}
+            onClick={() => setFilter("no_response")}
+            color="gray"
+          />
+        </div>
+      </div>
+
+      {/* Main Content - Split View */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left: Conversation List */}
+        <div className="w-96 flex-shrink-0 border-r bg-white overflow-y-auto">
+          <ConversationList
+            conversations={filteredConversations}
+            selectedId={selectedConversation?.id}
+            onSelect={handleSelectConversation}
+            loading={loading}
+          />
+        </div>
+
+        {/* Right: Conversation Detail */}
+        <div className="flex-1 flex flex-col bg-gray-50">
+          {selectedConversation ? (
+            <>
+              {/* Header */}
+              <ConversationHeader
+                athlete={selectedConversation.athletes}
+                outcome={outcome || undefined}
+                onSetOutcome={() => setShowOutcomeModal(true)}
+                onArchive={handleArchive}
+              />
+
+              {/* Messages */}
+              <ConversationThread
+                messages={messages}
+                loading={messagesLoading}
+                emptyMessage="No messages yet. Log your first message below."
+              />
+
+              {/* Compose */}
+              <ComposeBox
+                onSend={handleSendMessage}
+                athleteData={selectedConversation.athletes}
+                placeholder="Type a message to log..."
+              />
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center text-gray-500">
+                <svg
+                  className="mx-auto w-12 h-12 text-gray-300 mb-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                  />
+                </svg>
+                <p className="text-lg font-medium">Select a conversation</p>
+                <p className="text-sm mt-1">
+                  Choose a conversation from the list to view messages
+                </p>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatsCard
-          label="Total"
-          value={stats.total}
-          active={filter === "all"}
-          onClick={() => setFilter("all")}
-        />
-        <StatsCard
-          label="Unread"
-          value={stats.unread}
-          color="red"
-          active={filter === "unread"}
-          onClick={() => setFilter("unread")}
-        />
-        <StatsCard
-          label="Positive"
-          value={stats.positive}
-          color="green"
-          active={filter === "positive"}
-          onClick={() => setFilter("positive")}
-        />
-        <StatsCard
-          label="Negative"
-          value={stats.negative}
-          color="yellow"
-          active={filter === "negative"}
-          onClick={() => setFilter("negative")}
-        />
-      </div>
-
-      {/* Conversations List */}
-      <div className="bg-white shadow rounded-lg divide-y">
-        {filteredConversations.length === 0 ? (
-          <div className="p-8 text-center text-gray-800">
-            {filter === "all"
-              ? "No conversations yet. Start one from an athlete's profile."
-              : `No ${filter} conversations.`}
-          </div>
-        ) : (
-          filteredConversations.map((conv) => (
-            <ConversationRow
-              key={conv.id}
-              conversation={conv}
-              onClick={() => router.push(`/athletes/${conv.athlete_id}?tab=conversation`)}
-            />
-          ))
-        )}
-      </div>
+      {/* Outcome Modal */}
+      <OutcomeModal
+        isOpen={showOutcomeModal}
+        onClose={() => setShowOutcomeModal(false)}
+        onSubmit={handleSetOutcome}
+        currentOutcome={outcome?.outcome}
+        athleteName={selectedConversation?.athletes?.name}
+      />
     </div>
   );
 }
 
-function StatsCard({
+function FilterButton({
   label,
-  value,
-  color = "blue",
+  count,
   active,
   onClick,
+  color = "blue",
 }: {
   label: string;
-  value: number;
-  color?: "blue" | "red" | "green" | "yellow";
+  count: number;
   active: boolean;
   onClick: () => void;
+  color?: "blue" | "red" | "green" | "yellow" | "gray";
 }) {
   const colorClasses = {
-    blue: "bg-blue-50 border-blue-200 text-blue-700",
-    red: "bg-red-50 border-red-200 text-red-700",
-    green: "bg-green-50 border-green-200 text-green-700",
-    yellow: "bg-yellow-50 border-yellow-200 text-yellow-700",
+    blue: active ? "bg-blue-100 text-blue-700 border-blue-300" : "",
+    red: active ? "bg-red-100 text-red-700 border-red-300" : "",
+    green: active ? "bg-green-100 text-green-700 border-green-300" : "",
+    yellow: active ? "bg-yellow-100 text-yellow-700 border-yellow-300" : "",
+    gray: active ? "bg-gray-200 text-gray-700 border-gray-400" : "",
   };
 
   return (
     <button
       onClick={onClick}
-      className={`p-4 rounded-lg border-2 text-center transition-all ${
+      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
         active
-          ? `${colorClasses[color]} border-opacity-100`
-          : "bg-white border-gray-200 hover:border-gray-300"
+          ? colorClasses[color]
+          : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
       }`}
     >
-      <div className="text-2xl font-bold">{value}</div>
-      <div className="text-sm text-gray-800">{label}</div>
+      {label}
+      <span
+        className={`ml-1.5 ${
+          active ? "opacity-100" : "opacity-60"
+        }`}
+      >
+        {count}
+      </span>
     </button>
-  );
-}
-
-function ConversationRow({
-  conversation,
-  onClick,
-}: {
-  conversation: ConversationWithAthlete;
-  onClick: () => void;
-}) {
-  const athlete = conversation.athletes;
-  const outcome = conversation.conversation_outcomes?.[0]?.outcome;
-
-  const outcomeColors: Record<string, string> = {
-    positive: "bg-green-100 text-green-700",
-    converted: "bg-green-100 text-green-700",
-    negative: "bg-red-100 text-red-700",
-    question: "bg-yellow-100 text-yellow-700",
-    no_response: "bg-gray-100 text-gray-800",
-  };
-
-  return (
-    <div
-      onClick={onClick}
-      className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors ${
-        conversation.unread_count > 0 ? "bg-blue-50" : ""
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          {/* Avatar */}
-          {athlete?.profile_pic_url ? (
-            <img
-              src={athlete.profile_pic_url}
-              alt={athlete.name}
-              className="flex-shrink-0 h-12 w-12 rounded-full object-cover"
-            />
-          ) : (
-            <div className="flex-shrink-0 h-12 w-12 rounded-full bg-gray-200 flex items-center justify-center">
-              <span className="text-gray-600 font-medium text-lg">
-                {athlete?.name?.charAt(0) || "?"}
-              </span>
-            </div>
-          )}
-
-          {/* Info */}
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="font-medium text-gray-900">
-                {athlete?.name || "Unknown"}
-              </span>
-              {conversation.unread_count > 0 && (
-                <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
-                  {conversation.unread_count}
-                </span>
-              )}
-              {outcome && (
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    outcomeColors[outcome] || "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {outcome}
-                </span>
-              )}
-            </div>
-            <div className="text-sm text-gray-800">
-              {athlete?.sport} | @{athlete?.instagram_handle || "N/A"}
-              {athlete?.follower_count && (
-                <span className="ml-2">
-                  {(athlete.follower_count / 1000).toFixed(0)}K followers
-                </span>
-              )}
-            </div>
-            {conversation.last_message_preview && (
-              <div className="text-sm text-gray-800 mt-1 truncate max-w-md">
-                {conversation.last_message_preview}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Timestamp */}
-        <div className="text-sm text-gray-800">
-          {conversation.last_message_at
-            ? formatDate(conversation.last_message_at)
-            : "No messages"}
-        </div>
-      </div>
-    </div>
   );
 }
