@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+// Force dynamic rendering - prevents static path generation error
+export const dynamic = "force-dynamic";
+export const dynamicParams = true;
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
@@ -59,22 +63,47 @@ export async function POST(
       );
     }
 
-    // Upsert the outcome
-    const { data, error } = await supabase
+    // Check if outcome already exists for this conversation
+    const { data: existing } = await supabase
       .from("conversation_outcomes")
-      .upsert(
-        {
+      .select("id")
+      .eq("conversation_id", conversationId)
+      .maybeSingle();
+
+    let data;
+    let error;
+
+    if (existing) {
+      // Update existing outcome
+      const result = await supabase
+        .from("conversation_outcomes")
+        .update({
+          outcome,
+          outcome_at: new Date().toISOString(),
+          notes,
+          converted_deal_value: convertedDealValue,
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+    } else {
+      // Insert new outcome
+      const result = await supabase
+        .from("conversation_outcomes")
+        .insert({
           conversation_id: conversationId,
           outcome,
           outcome_at: new Date().toISOString(),
           notes,
           converted_deal_value: convertedDealValue,
-          marked_by: markedBy,
-        },
-        { onConflict: "conversation_id" }
-      )
-      .select()
-      .single();
+        })
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) {
       console.error("Error setting outcome:", error);

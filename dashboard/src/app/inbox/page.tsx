@@ -80,6 +80,7 @@ function InboxPageContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [outcome, setOutcome] = useState<ConversationOutcome | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [filter, setFilter] = useState<FilterType>("all");
   const [showOutcomeModal, setShowOutcomeModal] = useState(false);
@@ -88,11 +89,15 @@ function InboxPageContent() {
   // Fetch conversations
   const fetchConversations = useCallback(async () => {
     try {
+      console.log("Fetching conversations...");
       const response = await fetch("/api/conversations");
       const data = await response.json();
+      console.log("Got conversations:", data);
       setConversations(data.conversations || []);
-    } catch (error) {
-      console.error("Error fetching conversations:", error);
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching conversations:", err);
+      setError(err instanceof Error ? err.message : "Failed to load conversations");
     } finally {
       setLoading(false);
     }
@@ -105,34 +110,65 @@ function InboxPageContent() {
   // Handle URL param for pre-selected conversation
   useEffect(() => {
     const conversationId = searchParams.get("id");
-    if (conversationId && conversations.length > 0) {
+    // Only select if not already selected (prevents infinite loop)
+    if (conversationId && conversations.length > 0 && selectedConversation?.id !== conversationId) {
       const conv = conversations.find((c) => c.id === conversationId);
       if (conv) {
         handleSelectConversation(conv);
       }
     }
-  }, [searchParams, conversations]);
+  }, [searchParams, conversations, selectedConversation?.id]);
 
-  // Fetch messages for selected conversation
-  const fetchMessages = useCallback(async (conversationId: string) => {
+  // Fetch messages for selected conversation with retry logic
+  const fetchMessages = useCallback(async (conversationId: string, retries = 3) => {
     setMessagesLoading(true);
-    try {
-      const response = await fetch(`/api/conversations/${conversationId}`);
-      const data = await response.json();
 
-      setMessages(data.messages || []);
-      setOutcome(data.outcome || null);
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const response = await fetch(`/api/conversations/${conversationId}`);
 
-      // Update the conversation's unread count in the list
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === conversationId ? { ...c, unread_count: 0 } : c
-        )
-      );
-    } catch (error) {
-      console.error("Error fetching messages:", error);
-    } finally {
-      setMessagesLoading(false);
+        // Check if response is ok
+        if (!response.ok) {
+          console.warn(`Fetch attempt ${attempt + 1} failed with status ${response.status}`);
+          if (attempt < retries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+            continue;
+          }
+          throw new Error(`Failed to fetch conversation: ${response.status}`);
+        }
+
+        // Check content type is JSON
+        const contentType = response.headers.get("content-type");
+        if (!contentType?.includes("application/json")) {
+          console.warn(`Unexpected content type: ${contentType}`);
+          if (attempt < retries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+            continue;
+          }
+          throw new Error("Invalid response format");
+        }
+
+        const data = await response.json();
+
+        setMessages(data.messages || []);
+        setOutcome(data.outcome || null);
+
+        // Update the conversation's unread count in the list
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === conversationId ? { ...c, unread_count: 0 } : c
+          )
+        );
+
+        setMessagesLoading(false);
+        return; // Success - exit the retry loop
+      } catch (error) {
+        console.error(`Error fetching messages (attempt ${attempt + 1}):`, error);
+        if (attempt === retries - 1) {
+          setMessages([]);
+          setMessagesLoading(false);
+        }
+      }
     }
   }, []);
 
@@ -319,8 +355,22 @@ function InboxPageContent() {
     ).length,
   };
 
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-600">Error: {error}</p>
+        <button
+          onClick={fetchConversations}
+          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col">
+    <div className="h-[calc(100vh-180px)] flex flex-col -mx-4 sm:-mx-6 lg:-mx-8">
       {/* Header */}
       <div className="flex-shrink-0 bg-white border-b px-6 py-4">
         <div className="flex items-center justify-between">

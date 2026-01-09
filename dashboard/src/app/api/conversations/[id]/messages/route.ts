@@ -65,7 +65,7 @@ export async function POST(
       return NextResponse.json({ error: "Missing content" }, { status: 400 });
     }
 
-    // Insert the message
+    // Insert the message (note: sent_by column doesn't exist in DB schema)
     const { data: message, error: messageError } = await supabase
       .from("conversation_messages")
       .insert({
@@ -75,7 +75,6 @@ export async function POST(
         source,
         template_id: templateId,
         personalization_data: personalizationData || {},
-        sent_by: sentBy,
         sent_at: new Date().toISOString(),
       })
       .select()
