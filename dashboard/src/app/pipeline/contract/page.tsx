@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import ContractModal from "@/components/ContractModal";
+import ContractCard from "@/components/ContractCard";
 
 interface Athlete {
   id: string;
@@ -13,41 +15,93 @@ interface Athlete {
   pipeline_stage: string;
 }
 
+interface Contract {
+  id: string;
+  athlete_id: string;
+  status: string;
+  contract_type: string;
+  revenue_share_percent?: number | null;
+  monthly_guarantee?: number | null;
+  contract_duration_months?: number | null;
+  start_date?: string | null;
+  signed_at?: string | null;
+  notes?: string | null;
+  athletes?: Athlete;
+}
+
 export default function ContractStagePage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
+  const [filter, setFilter] = useState<string>("all");
 
-  useEffect(() => {
-    fetchAthletes();
-  }, []);
-
-  const fetchAthletes = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await fetch("/api/pipeline/athletes?stage=contract");
-      const data = await response.json();
-      setAthletes(data.athletes || []);
+      const [athletesRes, contractsRes] = await Promise.all([
+        fetch("/api/pipeline/athletes?stage=contract"),
+        fetch("/api/contracts"),
+      ]);
+
+      const athletesData = await athletesRes.json();
+      const contractsData = await contractsRes.json();
+
+      setAthletes(athletesData.athletes || []);
+      setContracts(contractsData.contracts || []);
     } catch (error) {
-      console.error("Error fetching athletes:", error);
+      console.error("Error fetching data:", error);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleContractCreated = () => {
+    setSelectedAthlete(null);
+    fetchData();
   };
 
-  const handleMarkSigned = async (athleteId: string) => {
-    // Mark as historical (success story)
-    try {
-      await fetch("/api/pipeline/athletes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ athleteId, toStage: null, markHistorical: true }),
-      });
-      setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
-    } catch (error) {
-      console.error("Error marking signed:", error);
-    }
-  };
+  // Athletes without contracts
+  const athletesWithoutContracts = athletes.filter(
+    (athlete) =>
+      !contracts.some(
+        (c) =>
+          c.athlete_id === athlete.id &&
+          c.status !== "rejected" &&
+          c.status !== "signed"
+      )
+  );
 
-  const totalFollowers = athletes.reduce((sum, a) => sum + (a.follower_count || 0), 0);
+  // Filter contracts
+  const filteredContracts =
+    filter === "all"
+      ? contracts.filter((c) => c.status !== "signed")
+      : contracts.filter((c) => c.status === filter);
+
+  const signedContracts = contracts.filter((c) => c.status === "signed");
+
+  // Calculate stats
+  const totalFollowers = athletes.reduce(
+    (sum, a) => sum + (a.follower_count || 0),
+    0
+  );
+
+  const totalContractValue = contracts
+    .filter((c) => c.status === "signed")
+    .reduce((sum, c) => {
+      const monthly = c.monthly_guarantee || 0;
+      const duration = c.contract_duration_months || 12;
+      return sum + monthly * duration;
+    }, 0);
+
+  const draftCount = contracts.filter((c) => c.status === "draft").length;
+  const sentCount = contracts.filter((c) => c.status === "sent").length;
+  const negotiatingCount = contracts.filter(
+    (c) => c.status === "negotiating"
+  ).length;
 
   if (loading) {
     return (
@@ -62,14 +116,16 @@ export default function ContractStagePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-800">
+          <Link href="/pipeline" className="text-gray-800 hover:text-gray-900">
             ← Pipeline
           </Link>
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <span className="text-3xl">🎉</span> Contracts
+              <span className="text-3xl">📝</span> Contracts
             </h1>
-            <p className="text-gray-800">Finalize deals and track signed athletes</p>
+            <p className="text-gray-800">
+              Finalize deals and track signed athletes
+            </p>
           </div>
         </div>
       </div>
@@ -77,8 +133,10 @@ export default function ContractStagePage() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-green-700">{athletes.length}</div>
-          <div className="text-sm text-green-600">Pending Contracts</div>
+          <div className="text-3xl font-bold text-green-700">
+            {athletes.length}
+          </div>
+          <div className="text-sm text-green-600">In Stage</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
           <div className="text-3xl font-bold text-gray-800">
@@ -87,12 +145,16 @@ export default function ContractStagePage() {
           <div className="text-sm text-gray-800">Total Reach</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">0</div>
-          <div className="text-sm text-gray-800">Signed This Month</div>
+          <div className="text-3xl font-bold text-gray-800">
+            {signedContracts.length}
+          </div>
+          <div className="text-sm text-gray-800">Signed</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">$0</div>
-          <div className="text-sm text-gray-800">Est. Revenue</div>
+          <div className="text-3xl font-bold text-gray-800">
+            ${(totalContractValue / 1000).toFixed(0)}K
+          </div>
+          <div className="text-sm text-gray-800">Contract Value</div>
         </div>
       </div>
 
@@ -103,7 +165,8 @@ export default function ContractStagePage() {
             <div>
               <h2 className="text-xl font-bold mb-1">Almost There!</h2>
               <p className="text-green-100">
-                {athletes.length} athlete{athletes.length > 1 ? "s" : ""} ready to sign contracts
+                {athletes.length} athlete{athletes.length > 1 ? "s" : ""} ready
+                to sign contracts
               </p>
             </div>
             <div className="text-5xl">🏆</div>
@@ -111,13 +174,148 @@ export default function ContractStagePage() {
         </div>
       )}
 
-      {/* Athletes List */}
-      {athletes.length === 0 ? (
+      {/* Filter Tabs */}
+      {contracts.length > 0 && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => setFilter("all")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              filter === "all"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            Active ({draftCount + sentCount + negotiatingCount})
+          </button>
+          <button
+            onClick={() => setFilter("draft")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              filter === "draft"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            Draft ({draftCount})
+          </button>
+          <button
+            onClick={() => setFilter("sent")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              filter === "sent"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            Sent ({sentCount})
+          </button>
+          <button
+            onClick={() => setFilter("negotiating")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              filter === "negotiating"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            Negotiating ({negotiatingCount})
+          </button>
+          <button
+            onClick={() => setFilter("signed")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              filter === "signed"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            Signed ({signedContracts.length})
+          </button>
+        </div>
+      )}
+
+      {/* Active Contracts */}
+      {filteredContracts.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            {filter === "signed" ? "Signed Contracts" : "Active Contracts"}
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filteredContracts.map((contract) => (
+              <ContractCard
+                key={contract.id}
+                contract={contract}
+                onStatusChange={fetchData}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Athletes Needing Contracts */}
+      {athletesWithoutContracts.length > 0 && filter === "all" && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Create Contract ({athletesWithoutContracts.length})
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {athletesWithoutContracts.map((athlete) => (
+              <div
+                key={athlete.id}
+                className="bg-white rounded-lg shadow border-2 border-green-200 p-4"
+              >
+                <div className="flex items-start gap-4">
+                  {athlete.profile_pic_url ? (
+                    <img
+                      src={athlete.profile_pic_url}
+                      alt={athlete.name}
+                      className="w-16 h-16 rounded-full object-cover border-4 border-green-100"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center text-2xl text-green-600">
+                      {athlete.name[0]}
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <Link
+                      href={`/athletes/${athlete.id}`}
+                      className="font-bold text-gray-900 hover:text-green-600 text-lg"
+                    >
+                      {athlete.name}
+                    </Link>
+                    <div className="text-sm text-gray-800">{athlete.sport}</div>
+                    {athlete.instagram_handle && (
+                      <div className="text-sm text-blue-600">
+                        @{athlete.instagram_handle}
+                      </div>
+                    )}
+                    {athlete.follower_count && (
+                      <div className="text-lg font-bold text-green-600 mt-1">
+                        {(athlete.follower_count / 1000).toFixed(0)}K followers
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <button
+                    onClick={() => setSelectedAthlete(athlete)}
+                    className="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700"
+                  >
+                    Create Contract
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {athletes.length === 0 && contracts.length === 0 && (
         <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="text-4xl mb-3">🎉</div>
-          <h3 className="font-semibold text-gray-800 mb-2">No Pending Contracts</h3>
+          <div className="text-4xl mb-3">📝</div>
+          <h3 className="font-semibold text-gray-800 mb-2">
+            No Pending Contracts
+          </h3>
           <p className="text-sm text-gray-800">
-            Successful meetings will move prospects here for contract finalization.
+            Successful meetings will move prospects here for contract
+            finalization.
           </p>
           <Link
             href="/pipeline/appointment"
@@ -126,92 +324,55 @@ export default function ContractStagePage() {
             Go to Appointments
           </Link>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {athletes.map((athlete) => (
-            <div
-              key={athlete.id}
-              className="bg-white rounded-lg shadow border-2 border-green-200 p-4"
-            >
-              <div className="flex items-start gap-4">
-                {athlete.profile_pic_url ? (
-                  <img
-                    src={athlete.profile_pic_url}
-                    alt={athlete.name}
-                    className="w-20 h-20 rounded-full object-cover border-4 border-green-100"
-                  />
-                ) : (
-                  <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center text-2xl text-green-600">
-                    {athlete.name[0]}
-                  </div>
-                )}
-                <div className="flex-1">
-                  <Link
-                    href={`/athletes/${athlete.id}`}
-                    className="font-bold text-gray-900 hover:text-green-600 text-lg"
-                  >
-                    {athlete.name}
-                  </Link>
-                  <div className="text-sm text-gray-800">{athlete.sport}</div>
-                  {athlete.instagram_handle && (
-                    <div className="text-sm text-blue-600">@{athlete.instagram_handle}</div>
-                  )}
-                  {athlete.follower_count && (
-                    <div className="text-lg font-bold text-green-600 mt-2">
-                      {(athlete.follower_count / 1000).toFixed(0)}K followers
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Contract Actions */}
-              <div className="mt-4 pt-4 border-t space-y-3">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <label className="block text-gray-800 mb-1">Contract Value</label>
-                    <input
-                      type="text"
-                      placeholder="$0.00"
-                      className="w-full border rounded px-3 py-1"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-gray-800 mb-1">Start Date</label>
-                    <input type="date" className="w-full border rounded px-3 py-1" />
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleMarkSigned(athlete.id)}
-                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700"
-                  >
-                    🎉 Mark as Signed
-                  </button>
-                  <Link
-                    href={`/athletes/${athlete.id}`}
-                    className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg font-medium hover:bg-gray-200"
-                  >
-                    View Profile
-                  </Link>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       )}
 
       {/* Recent Signings */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Success Stories</h2>
-        <p className="text-gray-800 text-sm">
-          Athletes who signed contracts will appear here. View all success stories in the{" "}
-          <Link href="/historical" className="text-green-600 hover:underline">
-            Historical Data
-          </Link>{" "}
-          section.
-        </p>
-      </div>
+      {signedContracts.length > 0 && filter !== "signed" && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Recent Success Stories ({signedContracts.length})
+          </h2>
+          <div className="flex flex-wrap gap-3">
+            {signedContracts.slice(0, 5).map((contract) => (
+              <div
+                key={contract.id}
+                className="flex items-center gap-2 bg-green-50 rounded-full px-3 py-1.5"
+              >
+                {contract.athletes?.profile_pic_url ? (
+                  <img
+                    src={contract.athletes.profile_pic_url}
+                    alt={contract.athletes.name}
+                    className="w-6 h-6 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-green-200 flex items-center justify-center text-xs text-green-700">
+                    {contract.athletes?.name?.[0]}
+                  </div>
+                )}
+                <span className="text-sm font-medium text-green-800">
+                  {contract.athletes?.name}
+                </span>
+              </div>
+            ))}
+          </div>
+          <Link
+            href="/historical"
+            className="inline-block mt-4 text-sm text-green-600 hover:underline"
+          >
+            View all success stories →
+          </Link>
+        </div>
+      )}
+
+      {/* Contract Modal */}
+      {selectedAthlete && (
+        <ContractModal
+          athlete={selectedAthlete}
+          isOpen={true}
+          onClose={() => setSelectedAthlete(null)}
+          onComplete={handleContractCreated}
+        />
+      )}
     </div>
   );
 }

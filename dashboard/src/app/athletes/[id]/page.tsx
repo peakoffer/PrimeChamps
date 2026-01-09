@@ -6,6 +6,9 @@ import { supabase, type Athlete } from "@/lib/supabase";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";
+import AppointmentModal from "@/components/AppointmentModal";
+import ContractModal from "@/components/ContractModal";
+import { ComposeBox, OutcomeModal } from "@/components/conversations";
 import type { BenchmarkMetrics } from "@/app/api/benchmarks/route";
 
 interface Message {
@@ -218,6 +221,24 @@ export default function AthleteDetailPage() {
   const [movingStage, setMovingStage] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectionModal, setShowRejectionModal] = useState(false);
+  const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [showContractModal, setShowContractModal] = useState(false);
+
+  // Appointments and contracts state
+  const [athleteAppointments, setAthleteAppointments] = useState<Array<{
+    id: string;
+    scheduled_at: string;
+    status: string;
+    location?: string;
+    outcome?: string;
+  }>>([]);
+  const [athleteContracts, setAthleteContracts] = useState<Array<{
+    id: string;
+    status: string;
+    contract_type: string;
+    revenue_share_percent?: number;
+    signed_at?: string;
+  }>>([]);
 
   // Instagram photos state
   const [instagramPhotos, setInstagramPhotos] = useState<Array<{
@@ -291,6 +312,27 @@ export default function AthleteDetailPage() {
       })
       .catch(err => console.error("Error loading benchmarks:", err));
   }, []);
+
+  // Fetch appointments and contracts for this athlete
+  const fetchAppointmentsAndContracts = async () => {
+    if (!athlete?.id) return;
+    try {
+      const [appointmentsRes, contractsRes] = await Promise.all([
+        fetch(`/api/appointments?athlete_id=${athlete.id}`),
+        fetch(`/api/contracts?athlete_id=${athlete.id}`),
+      ]);
+      const appointmentsData = await appointmentsRes.json();
+      const contractsData = await contractsRes.json();
+      setAthleteAppointments(appointmentsData.appointments || []);
+      setAthleteContracts(contractsData.contracts || []);
+    } catch (err) {
+      console.error("Error loading appointments/contracts:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAppointmentsAndContracts();
+  }, [athlete?.id]);
 
   // Fetch conversation when tab changes
   useEffect(() => {
@@ -409,8 +451,12 @@ export default function AthleteDetailPage() {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!conversation || !newMessage.trim()) return;
+  const handleSendMessage = async (
+    content: string,
+    direction: "outbound" | "inbound" = "outbound",
+    templateId?: string
+  ) => {
+    if (!conversation || !content.trim()) return;
 
     setSendingMessage(true);
     try {
@@ -418,10 +464,11 @@ export default function AthleteDetailPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: newMessage,
-          direction: "outbound",
+          content,
+          direction,
           source: "manual",
           sentBy: "User",
+          templateId,
         }),
       });
 
@@ -1497,6 +1544,92 @@ export default function AthleteDetailPage() {
               </button>
             </div>
           </div>
+
+          {/* Appointments & Contracts */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Appointments & Contracts</h2>
+
+            {/* Appointment Actions */}
+            <div className="mb-4">
+              <button
+                onClick={() => setShowAppointmentModal(true)}
+                className="w-full bg-orange-100 text-orange-700 px-4 py-2 rounded-lg hover:bg-orange-200 font-medium"
+              >
+                📅 Schedule Appointment
+              </button>
+            </div>
+
+            {/* Appointments List */}
+            {athleteAppointments.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-gray-800 mb-2">Appointments</h3>
+                <div className="space-y-2">
+                  {athleteAppointments.slice(0, 3).map((appt) => (
+                    <div key={appt.id} className="text-sm p-2 bg-gray-50 rounded">
+                      <div className="flex justify-between">
+                        <span>{new Date(appt.scheduled_at).toLocaleDateString()}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          appt.status === "completed" ? "bg-green-100 text-green-700" :
+                          appt.status === "scheduled" ? "bg-blue-100 text-blue-700" :
+                          "bg-gray-100 text-gray-700"
+                        }`}>
+                          {appt.status}
+                        </span>
+                      </div>
+                      {appt.outcome && (
+                        <div className="text-xs text-gray-600 mt-1">
+                          Outcome: {appt.outcome.replace("_", " ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Contract Actions */}
+            <div className="mb-4">
+              <button
+                onClick={() => setShowContractModal(true)}
+                className="w-full bg-green-100 text-green-700 px-4 py-2 rounded-lg hover:bg-green-200 font-medium"
+              >
+                📝 Create Contract
+              </button>
+            </div>
+
+            {/* Contracts List */}
+            {athleteContracts.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-800 mb-2">Contracts</h3>
+                <div className="space-y-2">
+                  {athleteContracts.map((contract) => (
+                    <div key={contract.id} className="text-sm p-2 bg-gray-50 rounded">
+                      <div className="flex justify-between">
+                        <span className="capitalize">{contract.contract_type}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          contract.status === "signed" ? "bg-green-100 text-green-700" :
+                          contract.status === "draft" ? "bg-gray-100 text-gray-700" :
+                          "bg-blue-100 text-blue-700"
+                        }`}>
+                          {contract.status}
+                        </span>
+                      </div>
+                      {contract.revenue_share_percent && (
+                        <div className="text-xs text-gray-600 mt-1">
+                          {contract.revenue_share_percent}% revenue share
+                        </div>
+                      )}
+                      {contract.signed_at && (
+                        <div className="text-xs text-green-600 mt-1">
+                          Signed: {new Date(contract.signed_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1593,29 +1726,17 @@ export default function AthleteDetailPage() {
           </div>
 
           {/* Message Input */}
-          <div className="p-4 border-t bg-white">
-            <div className="flex space-x-2">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
-                placeholder="Type a message..."
-                disabled={!conversation}
-                className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-              />
-              <button
-                onClick={handleSendMessage}
-                disabled={!conversation || !newMessage.trim() || sendingMessage}
-                className="bg-blue-500 text-white px-6 py-2 rounded-full hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {sendingMessage ? "..." : "Send"}
-              </button>
-            </div>
-            <p className="text-xs text-gray-800 mt-2 text-center">
-              Messages are logged for pattern analysis. Copy to Instagram to send.
-            </p>
-          </div>
+          <ComposeBox
+            onSend={handleSendMessage}
+            disabled={!conversation}
+            athleteData={{
+              name: athlete.name,
+              sport: athlete.sport,
+              instagram_handle: athlete.instagram_handle || undefined,
+              follower_count: athlete.follower_count || undefined,
+            }}
+            placeholder="Type a message to log..."
+          />
         </div>
       )}
 
@@ -1643,6 +1764,34 @@ export default function AthleteDetailPage() {
             setShowRejectionModal(false);
             // Navigate back to approval queue to continue reviewing
             router.push("/approve");
+          }}
+        />
+      )}
+
+      {/* Appointment Modal */}
+      {athlete && (
+        <AppointmentModal
+          athlete={athlete}
+          isOpen={showAppointmentModal}
+          onClose={() => setShowAppointmentModal(false)}
+          onComplete={() => {
+            setShowAppointmentModal(false);
+            fetchAppointmentsAndContracts();
+            setMessage({ type: "success", text: "Appointment scheduled!" });
+          }}
+        />
+      )}
+
+      {/* Contract Modal */}
+      {athlete && (
+        <ContractModal
+          athlete={athlete}
+          isOpen={showContractModal}
+          onClose={() => setShowContractModal(false)}
+          onComplete={() => {
+            setShowContractModal(false);
+            fetchAppointmentsAndContracts();
+            setMessage({ type: "success", text: "Contract created!" });
           }}
         />
       )}

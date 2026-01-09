@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import AppointmentModal from "@/components/AppointmentModal";
+import AppointmentCard from "@/components/AppointmentCard";
 
 interface Athlete {
   id: string;
@@ -14,41 +16,52 @@ interface Athlete {
 }
 
 interface Appointment {
-  athleteId: string;
-  date: string;
-  time: string;
-  notes: string;
+  id: string;
+  athlete_id: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  location?: string;
+  meeting_url?: string;
+  notes?: string;
+  status: string;
+  outcome?: string;
+  outcome_notes?: string;
+  athletes?: Athlete;
 }
 
 export default function AppointmentStagePage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [appointments, setAppointments] = useState<Map<string, Appointment>>(new Map());
-  const [editingAppointment, setEditingAppointment] = useState<string | null>(null);
+  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
+  const [view, setView] = useState<"list" | "calendar">("list");
 
-  useEffect(() => {
-    fetchAthletes();
-  }, []);
-
-  const fetchAthletes = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await fetch("/api/pipeline/athletes?stage=appointment");
-      const data = await response.json();
-      setAthletes(data.athletes || []);
+      const [athletesRes, appointmentsRes] = await Promise.all([
+        fetch("/api/pipeline/athletes?stage=appointment"),
+        fetch("/api/appointments?status=scheduled"),
+      ]);
+
+      const athletesData = await athletesRes.json();
+      const appointmentsData = await appointmentsRes.json();
+
+      setAthletes(athletesData.athletes || []);
+      setAppointments(appointmentsData.appointments || []);
     } catch (error) {
-      console.error("Error fetching athletes:", error);
+      console.error("Error fetching data:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleScheduleAppointment = (athleteId: string, date: string, time: string, notes: string) => {
-    setAppointments((prev) => {
-      const next = new Map(prev);
-      next.set(athleteId, { athleteId, date, time, notes });
-      return next;
-    });
-    setEditingAppointment(null);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleScheduleComplete = () => {
+    setSelectedAthlete(null);
+    fetchData();
   };
 
   const handleMoveToContract = async (athleteId: string) => {
@@ -58,25 +71,51 @@ export default function AppointmentStagePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ athleteId, toStage: "contract" }),
       });
-      setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
+      fetchData();
     } catch (error) {
       console.error("Error moving athlete:", error);
     }
   };
 
-  const handleNoShow = async (athleteId: string) => {
-    // Move back to response for follow-up
-    try {
-      await fetch("/api/pipeline/athletes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ athleteId, toStage: "response" }),
-      });
-      setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
-    } catch (error) {
-      console.error("Error moving athlete:", error);
+  // Group appointments by date for calendar view
+  const appointmentsByDate = appointments.reduce(
+    (acc, appt) => {
+      const dateKey = new Date(appt.scheduled_at).toDateString();
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(appt);
+      return acc;
+    },
+    {} as Record<string, Appointment[]>
+  );
+
+  // Get upcoming dates for the next 7 days
+  const getNextDays = (count: number) => {
+    const days = [];
+    for (let i = 0; i < count; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() + i);
+      days.push(date);
     }
+    return days;
   };
+
+  const todayAppointments = appointments.filter((a) => {
+    const apptDate = new Date(a.scheduled_at).toDateString();
+    return apptDate === new Date().toDateString();
+  });
+
+  const thisWeekAppointments = appointments.filter((a) => {
+    const apptDate = new Date(a.scheduled_at);
+    const today = new Date();
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    return apptDate >= today && apptDate <= weekEnd;
+  });
+
+  // Athletes without scheduled appointments
+  const athletesWithoutAppointments = athletes.filter(
+    (athlete) => !appointments.some((a) => a.athlete_id === athlete.id)
+  );
 
   if (loading) {
     return (
@@ -91,43 +130,209 @@ export default function AppointmentStagePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-800">
+          <Link href="/pipeline" className="text-gray-800 hover:text-gray-900">
             ← Pipeline
           </Link>
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
               <span className="text-3xl">📅</span> Appointments
             </h1>
-            <p className="text-gray-800">Schedule and manage meetings with prospects</p>
+            <p className="text-gray-800">
+              Schedule and manage meetings with prospects
+            </p>
           </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setView("list")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              view === "list"
+                ? "bg-orange-100 text-orange-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            List
+          </button>
+          <button
+            onClick={() => setView("calendar")}
+            className={`px-3 py-1.5 rounded text-sm ${
+              view === "calendar"
+                ? "bg-orange-100 text-orange-700"
+                : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            Calendar
+          </button>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-orange-700">{athletes.length}</div>
-          <div className="text-sm text-orange-600">Meetings Pending</div>
+          <div className="text-3xl font-bold text-orange-700">
+            {athletes.length}
+          </div>
+          <div className="text-sm text-orange-600">In Stage</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">{appointments.size}</div>
+          <div className="text-3xl font-bold text-gray-800">
+            {appointments.length}
+          </div>
           <div className="text-sm text-gray-800">Scheduled</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">0</div>
+          <div className="text-3xl font-bold text-gray-800">
+            {todayAppointments.length}
+          </div>
           <div className="text-sm text-gray-800">Today</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">0</div>
+          <div className="text-3xl font-bold text-gray-800">
+            {thisWeekAppointments.length}
+          </div>
           <div className="text-sm text-gray-800">This Week</div>
         </div>
       </div>
 
-      {/* Athletes List */}
-      {athletes.length === 0 ? (
+      {view === "calendar" ? (
+        /* Calendar View */
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Upcoming Schedule
+          </h2>
+          <div className="grid grid-cols-7 gap-2">
+            {getNextDays(7).map((date) => {
+              const dateKey = date.toDateString();
+              const dayAppointments = appointmentsByDate[dateKey] || [];
+              const isToday = date.toDateString() === new Date().toDateString();
+
+              return (
+                <div
+                  key={dateKey}
+                  className={`border rounded-lg p-3 min-h-[150px] ${
+                    isToday ? "border-orange-300 bg-orange-50" : ""
+                  }`}
+                >
+                  <div
+                    className={`text-sm font-medium mb-2 ${isToday ? "text-orange-700" : "text-gray-800"}`}
+                  >
+                    {date.toLocaleDateString("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </div>
+                  <div className="space-y-1">
+                    {dayAppointments.map((appt) => (
+                      <div
+                        key={appt.id}
+                        className="text-xs bg-blue-100 text-blue-800 rounded px-2 py-1 truncate"
+                        title={`${appt.athletes?.name} - ${new Date(appt.scheduled_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+                      >
+                        {new Date(appt.scheduled_at).toLocaleTimeString([], {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}{" "}
+                        {appt.athletes?.name?.split(" ")[0]}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Scheduled Appointments */}
+      {appointments.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Scheduled Appointments
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {appointments.map((appointment) => (
+              <AppointmentCard
+                key={appointment.id}
+                appointment={appointment}
+                onOutcomeRecorded={fetchData}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Athletes Needing Scheduling */}
+      {athletesWithoutAppointments.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Need to Schedule ({athletesWithoutAppointments.length})
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {athletesWithoutAppointments.map((athlete) => (
+              <div
+                key={athlete.id}
+                className="bg-white rounded-lg shadow border p-4"
+              >
+                <div className="flex items-start gap-4">
+                  {athlete.profile_pic_url ? (
+                    <img
+                      src={athlete.profile_pic_url}
+                      alt={athlete.name}
+                      className="w-14 h-14 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-xl">
+                      {athlete.name[0]}
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <Link
+                      href={`/athletes/${athlete.id}`}
+                      className="font-semibold text-gray-900 hover:text-orange-600"
+                    >
+                      {athlete.name}
+                    </Link>
+                    <div className="text-sm text-gray-800">{athlete.sport}</div>
+                    {athlete.instagram_handle && (
+                      <div className="text-sm text-blue-600">
+                        @{athlete.instagram_handle}
+                      </div>
+                    )}
+                    {athlete.follower_count && (
+                      <div className="text-sm text-gray-800">
+                        {(athlete.follower_count / 1000).toFixed(0)}K followers
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => setSelectedAthlete(athlete)}
+                    className="flex-1 px-3 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200"
+                  >
+                    📅 Schedule Meeting
+                  </button>
+                  <button
+                    onClick={() => handleMoveToContract(athlete.id)}
+                    className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200"
+                  >
+                    → Contract
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {athletes.length === 0 && appointments.length === 0 && (
         <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
           <div className="text-4xl mb-3">📅</div>
-          <h3 className="font-semibold text-gray-800 mb-2">No Pending Appointments</h3>
+          <h3 className="font-semibold text-gray-800 mb-2">
+            No Pending Appointments
+          </h3>
           <p className="text-sm text-gray-800">
             Prospects with positive responses will appear here for scheduling.
           </p>
@@ -138,136 +343,16 @@ export default function AppointmentStagePage() {
             Go to Response Tracking
           </Link>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {athletes.map((athlete) => {
-            const appt = appointments.get(athlete.id);
-            return (
-              <div key={athlete.id} className="bg-white rounded-lg shadow border p-4">
-                <div className="flex items-start gap-4">
-                  {athlete.profile_pic_url ? (
-                    <img
-                      src={athlete.profile_pic_url}
-                      alt={athlete.name}
-                      className="w-16 h-16 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-xl">
-                      {athlete.name[0]}
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <Link
-                      href={`/athletes/${athlete.id}`}
-                      className="font-semibold text-gray-900 hover:text-orange-600 text-lg"
-                    >
-                      {athlete.name}
-                    </Link>
-                    <div className="text-sm text-gray-800">{athlete.sport}</div>
-                    {athlete.instagram_handle && (
-                      <div className="text-sm text-blue-600">@{athlete.instagram_handle}</div>
-                    )}
-                    {athlete.follower_count && (
-                      <div className="text-sm text-gray-800">
-                        {(athlete.follower_count / 1000).toFixed(0)}K followers
-                      </div>
-                    )}
-                  </div>
-                </div>
+      )}
 
-                {/* Appointment Section */}
-                <div className="mt-4 pt-4 border-t">
-                  {appt ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-4 text-sm">
-                        <div className="flex items-center gap-2">
-                          <span>📅</span>
-                          <span className="font-medium">{appt.date}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span>🕐</span>
-                          <span className="font-medium">{appt.time}</span>
-                        </div>
-                      </div>
-                      {appt.notes && (
-                        <p className="text-sm text-gray-800 bg-gray-50 p-2 rounded">{appt.notes}</p>
-                      )}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleMoveToContract(athlete.id)}
-                          className="flex-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200"
-                        >
-                          ✓ Meeting Successful → Contract
-                        </button>
-                        <button
-                          onClick={() => handleNoShow(athlete.id)}
-                          className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-200"
-                        >
-                          No Show
-                        </button>
-                      </div>
-                    </div>
-                  ) : editingAppointment === athlete.id ? (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const form = e.target as HTMLFormElement;
-                        const date = (form.elements.namedItem("date") as HTMLInputElement).value;
-                        const time = (form.elements.namedItem("time") as HTMLInputElement).value;
-                        const notes = (form.elements.namedItem("notes") as HTMLTextAreaElement).value;
-                        handleScheduleAppointment(athlete.id, date, time, notes);
-                      }}
-                      className="space-y-3"
-                    >
-                      <div className="grid grid-cols-2 gap-3">
-                        <input
-                          type="date"
-                          name="date"
-                          required
-                          className="border rounded-lg px-3 py-2 text-sm"
-                        />
-                        <input
-                          type="time"
-                          name="time"
-                          required
-                          className="border rounded-lg px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <textarea
-                        name="notes"
-                        placeholder="Meeting notes..."
-                        rows={2}
-                        className="w-full border rounded-lg px-3 py-2 text-sm"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="submit"
-                          className="flex-1 px-3 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200"
-                        >
-                          Save Appointment
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingAppointment(null)}
-                          className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-200"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <button
-                      onClick={() => setEditingAppointment(athlete.id)}
-                      className="w-full px-3 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200"
-                    >
-                      📅 Schedule Meeting
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {/* Appointment Modal */}
+      {selectedAthlete && (
+        <AppointmentModal
+          athlete={selectedAthlete}
+          isOpen={true}
+          onClose={() => setSelectedAthlete(null)}
+          onComplete={handleScheduleComplete}
+        />
       )}
     </div>
   );
