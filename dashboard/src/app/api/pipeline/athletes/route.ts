@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     // Query athletes directly by pipeline_stage
     let query = supabase
       .from("athletes")
-      .select("id, name, sport, instagram_handle, profile_pic_url, follower_count, created_at, pipeline_stage, is_historical")
+      .select("id, name, sport, instagram_handle, email, profile_pic_url, follower_count, created_at, pipeline_stage, is_historical")
       .eq("pipeline_stage", stage)
       .order("created_at", { ascending: false })
       .limit(limit);
