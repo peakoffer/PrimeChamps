@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 // POST - Create a new notification
 export async function POST(request: NextRequest) {
   try {
-    const { type, title, message, metadata, user_name } = await request.json();
+    const { type, title, message, metadata, user_name, athlete_id, link } = await request.json();
 
     if (!type || !title) {
       return NextResponse.json({ error: "Type and title are required" }, { status: 400 });
@@ -77,6 +77,8 @@ export async function POST(request: NextRequest) {
         message: message || "",
         metadata: metadata || {},
         user_name: user_name || "System",
+        athlete_id: athlete_id || null,
+        link: link || null,
         read: false,
       })
       .select()

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+// Force dynamic rendering - prevents static path generation error
+export const dynamic = "force-dynamic";
+export const dynamicParams = true;
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
@@ -88,15 +92,31 @@ export async function POST(
       last_message_preview: content.substring(0, 100),
     };
 
-    // If it's an inbound message, increment unread count
+    // If it's an inbound message, increment unread count and create notification
     if (direction === "inbound") {
       const { data: conv } = await supabase
         .from("conversations")
-        .select("unread_count")
+        .select("unread_count, athlete_id, athletes(id, name)")
         .eq("id", conversationId)
         .single();
 
       updateData.unread_count = (conv?.unread_count || 0) + 1;
+
+      // Create response notification
+      if (conv?.athletes) {
+        const athlete = conv.athletes as unknown as { id: string; name: string };
+        try {
+          await supabase.from("activity_notifications").insert({
+            type: "response",
+            title: "New Reply",
+            message: `${athlete.name} replied to your message`,
+            athlete_id: athlete.id,
+            link: `/athletes/${athlete.id}`,
+          });
+        } catch {
+          // Non-critical - continue even if notification fails
+        }
+      }
     }
 
     await supabase

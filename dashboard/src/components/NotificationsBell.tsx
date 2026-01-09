@@ -12,9 +12,15 @@ interface ActivityNotification {
   metadata?: Record<string, unknown>;
   read: boolean;
   user_name?: string;
+  athlete_id?: string;
+  link?: string;
 }
 
 const typeIcons: Record<string, string> = {
+  response: "💬",
+  appointment: "📅",
+  appointment_reminder: "🔔",
+  milestone: "🎉",
   research_started: "🔍",
   research_completed: "✅",
   candidate_approved: "👍",
@@ -27,6 +33,10 @@ const typeIcons: Record<string, string> = {
 };
 
 const typeColors: Record<string, string> = {
+  response: "bg-teal-100 text-teal-800",
+  appointment: "bg-blue-100 text-blue-800",
+  appointment_reminder: "bg-orange-100 text-orange-800",
+  milestone: "bg-yellow-100 text-yellow-800",
   research_started: "bg-purple-100 text-purple-800",
   research_completed: "bg-green-100 text-green-800",
   candidate_approved: "bg-blue-100 text-blue-800",
@@ -38,8 +48,12 @@ const typeColors: Record<string, string> = {
   error: "bg-red-100 text-red-800",
 };
 
-// Links for each notification type
+// Default links for each notification type (used when notification has no custom link)
 const typeLinks: Record<string, string> = {
+  response: "/inbox",
+  appointment: "/pipeline/appointment",
+  appointment_reminder: "/pipeline/appointment",
+  milestone: "/pipeline/contract",
   research_started: "/pipeline/research",
   research_completed: "/approve",
   candidate_approved: "/approve",
@@ -77,14 +91,15 @@ export default function NotificationsBell() {
 
   // Handle notification click - navigate to relevant page
   const handleNotificationClick = (notification: ActivityNotification) => {
-    const link = typeLinks[notification.type] || "/";
+    // Prefer custom link over default type link
+    const link = notification.link || typeLinks[notification.type] || "/";
     setIsOpen(false);
 
     // Mark as read
-    fetch("/api/notifications", {
-      method: "PATCH",
+    fetch("/api/notifications/mark-read", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [notification.id] }),
+      body: JSON.stringify({ notification_ids: [notification.id] }),
     }).catch(() => {});
 
     router.push(link);
@@ -280,16 +295,23 @@ export default function NotificationsBell() {
           </div>
 
           {/* Footer */}
-          {notifications.length > 0 && (
-            <div className="px-4 py-2 bg-gray-50 border-t text-center">
-              <button
-                onClick={() => setIsOpen(false)}
-                className="text-xs text-gray-800 hover:text-gray-800"
-              >
-                Close
-              </button>
-            </div>
-          )}
+          <div className="px-4 py-2 bg-gray-50 border-t flex items-center justify-between">
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                router.push("/notifications");
+              }}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              View all notifications
+            </button>
+            <button
+              onClick={() => setIsOpen(false)}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>
