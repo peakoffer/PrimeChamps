@@ -42,6 +42,8 @@ interface ResearchConfig {
   resultCount: number;
   scoringModel: string; // LLM for scoring candidates
   targetRegions?: string[];
+  voiceContext?: string; // Voice transcription context
+  keywords?: string; // Search keywords
 }
 
 interface ResearchLog {

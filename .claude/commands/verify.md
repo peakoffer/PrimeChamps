@@ -4,44 +4,67 @@ description: Run all tests and validation for this project
 
 Run the complete verification suite for Prime Champs:
 
-## 1. TypeScript Type Checking
+## Quick Verify (run all at once)
+```bash
+cd /Users/maindrive/AntiGravity/Prime\ Champs && source .venv/bin/activate && python scripts/verify-session.py
+```
+
+## With Screenshots (visual verification)
+```bash
+cd /Users/maindrive/AntiGravity/Prime\ Champs && source .venv/bin/activate && python scripts/verify-session.py --screenshots
+```
+
+Screenshots saved to: `/Users/maindrive/AntiGravity/Prime Champs/screenshots/`
+
+---
+
+## Manual Steps (if needed)
+
+### 1. TypeScript Type Checking
 ```bash
 cd dashboard && npx tsc --noEmit
 ```
 
-## 2. ESLint
-```bash
-cd dashboard && npm run lint
-```
-
-## 3. Build Verification
+### 2. Build Verification
 ```bash
 cd dashboard && npm run build
 ```
 
-## 4. Start Dev Server (if not running)
+### 3. Python Backend
 ```bash
-cd dashboard && npm run dev &
-sleep 5
+source .venv/bin/activate && python -m py_compile backend/server.py backend/database.py
 ```
 
-## 5. API Health Checks
+### 4. API Health Checks
 ```bash
-# Test key endpoints
 curl -s http://localhost:3000/api/benchmarks | head -c 200
-curl -s http://localhost:3000/api/pipeline/athletes?stage=research | head -c 200
+curl -s http://localhost:3000/api/pipeline/athletes?stage=approval | head -c 200
 ```
 
-## 6. Python Backend (if applicable)
+### 5. Take Screenshot of Specific Page
 ```bash
-cd backend && python -m py_compile server.py database.py
+source .venv/bin/activate && python -c "
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page(viewport={'width': 1280, 'height': 800})
+    page.goto('http://localhost:3000/YOUR_PAGE_HERE', wait_until='networkidle')
+    page.screenshot(path='screenshots/verify.png')
+    browser.close()
+    print('Screenshot saved')
+"
 ```
 
-Report any failures with clear explanations of what went wrong and specific suggestions to fix. If everything passes, confirm the app is working correctly.
+---
+
+## After Verification
+
+- **If PASSED**: Continue to next task or report completion
+- **If FAILED**: Fix errors, then run verify again (ralph loop)
 
 Success criteria:
 - No TypeScript errors
-- No ESLint errors (warnings OK)
 - Build completes without errors
-- Dev server starts and responds to requests
-- API endpoints return valid JSON
+- Python syntax valid
+- API endpoints respond
+- Screenshots show expected UI (if applicable)

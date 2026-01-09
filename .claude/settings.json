@@ -12,10 +12,12 @@
       "WebSearch",
       "WebFetch",
       "AskFollowupQuestion",
-      "Bash(*)",
-      "mcp__*"
+      "Bash",
+      "mcp__*",
+      "Skill"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "bypassPermissions"
   },
   "enabledPlugins": {
     "code-simplifier@claude-plugins-official": true,

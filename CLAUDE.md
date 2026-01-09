@@ -223,6 +223,57 @@ Run `/plugin list` to see current plugins. Recommended:
 - `/plan` - Enter plan mode before coding
 - `/simplify` - Run code-simplifier on recent changes
 
+## Autonomous Session Mode (Ralph Loops)
+
+Sessions should run autonomously without human intervention. Follow this loop:
+
+### The Ralph Loop
+```
+1. READ task/goal from session file
+2. IMPLEMENT the feature/fix
+3. VERIFY using /verify or:
+   python scripts/verify-session.py --screenshots
+4. IF errors: FIX and go to step 3
+5. IF passed: CONTINUE to next task or REPORT completion
+```
+
+### Self-Verification Tools
+
+**Quick verify (build + types + python):**
+```bash
+cd /Users/maindrive/AntiGravity/Prime\ Champs && source .venv/bin/activate && python scripts/verify-session.py
+```
+
+**Full verify with screenshots:**
+```bash
+cd /Users/maindrive/AntiGravity/Prime\ Champs && source .venv/bin/activate && python scripts/verify-session.py --screenshots
+```
+
+**Screenshot specific page:**
+```bash
+source .venv/bin/activate && python -c "
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page(viewport={'width': 1280, 'height': 800})
+    page.goto('http://localhost:3000/YOUR_PAGE', wait_until='networkidle')
+    page.screenshot(path='screenshots/check.png')
+    browser.close()
+"
+```
+
+**View screenshot (Claude can read images):**
+```
+Read the file: /Users/maindrive/AntiGravity/Prime Champs/screenshots/check.png
+```
+
+### Key Principles
+- Don't wait for human approval on code changes
+- Verify your own work with builds and screenshots
+- Fix errors immediately, then re-verify
+- Only report back when task is COMPLETE or BLOCKED
+- Use screenshots to verify UI visually
+
 ## Dependencies
 
 ### Dashboard (package.json)

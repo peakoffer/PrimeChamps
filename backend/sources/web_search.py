@@ -12,8 +12,8 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 class WebSearchScraper:
     """Search Google for athlete news and achievements using Apify."""
 
-    # Apify Google Search Scraper actor
-    ACTOR_ID = "apify/google-search-scraper"
+    # Apify Google Search Results Scraper actor
+    ACTOR_ID = "nFJndFXA5zjCTuudP"
     BASE_URL = "https://api.apify.com/v2"
 
     def __init__(self, api_token: Optional[str] = None):
@@ -60,7 +60,7 @@ class WebSearchScraper:
                 url,
                 params={"token": self.api_token},
                 json=actor_input,
-                timeout=60
+                timeout=180
             )
             response.raise_for_status()
             data = response.json()
@@ -200,7 +200,7 @@ class WikipediaScraper:
                 url,
                 params={"token": self.api_token},
                 json=actor_input,
-                timeout=60
+                timeout=180
             )
             response.raise_for_status()
             data = response.json()

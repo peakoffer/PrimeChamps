@@ -40,3 +40,6 @@ data/*.json
 *.pem
 *.key
 credentials.json
+
+# MCP config (contains secrets)
+.mcp.json

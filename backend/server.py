@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from backend.agents import EnrichmentAgent, ResearchAgent, OutreachAgent, ScoringAgent
 from backend.database import db
+from backend.routes.instagram import router as instagram_router
 
 
 # Store running/completed jobs with progress tracking
@@ -51,6 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(instagram_router)
 
 
 # Request/Response Models

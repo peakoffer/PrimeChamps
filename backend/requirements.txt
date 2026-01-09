@@ -24,3 +24,7 @@ uvicorn[standard]>=0.27.0
 
 # Data Processing
 pandas>=2.0.0
+
+# Instagram DM Integration
+instagrapi>=2.0.0
+cryptography>=41.0.0

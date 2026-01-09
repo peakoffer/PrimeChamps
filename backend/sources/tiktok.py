@@ -13,7 +13,7 @@ class TikTokScraper:
     """Scrape TikTok profile data using Apify."""
 
     # Apify TikTok Profile Scraper actor
-    ACTOR_ID = "clockworks/tiktok-profile-scraper"
+    ACTOR_ID = "0FXVyOXXEmdGcV88a"
     BASE_URL = "https://api.apify.com/v2"
 
     def __init__(self, api_token: Optional[str] = None):
@@ -47,7 +47,7 @@ class TikTokScraper:
 
         actor_input = {
             "profiles": profiles,
-            "resultsPerPage": 0,  # Just profile info, no videos
+            "resultsPerPage": 1,  # Minimum 1 required
         }
 
         url = f"{self.BASE_URL}/acts/{self.ACTOR_ID}/run-sync-get-dataset-items"
@@ -62,19 +62,23 @@ class TikTokScraper:
             response.raise_for_status()
             data = response.json()
 
+            # Group results by author to get profile data
+            profiles_seen = set()
             for item in data:
-                username = item.get("uniqueId", "").lower()
-                if username:
+                author = item.get("authorMeta", {})
+                username = author.get("name", "").lower()
+                if username and username not in profiles_seen:
+                    profiles_seen.add(username)
                     results[username] = {
-                        "followers": item.get("followerCount"),
-                        "following": item.get("followingCount"),
-                        "likes": item.get("heartCount"),
-                        "videos": item.get("videoCount"),
-                        "bio": item.get("signature"),
-                        "nickname": item.get("nickname"),
-                        "is_verified": item.get("verified", False),
-                        "profile_pic": item.get("avatarLarger"),
-                        "url": f"https://www.tiktok.com/@{username}",
+                        "followers": author.get("fans"),
+                        "following": author.get("following"),
+                        "likes": author.get("heart"),
+                        "videos": author.get("video"),
+                        "bio": author.get("signature"),
+                        "nickname": author.get("nickName"),
+                        "is_verified": author.get("verified", False),
+                        "profile_pic": author.get("originalAvatarUrl"),
+                        "url": author.get("profileUrl"),
                     }
 
             return results

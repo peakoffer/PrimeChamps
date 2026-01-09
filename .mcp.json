@@ -1,5 +1,16 @@
 {
   "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "${SUPABASE_ACCESS_TOKEN}",
+        "--project-ref",
+        "rmxuwyxpoazsuqvdadlo"
+      ]
+    },
     "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
@@ -7,31 +18,9 @@
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
       }
     },
-    "supabase": {
+    "puppeteer": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres"],
-      "env": {
-        "DATABASE_URL": "${DATABASE_URL}"
-      },
-      "disabled": true
-    },
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/maindrive/AntiGravity/Prime Champs"
-      ],
-      "disabled": true
-    },
-    "slack": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-slack"],
-      "env": {
-        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
-        "SLACK_TEAM_ID": "${SLACK_TEAM_ID}"
-      },
-      "disabled": true
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
     }
   }
 }

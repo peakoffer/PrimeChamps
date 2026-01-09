@@ -1,6 +1,11 @@
-"""OnlyFans profile scraper using Apify."""
+"""OnlyFans profile scraper.
+
+Note: Full profile scraping via Apify requires renting a paid actor.
+Basic profile existence checking is available without Apify.
+"""
 
 import os
+import re
 import httpx
 from typing import Dict, Any, List, Optional
 from pathlib import Path
@@ -10,24 +15,112 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 class OnlyFansScraper:
-    """Scrape OnlyFans profile data using Apify."""
+    """
+    Scrape OnlyFans profile data.
 
-    # Apify OnlyFans Profile Scraper actor by curious_coder
+    Two modes:
+    1. Basic mode (free): Just checks if profile exists
+    2. Full mode (requires paid Apify actor): Gets full profile data
+    """
+
+    # Apify OnlyFans Profile Scraper actor (requires rental)
     ACTOR_ID = "hnCZKiaPQdBhjh5En"
     BASE_URL = "https://api.apify.com/v2"
 
     def __init__(self, api_token: Optional[str] = None):
         self.api_token = api_token or os.getenv("APIFY_API_KEY")
-        if not self.api_token:
-            raise ValueError("APIFY_API_KEY not set")
+
+    def check_profile_exists(self, username: str) -> Dict[str, Any]:
+        """
+        Check if OnlyFans profile exists using Playwright (headless browser).
+
+        Returns:
+            Dict with exists=True/False and basic profile info
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            return {
+                "exists": None,
+                "username": username,
+                "url": f"https://onlyfans.com/{username}",
+                "error": "Playwright not installed. Run: pip install playwright && playwright install chromium",
+            }
+
+        url = f"https://onlyfans.com/{username}"
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                )
+                page = context.new_page()
+                page.goto(url, wait_until="networkidle", timeout=30000)
+
+                # Wait for content to load
+                page.wait_for_timeout(2000)
+
+                # Check if profile exists by looking for user name element
+                name_el = page.query_selector(".g-user-name")
+
+                if not name_el:
+                    # No user name element = profile doesn't exist
+                    browser.close()
+                    return {"exists": False, "username": username, "url": url}
+
+                # Profile exists - extract info
+                result = {
+                    "exists": True,
+                    "username": username,
+                    "url": url,
+                    "name": name_el.inner_text() if name_el else None,
+                }
+
+                # Get avatar
+                try:
+                    avatar_el = page.query_selector(".g-avatar img")
+                    if avatar_el:
+                        result["avatar_url"] = avatar_el.get_attribute("src")
+                except:
+                    pass
+
+                # Get bio/about
+                try:
+                    bio_el = page.query_selector(".g-user-bio")
+                    if bio_el:
+                        result["about"] = bio_el.inner_text()
+                except:
+                    pass
+
+                browser.close()
+                return result
+
+        except Exception as e:
+            return {
+                "exists": None,
+                "username": username,
+                "url": url,
+                "error": str(e),
+            }
 
     def check_profile(self, username: str) -> Optional[Dict[str, Any]]:
-        """Alias for scrape_profile for backward compatibility."""
-        return self.scrape_profile(username)
+        """
+        Check/scrape an OnlyFans profile.
+
+        First tries Apify (full data), falls back to basic existence check.
+        """
+        # Try Apify first for full data
+        result = self.scrape_profile(username)
+        if result and result.get("exists"):
+            return result
+
+        # Fall back to basic check
+        return self.check_profile_exists(username)
 
     def scrape_profile(self, username: str) -> Optional[Dict[str, Any]]:
         """
-        Scrape an OnlyFans profile.
+        Scrape an OnlyFans profile via Apify (requires paid actor rental).
 
         Returns:
             Dict with full profile data if exists, None if not found
