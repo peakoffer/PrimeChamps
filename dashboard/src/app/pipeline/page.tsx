@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";
+import BulkActionBar from "@/components/BulkActionBar";
+import ImportModal from "@/components/ImportModal";
 
 interface Athlete {
   id: string;
@@ -68,6 +70,12 @@ export default function PipelinePage() {
 
   // Track pending drag-to-approve action
   const [pendingDragApproval, setPendingDragApproval] = useState(false);
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // Helper to get column index for movement validation
   const getColumnIndex = (columnId: string): number => {
@@ -235,6 +243,97 @@ export default function PipelinePage() {
     setPendingDragApproval(false);
   };
 
+  // Bulk selection handlers
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const handleBulkMove = async (toStage: string) => {
+    if (selectedIds.size === 0) return;
+    setBulkLoading(true);
+
+    try {
+      const response = await fetch("/api/pipeline/bulk-move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athlete_ids: Array.from(selectedIds),
+          to_stage: toStage,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Bulk move failed");
+      }
+
+      clearSelection();
+      fetchPipeline();
+    } catch (error) {
+      console.error("Error bulk moving athletes:", error);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkApprove = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkLoading(true);
+
+    try {
+      const response = await fetch("/api/athletes/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athlete_ids: Array.from(selectedIds),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Bulk approve failed");
+      }
+
+      clearSelection();
+      fetchPipeline();
+    } catch (error) {
+      console.error("Error bulk approving athletes:", error);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    const ids = Array.from(selectedIds).join(",");
+    const url = selectedIds.size > 0
+      ? `/api/athletes/export?ids=${ids}`
+      : "/api/athletes/export";
+
+    window.open(url, "_blank");
+  };
+
+  const handleImportComplete = () => {
+    setShowImportModal(false);
+    fetchPipeline();
+  };
+
+  // Get stages for bulk move dropdown (exclude research)
+  const bulkMoveStages = STAGES.filter((s) => s.id !== "research").map((s) => ({
+    id: s.id,
+    name: s.name,
+  }));
+
   const totalProspects = columns.reduce((sum, col) => sum + col.athletes.length, 0);
   const totalResearchSessions = columns.find(c => c.id === "research")?.researchSessions?.length || 0;
 
@@ -253,15 +352,63 @@ export default function PipelinePage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Sales Pipeline</h1>
           <p className="text-gray-800 mt-1">
-            {totalProspects} active prospects • Drag cards forward one stage at a time
+            {totalProspects} active prospects • {selectionMode ? "Click cards to select" : "Drag cards forward one stage at a time"}
           </p>
         </div>
-        <button
-          onClick={fetchPipeline}
-          className="text-sm text-blue-600 hover:text-blue-800"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Import
+          </button>
+          <button
+            onClick={handleExport}
+            className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export
+          </button>
+          <button
+            onClick={() => {
+              if (selectionMode) {
+                clearSelection();
+              } else {
+                setSelectionMode(true);
+              }
+            }}
+            className={`px-3 py-1.5 text-sm rounded-lg flex items-center gap-1 ${
+              selectionMode
+                ? "bg-blue-600 text-white hover:bg-blue-700"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+            }`}
+          >
+            {selectionMode ? (
+              <>
+                <span>Exit Selection</span>
+                {selectedIds.size > 0 && <span className="bg-white/20 px-1.5 rounded">{selectedIds.size}</span>}
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                Select
+              </>
+            )}
+          </button>
+          <button
+            onClick={fetchPipeline}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Funnel Overview */}
@@ -396,63 +543,83 @@ export default function PipelinePage() {
                     No prospects
                   </div>
                 ) : (
-                  column.athletes.map((athlete) => (
-                    <div
-                      key={athlete.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, athlete)}
-                      onClick={() => router.push(`/athletes/${athlete.id}`)}
-                      className={`bg-white rounded-lg shadow-sm border p-3 cursor-pointer hover:shadow-md hover:border-blue-300 transition-all ${
-                        draggedAthlete?.id === athlete.id ? "opacity-50 cursor-grabbing" : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {athlete.profile_pic_url ? (
-                          <img
-                            src={athlete.profile_pic_url}
-                            alt={athlete.name}
-                            className="w-10 h-10 rounded-full object-cover"
-                            draggable={false}
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-sm">
-                            {athlete.name?.[0] || "?"}
+                  column.athletes.map((athlete) => {
+                    const isSelected = selectedIds.has(athlete.id);
+                    return (
+                      <div
+                        key={athlete.id}
+                        draggable={!selectionMode}
+                        onDragStart={(e) => !selectionMode && handleDragStart(e, athlete)}
+                        onClick={() => {
+                          if (selectionMode) {
+                            toggleSelection(athlete.id);
+                          } else {
+                            router.push(`/athletes/${athlete.id}`);
+                          }
+                        }}
+                        className={`bg-white rounded-lg shadow-sm border p-3 cursor-pointer transition-all ${
+                          isSelected
+                            ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
+                            : "hover:shadow-md hover:border-blue-300"
+                        } ${draggedAthlete?.id === athlete.id ? "opacity-50 cursor-grabbing" : ""}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {/* Checkbox in selection mode */}
+                          {selectionMode && (
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
+                            />
+                          )}
+                          {athlete.profile_pic_url ? (
+                            <img
+                              src={athlete.profile_pic_url}
+                              alt={athlete.name}
+                              className="w-10 h-10 rounded-full object-cover"
+                              draggable={false}
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-sm">
+                              {athlete.name?.[0] || "?"}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 truncate">
+                              {athlete.name}
+                            </div>
+                            <div className="text-xs text-gray-800 truncate">{athlete.sport}</div>
+                          </div>
+                        </div>
+                        {(athlete.instagram_handle || athlete.follower_count) && (
+                          <div className="mt-2 flex items-center justify-between text-xs text-gray-800">
+                            {athlete.instagram_handle && <span>@{athlete.instagram_handle}</span>}
+                            {athlete.follower_count && (
+                              <span>{(athlete.follower_count / 1000).toFixed(0)}K</span>
+                            )}
                           </div>
                         )}
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 truncate">
-                            {athlete.name}
+                        {/* Show approve/reject buttons for approval column (not in selection mode) */}
+                        {column.id === "approval" && !selectionMode && (
+                          <div className="mt-3 pt-2 border-t flex gap-2">
+                            <button
+                              onClick={(e) => openApproveModal(athlete, e)}
+                              className="flex-1 py-1.5 px-2 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={(e) => openRejectModal(athlete, e)}
+                              className="flex-1 py-1.5 px-2 text-xs font-medium bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
+                            >
+                              Reject
+                            </button>
                           </div>
-                          <div className="text-xs text-gray-800 truncate">{athlete.sport}</div>
-                        </div>
+                        )}
                       </div>
-                      {(athlete.instagram_handle || athlete.follower_count) && (
-                        <div className="mt-2 flex items-center justify-between text-xs text-gray-800">
-                          {athlete.instagram_handle && <span>@{athlete.instagram_handle}</span>}
-                          {athlete.follower_count && (
-                            <span>{(athlete.follower_count / 1000).toFixed(0)}K</span>
-                          )}
-                        </div>
-                      )}
-                      {/* Show approve/reject buttons for approval column */}
-                      {column.id === "approval" && (
-                        <div className="mt-3 pt-2 border-t flex gap-2">
-                          <button
-                            onClick={(e) => openApproveModal(athlete, e)}
-                            className="flex-1 py-1.5 px-2 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={(e) => openRejectModal(athlete, e)}
-                            className="flex-1 py-1.5 px-2 text-xs font-medium bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )
               )}
             </div>
@@ -505,6 +672,27 @@ export default function PipelinePage() {
           isOpen={showRejectModal}
           onClose={handleModalClose}
           onComplete={handleModalComplete}
+        />
+      )}
+
+      {/* Import Modal */}
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onComplete={handleImportComplete}
+      />
+
+      {/* Bulk Action Bar */}
+      {selectionMode && selectedIds.size > 0 && (
+        <BulkActionBar
+          count={selectedIds.size}
+          allowedActions={["move", "approve", "export"]}
+          stages={bulkMoveStages}
+          onMove={handleBulkMove}
+          onApprove={handleBulkApprove}
+          onExport={handleExport}
+          onClear={clearSelection}
+          loading={bulkLoading}
         />
       )}
     </div>
