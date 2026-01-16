@@ -231,6 +231,7 @@ export default function AthleteDetailPage() {
     status: string;
     location?: string;
     outcome?: string;
+    notes?: string;
   }>>([]);
   const [athleteContracts, setAthleteContracts] = useState<Array<{
     id: string;
@@ -238,6 +239,9 @@ export default function AthleteDetailPage() {
     contract_type: string;
     revenue_share_percent?: number;
     signed_at?: string;
+    start_date?: string;
+    end_date?: string;
+    notes?: string;
   }>>([]);
 
   // Instagram photos state
@@ -743,7 +747,7 @@ export default function AthleteDetailPage() {
           </div>
 
           {/* Profile Info */}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             {/* Name Row with Actions */}
             <div className="flex flex-wrap items-center gap-3 mb-2">
               {isEditing ? (
@@ -819,47 +823,78 @@ export default function AthleteDetailPage() {
               </span>
             </div>
 
-            {/* Stats Row - Instagram Style */}
-            <div className="flex gap-8 mb-4">
-              <div className="text-center">
-                <div className="text-xl font-bold text-gray-900">{formatNumber(athlete.follower_count)}</div>
-                <div className="text-sm text-gray-700 font-medium">Followers</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-gray-900">{formatNumber(ig.following) || "—"}</div>
-                <div className="text-sm text-gray-700 font-medium">Following</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-gray-900">{formatNumber(ig.posts) || "—"}</div>
-                <div className="text-sm text-gray-700 font-medium">Posts</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-gray-900">
-                  {ig.follower_following_ratio
-                    ? `${ig.follower_following_ratio}x`
-                    : ig.following && athlete.follower_count
-                    ? `${(athlete.follower_count / ig.following).toFixed(1)}x`
-                    : "—"}
+            {/* Stats - Two Rows for Compact Layout */}
+            <div className="space-y-2 mb-4">
+              {/* Row 1 - Main Metrics */}
+              <div className="flex flex-wrap gap-4">
+                <div className="text-center min-w-[60px]">
+                  <div className="text-lg font-bold text-gray-900">{formatNumber(athlete.follower_count)}</div>
+                  <div className="text-xs text-gray-600">Followers</div>
                 </div>
-                <div className="text-sm text-gray-700 font-medium">Ratio</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-gray-900">
-                  {ig.engagement_rate
-                    ? `${ig.engagement_rate}%`
-                    : engagementRate
-                    ? `${engagementRate}%`
-                    : "—"}
+                <div className="text-center min-w-[60px]">
+                  <div className="text-lg font-bold text-gray-900">{formatNumber(ig.following) || "—"}</div>
+                  <div className="text-xs text-gray-600">Following</div>
                 </div>
-                <div className="text-sm text-gray-700 font-medium">Engagement</div>
-              </div>
-              {ig.avg_likes && (
-                <div className="text-center">
-                  <div className="text-xl font-bold text-gray-900">{formatNumber(ig.avg_likes)}</div>
-                  <div className="text-sm text-gray-700 font-medium">Avg Likes</div>
+                <div className="text-center min-w-[60px]">
+                  <div className="text-lg font-bold text-gray-900">{formatNumber(ig.posts) || "—"}</div>
+                  <div className="text-xs text-gray-600">Posts</div>
                 </div>
-              )}
+                <div className="text-center min-w-[60px]">
+                  <div className="text-lg font-bold text-green-600">
+                    {ig.engagement_rate
+                      ? `${ig.engagement_rate}%`
+                      : engagementRate
+                      ? `${engagementRate}%`
+                      : "—"}
+                  </div>
+                  <div className="text-xs text-gray-600">Engagement</div>
+                </div>
+              </div>
+              {/* Row 2 - Secondary Metrics */}
+              <div className="flex flex-wrap gap-4">
+                <div className="text-center min-w-[60px]">
+                  <div className="text-sm font-semibold text-gray-800">{ig.avg_likes ? formatNumber(ig.avg_likes) : "—"}</div>
+                  <div className="text-xs text-gray-500">Avg Likes</div>
+                </div>
+                <div className="text-center min-w-[60px]">
+                  <div className="text-sm font-semibold text-gray-800">{ig.avg_comments ? formatNumber(ig.avg_comments) : "—"}</div>
+                  <div className="text-xs text-gray-500">Avg Comments</div>
+                </div>
+                <div className="text-center min-w-[60px]">
+                  <div className="text-sm font-semibold text-gray-800">{ig.highlights ? formatNumber(ig.highlights) : "—"}</div>
+                  <div className="text-xs text-gray-500">Highlights</div>
+                </div>
+                <div className="text-center min-w-[60px]">
+                  <div className="text-sm font-semibold text-gray-800">{ig.igtv_videos ? formatNumber(ig.igtv_videos) : "—"}</div>
+                  <div className="text-xs text-gray-500">IGTV/Reels</div>
+                </div>
+              </div>
             </div>
+
+            {/* Link in Bio */}
+            {ig.external_url && (
+              <div className="mb-4 flex items-center gap-2 flex-wrap">
+                <span className="text-gray-700 font-medium text-sm">Link in Bio:</span>
+                <a
+                  href={ig.external_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline font-medium text-sm break-all"
+                >
+                  {ig.external_url}
+                </a>
+                {ig.external_url.toLowerCase().includes("onlyfans") && (
+                  <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded font-medium">
+                    OnlyFans Link
+                  </span>
+                )}
+                {(ig.external_url.toLowerCase().includes("linktree") || ig.external_url.toLowerCase().includes("linktr.ee")) && (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded font-medium">
+                    Linktree
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Bio - Directly under stats */}
             {ig.bio && (
@@ -879,13 +914,28 @@ export default function AthleteDetailPage() {
               </span>
             </div>
           </div>
+
+          {/* Right Side - Fit Score & Follower Tier (Full Display) */}
+          <div className="flex-shrink-0 flex flex-col gap-3 md:w-64">
+            {/* Full Fit Score Display */}
+            {benchmarks && (
+              <FullFitScoreCard
+                athlete={athlete}
+                instagramData={ig}
+                benchmarks={benchmarks}
+              />
+            )}
+            {/* Full Follower Tier Display */}
+            <FullTierCard followers={athlete.follower_count} />
+          </div>
         </div>
       </div>
 
-      {/* Pipeline Status Bar */}
+      {/* Pipeline Status & Actions Bar */}
       {athlete.pipeline_stage && (
         <div className="bg-white shadow rounded-lg p-4">
-          <div className="flex items-center justify-between flex-wrap gap-4">
+          {/* Top Row - Pipeline Status */}
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-900 font-medium">Pipeline Status:</span>
               <span className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
@@ -896,119 +946,313 @@ export default function AthleteDetailPage() {
               </span>
             </div>
 
-            {/* Stage Actions */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {athlete.pipeline_stage === "approval" && (
-                <>
-                  <button
-                    onClick={() => setShowApprovalModal(true)}
-                    className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium"
-                  >
-                    Approve →
-                  </button>
-                  <button
-                    onClick={() => setShowRejectionModal(true)}
-                    className="px-4 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 font-medium"
-                  >
-                    Reject
-                  </button>
-                </>
-              )}
-              {athlete.pipeline_stage === "reach_out" && (
-                <button
-                  onClick={() => handleMoveStage("response")}
-                  disabled={movingStage}
-                  className="px-4 py-2 bg-yellow-500 text-white text-sm rounded-lg hover:bg-yellow-600 disabled:opacity-50 font-medium"
-                >
-                  {movingStage ? "..." : "Mark as Contacted →"}
-                </button>
-              )}
-              {athlete.pipeline_stage === "response" && (
-                <>
-                  <button
-                    onClick={() => handleMoveStage("appointment")}
-                    disabled={movingStage}
-                    className="px-4 py-2 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 disabled:opacity-50 font-medium"
-                  >
-                    {movingStage ? "..." : "Schedule Appointment →"}
-                  </button>
-                  <button
-                    onClick={() => handleMoveStage("rejected")}
-                    disabled={movingStage}
-                    className="px-4 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 font-medium"
-                  >
-                    Not Interested
-                  </button>
-                </>
-              )}
-              {athlete.pipeline_stage === "appointment" && (
-                <>
-                  <button
-                    onClick={() => handleMoveStage("contract")}
-                    disabled={movingStage}
-                    className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
-                  >
-                    {movingStage ? "..." : "Contract Signed! 🎉"}
-                  </button>
-                  <button
-                    onClick={() => handleMoveStage("rejected")}
-                    disabled={movingStage}
-                    className="px-4 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 font-medium"
-                  >
-                    Didn't Close
-                  </button>
-                </>
-              )}
-              {athlete.pipeline_stage === "rejected" && (
-                <button
-                  onClick={() => handleMoveStage("approval")}
-                  disabled={movingStage}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
-                >
-                  {movingStage ? "..." : "Reconsider"}
-                </button>
-              )}
+            {/* Move to any stage dropdown */}
+            <select
+              value=""
+              onChange={(e) => e.target.value && handleMoveStage(e.target.value)}
+              disabled={movingStage}
+              className="text-sm border rounded-lg px-2 py-2 text-gray-900 bg-white hover:border-gray-400 disabled:opacity-50"
+            >
+              <option value="">Move to...</option>
+              {Object.entries(PIPELINE_STAGES)
+                .filter(([key]) => key !== athlete.pipeline_stage)
+                .map(([key, value]) => (
+                  <option key={key} value={key}>
+                    {value.icon} {value.label}
+                  </option>
+                ))}
+            </select>
+          </div>
 
-              {/* Move to any stage dropdown */}
-              <select
-                value=""
-                onChange={(e) => e.target.value && handleMoveStage(e.target.value)}
+          {/* Bottom Row - All Actions */}
+          <div className="flex flex-wrap items-center gap-2 pt-3 border-t">
+            {/* Stage-specific actions */}
+            {athlete.pipeline_stage === "approval" && (
+              <>
+                <button
+                  onClick={() => setShowApprovalModal(true)}
+                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => setShowRejectionModal(true)}
+                  className="px-4 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 font-medium"
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {athlete.pipeline_stage === "reach_out" && (
+              <button
+                onClick={() => handleMoveStage("response")}
                 disabled={movingStage}
-                className="text-sm border rounded-lg px-2 py-2 text-gray-900 bg-white hover:border-gray-400 disabled:opacity-50"
+                className="px-4 py-2 bg-yellow-500 text-white text-sm rounded-lg hover:bg-yellow-600 disabled:opacity-50 font-medium"
               >
-                <option value="">Move to...</option>
-                {Object.entries(PIPELINE_STAGES)
-                  .filter(([key]) => key !== athlete.pipeline_stage)
-                  .map(([key, value]) => (
-                    <option key={key} value={key}>
-                      {value.icon} {value.label}
-                    </option>
+                {movingStage ? "..." : "Mark as Contacted"}
+              </button>
+            )}
+            {athlete.pipeline_stage === "response" && (
+              <>
+                <button
+                  onClick={() => setShowAppointmentModal(true)}
+                  className="px-4 py-2 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 font-medium"
+                >
+                  Schedule Appointment
+                </button>
+                <button
+                  onClick={() => handleMoveStage("rejected")}
+                  disabled={movingStage}
+                  className="px-4 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 font-medium"
+                >
+                  Not Interested
+                </button>
+              </>
+            )}
+            {athlete.pipeline_stage === "appointment" && (
+              <>
+                <button
+                  onClick={() => setShowContractModal(true)}
+                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium"
+                >
+                  Create Contract
+                </button>
+                <button
+                  onClick={() => handleMoveStage("rejected")}
+                  disabled={movingStage}
+                  className="px-4 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 font-medium"
+                >
+                  Didn't Close
+                </button>
+              </>
+            )}
+            {athlete.pipeline_stage === "rejected" && (
+              <button
+                onClick={() => handleMoveStage("approval")}
+                disabled={movingStage}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+              >
+                {movingStage ? "..." : "Reconsider"}
+              </button>
+            )}
+
+            {/* Divider */}
+            <div className="h-6 w-px bg-gray-300 mx-1" />
+
+            {/* Common Actions - Always visible */}
+            <button
+              onClick={() => setShowAppointmentModal(true)}
+              className="px-3 py-2 bg-orange-100 text-orange-700 text-sm rounded-lg hover:bg-orange-200 font-medium"
+            >
+              Schedule Appt
+            </button>
+            <button
+              onClick={() => setShowContractModal(true)}
+              className="px-3 py-2 bg-green-100 text-green-700 text-sm rounded-lg hover:bg-green-200 font-medium"
+            >
+              Create Contract
+            </button>
+            <button
+              onClick={handleResetEnrichment}
+              className="px-3 py-2 bg-yellow-100 text-yellow-800 text-sm rounded-lg hover:bg-yellow-200 font-medium"
+            >
+              Reset Status
+            </button>
+            <button
+              onClick={handleDelete}
+              className="px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 font-medium"
+            >
+              Delete
+            </button>
+
+            {/* Appointments/Contracts Summary */}
+            {(athleteAppointments.length > 0 || athleteContracts.length > 0) && (
+              <>
+                <div className="h-6 w-px bg-gray-300 mx-1" />
+                {athleteAppointments.length > 0 && (
+                  <span className="px-2 py-1 bg-orange-50 text-orange-700 text-xs rounded font-medium">
+                    {athleteAppointments.length} appt{athleteAppointments.length > 1 ? "s" : ""}
+                  </span>
+                )}
+                {athleteContracts.length > 0 && (
+                  <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded font-medium">
+                    {athleteContracts.length} contract{athleteContracts.length > 1 ? "s" : ""}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Appointments & Contracts Section - Visible Management */}
+      {(athleteAppointments.length > 0 || athleteContracts.length > 0) && (
+        <div className="bg-white shadow rounded-lg p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Appointments Column */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <span className="text-orange-500">📅</span> Appointments
+                  {athleteAppointments.length > 0 && (
+                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
+                      {athleteAppointments.length}
+                    </span>
+                  )}
+                </h3>
+                <button
+                  onClick={() => setShowAppointmentModal(true)}
+                  className="text-xs text-orange-600 hover:text-orange-800 font-medium"
+                >
+                  + Add New
+                </button>
+              </div>
+              {athleteAppointments.length > 0 ? (
+                <div className="space-y-2">
+                  {athleteAppointments.map((appt) => (
+                    <div key={appt.id} className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="font-medium text-gray-900 text-sm">
+                            {new Date(appt.scheduled_at).toLocaleDateString("en-US", {
+                              weekday: "short",
+                              month: "short",
+                              day: "numeric",
+                              hour: "numeric",
+                              minute: "2-digit"
+                            })}
+                          </div>
+                          {appt.notes && (
+                            <div className="text-xs text-gray-600 mt-1">{appt.notes}</div>
+                          )}
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          appt.status === "completed" ? "bg-green-100 text-green-700" :
+                          appt.status === "scheduled" ? "bg-blue-100 text-blue-700" :
+                          appt.status === "cancelled" ? "bg-red-100 text-red-700" :
+                          "bg-gray-100 text-gray-700"
+                        }`}>
+                          {appt.status}
+                        </span>
+                      </div>
+                      {appt.outcome && (
+                        <div className="mt-2 pt-2 border-t border-orange-200 text-xs">
+                          <span className="text-gray-500">Outcome:</span>{" "}
+                          <span className={`font-medium ${
+                            appt.outcome === "successful" ? "text-green-600" :
+                            appt.outcome === "no_show" ? "text-red-600" :
+                            "text-gray-700"
+                          }`}>
+                            {appt.outcome.replace("_", " ")}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   ))}
-              </select>
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3 text-center">
+                  No appointments scheduled
+                </div>
+              )}
+            </div>
+
+            {/* Contracts Column */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <span className="text-green-500">📝</span> Contracts
+                  {athleteContracts.length > 0 && (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                      {athleteContracts.length}
+                    </span>
+                  )}
+                </h3>
+                <button
+                  onClick={() => setShowContractModal(true)}
+                  className="text-xs text-green-600 hover:text-green-800 font-medium"
+                >
+                  + Add New
+                </button>
+              </div>
+              {athleteContracts.length > 0 ? (
+                <div className="space-y-2">
+                  {athleteContracts.map((contract) => (
+                    <div key={contract.id} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="font-medium text-gray-900 text-sm capitalize">
+                            {contract.contract_type} Contract
+                          </div>
+                          {contract.revenue_share_percent && (
+                            <div className="text-xs text-gray-600 mt-1">
+                              {contract.revenue_share_percent}% revenue share
+                            </div>
+                          )}
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          contract.status === "signed" ? "bg-green-100 text-green-700" :
+                          contract.status === "sent" ? "bg-blue-100 text-blue-700" :
+                          contract.status === "draft" ? "bg-gray-100 text-gray-700" :
+                          "bg-yellow-100 text-yellow-700"
+                        }`}>
+                          {contract.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 pt-2 border-t border-green-200 text-xs grid grid-cols-2 gap-2">
+                        {contract.start_date && (
+                          <div>
+                            <span className="text-gray-500">Start:</span>{" "}
+                            <span className="font-medium">{new Date(contract.start_date).toLocaleDateString()}</span>
+                          </div>
+                        )}
+                        {contract.end_date && (
+                          <div>
+                            <span className="text-gray-500">End:</span>{" "}
+                            <span className="font-medium">{new Date(contract.end_date).toLocaleDateString()}</span>
+                          </div>
+                        )}
+                        {contract.signed_at && (
+                          <div className="col-span-2 text-green-600">
+                            <span className="text-green-500">✓</span> Signed {new Date(contract.signed_at).toLocaleDateString()}
+                          </div>
+                        )}
+                      </div>
+                      {contract.notes && (
+                        <div className="mt-2 text-xs text-gray-600">{contract.notes}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3 text-center">
+                  No contracts created
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Tab Selector */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
+      {/* Tab Selector - Right after Pipeline Status */}
+      <div className="bg-white shadow rounded-lg">
+        <nav className="flex">
           <button
             onClick={() => setActiveTab("info")}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+            className={`flex-1 py-3 px-4 text-center font-medium text-sm border-b-2 transition-colors ${
               activeTab === "info"
-                ? "border-blue-500 text-blue-600"
-                : "border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300"
+                ? "border-blue-500 text-blue-600 bg-blue-50/50"
+                : "border-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50"
             }`}
           >
             Profile Info
           </button>
           <button
             onClick={() => setActiveTab("conversation")}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+            className={`flex-1 py-3 px-4 text-center font-medium text-sm border-b-2 transition-colors ${
               activeTab === "conversation"
-                ? "border-blue-500 text-blue-600"
-                : "border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300"
+                ? "border-blue-500 text-blue-600 bg-blue-50/50"
+                : "border-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50"
             }`}
           >
             Conversation
@@ -1024,9 +1268,104 @@ export default function AthleteDetailPage() {
       {/* Tab Content */}
       {activeTab === "info" ? (
       <>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Info Card */}
-        <div className="lg:col-span-2 space-y-6">
+      {/* Instagram Photos Gallery - Part of Profile Info tab */}
+      {athlete.instagram_handle && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Instagram Photos</h2>
+            <div className="flex gap-2">
+              {instagramPhotos.length > 0 && (
+                <button
+                  onClick={() => fetchInstagramPhotos(true)}
+                  disabled={photosLoading}
+                  className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                  title="Fetch new photos from Instagram"
+                >
+                  {photosLoading ? "Fetching..." : "Refresh Photos"}
+                </button>
+              )}
+              {instagramPhotos.length === 0 && (
+                <button
+                  onClick={() => fetchInstagramPhotos(true)}
+                  disabled={photosLoading}
+                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {photosLoading ? "Loading..." : "Load Photos"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {photosError && (
+            <div className={`text-sm mb-4 ${photosError.includes("Fetching") ? "text-blue-600" : "text-red-600"}`}>
+              {photosError.includes("Fetching") && (
+                <span className="inline-block animate-spin mr-2">*</span>
+              )}
+              {photosError}
+            </div>
+          )}
+
+          {photosLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="aspect-square bg-gray-200 rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : instagramPhotos.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {instagramPhotos.map((photo) => (
+                <a
+                  key={photo.id}
+                  href={photo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group relative aspect-square bg-gray-100 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all"
+                >
+                  <img
+                    src={photo.displayUrl}
+                    alt={photo.caption || "Instagram post"}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                  {/* Always visible engagement overlay with clear labels */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/75 p-2">
+                    <div className="flex items-center justify-between gap-2 text-white text-xs">
+                      {photo.likesCount !== undefined && (
+                        <div className="flex items-center gap-1 bg-white/20 rounded px-1.5 py-0.5">
+                          <span className="text-red-400">♥</span>
+                          <span className="font-medium">{photo.likesCount.toLocaleString()}</span>
+                          <span className="text-white/60">likes</span>
+                        </div>
+                      )}
+                      {photo.commentsCount !== undefined && (
+                        <div className="flex items-center gap-1 bg-white/20 rounded px-1.5 py-0.5">
+                          <span className="text-blue-400">💬</span>
+                          <span className="font-medium">{photo.commentsCount.toLocaleString()}</span>
+                          <span className="text-white/60">comments</span>
+                        </div>
+                      )}
+                      {photo.likesCount !== undefined && athlete.follower_count && (
+                        <div className="flex items-center gap-1 bg-green-600/80 rounded px-1.5 py-0.5">
+                          <span className="font-bold">{((photo.likesCount / athlete.follower_count) * 100).toFixed(1)}%</span>
+                          <span className="text-white/80">eng</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
+              <p>Click "Load Photos" to view @{athlete.instagram_handle}'s recent posts</p>
+              <p className="text-xs mt-1">Review their content before making a decision</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Data Sections */}
+      <div className="space-y-6">
           {/* Editable Fields */}
           {isEditing && (
             <div className="bg-white shadow rounded-lg p-6">
@@ -1089,249 +1428,6 @@ export default function AthleteDetailPage() {
                   />
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Data Sections by Source */}
-
-          {/* Instagram Data Section */}
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-6 py-4 bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                📸 Instagram Data
-                {ig.scraped_at && (
-                  <span className="text-xs bg-white/20 px-2 py-0.5 rounded">
-                    Updated {new Date(ig.scraped_at).toLocaleDateString()}
-                  </span>
-                )}
-              </h2>
-              <button
-                onClick={() => handleEnrichFromSource("instagram")}
-                disabled={enriching || !athlete.instagram_handle}
-                className="px-3 py-1.5 bg-white/20 text-white text-sm rounded-lg hover:bg-white/30 disabled:opacity-50 font-medium"
-              >
-                {enriching ? "Refreshing..." : "Refresh Data"}
-              </button>
-            </div>
-            <div className="p-6 space-y-6">
-              {/* Main Metrics Row */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <DataCard label="Followers" value={formatNumber(athlete.follower_count)} />
-                <DataCard label="Following" value={formatNumber(ig.following)} />
-                <DataCard label="Posts" value={formatNumber(ig.posts)} />
-                <DataCard
-                  label="Ratio"
-                  value={ig.follower_following_ratio ? `${ig.follower_following_ratio}x` : (ig.following && athlete.follower_count ? `${(athlete.follower_count / ig.following).toFixed(1)}x` : "—")}
-                />
-                <DataCard
-                  label="Engagement"
-                  value={ig.engagement_rate ? `${ig.engagement_rate}%` : "—"}
-                />
-              </div>
-
-              {/* Secondary Metrics Row */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <DataCard label="Avg Likes" value={ig.avg_likes ? formatNumber(ig.avg_likes) : "—"} />
-                <DataCard label="Avg Comments" value={ig.avg_comments ? formatNumber(ig.avg_comments) : "—"} />
-                <DataCard label="Highlights" value={ig.highlights ? formatNumber(ig.highlights) : "—"} />
-                <DataCard label="IGTV/Reels" value={ig.igtv_videos ? formatNumber(ig.igtv_videos) : "—"} />
-              </div>
-
-              {/* Account Info Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <span className="text-gray-700 font-medium">Account Type:</span>
-                  <span className="ml-2 font-bold text-gray-900">{ig.business ? "Business" : "Personal"}</span>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <span className="text-gray-700 font-medium">Private:</span>
-                  <span className="ml-2 font-bold text-gray-900">{ig.private ? "Yes" : "No"}</span>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <span className="text-gray-700 font-medium">Verified:</span>
-                  <span className="ml-2 font-bold text-gray-900">{ig.verified ? "✓ Yes" : "No"}</span>
-                </div>
-                {ig.business_category && (
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <span className="text-gray-700 font-medium">Category:</span>
-                    <span className="ml-2 font-bold text-gray-900">{ig.business_category}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* External Link (Link in Bio) */}
-              {ig.external_url && (
-                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                  <span className="text-blue-800 font-medium">Link in Bio:</span>
-                  <a
-                    href={ig.external_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-2 text-blue-600 hover:underline font-medium break-all"
-                  >
-                    {ig.external_url}
-                  </a>
-                  {ig.external_url.toLowerCase().includes("onlyfans") && (
-                    <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded font-medium">
-                      ⚠️ OnlyFans Link!
-                    </span>
-                  )}
-                  {(ig.external_url.toLowerCase().includes("linktree") || ig.external_url.toLowerCase().includes("linktr.ee")) && (
-                    <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded font-medium">
-                      Linktree
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Additional Info */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                {ig.full_name && ig.full_name !== athlete.name && (
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <span className="text-gray-700 font-medium">Display Name:</span>
-                    <span className="ml-2 font-bold text-gray-900">{ig.full_name}</span>
-                  </div>
-                )}
-                {ig.username && (
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <span className="text-gray-700 font-medium">Username:</span>
-                    <span className="ml-2 font-bold text-gray-900">@{ig.username}</span>
-                  </div>
-                )}
-                {ig.joined_recently && (
-                  <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
-                    <span className="text-yellow-800 font-medium">⚠️ New Account</span>
-                  </div>
-                )}
-                {ig.has_channel && (
-                  <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
-                    <span className="text-purple-800 font-medium">📢 Has Broadcast Channel</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Related Profiles */}
-              {ig.related_profiles && ig.related_profiles.length > 0 && (
-                <div className="border-t pt-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Related Profiles ({ig.related_profiles.length})</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {ig.related_profiles.slice(0, 8).map((rp, idx) => (
-                      <a
-                        key={idx}
-                        href={`https://instagram.com/${rp.username}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-full text-sm text-gray-900 font-medium"
-                      >
-                        @{rp.username}
-                        {rp.verified && " ✓"}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Latest Posts Summary */}
-              {ig.latest_posts && ig.latest_posts.length > 0 && (
-                <div className="border-t pt-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Latest Posts Engagement ({ig.latest_posts.length} posts)</h3>
-                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                    {ig.latest_posts.slice(0, 6).map((post, idx) => (
-                      <a
-                        key={idx}
-                        href={post.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-gray-50 hover:bg-gray-100 rounded-lg p-2 text-center"
-                      >
-                        <div className="text-sm font-bold text-gray-900">{formatNumber(post.likes)}</div>
-                        <div className="text-xs text-gray-700">❤️ likes</div>
-                        <div className="text-xs text-gray-700 mt-1">{formatNumber(post.comments)} 💬</div>
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Instagram Photos Gallery */}
-          {athlete.instagram_handle && (
-            <div className="bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">📷 Instagram Photos</h2>
-                <div className="flex gap-2">
-                  {instagramPhotos.length > 0 && (
-                    <button
-                      onClick={() => fetchInstagramPhotos(true)}
-                      disabled={photosLoading}
-                      className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                      title="Fetch new photos from Instagram"
-                    >
-                      {photosLoading ? "Fetching..." : "Get New Pics"}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => fetchInstagramPhotos(instagramPhotos.length === 0)}
-                    disabled={photosLoading}
-                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {photosLoading ? "Loading..." : instagramPhotos.length > 0 ? "Show Loaded" : "Load Photos"}
-                  </button>
-                </div>
-              </div>
-
-              {photosError && (
-                <div className={`text-sm mb-4 ${photosError.includes("Fetching") ? "text-blue-600" : "text-red-600"}`}>
-                  {photosError.includes("Fetching") && (
-                    <span className="inline-block animate-spin mr-2">⏳</span>
-                  )}
-                  {photosError}
-                </div>
-              )}
-
-              {photosLoading ? (
-                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                  {[...Array(12)].map((_, i) => (
-                    <div key={i} className="aspect-square bg-gray-200 rounded-lg animate-pulse" />
-                  ))}
-                </div>
-              ) : instagramPhotos.length > 0 ? (
-                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                  {instagramPhotos.map((photo) => (
-                    <a
-                      key={photo.id}
-                      href={photo.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group relative aspect-square bg-gray-100 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all"
-                    >
-                      <img
-                        src={photo.displayUrl}
-                        alt={photo.caption || "Instagram post"}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                      {/* Hover overlay with stats */}
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <div className="text-white text-center text-sm">
-                          {photo.likesCount && (
-                            <div>❤️ {photo.likesCount.toLocaleString()}</div>
-                          )}
-                          {photo.commentsCount && (
-                            <div>💬 {photo.commentsCount.toLocaleString()}</div>
-                          )}
-                        </div>
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>Click "Load Photos" to view @{athlete.instagram_handle}'s recent posts</p>
-                  <p className="text-xs mt-1">This helps you quickly review their content before making a decision</p>
-                </div>
-              )}
             </div>
           )}
 
@@ -1507,139 +1603,15 @@ export default function AthleteDetailPage() {
               </div>
             </div>
           </details>
-        </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Fit Score */}
-          {benchmarks && (
-            <FitScoreCard
-              athlete={athlete}
-              instagramData={ig}
-              benchmarks={benchmarks}
-            />
+          {/* Notes / Raw Data */}
+          {parsedData?.other && (
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Additional Notes</h2>
+              <p className="text-gray-800">{parsedData.other}</p>
+            </div>
           )}
-
-          {/* Follower Tier */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Follower Tier</h2>
-            <TierBadge followers={athlete.follower_count} />
-          </div>
-
-          {/* Quick Actions */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
-            <div className="space-y-2">
-              <button
-                onClick={handleResetEnrichment}
-                className="w-full bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg hover:bg-yellow-200 font-medium"
-              >
-                Reset to Pending
-              </button>
-              <button
-                onClick={handleDelete}
-                className="w-full bg-red-100 text-red-700 px-4 py-2 rounded-lg hover:bg-red-200 font-medium"
-              >
-                Delete Athlete
-              </button>
-            </div>
-          </div>
-
-          {/* Appointments & Contracts */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Appointments & Contracts</h2>
-
-            {/* Appointment Actions */}
-            <div className="mb-4">
-              <button
-                onClick={() => setShowAppointmentModal(true)}
-                className="w-full bg-orange-100 text-orange-700 px-4 py-2 rounded-lg hover:bg-orange-200 font-medium"
-              >
-                📅 Schedule Appointment
-              </button>
-            </div>
-
-            {/* Appointments List */}
-            {athleteAppointments.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-medium text-gray-800 mb-2">Appointments</h3>
-                <div className="space-y-2">
-                  {athleteAppointments.slice(0, 3).map((appt) => (
-                    <div key={appt.id} className="text-sm p-2 bg-gray-50 rounded">
-                      <div className="flex justify-between">
-                        <span>{new Date(appt.scheduled_at).toLocaleDateString()}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${
-                          appt.status === "completed" ? "bg-green-100 text-green-700" :
-                          appt.status === "scheduled" ? "bg-blue-100 text-blue-700" :
-                          "bg-gray-100 text-gray-700"
-                        }`}>
-                          {appt.status}
-                        </span>
-                      </div>
-                      {appt.outcome && (
-                        <div className="text-xs text-gray-600 mt-1">
-                          Outcome: {appt.outcome.replace("_", " ")}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Contract Actions */}
-            <div className="mb-4">
-              <button
-                onClick={() => setShowContractModal(true)}
-                className="w-full bg-green-100 text-green-700 px-4 py-2 rounded-lg hover:bg-green-200 font-medium"
-              >
-                📝 Create Contract
-              </button>
-            </div>
-
-            {/* Contracts List */}
-            {athleteContracts.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-800 mb-2">Contracts</h3>
-                <div className="space-y-2">
-                  {athleteContracts.map((contract) => (
-                    <div key={contract.id} className="text-sm p-2 bg-gray-50 rounded">
-                      <div className="flex justify-between">
-                        <span className="capitalize">{contract.contract_type}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${
-                          contract.status === "signed" ? "bg-green-100 text-green-700" :
-                          contract.status === "draft" ? "bg-gray-100 text-gray-700" :
-                          "bg-blue-100 text-blue-700"
-                        }`}>
-                          {contract.status}
-                        </span>
-                      </div>
-                      {contract.revenue_share_percent && (
-                        <div className="text-xs text-gray-600 mt-1">
-                          {contract.revenue_share_percent}% revenue share
-                        </div>
-                      )}
-                      {contract.signed_at && (
-                        <div className="text-xs text-green-600 mt-1">
-                          Signed: {new Date(contract.signed_at).toLocaleDateString()}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         </div>
-      </div>
-
-      {/* Notes / Raw Data */}
-      {parsedData?.other && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Additional Notes</h2>
-          <p className="text-gray-800">{parsedData.other}</p>
-        </div>
-      )}
       </>
       ) : (
         /* Conversation Tab */
@@ -2109,6 +2081,302 @@ function FitScoreCard({
             {(excellentCount > 0 || goodCount > 0) && belowCount > 0 && ", "}
             {belowCount > 0 && `${belowCount} below avg`}
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Full Fit Score Card - displays all info directly
+function FullFitScoreCard({
+  athlete,
+  instagramData,
+  benchmarks,
+}: {
+  athlete: Athlete;
+  instagramData: InstagramData;
+  benchmarks: BenchmarkMetrics;
+}) {
+  const metricDetails: Array<{ label: string; status: "excellent" | "good" | "below"; value: string }> = [];
+
+  if (athlete.follower_count) {
+    const { ideal_min, ideal_max, low } = benchmarks.thresholds.followers;
+    let status: "excellent" | "good" | "below" = "below";
+    if (athlete.follower_count >= ideal_min && athlete.follower_count <= ideal_max) {
+      status = "excellent";
+    } else if (athlete.follower_count >= low) {
+      status = "good";
+    }
+    metricDetails.push({ label: "Followers", status, value: formatNumber(athlete.follower_count) || "—" });
+  }
+
+  const ratio = instagramData.follower_following_ratio ||
+    (instagramData.following && athlete.follower_count ? athlete.follower_count / instagramData.following : null);
+  if (ratio) {
+    const { good, excellent } = benchmarks.thresholds.ratio;
+    let status: "excellent" | "good" | "below" = "below";
+    if (ratio >= excellent) status = "excellent";
+    else if (ratio >= good) status = "good";
+    metricDetails.push({ label: "Ratio", status, value: `${ratio.toFixed(1)}x` });
+  }
+
+  if (instagramData.engagement_rate) {
+    const { good, excellent } = benchmarks.thresholds.engagement;
+    let status: "excellent" | "good" | "below" = "below";
+    if (instagramData.engagement_rate >= excellent) status = "excellent";
+    else if (instagramData.engagement_rate >= good) status = "good";
+    metricDetails.push({ label: "Engagement", status, value: `${instagramData.engagement_rate}%` });
+  }
+
+  const excellentCount = metricDetails.filter(m => m.status === "excellent").length;
+  const goodCount = metricDetails.filter(m => m.status === "good").length;
+  const belowCount = metricDetails.filter(m => m.status === "below").length;
+
+  const totalScore = metricDetails.length > 0
+    ? Math.round(((excellentCount * 100) + (goodCount * 70) + (belowCount * 30)) / metricDetails.length)
+    : 0;
+
+  let grade = "";
+  let gradeColor = "";
+  let gradeBg = "";
+  if (totalScore >= 85) { grade = "A"; gradeColor = "text-green-600"; gradeBg = "bg-green-100"; }
+  else if (totalScore >= 70) { grade = "B"; gradeColor = "text-blue-600"; gradeBg = "bg-blue-100"; }
+  else if (totalScore >= 55) { grade = "C"; gradeColor = "text-yellow-600"; gradeBg = "bg-yellow-100"; }
+  else { grade = "D"; gradeColor = "text-red-600"; gradeBg = "bg-red-100"; }
+
+  return (
+    <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg p-3 text-white">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium opacity-80">Fit Score</span>
+        <span className="text-xs opacity-60">{benchmarks.totalAthletes} athletes</span>
+      </div>
+      <div className="flex items-center gap-3 mb-2">
+        <div className={`w-12 h-12 rounded-full ${gradeBg} ${gradeColor} flex flex-col items-center justify-center font-bold`}>
+          <span className="text-xl">{grade}</span>
+        </div>
+        <div>
+          <div className="text-2xl font-bold">{totalScore}%</div>
+        </div>
+      </div>
+      {/* Metric breakdown - always visible */}
+      <div className="space-y-1 pt-2 border-t border-white/20">
+        {metricDetails.map((m, i) => (
+          <div key={i} className="flex items-center justify-between text-xs">
+            <span className="opacity-80">{m.label}</span>
+            <div className="flex items-center gap-1">
+              <span className="font-medium">{m.value}</span>
+              <span className={`w-2 h-2 rounded-full ${
+                m.status === "excellent" ? "bg-green-400" :
+                m.status === "good" ? "bg-yellow-400" : "bg-red-400"
+              }`} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Full Follower Tier Card - displays all info directly
+function FullTierCard({ followers }: { followers: number | null }) {
+  if (!followers) {
+    return (
+      <div className="bg-gray-100 rounded-lg p-3 text-center">
+        <div className="text-xs text-gray-500">Follower Tier</div>
+        <div className="text-sm text-gray-400">No data</div>
+      </div>
+    );
+  }
+
+  let tier = "";
+  let icon = "";
+  let color = "";
+  let description = "";
+  let range = "";
+
+  if (followers >= 5000000) {
+    tier = "Mega Star"; icon = "🏆"; color = "bg-yellow-100 border-yellow-400 text-yellow-800";
+    description = "Marquee signing"; range = "5M+";
+  } else if (followers >= 1000000) {
+    tier = "Star"; icon = "⭐"; color = "bg-purple-100 border-purple-400 text-purple-800";
+    description = "Major talent"; range = "1M-5M";
+  } else if (followers >= 500000) {
+    tier = "Rising Star"; icon = "🔥"; color = "bg-orange-100 border-orange-400 text-orange-800";
+    description = "High potential"; range = "500K-1M";
+  } else if (followers >= 100000) {
+    tier = "Sweet Spot"; icon = "💎"; color = "bg-green-100 border-green-400 text-green-800";
+    description = "Ideal OF range"; range = "100K-500K";
+  } else if (followers >= 50000) {
+    tier = "Growing"; icon = "📈"; color = "bg-blue-100 border-blue-400 text-blue-800";
+    description = "Emerging"; range = "50K-100K";
+  } else {
+    tier = "Micro"; icon = "🌱"; color = "bg-gray-100 border-gray-400 text-gray-800";
+    description = "Niche reach"; range = "<50K";
+  }
+
+  return (
+    <div className={`${color} border-2 rounded-lg p-3`}>
+      <div className="text-xs font-medium opacity-70 mb-1">Follower Tier</div>
+      <div className="flex items-center gap-2">
+        <span className="text-2xl">{icon}</span>
+        <div>
+          <div className="font-bold">{tier}</div>
+          <div className="text-xs opacity-75">{description}</div>
+        </div>
+      </div>
+      <div className="mt-2 pt-2 border-t border-current/20 flex justify-between text-xs">
+        <span className="opacity-70">Range: {range}</span>
+        <span className="font-medium">{followers.toLocaleString()}</span>
+      </div>
+    </div>
+  );
+}
+
+// Compact Fit Score for header with hover tooltip
+function CompactFitScore({
+  athlete,
+  instagramData,
+  benchmarks,
+}: {
+  athlete: Athlete;
+  instagramData: InstagramData;
+  benchmarks: BenchmarkMetrics;
+}) {
+  // Calculate score (simplified version)
+  const metricDetails: Array<{ label: string; status: "excellent" | "good" | "below"; value: string }> = [];
+
+  if (athlete.follower_count) {
+    const { ideal_min, ideal_max, low } = benchmarks.thresholds.followers;
+    let status: "excellent" | "good" | "below" = "below";
+    if (athlete.follower_count >= ideal_min && athlete.follower_count <= ideal_max) {
+      status = "excellent";
+    } else if (athlete.follower_count >= low) {
+      status = "good";
+    }
+    metricDetails.push({ label: "Followers", status, value: formatNumber(athlete.follower_count) || "—" });
+  }
+
+  const ratio = instagramData.follower_following_ratio ||
+    (instagramData.following && athlete.follower_count ? athlete.follower_count / instagramData.following : null);
+  if (ratio) {
+    const { good, excellent } = benchmarks.thresholds.ratio;
+    let status: "excellent" | "good" | "below" = "below";
+    if (ratio >= excellent) status = "excellent";
+    else if (ratio >= good) status = "good";
+    metricDetails.push({ label: "Ratio", status, value: `${ratio.toFixed(1)}x` });
+  }
+
+  if (instagramData.engagement_rate) {
+    const { good, excellent } = benchmarks.thresholds.engagement;
+    let status: "excellent" | "good" | "below" = "below";
+    if (instagramData.engagement_rate >= excellent) status = "excellent";
+    else if (instagramData.engagement_rate >= good) status = "good";
+    metricDetails.push({ label: "Engagement", status, value: `${instagramData.engagement_rate}%` });
+  }
+
+  const excellentCount = metricDetails.filter(m => m.status === "excellent").length;
+  const goodCount = metricDetails.filter(m => m.status === "good").length;
+  const belowCount = metricDetails.filter(m => m.status === "below").length;
+
+  const totalScore = metricDetails.length > 0
+    ? Math.round(((excellentCount * 100) + (goodCount * 70) + (belowCount * 30)) / metricDetails.length)
+    : 0;
+
+  let grade = "";
+  let gradeColor = "";
+  if (totalScore >= 85) { grade = "A"; gradeColor = "bg-green-500 text-white"; }
+  else if (totalScore >= 70) { grade = "B"; gradeColor = "bg-blue-500 text-white"; }
+  else if (totalScore >= 55) { grade = "C"; gradeColor = "bg-yellow-500 text-white"; }
+  else { grade = "D"; gradeColor = "bg-red-500 text-white"; }
+
+  return (
+    <div className="group relative bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg p-3 text-white text-center cursor-help">
+      <div className="text-xs font-medium opacity-80 mb-1">Fit Score</div>
+      <div className="flex items-center justify-center gap-2">
+        <div className={`w-10 h-10 rounded-full ${gradeColor} flex items-center justify-center font-bold text-lg`}>
+          {grade}
+        </div>
+        <div className="text-left">
+          <div className="text-lg font-bold">{totalScore}%</div>
+          <div className="text-xs opacity-75">{metricDetails.length} metrics</div>
+        </div>
+      </div>
+      {/* Hover Tooltip */}
+      <div className="absolute left-0 right-0 top-full mt-2 bg-white text-gray-900 rounded-lg shadow-xl p-3 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+        <div className="text-xs font-semibold mb-2 text-gray-700">Score Breakdown</div>
+        <div className="space-y-1">
+          {metricDetails.map((m, i) => (
+            <div key={i} className="flex items-center justify-between text-xs">
+              <span className="text-gray-600">{m.label}</span>
+              <div className="flex items-center gap-1">
+                <span className="font-medium">{m.value}</span>
+                <span className={`w-2 h-2 rounded-full ${
+                  m.status === "excellent" ? "bg-green-500" :
+                  m.status === "good" ? "bg-yellow-500" : "bg-red-500"
+                }`} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 pt-2 border-t text-xs text-gray-500">
+          Based on {benchmarks.totalAthletes} historical athletes
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Compact Follower Tier for header with hover tooltip
+function CompactTierBadge({ followers }: { followers: number | null }) {
+  if (!followers) {
+    return (
+      <div className="bg-gray-100 rounded-lg p-3 text-center">
+        <div className="text-xs text-gray-500">Follower Tier</div>
+        <div className="text-sm text-gray-400">No data</div>
+      </div>
+    );
+  }
+
+  let tier = "";
+  let icon = "";
+  let color = "";
+  let description = "";
+  let range = "";
+
+  if (followers >= 5000000) {
+    tier = "Mega Star"; icon = "🏆"; color = "bg-yellow-100 border-yellow-400 text-yellow-800";
+    description = "Marquee signing potential"; range = "5M+ followers";
+  } else if (followers >= 1000000) {
+    tier = "Star"; icon = "⭐"; color = "bg-purple-100 border-purple-400 text-purple-800";
+    description = "Major talent"; range = "1M-5M followers";
+  } else if (followers >= 500000) {
+    tier = "Rising Star"; icon = "🔥"; color = "bg-orange-100 border-orange-400 text-orange-800";
+    description = "High potential"; range = "500K-1M followers";
+  } else if (followers >= 100000) {
+    tier = "Sweet Spot"; icon = "💎"; color = "bg-green-100 border-green-400 text-green-800";
+    description = "Ideal OF target range"; range = "100K-500K followers";
+  } else if (followers >= 50000) {
+    tier = "Growing"; icon = "📈"; color = "bg-blue-100 border-blue-400 text-blue-800";
+    description = "Emerging talent"; range = "50K-100K followers";
+  } else {
+    tier = "Micro"; icon = "🌱"; color = "bg-gray-100 border-gray-400 text-gray-800";
+    description = "Niche reach"; range = "Under 50K followers";
+  }
+
+  return (
+    <div className={`group relative ${color} border-2 rounded-lg p-3 text-center cursor-help`}>
+      <div className="text-xs font-medium opacity-70 mb-1">Follower Tier</div>
+      <div className="text-lg">{icon}</div>
+      <div className="text-sm font-bold">{tier}</div>
+      <div className="text-xs opacity-75">{(followers / 1000).toFixed(0)}K</div>
+      {/* Hover Tooltip */}
+      <div className="absolute left-0 right-0 top-full mt-2 bg-white text-gray-900 rounded-lg shadow-xl p-3 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 border">
+        <div className="text-sm font-semibold mb-1">{icon} {tier}</div>
+        <div className="text-xs text-gray-600 mb-2">{description}</div>
+        <div className="text-xs text-gray-500">{range}</div>
+        <div className="mt-2 pt-2 border-t text-xs">
+          <span className="font-medium">{followers.toLocaleString()}</span>
+          <span className="text-gray-500"> exact followers</span>
         </div>
       </div>
     </div>

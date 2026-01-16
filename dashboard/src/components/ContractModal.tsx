@@ -1,4 +1,5 @@
 "use client";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 
@@ -116,17 +117,11 @@ export default function ContractModal({
         {/* Athlete Info */}
         <div className="p-4 border-b bg-gray-50">
           <div className="flex items-center gap-3">
-            {athlete.profile_pic_url ? (
-              <img
-                src={athlete.profile_pic_url}
-                alt={athlete.name}
-                className="w-12 h-12 rounded-full object-cover"
-              />
-            ) : (
-              <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-lg">
-                {athlete.name?.[0]}
-              </div>
-            )}
+            <AthleteAvatar
+              name={athlete.name}
+              profilePicUrl={athlete.profile_pic_url}
+              size="lg"
+            />
             <div>
               <div className="font-semibold">{athlete.name}</div>
               <div className="text-sm text-gray-800">

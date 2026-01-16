@@ -38,14 +38,12 @@ export default function NavBar() {
   const navLinks = [
     { href: "/", label: "Dashboard" },
     { href: "/pipeline", label: "Pipeline" },
-    { href: "/pipeline/approval", label: "Approval" },
-    { href: "/inbox", label: "Inbox" },
     { href: "/historical", label: "Historical" },
     { href: "/analytics", label: "Analytics" },
   ];
 
   return (
-    <nav className="bg-white shadow-sm border-b">
+    <nav className="bg-white shadow-sm border-b sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">

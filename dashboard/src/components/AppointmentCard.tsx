@@ -1,4 +1,5 @@
 "use client";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -151,17 +152,11 @@ export default function AppointmentCard({
     >
       {/* Athlete Info */}
       <div className="flex items-start gap-4">
-        {athlete?.profile_pic_url ? (
-          <img
-            src={athlete.profile_pic_url}
-            alt={athlete.name}
-            className="w-14 h-14 rounded-full object-cover"
-          />
-        ) : (
-          <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-xl">
-            {athlete?.name?.[0] || "?"}
-          </div>
-        )}
+        <AthleteAvatar
+          name={athlete?.name || "?"}
+          profilePicUrl={athlete?.profile_pic_url}
+          size="lg"
+        />
         <div className="flex-1">
           <Link
             href={`/athletes/${appointment.athlete_id}`}

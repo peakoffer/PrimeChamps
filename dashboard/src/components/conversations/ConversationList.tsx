@@ -1,6 +1,7 @@
 "use client";
 
 import { formatDate } from "@/lib/utils";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -125,19 +126,11 @@ export default function ConversationList({
           >
             <div className="flex items-start gap-3">
               {/* Avatar */}
-              {athlete?.profile_pic_url ? (
-                <img
-                  src={athlete.profile_pic_url}
-                  alt={athlete.name}
-                  className="w-12 h-12 rounded-full object-cover flex-shrink-0"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-                  <span className="text-gray-600 font-medium text-lg">
-                    {athlete?.name?.charAt(0) || "?"}
-                  </span>
-                </div>
-              )}
+              <AthleteAvatar
+                name={athlete?.name || "?"}
+                profilePicUrl={athlete?.profile_pic_url}
+                size="lg"
+              />
 
               {/* Content */}
               <div className="flex-1 min-w-0">

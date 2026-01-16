@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { PipelineStageNav } from "@/components/PipelineStageNav";
 import AppointmentModal from "@/components/AppointmentModal";
 import AppointmentCard from "@/components/AppointmentCard";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -126,21 +128,19 @@ export default function AppointmentStagePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Stage Navigation */}
+      <PipelineStageNav currentStage="appointment" />
+
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-900">
-            ← Pipeline
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <span className="text-3xl">📅</span> Appointments
-            </h1>
-            <p className="text-gray-800">
-              Schedule and manage meetings with prospects
-            </p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <span className="text-3xl">📅</span> Appointments
+          </h1>
+          <p className="text-gray-600">
+            Schedule and manage meetings with prospects
+          </p>
         </div>
         <div className="flex gap-2">
           <button
@@ -275,17 +275,11 @@ export default function AppointmentStagePage() {
                 className="bg-white rounded-lg shadow border p-4"
               >
                 <div className="flex items-start gap-4">
-                  {athlete.profile_pic_url ? (
-                    <img
-                      src={athlete.profile_pic_url}
-                      alt={athlete.name}
-                      className="w-14 h-14 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-xl">
-                      {athlete.name[0]}
-                    </div>
-                  )}
+                  <AthleteAvatar
+                    name={athlete.name}
+                    profilePicUrl={athlete.profile_pic_url}
+                    size="lg"
+                  />
                   <div className="flex-1">
                     <Link
                       href={`/athletes/${athlete.id}`}

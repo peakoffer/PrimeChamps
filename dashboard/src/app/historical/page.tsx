@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -180,17 +181,11 @@ export default function HistoricalPage() {
               href={`/athletes/${athlete.id}`}
               className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors"
             >
-              {athlete.profile_pic_url ? (
-                <img
-                  src={athlete.profile_pic_url}
-                  alt={athlete.name}
-                  className="w-12 h-12 rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-800">
-                  {athlete.name?.[0] || "?"}
-                </div>
-              )}
+              <AthleteAvatar
+                name={athlete.name}
+                profilePicUrl={athlete.profile_pic_url}
+                size="lg"
+              />
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-gray-900 truncate">{athlete.name}</div>
                 <div className="text-sm text-gray-800 truncate">

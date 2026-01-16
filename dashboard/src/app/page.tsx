@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase, type Athlete, type OutreachMessage } from "@/lib/supabase";
 import { formatNumber, getStatusColor } from "@/lib/utils";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Stats {
   totalAthletes: number;
@@ -11,9 +13,11 @@ interface Stats {
   pendingApprovals: number;
   messagesSent: number;
   repliesReceived: number;
+  sportsCovered: number;
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [stats, setStats] = useState<Stats>({
     totalAthletes: 0,
     pendingEnrichment: 0,
@@ -21,6 +25,7 @@ export default function Dashboard() {
     pendingApprovals: 0,
     messagesSent: 0,
     repliesReceived: 0,
+    sportsCovered: 0,
   });
   const [recentAthletes, setRecentAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,35 +33,45 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        // Fetch athletes
+        // Fetch recent athletes (active pipeline only, not historical)
         const { data: athletes, error: athletesError } = await supabase
           .from("athletes")
           .select("*")
+          .neq("pipeline_stage", "rejected")
+          .or("is_historical.is.null,is_historical.eq.false")
           .order("created_at", { ascending: false })
           .limit(5);
 
         if (athletesError) throw athletesError;
 
-        // Fetch all athletes for stats
-        const { data: allAthletes } = await supabase.from("athletes").select("enrichment_status");
+        // Fetch active pipeline athletes for stats (exclude historical and rejected)
+        const { data: activeAthletes } = await supabase
+          .from("athletes")
+          .select("enrichment_status, sport, pipeline_stage, is_historical")
+          .neq("pipeline_stage", "rejected")
+          .or("is_historical.is.null,is_historical.eq.false");
 
         // Fetch messages for stats
         const { data: messages } = await supabase.from("outreach_messages").select("status, approval_status");
 
-        // Calculate stats
-        const pending = allAthletes?.filter((a) => a.enrichment_status === "pending").length || 0;
-        const enriched = allAthletes?.filter((a) => a.enrichment_status === "enriched").length || 0;
+        // Calculate stats from active athletes only
+        const pending = activeAthletes?.filter((a) => a.enrichment_status === "pending").length || 0;
+        const enriched = activeAthletes?.filter((a) => a.enrichment_status === "enriched").length || 0;
         const pendingApprovals = messages?.filter((m) => m.approval_status === "pending").length || 0;
         const sent = messages?.filter((m) => m.status === "sent" || m.status === "delivered" || m.status === "read" || m.status === "replied").length || 0;
         const replied = messages?.filter((m) => m.status === "replied").length || 0;
 
+        // Count unique sports
+        const uniqueSports = new Set(activeAthletes?.map((a) => a.sport).filter(Boolean));
+
         setStats({
-          totalAthletes: allAthletes?.length || 0,
+          totalAthletes: activeAthletes?.length || 0,
           pendingEnrichment: pending,
           enrichedAthletes: enriched,
           pendingApprovals,
           messagesSent: sent,
           repliesReceived: replied,
+          sportsCovered: uniqueSports.size,
         });
 
         setRecentAthletes(athletes || []);
@@ -89,37 +104,42 @@ export default function Dashboard() {
           value={stats.totalAthletes}
           subtitle={`${stats.enrichedAthletes} enriched`}
           color="blue"
+          link="/athletes"
         />
         <StatCard
           title="Pending Enrichment"
           value={stats.pendingEnrichment}
           subtitle="Need data enrichment"
           color="yellow"
+          link="/athletes?status=pending"
         />
         <StatCard
           title="Pending Approval"
           value={stats.pendingApprovals}
           subtitle="Messages to review"
           color="purple"
-          link="/approve"
+          link="/messages/approval"
         />
         <StatCard
           title="Messages Sent"
           value={stats.messagesSent}
           subtitle={`${stats.repliesReceived} replies`}
           color="green"
+          link="/messages/queue"
         />
         <StatCard
           title="Response Rate"
           value={stats.messagesSent > 0 ? `${Math.round((stats.repliesReceived / stats.messagesSent) * 100)}%` : "—"}
           subtitle="Reply rate"
           color="emerald"
+          link="/inbox"
         />
         <StatCard
           title="Sports Covered"
-          value={new Set(recentAthletes.map((a) => a.sport)).size}
+          value={stats.sportsCovered}
           subtitle="Active categories"
           color="indigo"
+          link="/pipeline"
         />
       </div>
 
@@ -130,14 +150,14 @@ export default function Dashboard() {
         </div>
         <ul className="divide-y divide-gray-200">
           {recentAthletes.map((athlete) => (
-            <li key={athlete.id} className="px-4 py-4 sm:px-6">
+            <li key={athlete.id} className="px-4 py-4 sm:px-6 hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/athletes/${athlete.id}`)}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                    <span className="text-gray-800 font-medium">
-                      {athlete.name.charAt(0)}
-                    </span>
-                  </div>
+                  <AthleteAvatar
+                    name={athlete.name}
+                    profilePicUrl={athlete.profile_pic_url}
+                    size="md"
+                  />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-900">{athlete.name}</p>
                     <p className="text-sm text-gray-800">
@@ -195,7 +215,7 @@ function StatCard({
   };
 
   const content = (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
+    <div className={`bg-white overflow-hidden shadow rounded-lg ${link ? "hover:shadow-md hover:bg-gray-50 transition-all cursor-pointer" : ""}`}>
       <div className="p-5">
         <div className="flex items-center">
           <div className={`flex-shrink-0 rounded-md p-3 ${colorClasses[color]}`}>

@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { PipelineStageNav } from "@/components/PipelineStageNav";
 
 interface Athlete {
   id: string;
@@ -86,6 +88,10 @@ function ApprovalPageContent() {
   const [bulkRejectReason, setBulkRejectReason] = useState("");
   const [bulkAvoidSimilar, setBulkAvoidSimilar] = useState<"yes" | "no" | "flag">("yes");
 
+  // Recently approved athletes (to show in the Approved tab)
+  const [recentlyApproved, setRecentlyApproved] = useState<Athlete[]>([]);
+  const [approvedAthletes, setApprovedAthletes] = useState<Athlete[]>([]);
+
   // Expanded cards
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
 
@@ -102,7 +108,7 @@ function ApprovalPageContent() {
 
   async function fetchData() {
     setLoading(true);
-    await Promise.all([fetchAthletes(), fetchRejectedAthletes(), fetchApprovedCount()]);
+    await Promise.all([fetchAthletes(), fetchRejectedAthletes(), fetchApprovedCount(), fetchApprovedAthletes()]);
     setLoading(false);
   }
 
@@ -191,6 +197,24 @@ function ApprovalPageContent() {
     }
   }
 
+  async function fetchApprovedAthletes() {
+    try {
+      // Fetch athletes in reach_out stage (recently approved)
+      const { data, error } = await supabase
+        .from("athletes")
+        .select("*")
+        .eq("pipeline_stage", "reach_out")
+        .eq("is_historical", false)
+        .order("updated_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setApprovedAthletes(data || []);
+    } catch (error) {
+      console.error("Error fetching approved athletes:", error);
+    }
+  }
+
   function parseNotes(notes: string | null | undefined): ParsedNotes {
     if (!notes) return {};
     try {
@@ -266,6 +290,9 @@ function ApprovalPageContent() {
     if (selectedAthletes.size === 0) return;
     setBulkActionLoading(true);
 
+    // Store the athletes being approved before processing
+    const athletesToApprove = athletes.filter((a) => selectedAthletes.has(a.id));
+
     try {
       for (const athleteId of selectedAthletes) {
         // Move to reach_out stage (simple bulk approve)
@@ -293,10 +320,16 @@ function ApprovalPageContent() {
         });
       }
 
-      // Remove from list and clear selection
+      // Store recently approved athletes and switch to that tab
+      setRecentlyApproved(athletesToApprove);
+
+      // Remove from pending list and clear selection
       setAthletes((prev) => prev.filter((a) => !selectedAthletes.has(a.id)));
       setSelectedAthletes(new Set());
-      fetchApprovedCount();
+
+      // Refresh approved data and switch to approved tab
+      await Promise.all([fetchApprovedCount(), fetchApprovedAthletes()]);
+      setActiveTab("messages");
     } catch (error) {
       console.error("Bulk approve error:", error);
     } finally {
@@ -379,17 +412,15 @@ function ApprovalPageContent() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header with back link */}
+    <div className="space-y-4">
+      {/* Stage Navigation */}
+      <PipelineStageNav currentStage="approval" />
+
+      {/* Header */}
       <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-800">
-            ← Pipeline
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Approval Queue</h1>
-            <p className="text-sm text-gray-800 mt-1">Review candidates from research agent</p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Approval Queue</h1>
+          <p className="text-sm text-gray-600 mt-1">Review candidates from research agent</p>
         </div>
         <button
           onClick={fetchData}
@@ -522,17 +553,11 @@ function ApprovalPageContent() {
 
                           {/* Profile Picture */}
                           <Link href={`/athletes/${athlete.id}`} className="flex-shrink-0">
-                            {athlete.profile_pic_url ? (
-                              <img
-                                src={athlete.profile_pic_url}
-                                alt={athlete.name}
-                                className="w-14 h-14 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-lg font-medium">
-                                {athlete.name?.[0] || "?"}
-                              </div>
-                            )}
+                            <AthleteAvatar
+                              name={athlete.name}
+                              profilePicUrl={athlete.profile_pic_url}
+                              size="lg"
+                            />
                           </Link>
 
                           {/* Main Info - Compact */}
@@ -653,19 +678,142 @@ function ApprovalPageContent() {
 
       {/* Messages Tab Content (Approved - shows approved athletes in pipeline) */}
       {activeTab === "messages" && (
-        <div className="bg-white shadow rounded-lg p-12 text-center">
-          <div className="text-4xl mb-4">✅</div>
-          <div className="text-gray-800 text-lg mb-2">{approvedCount} Athletes Approved</div>
-          <p className="text-gray-800 text-sm">
-            These athletes have been moved to the outreach pipeline.
-          </p>
-          <Link
-            href="/pipeline"
-            className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            View Pipeline
-          </Link>
-        </div>
+        <>
+          {/* Recently Approved Banner (if applicable) */}
+          {recentlyApproved.length > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">🎉</span>
+                <h3 className="font-semibold text-green-800">
+                  Just Approved: {recentlyApproved.length} Athlete{recentlyApproved.length > 1 ? "s" : ""}
+                </h3>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {recentlyApproved.map((athlete) => (
+                  <Link
+                    key={athlete.id}
+                    href={`/athletes/${athlete.id}`}
+                    className="flex items-center gap-2 bg-white rounded-full px-3 py-1.5 border border-green-300 hover:bg-green-100 transition-colors"
+                  >
+                    <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="sm" />
+                    <span className="text-sm font-medium text-gray-900">{athlete.name}</span>
+                  </Link>
+                ))}
+              </div>
+              <button
+                onClick={() => setRecentlyApproved([])}
+                className="text-sm text-green-600 hover:text-green-800"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* All Approved Athletes */}
+          {approvedAthletes.length === 0 && recentlyApproved.length === 0 ? (
+            <div className="bg-white shadow rounded-lg p-12 text-center">
+              <div className="text-4xl mb-4">📋</div>
+              <div className="text-gray-800 text-lg mb-2">No athletes ready for outreach yet</div>
+              <p className="text-gray-800 text-sm">
+                Approve athletes from the pending queue to see them here.
+              </p>
+              <button
+                onClick={() => setActiveTab("athletes")}
+                className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Go to Pending Queue
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Header */}
+              <div className="bg-white shadow rounded-lg p-4 flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-gray-900">{approvedCount} Athletes Ready for Outreach</h3>
+                  <p className="text-sm text-gray-600">These athletes have been approved and moved to reach_out stage</p>
+                </div>
+                <Link
+                  href="/pipeline?stage=reach_out"
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+                >
+                  View in Pipeline
+                </Link>
+              </div>
+
+              {/* Athletes Grid */}
+              <div className="grid gap-3">
+                {approvedAthletes.map((athlete) => {
+                  const notes = parseNotes(athlete.notes);
+
+                  return (
+                    <div
+                      key={athlete.id}
+                      className="bg-white shadow rounded-lg p-3 border-l-4 border-green-400"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Link href={`/athletes/${athlete.id}`}>
+                          <AthleteAvatar
+                            name={athlete.name}
+                            profilePicUrl={athlete.profile_pic_url}
+                            size="lg"
+                          />
+                        </Link>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Link
+                              href={`/athletes/${athlete.id}`}
+                              className="font-semibold text-gray-900 hover:text-blue-600"
+                            >
+                              {athlete.name}
+                            </Link>
+                            {athlete.follower_count && (
+                              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
+                                {(athlete.follower_count / 1000).toFixed(0)}K
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700">
+                              Ready for Outreach
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 mt-1 text-sm">
+                            <span className="font-medium text-gray-700">{athlete.sport}</span>
+                            {athlete.instagram_handle && (
+                              <a
+                                href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                @{athlete.instagram_handle}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Link
+                            href={`/athletes/${athlete.id}`}
+                            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200"
+                          >
+                            View Profile
+                          </Link>
+                          <Link
+                            href={`/messages/generate?athlete=${athlete.id}`}
+                            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700"
+                          >
+                            Generate Message
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* Rejected Tab Content */}
@@ -696,17 +844,12 @@ function ApprovalPageContent() {
                       <div className="flex items-start gap-4">
                         {/* Profile Picture */}
                         <Link href={`/athletes/${athlete.id}`}>
-                          {athlete.profile_pic_url ? (
-                            <img
-                              src={athlete.profile_pic_url}
-                              alt={athlete.name}
-                              className="w-14 h-14 rounded-full object-cover opacity-75"
-                            />
-                          ) : (
-                            <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-lg font-medium">
-                              {athlete.name?.[0] || "?"}
-                            </div>
-                          )}
+                          <AthleteAvatar
+                            name={athlete.name}
+                            profilePicUrl={athlete.profile_pic_url}
+                            size="lg"
+                            className="opacity-75"
+                          />
                         </Link>
 
                         {/* Main Info */}

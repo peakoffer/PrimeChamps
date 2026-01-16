@@ -1,4 +1,5 @@
 "use client";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -207,13 +208,12 @@ export default function RejectionModal({ athlete, isOpen, onClose, onComplete }:
         {/* Athlete Info */}
         <div className="p-6 border-b bg-gray-50">
           <div className="flex items-center gap-4">
-            {athlete.profile_pic_url ? (
-              <img src={athlete.profile_pic_url} alt={athlete.name} className="w-16 h-16 rounded-full object-cover opacity-75" />
-            ) : (
-              <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-xl">
-                {athlete.name?.[0]}
-              </div>
-            )}
+            <AthleteAvatar
+              name={athlete.name}
+              profilePicUrl={athlete.profile_pic_url}
+              size="xl"
+              className="opacity-75"
+            />
             <div>
               <div className="font-semibold text-lg text-gray-800">{athlete.name}</div>
               <div className="text-gray-800">{athlete.sport}</div>

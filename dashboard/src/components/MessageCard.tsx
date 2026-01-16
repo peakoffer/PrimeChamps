@@ -1,4 +1,5 @@
 "use client";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import type { OutreachMessage } from "@/lib/supabase";
@@ -84,17 +85,11 @@ export default function MessageCard({
 
           {/* Athlete Profile */}
           <div className="flex-shrink-0">
-            {athlete?.profile_pic_url ? (
-              <img
-                src={athlete.profile_pic_url}
-                alt={athlete.name}
-                className="w-12 h-12 rounded-full object-cover"
-              />
-            ) : (
-              <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-lg font-medium">
-                {athlete?.name?.[0] || "?"}
-              </div>
-            )}
+            <AthleteAvatar
+              name={athlete?.name || "?"}
+              profilePicUrl={athlete?.profile_pic_url}
+              size="lg"
+            />
           </div>
 
           {/* Content */}

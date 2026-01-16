@@ -1,4 +1,5 @@
 "use client";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -116,27 +117,11 @@ export default function ContractCard({
     >
       {/* Header with athlete info */}
       <div className="flex items-start gap-4">
-        {athlete?.profile_pic_url ? (
-          <img
-            src={athlete.profile_pic_url}
-            alt={athlete.name}
-            className={`w-16 h-16 rounded-full object-cover border-4 ${
-              contract.status === "signed"
-                ? "border-green-100"
-                : "border-gray-100"
-            }`}
-          />
-        ) : (
-          <div
-            className={`w-16 h-16 rounded-full flex items-center justify-center text-xl ${
-              contract.status === "signed"
-                ? "bg-green-100 text-green-600"
-                : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            {athlete?.name?.[0] || "?"}
-          </div>
-        )}
+        <AthleteAvatar
+          name={athlete?.name || "?"}
+          profilePicUrl={athlete?.profile_pic_url}
+          size="xl"
+        />
         <div className="flex-1">
           <Link
             href={`/athletes/${contract.athlete_id}`}

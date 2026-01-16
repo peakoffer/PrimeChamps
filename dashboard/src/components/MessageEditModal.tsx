@@ -1,4 +1,5 @@
 "use client";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import type { OutreachMessage } from "@/lib/supabase";
@@ -91,17 +92,11 @@ export default function MessageEditModal({
         <div className="w-80 border-r bg-gray-50 overflow-y-auto flex-shrink-0">
           <div className="p-4 border-b bg-white">
             <div className="flex items-center gap-3">
-              {athlete?.profile_pic_url ? (
-                <img
-                  src={athlete.profile_pic_url}
-                  alt={athlete.name}
-                  className="w-16 h-16 rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-xl font-medium">
-                  {athlete?.name?.[0] || "?"}
-                </div>
-              )}
+              <AthleteAvatar
+                name={athlete?.name || "?"}
+                profilePicUrl={athlete?.profile_pic_url}
+                size="xl"
+              />
               <div>
                 <h3 className="font-semibold text-lg">{athlete?.name || "Unknown"}</h3>
                 <p className="text-sm text-gray-600">{athlete?.sport || "—"}</p>

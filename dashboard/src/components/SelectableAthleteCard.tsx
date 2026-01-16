@@ -1,6 +1,7 @@
 "use client";
 
 import { DragEvent } from "react";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -77,18 +78,11 @@ export default function SelectableAthleteCard({
         )}
 
         {/* Profile Picture */}
-        {athlete.profile_pic_url ? (
-          <img
-            src={athlete.profile_pic_url}
-            alt={athlete.name}
-            className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-            draggable={false}
-          />
-        ) : (
-          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-sm flex-shrink-0">
-            {athlete.name?.[0] || "?"}
-          </div>
-        )}
+        <AthleteAvatar
+          name={athlete.name}
+          profilePicUrl={athlete.profile_pic_url}
+          size="md"
+        />
 
         {/* Info */}
         <div className="flex-1 min-w-0">

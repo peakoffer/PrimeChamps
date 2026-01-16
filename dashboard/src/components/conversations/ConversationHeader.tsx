@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { formatNumber } from "@/lib/utils";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -71,19 +72,11 @@ export default function ConversationHeader({
         {/* Left: Athlete Info */}
         <div className="flex items-center gap-3">
           {/* Avatar */}
-          {athlete.profile_pic_url ? (
-            <img
-              src={athlete.profile_pic_url}
-              alt={athlete.name}
-              className="w-10 h-10 rounded-full object-cover"
-            />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-              <span className="text-gray-600 font-medium">
-                {athlete.name?.charAt(0) || "?"}
-              </span>
-            </div>
-          )}
+          <AthleteAvatar
+            name={athlete.name}
+            profilePicUrl={athlete.profile_pic_url}
+            size="md"
+          />
 
           {/* Info */}
           <div>

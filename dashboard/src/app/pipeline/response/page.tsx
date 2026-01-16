@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { PipelineStageNav } from "@/components/PipelineStageNav";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -74,19 +76,17 @@ export default function ResponseStagePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Stage Navigation */}
+      <PipelineStageNav currentStage="response" />
+
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-800">
-            ← Pipeline
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <span className="text-3xl">💬</span> Response Tracking
-            </h1>
-            <p className="text-gray-800">Monitor and categorize responses from outreach</p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <span className="text-3xl">💬</span> Response Tracking
+          </h1>
+          <p className="text-gray-600">Monitor and categorize responses from outreach</p>
         </div>
       </div>
 
@@ -164,17 +164,11 @@ export default function ResponseStagePage() {
                 <tr key={athlete.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      {athlete.profile_pic_url ? (
-                        <img
-                          src={athlete.profile_pic_url}
-                          alt={athlete.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-                          {athlete.name[0]}
-                        </div>
-                      )}
+                      <AthleteAvatar
+                        name={athlete.name}
+                        profilePicUrl={athlete.profile_pic_url}
+                        size="md"
+                      />
                       <div>
                         <Link
                           href={`/athletes/${athlete.id}`}

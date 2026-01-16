@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import MessageCard from "@/components/MessageCard";
 import type { OutreachMessage } from "@/lib/supabase";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 type StatusFilter = "all" | "approved" | "sent" | "delivered" | "replied";
 
@@ -259,17 +260,11 @@ export default function SendQueuePage() {
                 <div className="flex items-start gap-4">
                   {/* Athlete Info */}
                   <div className="flex-shrink-0">
-                    {message.athletes?.profile_pic_url ? (
-                      <img
-                        src={message.athletes.profile_pic_url}
-                        alt={message.athletes.name}
-                        className="w-12 h-12 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-lg font-medium">
-                        {message.athletes?.name?.[0] || "?"}
-                      </div>
-                    )}
+                    <AthleteAvatar
+                      name={message.athletes?.name || "?"}
+                      profilePicUrl={message.athletes?.profile_pic_url}
+                      size="lg"
+                    />
                   </div>
 
                   {/* Content */}

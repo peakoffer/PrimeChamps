@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { Suspense, useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { PipelineStageNav } from "@/components/PipelineStageNav";
 
 interface Athlete {
   id: string;
@@ -192,7 +195,10 @@ const SPORT_REGION_PRESETS: Record<string, string[]> = {
   "historical": ["usa"],
 };
 
-export default function ResearchStagePage() {
+function ResearchStageContent() {
+  const searchParams = useSearchParams();
+  const sessionIdFromUrl = searchParams.get("session");
+
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -264,6 +270,24 @@ export default function ResearchStagePage() {
       }
     };
   }, []);
+
+  // Auto-expand session from URL param
+  useEffect(() => {
+    if (sessionIdFromUrl && researchLogs.length > 0) {
+      // Check if the session exists in our logs
+      const sessionExists = researchLogs.some(log => log.id === sessionIdFromUrl);
+      if (sessionExists) {
+        setExpandedLogId(sessionIdFromUrl);
+        // Scroll to the session after a brief delay
+        setTimeout(() => {
+          const element = document.getElementById(`research-log-${sessionIdFromUrl}`);
+          if (element) {
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }, 100);
+      }
+    }
+  }, [sessionIdFromUrl, researchLogs]);
 
   // Check for running research sessions in the database
   const checkForRunningResearch = async () => {
@@ -760,19 +784,17 @@ export default function ResearchStagePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Stage Navigation */}
+      <PipelineStageNav currentStage="research" />
+
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-800">
-            ← Pipeline
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <span className="text-3xl">🔍</span> Research
-            </h1>
-            <p className="text-gray-800">Discover and evaluate new prospects</p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <span className="text-3xl">🔍</span> Research
+          </h1>
+          <p className="text-gray-600">Discover and evaluate new prospects</p>
         </div>
         <button
           onClick={() => setShowConfigModal(true)}
@@ -938,7 +960,7 @@ export default function ResearchStagePage() {
             {researchLogs.map((log) => {
               const isRunning = log.status === "running" || log.status === "pending";
               return (
-              <div key={log.id} className={`hover:bg-gray-50 ${isRunning ? "bg-yellow-50/50" : ""}`}>
+              <div key={log.id} id={`research-log-${log.id}`} className={`hover:bg-gray-50 ${isRunning ? "bg-yellow-50/50" : ""} ${expandedLogId === log.id ? "ring-2 ring-purple-300 rounded-lg" : ""}`}>
                 {/* Log Header - Clickable */}
                 <button
                   onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
@@ -1158,17 +1180,11 @@ export default function ResearchStagePage() {
                 <tr key={athlete.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      {athlete.profile_pic_url ? (
-                        <img
-                          src={athlete.profile_pic_url}
-                          alt={athlete.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-                          {athlete.name[0]}
-                        </div>
-                      )}
+                      <AthleteAvatar
+                        name={athlete.name}
+                        profilePicUrl={athlete.profile_pic_url}
+                        size="md"
+                      />
                       <div>
                         <Link
                           href={`/athletes/${athlete.id}`}
@@ -1429,17 +1445,11 @@ export default function ResearchStagePage() {
                     <div className="flex items-start gap-4">
                       {/* Profile */}
                       <div className="flex-shrink-0">
-                        {candidate.profile_pic_url ? (
-                          <img
-                            src={candidate.profile_pic_url}
-                            alt={candidate.name}
-                            className="w-16 h-16 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center text-2xl text-purple-600">
-                            {candidate.name[0]}
-                          </div>
-                        )}
+                        <AthleteAvatar
+                          name={candidate.name}
+                          profilePicUrl={candidate.profile_pic_url}
+                          size="xl"
+                        />
                       </div>
 
                       {/* Info */}
@@ -1615,5 +1625,13 @@ export default function ResearchStagePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ResearchStagePage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-gray-600">Loading research...</div></div>}>
+      <ResearchStageContent />
+    </Suspense>
   );
 }

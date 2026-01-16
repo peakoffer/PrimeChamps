@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, type Athlete } from "@/lib/supabase";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 export default function AthletesPage() {
   const router = useRouter();
@@ -133,19 +134,11 @@ export default function AthletesPage() {
               >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
-                    {athlete.profile_pic_url ? (
-                      <img
-                        src={athlete.profile_pic_url}
-                        alt={athlete.name}
-                        className="flex-shrink-0 h-10 w-10 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                        <span className="text-gray-800 font-medium">
-                          {athlete.name.charAt(0)}
-                        </span>
-                      </div>
-                    )}
+                    <AthleteAvatar
+                      name={athlete.name}
+                      profilePicUrl={athlete.profile_pic_url}
+                      size="md"
+                    />
                     <div className="ml-4">
                       <div className="text-sm font-medium text-gray-900">{athlete.name}</div>
                       <div className="text-sm text-gray-800">{athlete.email || "No email"}</div>

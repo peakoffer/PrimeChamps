@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { PipelineStageNav } from "@/components/PipelineStageNav";
 import ContractModal from "@/components/ContractModal";
 import ContractCard from "@/components/ContractCard";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -112,21 +114,19 @@ export default function ContractStagePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Stage Navigation */}
+      <PipelineStageNav currentStage="contract" />
+
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/pipeline" className="text-gray-800 hover:text-gray-900">
-            ← Pipeline
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <span className="text-3xl">📝</span> Contracts
-            </h1>
-            <p className="text-gray-800">
-              Finalize deals and track signed athletes
-            </p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <span className="text-3xl">📝</span> Contracts
+          </h1>
+          <p className="text-gray-600">
+            Finalize deals and track signed athletes
+          </p>
         </div>
       </div>
 
@@ -261,17 +261,11 @@ export default function ContractStagePage() {
                 className="bg-white rounded-lg shadow border-2 border-green-200 p-4"
               >
                 <div className="flex items-start gap-4">
-                  {athlete.profile_pic_url ? (
-                    <img
-                      src={athlete.profile_pic_url}
-                      alt={athlete.name}
-                      className="w-16 h-16 rounded-full object-cover border-4 border-green-100"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center text-2xl text-green-600">
-                      {athlete.name[0]}
-                    </div>
-                  )}
+                  <AthleteAvatar
+                    name={athlete.name}
+                    profilePicUrl={athlete.profile_pic_url}
+                    size="xl"
+                  />
                   <div className="flex-1">
                     <Link
                       href={`/athletes/${athlete.id}`}
@@ -338,17 +332,11 @@ export default function ContractStagePage() {
                 key={contract.id}
                 className="flex items-center gap-2 bg-green-50 rounded-full px-3 py-1.5"
               >
-                {contract.athletes?.profile_pic_url ? (
-                  <img
-                    src={contract.athletes.profile_pic_url}
-                    alt={contract.athletes.name}
-                    className="w-6 h-6 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-6 h-6 rounded-full bg-green-200 flex items-center justify-center text-xs text-green-700">
-                    {contract.athletes?.name?.[0]}
-                  </div>
-                )}
+                <AthleteAvatar
+                  name={contract.athletes?.name || "?"}
+                  profilePicUrl={contract.athletes?.profile_pic_url}
+                  size="xs"
+                />
                 <span className="text-sm font-medium text-green-800">
                   {contract.athletes?.name}
                 </span>

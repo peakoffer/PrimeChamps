@@ -7,6 +7,7 @@ import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";
 import BulkActionBar from "@/components/BulkActionBar";
 import ImportModal from "@/components/ImportModal";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Athlete {
   id: string;
@@ -77,6 +78,11 @@ export default function PipelinePage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
 
+  // Expandable research sessions state
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [sessionAthletes, setSessionAthletes] = useState<Record<string, Athlete[]>>({});
+  const [loadingSession, setLoadingSession] = useState<string | null>(null);
+
   // Helper to get column index for movement validation
   const getColumnIndex = (columnId: string): number => {
     return STAGES.findIndex((s) => s.id === columnId);
@@ -130,6 +136,46 @@ export default function PipelinePage() {
   useEffect(() => {
     fetchPipeline();
   }, [fetchPipeline]);
+
+  // Toggle research session expansion and fetch athletes
+  const toggleSessionExpand = async (sessionId: string) => {
+    if (expandedSessions.has(sessionId)) {
+      // Collapse
+      setExpandedSessions((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    } else {
+      // Expand and fetch athletes if not already loaded
+      setExpandedSessions((prev) => new Set(prev).add(sessionId));
+
+      if (!sessionAthletes[sessionId]) {
+        setLoadingSession(sessionId);
+        try {
+          const response = await fetch(`/api/research/sessions/${sessionId}/athletes`);
+          const data = await response.json();
+          setSessionAthletes((prev) => ({
+            ...prev,
+            [sessionId]: data.athletes || [],
+          }));
+        } catch (error) {
+          console.error("Error fetching session athletes:", error);
+          setSessionAthletes((prev) => ({
+            ...prev,
+            [sessionId]: [],
+          }));
+        } finally {
+          setLoadingSession(null);
+        }
+      }
+    }
+  };
+
+  // Handle double-click to navigate to specific research session
+  const handleSessionDoubleClick = (sessionId: string) => {
+    router.push(`/pipeline/research?session=${sessionId}`);
+  };
 
   const handleDragStart = (e: DragEvent, athlete: Athlete) => {
     setDraggedAthlete(athlete);
@@ -437,6 +483,43 @@ export default function PipelinePage() {
         </div>
       </div>
 
+      {/* Stage Conversion */}
+      {totalProspects > 0 && (
+        <div className="bg-white shadow rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            {columns.slice(0, -1).map((col, index) => {
+              const nextCol = columns[index + 1];
+              const currentCount = col.id === "research"
+                ? (col.researchSessions?.length || 0)
+                : col.athletes.length;
+              const nextCount = nextCol.id === "research"
+                ? (nextCol.researchSessions?.length || 0)
+                : nextCol.athletes.length;
+              const rate = currentCount > 0
+                ? Math.round((nextCount / currentCount) * 100)
+                : 0;
+              return (
+                <div key={col.id} className="flex items-center">
+                  <div className="text-center px-2">
+                    <div className={`text-lg font-bold ${
+                      rate >= 50 ? "text-green-600" : rate >= 25 ? "text-yellow-600" : "text-gray-500"
+                    }`}>
+                      {rate}%
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {col.name} → {nextCol.name}
+                    </div>
+                  </div>
+                  {index < columns.length - 2 && (
+                    <div className="mx-2 text-gray-300">|</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Empty State */}
       {totalProspects === 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
@@ -511,30 +594,99 @@ export default function PipelinePage() {
                     No research sessions
                   </div>
                 ) : (
-                  column.researchSessions.map((session) => (
-                    <div
-                      key={session.id}
-                      onClick={() => router.push("/pipeline/research")}
-                      className="bg-white rounded-lg shadow-sm border p-3 cursor-pointer hover:shadow-md hover:border-purple-300 transition-all"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${
-                          session.status === "completed" ? "bg-green-500" :
-                          session.status === "running" ? "bg-yellow-500 animate-pulse" :
-                          "bg-gray-400"
-                        }`} />
-                        <span className="font-medium text-gray-900 text-sm capitalize">
-                          {session.config_used?.sportFocus || "Research"}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-xs text-gray-800">
-                        <div className="flex justify-between">
-                          <span>{session.stats?.returned || 0} candidates</span>
-                          <span>{new Date(session.created_at).toLocaleDateString()}</span>
+                  column.researchSessions.map((session) => {
+                    const isExpanded = expandedSessions.has(session.id);
+                    const athletes = sessionAthletes[session.id] || [];
+                    const isLoading = loadingSession === session.id;
+
+                    return (
+                      <div key={session.id} className="space-y-1">
+                        {/* Session Header - Click to expand, Double-click to navigate */}
+                        <div
+                          onClick={() => toggleSessionExpand(session.id)}
+                          onDoubleClick={() => handleSessionDoubleClick(session.id)}
+                          className={`bg-white rounded-lg shadow-sm border p-3 cursor-pointer transition-all ${
+                            isExpanded
+                              ? "border-purple-400 bg-purple-50 ring-1 ring-purple-200"
+                              : "hover:shadow-md hover:border-purple-300"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            {/* Expand/Collapse Arrow */}
+                            <svg
+                              className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                            <span className={`w-2 h-2 rounded-full ${
+                              session.status === "completed" ? "bg-green-500" :
+                              session.status === "running" ? "bg-yellow-500 animate-pulse" :
+                              "bg-gray-400"
+                            }`} />
+                            <span className="font-medium text-gray-900 text-sm capitalize flex-1">
+                              {session.config_used?.sportFocus || "Research"}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-xs text-gray-800 pl-6">
+                            <div className="flex justify-between">
+                              <span>{session.stats?.returned || 0} candidates</span>
+                              <span>{new Date(session.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
                         </div>
+
+                        {/* Expanded Athletes List - View Only (no drag) */}
+                        {isExpanded && (
+                          <div className="ml-4 space-y-1 border-l-2 border-purple-200 pl-2">
+                            {isLoading ? (
+                              <div className="text-xs text-gray-500 py-2 text-center">Loading athletes...</div>
+                            ) : athletes.length === 0 ? (
+                              <div className="text-xs text-gray-500 py-2 text-center">No athletes in this session</div>
+                            ) : (
+                              athletes.map((athlete) => (
+                                <div
+                                  key={athlete.id}
+                                  onClick={() => router.push(`/athletes/${athlete.id}`)}
+                                  className="bg-white rounded-lg shadow-sm border p-2 cursor-pointer transition-all hover:shadow-md hover:border-purple-300"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <AthleteAvatar
+                                      name={athlete.name}
+                                      profilePicUrl={athlete.profile_pic_url}
+                                      size="sm"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium text-gray-900 text-xs truncate">
+                                        {athlete.name}
+                                      </div>
+                                    </div>
+                                    {/* Key Metrics */}
+                                    <div className="flex items-center gap-2 text-xs flex-shrink-0">
+                                      {athlete.follower_count && (
+                                        <span className="text-gray-700 font-medium">
+                                          {athlete.follower_count >= 1000000
+                                            ? `${(athlete.follower_count / 1000000).toFixed(1)}M`
+                                            : `${(athlete.follower_count / 1000).toFixed(0)}K`}
+                                        </span>
+                                      )}
+                                      {(athlete as Athlete & { engagement_rate?: number }).engagement_rate && (
+                                        <span className="text-green-600 font-medium">
+                                          {((athlete as Athlete & { engagement_rate?: number }).engagement_rate! * 100).toFixed(1)}%
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )
               ) : (
                 /* Athletes */
@@ -573,18 +725,11 @@ export default function PipelinePage() {
                               className="w-4 h-4 text-blue-600 rounded flex-shrink-0"
                             />
                           )}
-                          {athlete.profile_pic_url ? (
-                            <img
-                              src={athlete.profile_pic_url}
-                              alt={athlete.name}
-                              className="w-10 h-10 rounded-full object-cover"
-                              draggable={false}
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-800 text-sm">
-                              {athlete.name?.[0] || "?"}
-                            </div>
-                          )}
+                          <AthleteAvatar
+                            name={athlete.name}
+                            profilePicUrl={athlete.profile_pic_url}
+                            size="md"
+                          />
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-gray-900 truncate">
                               {athlete.name}
@@ -627,33 +772,6 @@ export default function PipelinePage() {
           );
         })}
       </div>
-
-      {/* Conversion Metrics */}
-      {totalProspects > 0 && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Stage Conversion</h2>
-          <div className="grid grid-cols-5 gap-4">
-            {columns.slice(0, -1).map((col, index) => {
-              const nextCol = columns[index + 1];
-              const rate = col.athletes.length > 0
-                ? Math.round((nextCol.athletes.length / col.athletes.length) * 100)
-                : 0;
-              return (
-                <div key={col.id} className="text-center">
-                  <div className="text-xs text-gray-800 mb-1">
-                    {col.name} → {nextCol.name}
-                  </div>
-                  <div className={`text-xl font-bold ${
-                    rate >= 50 ? "text-green-600" : rate >= 25 ? "text-yellow-600" : "text-gray-800"
-                  }`}>
-                    {rate}%
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Comprehensive Approval Modal */}
       {selectedAthlete && (
