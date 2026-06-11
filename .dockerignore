@@ -1,0 +1,18 @@
+# Keep the backend image small — exclude the dashboard, venvs, and junk.
+dashboard/
+.venv/
+venv/
+**/__pycache__/
+*.pyc
+.git/
+.github/
+screenshots/
+data/
+docs/
+*.md
+.env
+.env.*
+!.env.example
+.mcp.json
+.claude/
+node_modules/
