@@ -111,7 +111,10 @@ export async function POST(request: NextRequest) {
       const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
       const aiResponse = await fetch(`${backendUrl}/outreach/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.BACKEND_API_KEY ? { "X-API-Key": process.env.BACKEND_API_KEY } : {}),
+        },
         body: JSON.stringify({
           athlete: {
             name: athlete.name,

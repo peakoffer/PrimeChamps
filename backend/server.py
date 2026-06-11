@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import os
+import secrets
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
@@ -9,7 +11,8 @@ import uuid
 
 logger = logging.getLogger("prime_champs.server")
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -47,14 +50,47 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS for Next.js dashboard
+# CORS for Next.js dashboard. Override allowed origins in prod via
+# BACKEND_CORS_ORIGINS (comma-separated). CORS only constrains browsers — the
+# API-key check below is what actually protects the API from scripts/curl.
+_cors_origins = os.environ.get(
+    "BACKEND_CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- API key auth -----------------------------------------------------------
+# The dashboard's server-side routes call this API with an X-API-Key header.
+# When BACKEND_API_KEY is set, every request must present it (except liveness
+# probes and CORS preflight). When unset, the API runs OPEN and logs a loud
+# warning — set the key (and bind to 127.0.0.1) for any non-localhost use.
+BACKEND_API_KEY = os.environ.get("BACKEND_API_KEY", "").strip()
+_OPEN_PATHS = {"/health", "/", "/docs", "/openapi.json", "/redoc"}
+
+if not BACKEND_API_KEY:
+    logger.warning(
+        "BACKEND_API_KEY is not set — the agent API is UNAUTHENTICATED. "
+        "Set it and bind to 127.0.0.1 before exposing this server."
+    )
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    if (
+        BACKEND_API_KEY
+        and request.method != "OPTIONS"
+        and request.url.path not in _OPEN_PATHS
+    ):
+        provided = request.headers.get("x-api-key", "")
+        if not secrets.compare_digest(provided, BACKEND_API_KEY):
+            return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
+    return await call_next(request)
+
 
 # Include routers
 app.include_router(instagram_router)

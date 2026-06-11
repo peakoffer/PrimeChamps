@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { setupRouteDisabled } from "@/lib/setup-guard";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -8,6 +9,8 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // POST - Create research tables if they don't exist
 export async function POST() {
+  const disabled = setupRouteDisabled();
+  if (disabled) return disabled;
   try {
     const results: string[] = [];
     const errors: string[] = [];
