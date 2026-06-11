@@ -203,39 +203,109 @@ Return ONLY the hook text, nothing else.
             # Fallback to generic hook
             return f"your work in {athlete.get('sport', 'athletics')}"
 
+    def _get_setting(self, key: str, default: Any) -> Any:
+        """Read a value from outreach_settings, falling back to a default."""
+        try:
+            res = self.db.client.table("outreach_settings").select("value").eq(
+                "key", key
+            ).single().execute()
+            if res.data is not None and res.data.get("value") is not None:
+                return res.data["value"]
+        except Exception:
+            pass
+        return default
+
+    def _dms_sent_today(self) -> int:
+        """Count outreach messages already marked sent in the last 24h."""
+        from datetime import datetime, timedelta
+        since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        try:
+            res = self.db.client.table("outreach_messages").select(
+                "id", count="exact"
+            ).eq("status", OutreachStatus.SENT.value).gte("sent_at", since).execute()
+            return res.count or 0
+        except Exception:
+            return 0
+
     async def send_approved_messages(self, limit: int = 20) -> Dict[str, Any]:
         """
-        Report which approved messages are READY to send.
+        Send approved outreach messages via Instagram DM.
 
-        Automated sending is intentionally NOT wired here:
-        - Instagram DM automation carries account-ban risk and is a deliberate
-          product deferral (see CLAUDE.md).
-        - Email send exists on the dashboard tier (Resend); routing backend
-          sends through it is a separate, signed-off task.
+        Guardrails (all enforced before any send):
+        - outreach_settings.pause_all_outreach must be falsy
+        - Instagram kill switch must be off (checked inside send_dm)
+        - daily_dm_limit caps sends per rolling 24h
+        - hourly rate limit + randomized delay (inside send_dm)
 
-        This method therefore does NOT send and does NOT mark anything sent —
-        it returns an honest inventory so the caller/UI can surface "N ready to
-        send" without claiming athletes were contacted when they weren't.
+        A message is marked SENT only after Instagram confirms delivery; failures
+        leave it APPROVED so it is retried next run.
         """
+        from datetime import datetime
+
+        if self._get_setting("pause_all_outreach", False) in (True, "true"):
+            self.log_info("Outreach paused via outreach_settings.pause_all_outreach")
+            return {"sent": 0, "skipped": 0, "failed": 0, "paused": True}
+
+        daily_limit = int(self._get_setting("daily_dm_limit", 50))
+        already_today = self._dms_sent_today()
+        remaining_today = max(0, daily_limit - already_today)
+        if remaining_today == 0:
+            self.log_info(f"Daily DM limit reached ({already_today}/{daily_limit})")
+            return {"sent": 0, "skipped": 0, "failed": 0, "daily_limit_reached": True}
+
+        send_budget = min(limit, remaining_today)
+
         approved = self.db.client.table("outreach_messages").select("*, athletes(*)").eq(
             "approval_status", ApprovalStatus.APPROVED.value
         ).eq(
             "status", OutreachStatus.APPROVED.value
-        ).limit(limit).execute()
+        ).limit(send_budget).execute()
 
         rows = approved.data or []
-        with_email = sum(1 for m in rows if (m.get("athletes") or {}).get("email"))
+        if not rows:
+            self.log_info("No approved messages to send")
+            return {"sent": 0, "skipped": 0, "failed": 0}
 
-        self.log_info(
-            f"{len(rows)} approved message(s) ready to send "
-            f"({with_email} have an email address). Sending not yet wired."
-        )
+        # Imported here to avoid a hard dependency at module load.
+        from backend.sources.instagram_dm import instagram_dm
 
-        return {
-            "sent": 0,
-            "ready_to_send": len(rows),
-            "ready_via_email": with_email,
-            "ready_via_dm_only": len(rows) - with_email,
-            "sending_implemented": False,
-            "note": "Sending is not automated. Approve channel + sign-off required before wiring.",
-        }
+        results = {"sent": 0, "skipped": 0, "failed": 0}
+
+        for message in rows:
+            athlete = message.get("athletes") or {}
+            handle = athlete.get("instagram_handle")
+            if not handle:
+                self.log_info(f"Skipping {athlete.get('name')}: no instagram_handle")
+                results["skipped"] += 1
+                continue
+
+            send_result = await instagram_dm.send_dm(handle, message["message_content"])
+
+            if send_result.get("success"):
+                self.db.client.table("outreach_messages").update({
+                    "status": OutreachStatus.SENT.value,
+                    "sent_at": datetime.utcnow().isoformat(),
+                }).eq("id", message["id"]).execute()
+                try:
+                    self.db.log_event(
+                        event_type="outreach_sent",
+                        athlete_id=athlete.get("id"),
+                        metadata={"channel": "instagram_dm", "message_id": message["id"]},
+                    )
+                except Exception:
+                    pass
+                results["sent"] += 1
+                self.log_info(f"Sent DM to {athlete.get('name')} (@{handle})")
+            elif send_result.get("error") == "kill_switch_active":
+                self.log_info("Kill switch active — stopping send run")
+                break
+            elif send_result.get("error") in ("rate_limited",):
+                self.log_info("Hourly rate limit hit — stopping send run")
+                break
+            else:
+                self.log_error(
+                    f"Failed to DM {athlete.get('name')}: {send_result.get('error')}"
+                )
+                results["failed"] += 1
+
+        return results

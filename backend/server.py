@@ -39,7 +39,23 @@ def update_job_progress(job_id: str, current: int, total: int, message: str = ""
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     print("Prime Champs Agent Server starting...")
+    # Auto-start the autonomous pipeline scheduler when enabled. Survives here
+    # so the loop runs without a human POSTing a start endpoint after restart.
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    if pipeline_scheduler.autorun_enabled():
+        try:
+            res = await pipeline_scheduler.start()
+            print(f"Pipeline scheduler: {res.get('message')}")
+        except Exception as e:
+            logger.error("Failed to auto-start pipeline scheduler: %s", e)
+    else:
+        print("Pipeline scheduler autorun disabled (set PIPELINE_AUTORUN_ENABLED=true)")
     yield
+    try:
+        from backend.services.pipeline_scheduler import pipeline_scheduler
+        await pipeline_scheduler.stop()
+    except Exception:
+        pass
     print("Prime Champs Agent Server shutting down...")
 
 
@@ -718,6 +734,37 @@ async def get_stats():
         }
 
 
+# ==================== Pipeline scheduler control ====================
+
+@app.get("/pipeline/scheduler/status")
+async def pipeline_scheduler_status():
+    """Status of the autonomous pipeline scheduler."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.get_status()
+
+
+@app.post("/pipeline/scheduler/start")
+async def pipeline_scheduler_start():
+    """Start the autonomous pipeline scheduler."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.start()
+
+
+@app.post("/pipeline/scheduler/stop")
+async def pipeline_scheduler_stop():
+    """Stop the autonomous pipeline scheduler."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.stop()
+
+
+@app.post("/pipeline/scheduler/run-once")
+async def pipeline_scheduler_run_once():
+    """Run a single pipeline tick on demand (enrich → score → generate → send)."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.trigger_once()
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Default to localhost; the API key check + reverse proxy handle exposure.
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=8000)
