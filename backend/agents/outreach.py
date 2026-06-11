@@ -85,20 +85,42 @@ Prime Champs Team"""
         return results
 
     def _get_outreach_candidates(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get athletes that are ready for outreach."""
-        # Get enriched athletes
+        """Get enriched athletes that do NOT already have an outreach message."""
         from backend.database import EnrichmentStatus
-        enriched = self.db.list_athletes(enrichment_status=EnrichmentStatus.ENRICHED, limit=limit * 2)
 
-        # Filter out those already contacted
-        # (In production, would join with outreach_messages table)
-        candidates = []
-        for athlete in enriched:
-            # Check if already has outreach message
-            # This is simplified - real implementation would be a proper query
-            candidates.append(athlete)
-            if len(candidates) >= limit:
+        # Set of athletes that already have a message of any status. Pulled in
+        # one query rather than per-athlete to avoid N+1.
+        contacted_ids = set()
+        try:
+            existing = (
+                self.db.client.table("outreach_messages")
+                .select("athlete_id")
+                .execute()
+            )
+            contacted_ids = {
+                row["athlete_id"] for row in (existing.data or []) if row.get("athlete_id")
+            }
+        except Exception as e:
+            self.log_error(f"Could not load already-contacted athletes: {e}")
+            # Fail safe: if we can't tell who was contacted, don't message anyone.
+            return []
+
+        candidates: List[Dict[str, Any]] = []
+        offset = 0
+        page = max(limit * 2, 50)
+        # Page through enriched athletes until we collect `limit` uncontacted ones.
+        while len(candidates) < limit:
+            enriched = self.db.list_athletes(
+                enrichment_status=EnrichmentStatus.ENRICHED, limit=page, offset=offset
+            )
+            if not enriched:
                 break
+            for athlete in enriched:
+                if athlete["id"] not in contacted_ids:
+                    candidates.append(athlete)
+                    if len(candidates) >= limit:
+                        break
+            offset += page
 
         return candidates
 
@@ -183,43 +205,37 @@ Return ONLY the hook text, nothing else.
 
     async def send_approved_messages(self, limit: int = 20) -> Dict[str, Any]:
         """
-        Send messages that have been approved.
+        Report which approved messages are READY to send.
 
-        NOTE: This is a placeholder. Real implementation needs:
-        - Instagram DM automation (careful with rate limiting)
-        - Email sending for those with emails
-        - Proper error handling and retry logic
+        Automated sending is intentionally NOT wired here:
+        - Instagram DM automation carries account-ban risk and is a deliberate
+          product deferral (see CLAUDE.md).
+        - Email send exists on the dashboard tier (Resend); routing backend
+          sends through it is a separate, signed-off task.
 
-        Returns:
-            Dict with send results
+        This method therefore does NOT send and does NOT mark anything sent —
+        it returns an honest inventory so the caller/UI can surface "N ready to
+        send" without claiming athletes were contacted when they weren't.
         """
-        # Get approved messages
         approved = self.db.client.table("outreach_messages").select("*, athletes(*)").eq(
             "approval_status", ApprovalStatus.APPROVED.value
         ).eq(
             "status", OutreachStatus.APPROVED.value
         ).limit(limit).execute()
 
-        if not approved.data:
-            self.log_info("No approved messages to send")
-            return {"sent": 0}
+        rows = approved.data or []
+        with_email = sum(1 for m in rows if (m.get("athletes") or {}).get("email"))
 
-        results = {"sent": 0, "failed": 0}
+        self.log_info(
+            f"{len(rows)} approved message(s) ready to send "
+            f"({with_email} have an email address). Sending not yet wired."
+        )
 
-        for message in approved.data:
-            try:
-                # Placeholder for actual sending
-                # Real implementation would:
-                # 1. Send via Instagram DM API/automation
-                # 2. Or send via email if available
-                # 3. Update status to SENT
-                # 4. Log the event
-
-                self.log_info(f"Would send message to {message['athletes']['name']} (sending not implemented)")
-                results["sent"] += 1
-
-            except Exception as e:
-                self.log_error(f"Failed to send message {message['id']}: {str(e)}")
-                results["failed"] += 1
-
-        return results
+        return {
+            "sent": 0,
+            "ready_to_send": len(rows),
+            "ready_via_email": with_email,
+            "ready_via_dm_only": len(rows) - with_email,
+            "sending_implemented": False,
+            "note": "Sending is not automated. Approve channel + sign-off required before wiring.",
+        }
