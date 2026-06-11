@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase, type Athlete, type OutreachMessage } from "@/lib/supabase";
 import { formatNumber, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
@@ -183,9 +184,9 @@ export default function Dashboard() {
           </div>
         )}
         <div className="px-4 py-3 border-t">
-          <a href="/athletes" className="text-sm text-blue-600 hover:text-blue-800">
+          <Link href="/athletes" className="text-sm text-blue-600 hover:text-blue-800">
             View all athletes →
-          </a>
+          </Link>
         </div>
       </div>
     </div>

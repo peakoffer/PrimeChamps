@@ -138,8 +138,10 @@ source .venv/bin/activate
 # Type check
 cd backend && python -m mypy . --ignore-missing-imports
 
-# Start server
-cd backend && python -m uvicorn server:app --reload
+# Start server — run from the PROJECT ROOT, not backend/.
+# Modules use absolute `backend.*` imports, so `cd backend && uvicorn server:app`
+# fails with ModuleNotFoundError. Stay at the root:
+python -m uvicorn backend.server:app --reload --port 8000
 # Visit http://localhost:8000/docs for API docs
 ```
 

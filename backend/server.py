@@ -1,10 +1,13 @@
 """FastAPI server for Prime Champs agent execution."""
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 import uuid
+
+logger = logging.getLogger("prime_champs.server")
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -492,8 +495,11 @@ async def run_bulk_enrich_job(job_id: str, source: str, limit: int, historical: 
                             "raw_data": data,
                         }, on_conflict="athlete_id,data_source").execute()
                         updated += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(
+                            "Failed to upsert onlyfans enrichment for athlete %s: %s",
+                            athlete_id, e,
+                        )
 
                     # Update progress
                     jobs[job_id]["progress"] = {
@@ -563,8 +569,11 @@ async def enrich_single(request: SingleEnrichRequest):
                         "data_source": "instagram",
                         "raw_data": data,
                     }, on_conflict="athlete_id,data_source").execute()
-                except Exception:
-                    pass  # Table might not exist
+                except Exception as e:
+                    logger.error(
+                        "Failed to upsert instagram enrichment for athlete %s: %s",
+                        request.athlete_id, e,
+                    )
 
                 enrichment_result = data
 
@@ -598,8 +607,11 @@ async def enrich_single(request: SingleEnrichRequest):
                         "data_source": "onlyfans",
                         "raw_data": data,
                     }, on_conflict="athlete_id,data_source").execute()
-                except Exception:
-                    pass  # Table might not exist
+                except Exception as e:
+                    logger.error(
+                        "Failed to upsert onlyfans enrichment for athlete %s: %s",
+                        request.athlete_id, e,
+                    )
 
                 enrichment_result = data
             else:

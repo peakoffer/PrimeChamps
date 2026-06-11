@@ -1,42 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "prime-champs-secret-key-change-in-production"
-);
+// No literal fallback — an unset secret must break auth loudly, not silently
+// accept a publicly-known key that lets anyone forge a session.
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("JWT_SECRET is missing or too short (min 32 chars).");
+  }
+  return new TextEncoder().encode(secret);
+}
 
 const SESSION_COOKIE = "prime-champs-session";
 
-// Routes that don't require authentication
-const PUBLIC_ROUTES = ["/login", "/api/auth/login"];
+// Routes reachable without a session.
+// - /login, /api/auth/login: the entry point itself
+// - /api/email/webhook: external caller (Resend), verified by its own HMAC signature
+const PUBLIC_ROUTES = ["/login", "/api/auth/login", "/api/email/webhook"];
+
+function isPublic(pathname: string): boolean {
+  return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + "/"));
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const isApi = pathname.startsWith("/api/");
 
   // Allow public routes
-  if (PUBLIC_ROUTES.some((route) => pathname.startsWith(route))) {
+  if (isPublic(pathname)) {
     return NextResponse.next();
   }
 
-  // Allow API routes (they handle their own auth if needed)
-  if (pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
-    return NextResponse.next();
-  }
+  const unauthorized = () =>
+    isApi
+      ? NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      : NextResponse.redirect(new URL("/login", request.url));
 
   // Check for session cookie
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-
   if (!token) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return unauthorized();
   }
 
   try {
-    // Verify JWT
-    await jwtVerify(token, JWT_SECRET);
+    await jwtVerify(token, getJwtSecret());
     return NextResponse.next();
   } catch {
-    // Invalid token, redirect to login
-    const response = NextResponse.redirect(new URL("/login", request.url));
+    const response = unauthorized();
     response.cookies.delete(SESSION_COOKIE);
     return response;
   }
