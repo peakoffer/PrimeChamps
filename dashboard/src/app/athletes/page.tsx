@@ -5,6 +5,28 @@ import { useRouter } from "next/navigation";
 import { supabase, type Athlete } from "@/lib/supabase";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+
+type SortKey = "followers" | "name" | "created_at";
+type SortDirection = "asc" | "desc";
+
+function SortIcon({
+  active,
+  direction,
+}: {
+  active: boolean;
+  direction: SortDirection;
+}) {
+  if (!active) {
+    return <ArrowUpDown className="h-4 w-4 text-gray-400" aria-hidden="true" />;
+  }
+
+  return direction === "asc" ? (
+    <ArrowUp className="h-4 w-4 text-blue-600" aria-hidden="true" />
+  ) : (
+    <ArrowDown className="h-4 w-4 text-blue-600" aria-hidden="true" />
+  );
+}
 
 export default function AthletesPage() {
   const router = useRouter();
@@ -12,7 +34,8 @@ export default function AthletesPage() {
   const [loading, setLoading] = useState(true);
   const [sportFilter, setSportFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
-  const [sortBy, setSortBy] = useState<string>("followers");
+  const [sortKey, setSortKey] = useState<SortKey>("followers");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sports, setSports] = useState<string[]>([]);
 
   useEffect(() => {
@@ -21,12 +44,15 @@ export default function AthletesPage() {
         let query = supabase.from("athletes").select("*");
 
         // Apply sorting
-        if (sortBy === "followers") {
-          query = query.order("follower_count", { ascending: false, nullsFirst: false });
-        } else if (sortBy === "name") {
-          query = query.order("name", { ascending: true });
+        if (sortKey === "followers") {
+          query = query.order("follower_count", {
+            ascending: sortDirection === "asc",
+            nullsFirst: false,
+          });
+        } else if (sortKey === "name") {
+          query = query.order("name", { ascending: sortDirection === "asc" });
         } else {
-          query = query.order("created_at", { ascending: false });
+          query = query.order("created_at", { ascending: sortDirection === "asc" });
         }
 
         if (sportFilter) {
@@ -52,7 +78,25 @@ export default function AthletesPage() {
     }
 
     fetchAthletes();
-  }, [sportFilter, statusFilter, sortBy]);
+  }, [sportFilter, statusFilter, sortKey, sortDirection]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSortKey(key);
+    setSortDirection(key === "name" ? "asc" : "desc");
+  };
+
+  const sortSelectValue = `${sortKey}:${sortDirection}`;
+
+  const handleSortSelect = (value: string) => {
+    const [key, direction] = value.split(":") as [SortKey, SortDirection];
+    setSortKey(key);
+    setSortDirection(direction);
+  };
 
   if (loading) {
     return (
@@ -90,13 +134,17 @@ export default function AthletesPage() {
             <option value="failed">Failed</option>
           </select>
           <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
+            value={sortSelectValue}
+            onChange={(e) => handleSortSelect(e.target.value)}
             className="border rounded-md px-3 py-2 text-sm"
+            aria-label="Sort athletes"
           >
-            <option value="followers">Sort by Followers</option>
-            <option value="name">Sort by Name</option>
-            <option value="recent">Sort by Recent</option>
+            <option value="followers:desc">Followers: High to Low</option>
+            <option value="followers:asc">Followers: Low to High</option>
+            <option value="created_at:desc">Added: Newest First</option>
+            <option value="created_at:asc">Added: Oldest First</option>
+            <option value="name:asc">Name: A to Z</option>
+            <option value="name:desc">Name: Z to A</option>
           </select>
         </div>
       </div>
@@ -106,7 +154,14 @@ export default function AthletesPage() {
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
-                Athlete
+                <button
+                  type="button"
+                  onClick={() => handleSort("name")}
+                  className="flex items-center gap-2 hover:text-blue-700"
+                >
+                  Athlete
+                  <SortIcon active={sortKey === "name"} direction={sortDirection} />
+                </button>
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
                 Sport
@@ -114,14 +169,34 @@ export default function AthletesPage() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
                 Instagram
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
-                Followers
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider"
+                aria-sort={sortKey === "followers" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSort("followers")}
+                  className="flex items-center gap-2 hover:text-blue-700"
+                >
+                  Followers
+                  <SortIcon active={sortKey === "followers"} direction={sortDirection} />
+                </button>
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
-                Added
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider"
+                aria-sort={sortKey === "created_at" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSort("created_at")}
+                  className="flex items-center gap-2 hover:text-blue-700"
+                >
+                  Added
+                  <SortIcon active={sortKey === "created_at"} direction={sortDirection} />
+                </button>
               </th>
             </tr>
           </thead>

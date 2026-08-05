@@ -38,8 +38,10 @@ export default function NavBar() {
   const navLinks = [
     { href: "/", label: "Dashboard" },
     { href: "/pipeline", label: "Pipeline" },
+    { href: "/inbox", label: "Inbox" },
     { href: "/historical", label: "Historical" },
     { href: "/analytics", label: "Analytics" },
+    { href: "/connections", label: "Connections" },
   ];
 
   return (

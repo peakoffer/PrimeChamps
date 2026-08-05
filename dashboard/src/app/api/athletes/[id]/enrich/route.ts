@@ -1,11 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  isEnrichmentSource,
+  runAthleteEnrichment,
+  type EnrichmentProviderResult,
+  type EnrichmentSource,
+} from "@/lib/enrichment-providers";
 
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+async function persistEnrichmentResult(
+  athleteId: string,
+  source: EnrichmentSource,
+  result: EnrichmentProviderResult
+) {
+  const now = new Date();
+  const expiryDays = source === "google" || source === "tiktok" || source === "instagram" ? 7 : 30;
+  const expiresAt = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
+  const { error } = await supabase.from("athlete_enrichment_sources").upsert(
+    {
+      athlete_id: athleteId,
+      source,
+      status: result.status,
+      data: result.data,
+      fetched_at: result.status === "not_configured" ? null : now.toISOString(),
+      expires_at: result.status === "not_configured" ? null : expiresAt.toISOString(),
+      last_error: null,
+    },
+    { onConflict: "athlete_id,source" }
+  );
+
+  if (error) throw error;
+}
 
 // Helper to wait
 function sleep(ms: number) {
@@ -365,6 +395,25 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
   return fullProfile;
 }
 
+// GET - Return the latest structured enrichment results for an athlete.
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const { data, error } = await supabase
+    .from("athlete_enrichment_sources")
+    .select("source,status,data,fetched_at,expires_at,last_error")
+    .eq("athlete_id", id)
+    .order("source");
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ sources: data || [] });
+}
+
 // POST - Enrich a single athlete from a specific source
 export async function POST(
   request: NextRequest,
@@ -375,8 +424,8 @@ export async function POST(
     const body = await request.json();
     const { source } = body;
 
-    if (!source) {
-      return NextResponse.json({ error: "Missing source parameter" }, { status: 400 });
+    if (!isEnrichmentSource(source)) {
+      return NextResponse.json({ error: "Invalid or missing source parameter" }, { status: 400 });
     }
 
     // Fetch the athlete first
@@ -403,7 +452,7 @@ export async function POST(
       }
 
       // Build comprehensive IG_DATA JSON
-      const igDataJson = JSON.stringify({
+      const storedInstagramData = {
         // Basic
         ig_id: igData.id,
         username: igData.username,
@@ -456,7 +505,8 @@ export async function POST(
 
         // Metadata
         scraped_at: new Date().toISOString(),
-      });
+      };
+      const igDataJson = JSON.stringify(storedInstagramData);
 
       // Remove old IG_DATA if present
       const existingNotes = athlete.notes || "";
@@ -505,6 +555,12 @@ export async function POST(
         }
       }
 
+      await persistEnrichmentResult(id, "instagram", {
+        status: "complete",
+        data: storedInstagramData,
+        message: `Updated Instagram profile for @${igData.username}.`,
+      });
+
       return NextResponse.json({
         success: true,
         data: {
@@ -537,34 +593,32 @@ export async function POST(
       });
     }
 
-    if (source === "google" || source === "wikipedia") {
-      return NextResponse.json({
-        success: true,
-        data: {
-          message: `${source} enrichment coming soon. Data from research agent is already applied.`,
-        },
-      });
+    const result = await runAthleteEnrichment(source, athlete);
+    await persistEnrichmentResult(id, source, result);
+
+    const athleteUpdates: Record<string, unknown> = {};
+    if (source === "wikipedia" && result.status === "complete") {
+      athleteUpdates.wikipedia_url = result.data.url;
+    }
+    if (source === "tiktok" && result.status === "complete") {
+      athleteUpdates.tiktok_handle = result.data.handle;
+      athleteUpdates.tiktok_url = result.data.url;
     }
 
-    if (source === "tiktok") {
-      return NextResponse.json({
-        success: true,
-        data: {
-          message: "TikTok enrichment coming soon. Search for athlete on TikTok manually.",
-        },
-      });
+    if (Object.keys(athleteUpdates).length > 0) {
+      athleteUpdates.updated_at = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from("athletes")
+        .update(athleteUpdates)
+        .eq("id", id);
+      if (updateError) throw updateError;
     }
 
-    if (source === "onlyfans") {
-      return NextResponse.json({
-        success: true,
-        data: {
-          message: "OnlyFans check coming soon. Search manually at onlyfans.com",
-        },
-      });
-    }
-
-    return NextResponse.json({ error: `Unknown source: ${source}` }, { status: 400 });
+    return NextResponse.json({
+      success: true,
+      status: result.status,
+      data: { ...result.data, message: result.message },
+    });
 
   } catch (error) {
     console.error("Enrich error:", error);

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -6,65 +6,101 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-export async function GET() {
+function periodStart(period: string) {
+  const match = period.match(/^(\d+)d$/);
+  if (!match) return null;
+  const start = new Date();
+  start.setDate(start.getDate() - Number(match[1]));
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
+}
+
+function percentageChange(current: number, previous: number) {
+  if (previous > 0) return Math.round(((current - previous) / previous) * 100);
+  return current > 0 ? 100 : 0;
+}
+
+function relationshipAthleteId(value: unknown) {
+  if (Array.isArray(value)) return value[0]?.athlete_id as string | undefined;
+  if (value && typeof value === "object" && "athlete_id" in value) {
+    return (value as { athlete_id?: string }).athlete_id;
+  }
+  return undefined;
+}
+
+export async function GET(request: NextRequest) {
   try {
-    // Get current date info for week-over-week comparison
+    const { searchParams } = new URL(request.url);
+    const startDate = periodStart(searchParams.get("period") || "365d");
+    const sport = searchParams.get("sport");
     const now = new Date();
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-    // Fetch all data in parallel
+    let athleteQuery = supabase
+      .from("athletes")
+      .select("id,pipeline_stage,created_at")
+      .not("pipeline_stage", "is", null)
+      .or("is_historical.eq.false,is_historical.is.null");
+    if (startDate) athleteQuery = athleteQuery.gte("created_at", startDate);
+    if (sport) athleteQuery = athleteQuery.eq("sport", sport);
+
+    let thisWeekQuery = supabase
+      .from("athletes")
+      .select("id")
+      .or("is_historical.eq.false,is_historical.is.null")
+      .gte("created_at", oneWeekAgo.toISOString());
+    let lastWeekQuery = supabase
+      .from("athletes")
+      .select("id")
+      .or("is_historical.eq.false,is_historical.is.null")
+      .gte("created_at", twoWeeksAgo.toISOString())
+      .lt("created_at", oneWeekAgo.toISOString());
+    if (sport) {
+      thisWeekQuery = thisWeekQuery.eq("sport", sport);
+      lastWeekQuery = lastWeekQuery.eq("sport", sport);
+    }
+
     const [
-      { data: allAthletes, error: athletesError },
-      { data: thisWeekAthletes, error: thisWeekError },
-      { data: lastWeekAthletes, error: lastWeekError },
-      { data: messages, error: messagesError },
-      { data: thisWeekMessages, error: thisWeekMsgError },
-      { data: lastWeekMessages, error: lastWeekMsgError },
-      { data: conversions, error: conversionsError },
+      athleteResult,
+      thisWeekResult,
+      lastWeekResult,
+      outreachResult,
+      conversationResult,
+      emailResult,
+      channelResult,
+      contractResult,
     ] = await Promise.all([
-      // All athletes with pipeline stage
-      supabase
-        .from("athletes")
-        .select("id, pipeline_stage, created_at")
-        .not("pipeline_stage", "is", null),
-      // Athletes added this week
-      supabase
-        .from("athletes")
-        .select("id")
-        .gte("created_at", oneWeekAgo.toISOString()),
-      // Athletes added last week
-      supabase
-        .from("athletes")
-        .select("id")
-        .gte("created_at", twoWeeksAgo.toISOString())
-        .lt("created_at", oneWeekAgo.toISOString()),
-      // All outreach messages
+      athleteQuery,
+      thisWeekQuery,
+      lastWeekQuery,
       supabase
         .from("outreach_messages")
-        .select("id, sent_at, response_received_at"),
-      // Messages with responses this week
+        .select("athlete_id,sent_at,response_received_at,replied_at"),
       supabase
-        .from("outreach_messages")
-        .select("id, response_received_at")
-        .gte("created_at", oneWeekAgo.toISOString()),
-      // Messages with responses last week
+        .from("conversation_messages")
+        .select("direction,sent_at,conversations!inner(athlete_id)"),
+      supabase.from("email_messages").select("athlete_id,sent_at,replied_at"),
       supabase
-        .from("outreach_messages")
-        .select("id, response_received_at")
-        .gte("created_at", twoWeeksAgo.toISOString())
-        .lt("created_at", oneWeekAgo.toISOString()),
-      // Athletes that reached contract stage with timestamps
-      supabase
-        .from("athletes")
-        .select("id, created_at, updated_at")
-        .eq("pipeline_stage", "contract"),
+        .from("channel_messages")
+        .select("athlete_id,direction,sent_at,received_at,created_at"),
+      supabase.from("contracts").select("athlete_id,status,signed_at"),
     ]);
 
-    if (athletesError) throw athletesError;
-    if (messagesError) throw messagesError;
+    const firstError = [
+      athleteResult.error,
+      thisWeekResult.error,
+      lastWeekResult.error,
+      outreachResult.error,
+      conversationResult.error,
+      emailResult.error,
+      channelResult.error,
+      contractResult.error,
+    ].find(Boolean);
+    if (firstError) throw firstError;
 
-    // Calculate total by stage
+    const athletes = athleteResult.data || [];
+    const athleteIds = new Set(athletes.map((athlete) => athlete.id));
     const byStage: Record<string, number> = {
       research: 0,
       approval: 0,
@@ -75,66 +111,100 @@ export async function GET() {
       rejected: 0,
     };
 
-    (allAthletes || []).forEach((a) => {
-      if (a.pipeline_stage && byStage[a.pipeline_stage] !== undefined) {
-        byStage[a.pipeline_stage]++;
-      }
-    });
-
-    const totalAthletes = allAthletes?.length || 0;
-    const totalInPipeline = Object.values(byStage).reduce((a, b) => a + b, 0) - byStage.rejected;
-
-    // Conversion rate: athletes in contract / total non-rejected
-    const contracted = byStage.contract || 0;
-    const conversionRate = totalInPipeline > 0 ? contracted / totalInPipeline : 0;
-
-    // Average days to conversion
-    let avgDaysToConversion = 0;
-    if (conversions && conversions.length > 0) {
-      const conversionDays = conversions
-        .filter((c) => c.created_at && c.updated_at)
-        .map((c) => {
-          const created = new Date(c.created_at);
-          const updated = new Date(c.updated_at);
-          return (updated.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
-        });
-      if (conversionDays.length > 0) {
-        avgDaysToConversion = Math.round(
-          conversionDays.reduce((a, b) => a + b, 0) / conversionDays.length
-        );
+    for (const athlete of athletes) {
+      if (athlete.pipeline_stage && byStage[athlete.pipeline_stage] !== undefined) {
+        byStage[athlete.pipeline_stage] += 1;
       }
     }
 
-    // Response rate
-    const sentMessages = (messages || []).filter((m) => m.sent_at);
-    const respondedMessages = (messages || []).filter((m) => m.response_received_at);
-    const responseRate = sentMessages.length > 0
-      ? respondedMessages.length / sentMessages.length
-      : 0;
+    const contactedAthletes = new Set<string>();
+    const respondedAthletes = new Set<string>();
+    const firstContactAt = new Map<string, number>();
+    const responseDates: number[] = [];
 
-    // Week over week calculations
-    const thisWeekCount = thisWeekAthletes?.length || 0;
-    const lastWeekCount = lastWeekAthletes?.length || 0;
-    const athleteChange = lastWeekCount > 0
-      ? ((thisWeekCount - lastWeekCount) / lastWeekCount) * 100
-      : (thisWeekCount > 0 ? 100 : 0);
+    const recordContact = (athleteId: string | null | undefined, date: string | null) => {
+      if (!athleteId || !date || !athleteIds.has(athleteId)) return;
+      const timestamp = new Date(date).getTime();
+      if (Number.isNaN(timestamp)) return;
+      contactedAthletes.add(athleteId);
+      const existing = firstContactAt.get(athleteId);
+      if (existing === undefined || timestamp < existing) firstContactAt.set(athleteId, timestamp);
+    };
+    const recordResponse = (athleteId: string | null | undefined, date: string | null) => {
+      if (!athleteId || !date || !athleteIds.has(athleteId)) return;
+      const timestamp = new Date(date).getTime();
+      if (Number.isNaN(timestamp)) return;
+      respondedAthletes.add(athleteId);
+      responseDates.push(timestamp);
+    };
 
-    const thisWeekResponses = (thisWeekMessages || []).filter((m) => m.response_received_at).length;
-    const lastWeekResponses = (lastWeekMessages || []).filter((m) => m.response_received_at).length;
-    const responseChange = lastWeekResponses > 0
-      ? ((thisWeekResponses - lastWeekResponses) / lastWeekResponses) * 100
-      : (thisWeekResponses > 0 ? 100 : 0);
+    for (const message of outreachResult.data || []) {
+      recordContact(message.athlete_id, message.sent_at);
+      recordResponse(message.athlete_id, message.response_received_at || message.replied_at);
+    }
+    for (const message of emailResult.data || []) {
+      recordContact(message.athlete_id, message.sent_at);
+      recordResponse(message.athlete_id, message.replied_at);
+    }
+    for (const message of conversationResult.data || []) {
+      const athleteId = relationshipAthleteId(message.conversations);
+      if (message.direction === "outbound") recordContact(athleteId, message.sent_at);
+      if (message.direction === "inbound") recordResponse(athleteId, message.sent_at);
+    }
+    for (const message of channelResult.data || []) {
+      if (message.direction === "outbound") recordContact(message.athlete_id, message.sent_at);
+      if (message.direction === "inbound") {
+        recordResponse(message.athlete_id, message.received_at || message.created_at);
+      }
+    }
+
+    const convertedAthletes = new Set<string>();
+    const daysToConversion: number[] = [];
+    for (const contract of contractResult.data || []) {
+      if (!athleteIds.has(contract.athlete_id) || !contract.signed_at) continue;
+      convertedAthletes.add(contract.athlete_id);
+      const firstContact = firstContactAt.get(contract.athlete_id);
+      if (firstContact !== undefined) {
+        const days = (new Date(contract.signed_at).getTime() - firstContact) / 86_400_000;
+        if (days >= 0) daysToConversion.push(days);
+      }
+    }
+
+    const totalAthletes = athletes.length;
+    const totalInPipeline = totalAthletes - byStage.rejected;
+    const conversionRate = totalAthletes > 0 ? convertedAthletes.size / totalAthletes : 0;
+    const responseRate =
+      contactedAthletes.size > 0 ? respondedAthletes.size / contactedAthletes.size : 0;
+    const avgDaysToConversion =
+      daysToConversion.length > 0
+        ? Math.round(daysToConversion.reduce((sum, days) => sum + days, 0) / daysToConversion.length)
+        : 0;
+    const thisWeekResponses = responseDates.filter((date) => date >= oneWeekAgo.getTime()).length;
+    const lastWeekResponses = responseDates.filter(
+      (date) => date >= twoWeeksAgo.getTime() && date < oneWeekAgo.getTime()
+    ).length;
+    const thisWeekAthletes = thisWeekResult.data?.length || 0;
+    const lastWeekAthletes = lastWeekResult.data?.length || 0;
 
     return NextResponse.json({
       total_athletes: totalAthletes,
       total_in_pipeline: totalInPipeline,
       by_stage: byStage,
-      conversion_rate: Math.round(conversionRate * 100) / 100,
+      conversion_rate: Math.round(conversionRate * 1000) / 1000,
       avg_days_to_conversion: avgDaysToConversion,
-      response_rate: Math.round(responseRate * 100) / 100,
+      response_rate: Math.round(responseRate * 1000) / 1000,
+      this_week: {
+        athletes: thisWeekAthletes,
+        responses: thisWeekResponses,
+      },
       week_over_week: {
-        athletes: Math.round(athleteChange),
-        responses: Math.round(responseChange),
+        athletes: percentageChange(thisWeekAthletes, lastWeekAthletes),
+        responses: percentageChange(thisWeekResponses, lastWeekResponses),
+      },
+      definitions: {
+        conversion_rate: "Signed contracts divided by all non-historical entrants in the selected cohort",
+        response_rate: "Contacted athletes with at least one reply divided by contacted athletes",
+        avg_days_to_conversion: "First recorded outbound contact to contract signed_at",
       },
     });
   } catch (error) {

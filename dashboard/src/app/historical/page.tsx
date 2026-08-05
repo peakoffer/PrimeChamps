@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { ImageDown, Loader2 } from "lucide-react";
 
 interface Athlete {
   id: string;
@@ -23,12 +24,24 @@ interface Stats {
   avgFollowers: number;
 }
 
+interface BackfillStatus {
+  eligible: number;
+  queued: number;
+  running: number;
+  complete: number;
+  failed: number;
+  cancelled: number;
+}
+
 export default function HistoricalPage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
   const [selectedSport, setSelectedSport] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [backfillStatus, setBackfillStatus] = useState<BackfillStatus | null>(null);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -36,12 +49,54 @@ export default function HistoricalPage() {
       const data = await response.json();
       setAthletes(data.athletes || []);
       setStats(data.stats || null);
+      const backfillResponse = await fetch("/api/historical/backfill", { cache: "no-store" });
+      if (backfillResponse.ok) {
+        const backfillData = await backfillResponse.json();
+        setBackfillStatus(backfillData.status || null);
+      }
     } catch (error) {
       console.error("Error fetching historical data:", error);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const queueMediaRepair = async () => {
+    setBackfillBusy(true);
+    setBackfillMessage(null);
+    try {
+      const response = await fetch("/api/historical/backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 25 }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not queue media repair");
+      setBackfillStatus(data.status);
+      setBackfillMessage(`Queued ${data.queued} historical profile${data.queued === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setBackfillMessage(error instanceof Error ? error.message : "Could not queue media repair");
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+
+  const processNextRepair = async () => {
+    setBackfillBusy(true);
+    setBackfillMessage("Repairing one profile. Instagram enrichment can take up to two minutes…");
+    try {
+      const response = await fetch("/api/enrichment/jobs/process", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Media repair failed");
+      setBackfillMessage(data.processed ? "One historical profile was repaired." : data.message);
+      await fetchData();
+    } catch (error) {
+      setBackfillMessage(error instanceof Error ? error.message : "Media repair failed");
+      await fetchData();
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -95,6 +150,44 @@ export default function HistoricalPage() {
               They are NOT in the sales pipeline - they&apos;re used to train and inform our
               research agent on what makes a good prospect.
             </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-gray-950">
+              <ImageDown className="h-5 w-5 text-blue-600" /> Historical media repair
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Replace expiring Instagram CDN links with permanent Supabase copies and refresh saved posts.
+            </p>
+            {backfillStatus && (
+              <p className="mt-2 text-xs text-gray-500">
+                {backfillStatus.eligible} eligible · {backfillStatus.queued} queued · {backfillStatus.complete} complete · {backfillStatus.failed} failed
+              </p>
+            )}
+            {backfillMessage && <p className="mt-2 text-sm text-blue-700">{backfillMessage}</p>}
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={queueMediaRepair}
+              disabled={backfillBusy || !backfillStatus?.eligible}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Queue next 25
+            </button>
+            <button
+              type="button"
+              onClick={processNextRepair}
+              disabled={backfillBusy || !backfillStatus?.queued}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {backfillBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Repair next profile
+            </button>
           </div>
         </div>
       </div>

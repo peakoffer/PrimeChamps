@@ -21,6 +21,10 @@ interface OverviewData {
     athletes: number;
     responses: number;
   };
+  this_week: {
+    athletes: number;
+    responses: number;
+  };
 }
 
 interface FunnelStage {
@@ -61,7 +65,7 @@ export default function AnalyticsPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState("30d");
+  const [period, setPeriod] = useState("365d");
   const [sportFilter, setSportFilter] = useState<string>("");
   const [exporting, setExporting] = useState(false);
 
@@ -70,13 +74,17 @@ export default function AnalyticsPage() {
     setError(null);
 
     try {
+      const filteredParams = new URLSearchParams({ period });
+      if (sportFilter) filteredParams.set("sport", sportFilter);
+      const filteredQuery = filteredParams.toString();
+
       const [overviewRes, funnelRes, templatesRes, sportsRes, timelineRes] =
         await Promise.all([
-          fetch("/api/analytics/overview"),
-          fetch("/api/analytics/funnel"),
-          fetch("/api/analytics/templates"),
-          fetch("/api/analytics/by-sport"),
-          fetch(`/api/analytics/timeline?period=${period}`),
+          fetch(`/api/analytics/overview?${filteredQuery}`),
+          fetch(`/api/analytics/funnel?${filteredQuery}`),
+          fetch(`/api/analytics/templates?${filteredQuery}`),
+          fetch(`/api/analytics/by-sport?period=${period}`),
+          fetch(`/api/analytics/timeline?${filteredQuery}`),
         ]);
 
       if (!overviewRes.ok) throw new Error("Failed to fetch overview");
@@ -104,7 +112,7 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, sportFilter]);
 
   useEffect(() => {
     fetchData();
@@ -271,7 +279,7 @@ export default function AnalyticsPage() {
         />
         <MetricCard
           title="Athletes This Week"
-          value={overview?.week_over_week.athletes || 0}
+          value={overview?.this_week.athletes || 0}
           trend={overview?.week_over_week.athletes}
           trendLabel="vs last week"
           color="gray"
