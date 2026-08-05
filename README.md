@@ -51,15 +51,18 @@ Required variables:
 ```env
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_KEY=your_service_key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+SUPABASE_SECRET_KEY=your_server_secret_key
 
 # Apify (Instagram scraping)
 APIFY_API_KEY=your_apify_key
 
-# Auth
-AUTH_PASSWORD=your_dashboard_password
+# One-time first-owner conversion only; remove after /setup succeeds
+AUTH_USERS=zac:your-current-preview-password:Zac
 ```
+
+For per-user Microsoft, Instagram, webhook, invitation, and encryption setup,
+see [`docs/CONNECTED_ACCOUNTS.md`](docs/CONNECTED_ACCOUNTS.md).
 
 ### 2. Database Setup
 
@@ -95,6 +98,10 @@ npm run dev
 ```
 
 Visit http://localhost:3000
+
+On a fresh install, open http://localhost:3000/setup once to create Zac as the
+Supabase-backed owner. Invite Dylan and other teammates later from `/team` so
+each person owns their own provider connections.
 
 Before enabling any automation, keep both `PIPELINE_AUTORUN_ENABLED=false` and
 `INSTAGRAM_DM_SENDING_ENABLED=false` until the staging checklist in `DEPLOY.md`

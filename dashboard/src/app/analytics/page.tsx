@@ -25,6 +25,16 @@ interface OverviewData {
     athletes: number;
     responses: number;
   };
+  cohort?: {
+    size: number;
+    firstAddedAt: string | null;
+    lastAddedAt: string | null;
+    definition: string;
+  };
+  data_quality?: {
+    contract_stage_without_signature: number;
+    signed_contract_outside_contract_stage: number;
+  };
 }
 
 interface FunnelStage {
@@ -36,6 +46,7 @@ interface FunnelStage {
 interface TemplateData {
   id: string;
   name: string;
+  channel?: string;
   sent: number;
   replies: number;
   reply_rate: number;
@@ -122,6 +133,7 @@ export default function AnalyticsPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams({ type });
+      params.set("period", period);
       if (sportFilter) params.append("sport", sportFilter);
 
       const response = await fetch(`/api/analytics/export?${params}`);
@@ -179,7 +191,7 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
           <p className="text-gray-600 mt-1">
-            Track campaign performance and conversion metrics
+            Track non-historical pipeline cohorts, outreach, and signed-contract conversion
           </p>
         </div>
 
@@ -250,6 +262,32 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {overview?.cohort && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <span className="font-semibold">Current analytics cohort:</span>{" "}
+          {overview.cohort.size} athletes
+          {overview.cohort.firstAddedAt && overview.cohort.lastAddedAt
+            ? ` added ${new Date(overview.cohort.firstAddedAt).toLocaleDateString()}–${new Date(overview.cohort.lastAddedAt).toLocaleDateString()}`
+            : ""}
+          . Historical records are excluded.
+        </div>
+      )}
+
+      {overview?.data_quality &&
+        (overview.data_quality.contract_stage_without_signature > 0 ||
+          overview.data_quality.signed_contract_outside_contract_stage > 0) && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            <span className="font-semibold">Testing-data consistency note:</span>{" "}
+            {overview.data_quality.contract_stage_without_signature} athlete
+            {overview.data_quality.contract_stage_without_signature === 1 ? " is" : "s are"}{" "}
+            currently in Contract without a signed contract, and{" "}
+            {overview.data_quality.signed_contract_outside_contract_stage} signed-contract
+            athlete{overview.data_quality.signed_contract_outside_contract_stage === 1 ? " is" : "s are"}{" "}
+            currently in another stage. Conversion metrics use signed contracts; current
+            positions use the pipeline card stage.
+          </div>
+        )}
+
       {/* Key Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <MetricCard
@@ -259,9 +297,9 @@ export default function AnalyticsPage() {
           color="blue"
         />
         <MetricCard
-          title="Conversion Rate"
+          title="Signed Contract Rate"
           value={`${((overview?.conversion_rate || 0) * 100).toFixed(1)}%`}
-          subtitle="Research → Contract"
+          subtitle="Cohort → signed contract"
           color="green"
         />
         <MetricCard
@@ -301,8 +339,12 @@ export default function AnalyticsPage() {
       {/* Stage Breakdown Cards */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Pipeline Stage Breakdown
+          Current Pipeline Positions
         </h3>
+        <p className="-mt-2 mb-4 text-sm leading-6 text-gray-500">
+          Exclusive: each athlete appears once in the stage where they currently sit.
+          These counts are not expected to match cumulative progression above.
+        </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
           {Object.entries(overview?.by_stage || {}).map(([stage, count]) => (
             <div

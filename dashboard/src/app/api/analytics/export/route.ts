@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  analyticsPeriodStart,
+  buildFunnelStages,
+} from "@/lib/analytics/funnel";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,7 +15,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "athletes";
     const sport = searchParams.get("sport");
-    const startDate = searchParams.get("start_date");
+    const startDate =
+      searchParams.get("start_date") ||
+      analyticsPeriodStart(searchParams.get("period") || "365d");
     const endDate = searchParams.get("end_date");
 
     let csvContent = "";
@@ -31,7 +37,8 @@ export async function GET(request: NextRequest) {
           created_at,
           updated_at
         `)
-        .not("pipeline_stage", "is", null);
+        .not("pipeline_stage", "is", null)
+        .or("is_historical.eq.false,is_historical.is.null");
 
       if (sport) {
         query = query.eq("sport", sport);
@@ -140,25 +147,44 @@ export async function GET(request: NextRequest) {
 
       filename = `messages_export_${new Date().toISOString().split("T")[0]}.csv`;
     } else if (type === "funnel") {
-      // Export funnel stats
-      const { data, error } = await supabase
+      let athleteQuery = supabase
         .from("athletes")
-        .select("pipeline_stage")
-        .not("pipeline_stage", "is", null);
+        .select("id,pipeline_stage")
+        .not("pipeline_stage", "is", null)
+        .or("is_historical.eq.false,is_historical.is.null");
+      if (sport) athleteQuery = athleteQuery.eq("sport", sport);
+      if (startDate) athleteQuery = athleteQuery.gte("created_at", startDate);
+      if (endDate) athleteQuery = athleteQuery.lte("created_at", endDate);
 
-      if (error) throw error;
+      const { data: athletes, error: athleteError } = await athleteQuery;
+      if (athleteError) throw athleteError;
+      const cohort = athletes || [];
+      const athleteIds = cohort.map((athlete) => athlete.id);
+      const [historyResult, contractsResult] = athleteIds.length
+        ? await Promise.all([
+            supabase
+              .from("pipeline_history")
+              .select("athlete_id,to_stage")
+              .in("athlete_id", athleteIds),
+            supabase
+              .from("contracts")
+              .select("athlete_id")
+              .in("athlete_id", athleteIds)
+              .not("signed_at", "is", null),
+          ])
+        : [{ data: [], error: null }, { data: [], error: null }];
+      if (historyResult.error) throw historyResult.error;
+      if (contractsResult.error) throw contractsResult.error;
 
-      const stageCounts: Record<string, number> = {};
-      (data || []).forEach((a) => {
-        stageCounts[a.pipeline_stage] = (stageCounts[a.pipeline_stage] || 0) + 1;
-      });
-
-      const headers = ["Pipeline Stage", "Count"];
+      const stages = buildFunnelStages(
+        cohort,
+        historyResult.data || [],
+        (contractsResult.data || []).map((contract) => contract.athlete_id)
+      );
+      const headers = ["Cumulative Stage", "Athletes Reached", "Share of Cohort"];
       csvContent = headers.join(",") + "\n";
-
-      const stages = ["research", "approval", "reach_out", "response", "appointment", "contract", "rejected"];
       stages.forEach((stage) => {
-        csvContent += `${stage},${stageCounts[stage] || 0}\n`;
+        csvContent += `${stage.name},${stage.count},${stage.percent}%\n`;
       });
 
       filename = `funnel_export_${new Date().toISOString().split("T")[0]}.csv`;

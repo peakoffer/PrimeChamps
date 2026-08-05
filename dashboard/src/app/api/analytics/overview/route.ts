@@ -170,7 +170,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const contractStageAthletes = new Set(
+      athletes
+        .filter((athlete) => athlete.pipeline_stage === "contract")
+        .map((athlete) => athlete.id)
+    );
+    const contractStageWithoutSignature = [...contractStageAthletes].filter(
+      (athleteId) => !convertedAthletes.has(athleteId)
+    ).length;
+    const signedContractOutsideStage = [...convertedAthletes].filter(
+      (athleteId) => !contractStageAthletes.has(athleteId)
+    ).length;
+
     const totalAthletes = athletes.length;
+    const cohortDates = athletes
+      .map((athlete) => athlete.created_at)
+      .filter((value): value is string => Boolean(value))
+      .sort();
     const totalInPipeline = totalAthletes - byStage.rejected;
     const conversionRate = totalAthletes > 0 ? convertedAthletes.size / totalAthletes : 0;
     const responseRate =
@@ -200,6 +216,17 @@ export async function GET(request: NextRequest) {
       week_over_week: {
         athletes: percentageChange(thisWeekAthletes, lastWeekAthletes),
         responses: percentageChange(thisWeekResponses, lastWeekResponses),
+      },
+      cohort: {
+        size: totalAthletes,
+        firstAddedAt: cohortDates[0] || null,
+        lastAddedAt: cohortDates.at(-1) || null,
+        definition:
+          "Non-historical athletes added during the selected period, including rejections",
+      },
+      data_quality: {
+        contract_stage_without_signature: contractStageWithoutSignature,
+        signed_contract_outside_contract_stage: signedContractOutsideStage,
       },
       definitions: {
         conversion_rate: "Signed contracts divided by all non-historical entrants in the selected cohort",

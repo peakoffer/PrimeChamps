@@ -7,6 +7,7 @@ import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 interface TemplateData {
   id: string;
   name: string;
+  channel?: string;
   sent: number;
   replies: number;
   reply_rate: number;
@@ -19,6 +20,26 @@ interface TemplatePerformanceTableProps {
 
 type SortKey = "name" | "sent" | "replies" | "reply_rate" | "conversions";
 type SortDir = "asc" | "desc";
+
+function SortIcon({
+  columnKey,
+  sortKey,
+  sortDir,
+}: {
+  columnKey: SortKey;
+  sortKey: SortKey;
+  sortDir: SortDir;
+}) {
+  if (sortKey !== columnKey) {
+    return <ArrowUpDown className="h-4 w-4 text-gray-400" />;
+  }
+
+  return sortDir === "asc" ? (
+    <ArrowUp className="h-4 w-4 text-blue-600" />
+  ) : (
+    <ArrowDown className="h-4 w-4 text-blue-600" />
+  );
+}
 
 export default function TemplatePerformanceTable({
   templates,
@@ -50,18 +71,8 @@ export default function TemplatePerformanceTable({
     }
   };
 
-  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
-    if (sortKey !== columnKey) {
-      return <ArrowUpDown className="h-4 w-4 text-gray-400" />;
-    }
-    return sortDir === "asc" ? (
-      <ArrowUp className="h-4 w-4 text-blue-600" />
-    ) : (
-      <ArrowDown className="h-4 w-4 text-blue-600" />
-    );
-  };
-
-  const getReplyRateColor = (rate: number) => {
+  const getReplyRateColor = (rate: number, sent: number) => {
+    if (sent === 0) return "text-gray-600 bg-gray-100";
     if (rate >= 0.3) return "text-green-600 bg-green-50";
     if (rate >= 0.2) return "text-yellow-600 bg-yellow-50";
     return "text-red-600 bg-red-50";
@@ -73,6 +84,16 @@ export default function TemplatePerformanceTable({
         <h3 className="text-lg font-semibold text-gray-900">
           Template Performance
         </h3>
+        <p className="mt-1 text-sm leading-6 text-gray-500">
+          Sent messages attributed to each template across connected channels.
+          Pending approvals and untagged replies do not count.
+        </p>
+        {templates.length > 0 && templates.every((template) => template.sent === 0) && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            Templates are loaded, but no sent message is attributed to one yet, so
+            performance rates are not meaningful.
+          </p>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
@@ -84,7 +105,7 @@ export default function TemplatePerformanceTable({
               >
                 <div className="flex items-center gap-2">
                   Template
-                  <SortIcon columnKey="name" />
+                  <SortIcon columnKey="name" sortKey={sortKey} sortDir={sortDir} />
                 </div>
               </th>
               <th
@@ -93,7 +114,7 @@ export default function TemplatePerformanceTable({
               >
                 <div className="flex items-center justify-end gap-2">
                   Sent
-                  <SortIcon columnKey="sent" />
+                  <SortIcon columnKey="sent" sortKey={sortKey} sortDir={sortDir} />
                 </div>
               </th>
               <th
@@ -102,7 +123,7 @@ export default function TemplatePerformanceTable({
               >
                 <div className="flex items-center justify-end gap-2">
                   Replies
-                  <SortIcon columnKey="replies" />
+                  <SortIcon columnKey="replies" sortKey={sortKey} sortDir={sortDir} />
                 </div>
               </th>
               <th
@@ -111,7 +132,7 @@ export default function TemplatePerformanceTable({
               >
                 <div className="flex items-center justify-end gap-2">
                   Reply Rate
-                  <SortIcon columnKey="reply_rate" />
+                  <SortIcon columnKey="reply_rate" sortKey={sortKey} sortDir={sortDir} />
                 </div>
               </th>
               <th
@@ -120,7 +141,7 @@ export default function TemplatePerformanceTable({
               >
                 <div className="flex items-center justify-end gap-2">
                   Conversions
-                  <SortIcon columnKey="conversions" />
+                  <SortIcon columnKey="conversions" sortKey={sortKey} sortDir={sortDir} />
                 </div>
               </th>
             </tr>
@@ -142,6 +163,9 @@ export default function TemplatePerformanceTable({
                     <div className="text-sm font-medium text-gray-900">
                       {template.name}
                     </div>
+                    {template.channel && (
+                      <div className="mt-0.5 text-xs text-gray-500">{template.channel}</div>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <div className="text-sm text-gray-900">{template.sent}</div>
@@ -155,7 +179,7 @@ export default function TemplatePerformanceTable({
                     <span
                       className={cn(
                         "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                        getReplyRateColor(template.reply_rate)
+                        getReplyRateColor(template.reply_rate, template.sent)
                       )}
                     >
                       {(template.reply_rate * 100).toFixed(1)}%

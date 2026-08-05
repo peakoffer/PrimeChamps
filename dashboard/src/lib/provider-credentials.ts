@@ -1,6 +1,15 @@
 import "server-only";
 
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+
+export interface StoredProviderCredentials {
+  accessToken: string;
+  refreshToken: string | null;
+  tokenType: string;
+  scope: string;
+  expiresIn: number | null;
+  obtainedAt: string;
+}
 
 function getEncryptionKey() {
   const configuredKey = process.env.CHANNEL_TOKEN_ENCRYPTION_KEY?.trim();
@@ -15,7 +24,7 @@ function getEncryptionKey() {
   return key;
 }
 
-export function encryptProviderCredentials(credentials: Record<string, unknown>) {
+export function encryptProviderCredentials(credentials: object) {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
   const ciphertext = Buffer.concat([
@@ -30,4 +39,36 @@ export function encryptProviderCredentials(credentials: Record<string, unknown>)
     authTag.toString("base64url"),
     ciphertext.toString("base64url"),
   ].join(":");
+}
+
+export function decryptProviderCredentials(ciphertext: string): StoredProviderCredentials {
+  const [version, ivValue, authTagValue, encryptedValue] = ciphertext.split(":");
+  if (version !== "v1" || !ivValue || !authTagValue || !encryptedValue) {
+    throw new Error("Provider credentials use an unsupported format");
+  }
+
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    getEncryptionKey(),
+    Buffer.from(ivValue, "base64url")
+  );
+  decipher.setAuthTag(Buffer.from(authTagValue, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(encryptedValue, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+  const parsed = JSON.parse(plaintext) as Partial<StoredProviderCredentials>;
+
+  if (!parsed.accessToken || !parsed.obtainedAt) {
+    throw new Error("Provider credentials are incomplete");
+  }
+
+  return {
+    accessToken: parsed.accessToken,
+    refreshToken: parsed.refreshToken || null,
+    tokenType: parsed.tokenType || "Bearer",
+    scope: parsed.scope || "",
+    expiresIn: typeof parsed.expiresIn === "number" ? parsed.expiresIn : null,
+    obtainedAt: parsed.obtainedAt,
+  };
 }

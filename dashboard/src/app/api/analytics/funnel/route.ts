@@ -1,33 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  analyticsPeriodStart,
+  buildFunnelStages,
+} from "@/lib/analytics/funnel";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-const STAGE_ORDER = [
-  "research",
-  "approval",
-  "reach_out",
-  "response",
-  "appointment",
-  "contract",
-] as const;
-
-function periodStart(period: string) {
-  const match = period.match(/^(\d+)d$/);
-  if (!match) return null;
-  const start = new Date();
-  start.setDate(start.getDate() - Number(match[1]));
-  start.setHours(0, 0, 0, 0);
-  return start.toISOString();
-}
-
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const startDate = periodStart(searchParams.get("period") || "365d");
+    const startDate = analyticsPeriodStart(searchParams.get("period") || "365d");
     const sport = searchParams.get("sport");
 
     let athleteQuery = supabase
@@ -41,53 +27,38 @@ export async function GET(request: NextRequest) {
     const { data: athletes, error: athletesError } = await athleteQuery;
     if (athletesError) throw athletesError;
 
-    const athleteIds = (athletes || []).map((athlete) => athlete.id);
-    const reachedByAthlete = new Map<string, Set<string>>();
+    const cohort = athletes || [];
+    const athleteIds = cohort.map((athlete) => athlete.id);
+    const [historyResult, contractsResult] = athleteIds.length
+      ? await Promise.all([
+          supabase
+            .from("pipeline_history")
+            .select("athlete_id,to_stage")
+            .in("athlete_id", athleteIds),
+          supabase
+            .from("contracts")
+            .select("athlete_id")
+            .in("athlete_id", athleteIds)
+            .not("signed_at", "is", null),
+        ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (historyResult.error) throw historyResult.error;
+    if (contractsResult.error) throw contractsResult.error;
 
-    for (const athlete of athletes || []) {
-      const reached = new Set<string>(["research"]);
-      const currentIndex = STAGE_ORDER.indexOf(
-        athlete.pipeline_stage as (typeof STAGE_ORDER)[number]
-      );
-      if (currentIndex >= 0) {
-        STAGE_ORDER.slice(0, currentIndex + 1).forEach((stage) => reached.add(stage));
-      }
-      reachedByAthlete.set(athlete.id, reached);
-    }
-
-    if (athleteIds.length > 0) {
-      const { data: history, error: historyError } = await supabase
-        .from("pipeline_history")
-        .select("athlete_id,to_stage")
-        .in("athlete_id", athleteIds);
-      if (historyError) throw historyError;
-
-      for (const transition of history || []) {
-        const reached = reachedByAthlete.get(transition.athlete_id);
-        const stageIndex = STAGE_ORDER.indexOf(
-          transition.to_stage as (typeof STAGE_ORDER)[number]
-        );
-        if (reached && stageIndex >= 0) {
-          STAGE_ORDER.slice(0, stageIndex + 1).forEach((stage) => reached.add(stage));
-        }
-      }
-    }
-
-    const baseCount = athletes?.length || 0;
-    const stages = STAGE_ORDER.map((stage) => {
-      const count = [...reachedByAthlete.values()].filter((reached) => reached.has(stage)).length;
-      return {
-        name: stage,
-        count,
-        percent: baseCount > 0 ? Math.round((count / baseCount) * 100) : 0,
-      };
-    });
+    const stages = buildFunnelStages(
+      cohort,
+      historyResult.data || [],
+      (contractsResult.data || []).map((contract) => contract.athlete_id)
+    );
 
     return NextResponse.json({
       stages,
       cohort: {
-        size: baseCount,
-        definition: "Non-historical athletes entering the selected period, including rejections",
+        size: cohort.length,
+        definition:
+          "Non-historical athletes added during the selected period, including rejections",
+        stageDefinition:
+          "Cumulative progression. Research through Appointment use current stage plus stage history; Contract requires signed_at.",
       },
     });
   } catch (error) {
