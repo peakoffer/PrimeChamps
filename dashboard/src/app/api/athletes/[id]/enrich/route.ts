@@ -6,6 +6,10 @@ import {
   type EnrichmentProviderResult,
   type EnrichmentSource,
 } from "@/lib/enrichment-providers";
+import {
+  parseInstagramPostTimestamp,
+  sortInstagramPostsNewestFirst,
+} from "@/lib/instagram-post-order";
 
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -111,7 +115,7 @@ async function savePostsToDatabase(
 ): Promise<number> {
   let savedCount = 0;
 
-  for (const post of posts) {
+  for (const post of sortInstagramPostsNewestFirst(posts)) {
     const postId = post.shortCode || post.id || `post_${Date.now()}_${savedCount}`;
 
     // Check if already exists
@@ -128,20 +132,7 @@ async function savePostsToDatabase(
     const storedImageUrl = await downloadAndStorePostImage(post.displayUrl, athleteId, postId);
 
     if (storedImageUrl) {
-      // Parse timestamp
-      let postedAt: string | null = null;
-      if (post.timestamp) {
-        try {
-          const ts = post.timestamp.includes("T")
-            ? new Date(post.timestamp)
-            : new Date(parseInt(post.timestamp) * 1000);
-          if (!isNaN(ts.getTime())) {
-            postedAt = ts.toISOString();
-          }
-        } catch {
-          // Invalid timestamp
-        }
-      }
+      const postedAt = parseInstagramPostTimestamp(post.timestamp);
 
       const { error } = await supabase.from("athlete_posts").upsert({
         athlete_id: athleteId,

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  parseInstagramPostTimestamp,
+  sortInstagramPostsNewestFirst,
+  type ScrapedInstagramPost,
+} from "@/lib/instagram-post-order";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -42,7 +47,8 @@ export async function GET(request: NextRequest) {
       .from("athlete_posts")
       .select("*")
       .eq("athlete_id", targetAthleteId)
-      .order("posted_at", { ascending: false })
+      .order("posted_at", { ascending: false, nullsFirst: false })
+      .order("post_id", { ascending: false })
       .limit(12);
 
     if (error) {
@@ -75,7 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform to consistent format
-    const photos = posts.map((post) => ({
+    const photos = sortInstagramPostsNewestFirst(posts.map((post) => ({
       id: post.post_id,
       url: post.post_url,
       displayUrl: post.image_url,
@@ -84,7 +90,7 @@ export async function GET(request: NextRequest) {
       commentsCount: post.comments_count,
       type: post.post_type,
       timestamp: post.posted_at,
-    }));
+    })));
 
     return NextResponse.json({
       photos,
@@ -217,6 +223,7 @@ export async function POST(request: NextRequest) {
           username: [instagramHandle],
           resultsLimit: Math.min(limit, 10), // Cap at 10 for speed
           searchType: "user", // Faster than hashtag
+          skipPinnedPosts: true, // Return the newest posts, not older items pinned to the grid top
         }),
       }
     );
@@ -285,7 +292,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch results from Apify" }, { status: 500 });
     }
 
-    const posts = await dataResponse.json();
+    const posts = sortInstagramPostsNewestFirst(
+      (await dataResponse.json()) as ScrapedInstagramPost[]
+    );
     console.log(`[Instagram Photos] Apify returned ${posts.length} posts`);
 
     if (!posts || posts.length === 0) {
@@ -328,21 +337,7 @@ export async function POST(request: NextRequest) {
       const storedImageUrl = await downloadAndStorePostImage(originalImageUrl, targetAthleteId, postId);
 
       if (storedImageUrl) {
-        // Parse timestamp safely
-        let postedAt: string | null = null;
-        if (post.timestamp) {
-          try {
-            // Handle various timestamp formats
-            const ts = typeof post.timestamp === 'string'
-              ? (post.timestamp.includes('T') ? new Date(post.timestamp) : new Date(parseInt(post.timestamp) * 1000))
-              : new Date(post.timestamp * 1000);
-            if (!isNaN(ts.getTime())) {
-              postedAt = ts.toISOString();
-            }
-          } catch {
-            // Invalid timestamp, leave as null
-          }
-        }
+        const postedAt = parseInstagramPostTimestamp(post.timestamp);
 
         // Save to database
         const { error } = await supabase.from("athlete_posts").upsert({
@@ -381,10 +376,11 @@ export async function POST(request: NextRequest) {
       .from("athlete_posts")
       .select("*")
       .eq("athlete_id", targetAthleteId)
-      .order("posted_at", { ascending: false })
+      .order("posted_at", { ascending: false, nullsFirst: false })
+      .order("post_id", { ascending: false })
       .limit(12);
 
-    const photos = (allPosts || []).map((post) => ({
+    const photos = sortInstagramPostsNewestFirst((allPosts || []).map((post) => ({
       id: post.post_id,
       url: post.post_url,
       displayUrl: post.image_url,
@@ -393,7 +389,7 @@ export async function POST(request: NextRequest) {
       commentsCount: post.comments_count,
       type: post.post_type,
       timestamp: post.posted_at,
-    }));
+    })));
 
     return NextResponse.json({
       photos,

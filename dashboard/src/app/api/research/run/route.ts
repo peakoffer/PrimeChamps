@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { RESEARCH_SCORING_MODEL } from "@/lib/ai/models";
+import {
+  parseInstagramPostTimestamp,
+  sortInstagramPostsNewestFirst,
+  type ScrapedInstagramPost,
+} from "@/lib/instagram-post-order";
 
 export const maxDuration = 300;
 
@@ -1453,6 +1458,7 @@ async function fetchInstagramPhotosForAthlete(
           username: [instagramHandle],
           resultsLimit: limit,
           searchType: "user",
+          skipPinnedPosts: true,
         }),
       }
     );
@@ -1503,7 +1509,9 @@ async function fetchInstagramPhotosForAthlete(
       return { success: false, photoCount: 0, error: "Failed to fetch results" };
     }
 
-    const posts = await dataResponse.json();
+    const posts = sortInstagramPostsNewestFirst(
+      (await dataResponse.json()) as ScrapedInstagramPost[]
+    );
 
     if (!posts || posts.length === 0) {
       await supabase
@@ -1552,20 +1560,7 @@ async function fetchInstagramPhotosForAthlete(
           .from("athlete-posts")
           .getPublicUrl(filePath);
 
-        // Parse timestamp safely
-        let postedAt: string | null = null;
-        if (post.timestamp) {
-          try {
-            const ts = typeof post.timestamp === 'string'
-              ? (post.timestamp.includes('T') ? new Date(post.timestamp) : new Date(parseInt(post.timestamp) * 1000))
-              : new Date(post.timestamp * 1000);
-            if (!isNaN(ts.getTime())) {
-              postedAt = ts.toISOString();
-            }
-          } catch {
-            // Invalid timestamp
-          }
-        }
+        const postedAt = parseInstagramPostTimestamp(post.timestamp);
 
         // Save to database
         const { error } = await supabase.from("athlete_posts").upsert({

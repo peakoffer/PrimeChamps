@@ -11,6 +11,7 @@ import AppointmentModal from "@/components/AppointmentModal";
 import ContractModal from "@/components/ContractModal";
 import { ComposeBox, OutcomeModal } from "@/components/conversations";
 import type { BenchmarkMetrics } from "@/app/api/benchmarks/route";
+import { sortInstagramPostsNewestFirst } from "@/lib/instagram-post-order";
 
 interface Message {
   id: string;
@@ -325,6 +326,7 @@ export default function AthleteDetailPage() {
     caption?: string;
     likesCount?: number;
     commentsCount?: number;
+    timestamp?: string | null;
   }>>([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState<string | null>(null);
@@ -374,7 +376,7 @@ export default function AthleteDetailPage() {
         .then(res => res.json())
         .then(data => {
           if (data.photos?.length > 0) {
-            setInstagramPhotos(data.photos);
+            setInstagramPhotos(sortInstagramPostsNewestFirst(data.photos));
           }
         })
         .catch(err => console.error("Error loading photos:", err));
@@ -479,7 +481,7 @@ export default function AthleteDetailPage() {
         const dbData = await dbResponse.json();
 
         if (dbData.photos?.length > 0) {
-          setInstagramPhotos(dbData.photos);
+          setInstagramPhotos(sortInstagramPostsNewestFirst(dbData.photos));
           setPhotosLoading(false);
           return;
         }
@@ -505,7 +507,7 @@ export default function AthleteDetailPage() {
       }
 
       if (data.photos?.length > 0) {
-        setInstagramPhotos(data.photos);
+        setInstagramPhotos(sortInstagramPostsNewestFirst(data.photos));
         setPhotosError(null);
 
         // Show success message with stats
@@ -1447,6 +1449,11 @@ export default function AthleteDetailPage() {
                     className="w-full h-full object-cover"
                     loading="lazy"
                   />
+                  {photo.timestamp && (
+                    <span className="absolute left-2 top-2 rounded bg-black/75 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+                      {formatDate(photo.timestamp)}
+                    </span>
+                  )}
                   {/* Always visible engagement overlay with a full-width engagement row. */}
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/85 to-black/70 p-2 text-white">
                     <div className="grid grid-cols-2 gap-1 text-xs">
