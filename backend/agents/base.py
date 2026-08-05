@@ -6,6 +6,8 @@ import anthropic
 from backend.config import config
 from backend.database import db
 
+LATEST_CLAUDE_SONNET_MODEL = "claude-sonnet-5"
+
 
 class BaseAgent(ABC):
     """Base class for all Prime Champs agents."""
@@ -46,7 +48,7 @@ class BaseAgent(ABC):
         messages = [{"role": "user", "content": prompt}]
 
         response = self.ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=LATEST_CLAUDE_SONNET_MODEL,
             max_tokens=max_tokens,
             system=system or "You are a helpful assistant.",
             messages=messages

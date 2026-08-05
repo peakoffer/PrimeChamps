@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { LATEST_ANTHROPIC_MODELS } from "@/lib/ai/models";
 import type { Athlete } from "./supabase";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -260,7 +261,7 @@ Return ONLY the message text, nothing else. Do not include quotation marks aroun
     const anthropic = new Anthropic({ apiKey: anthropicKey });
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: LATEST_ANTHROPIC_MODELS.sonnet,
       max_tokens: 300,
       messages: [{ role: "user", content: userPrompt }],
       system: systemPrompt,
