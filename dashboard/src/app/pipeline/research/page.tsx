@@ -5,6 +5,10 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
+import {
+  RESEARCH_SCORING_MODEL,
+  RESEARCH_SCORING_MODEL_LABEL,
+} from "@/lib/ai/models";
 
 interface Athlete {
   id: string;
@@ -156,24 +160,6 @@ const REJECTION_REASONS = [
   { value: "other", label: "Other (specify in notes)" },
 ];
 
-// AI Model options - organized by provider with flagship + fast options
-const AI_MODEL_OPTIONS = [
-  { value: "auto", label: "Auto (Best Available)", category: "auto" },
-  // OpenAI Models
-  { value: "gpt-4o", label: "GPT-4o (Flagship)", category: "openai" },
-  { value: "gpt-4-turbo", label: "GPT-4 Turbo", category: "openai" },
-  { value: "gpt-4o-mini", label: "GPT-4o Mini (Fast)", category: "openai" },
-  { value: "o1-preview", label: "o1 Preview (Reasoning)", category: "openai" },
-  // Anthropic Models
-  { value: "claude-opus", label: "Claude Opus 4 (Flagship)", category: "anthropic" },
-  { value: "claude-sonnet", label: "Claude Sonnet 4", category: "anthropic" },
-  { value: "claude-haiku", label: "Claude Haiku 3.5 (Fast)", category: "anthropic" },
-  // Google Models
-  { value: "gemini-pro", label: "Gemini 1.5 Pro", category: "google" },
-  { value: "gemini-flash", label: "Gemini 1.5 Flash (Fast)", category: "google" },
-  { value: "gemini-flash-8b", label: "Gemini Flash 8B (Fastest)", category: "google" },
-];
-
 const REGION_OPTIONS = [
   { value: "usa", label: "USA (Primary Focus)" },
   { value: "canada", label: "Canada" },
@@ -234,7 +220,7 @@ function ResearchStageContent() {
     followerMin: 30000,
     followerMax: 500000,
     resultCount: 10,
-    scoringModel: "claude-haiku",
+    scoringModel: RESEARCH_SCORING_MODEL,
     targetRegions: ["usa"],
   });
 
@@ -759,7 +745,7 @@ function ResearchStageContent() {
       followerMin: logConfig.followerMin || 30000,
       followerMax: logConfig.followerMax || 500000,
       resultCount: logConfig.resultCount || 10,
-      scoringModel: logConfig.scoringModel || "claude-haiku",
+      scoringModel: RESEARCH_SCORING_MODEL,
       targetRegions: logConfig.targetRegions || ["usa"],
     });
 
@@ -1052,7 +1038,7 @@ function ResearchStageContent() {
                         </div>
                         <div>
                           <span className="text-gray-800">Scoring Model:</span>{" "}
-                          <span className="text-gray-900">{log.config_used?.scoringModel || "auto"}</span>
+                          <span className="text-gray-900">{log.config_used?.scoringModel || RESEARCH_SCORING_MODEL}</span>
                         </div>
                         {log.config_used?.keywords && (
                           <div className="col-span-2">
@@ -1376,18 +1362,12 @@ function ResearchStageContent() {
                 <label className="block text-sm font-medium text-gray-900 mb-2">
                   Scoring Model
                 </label>
-                <select
-                  value={config.scoringModel}
-                  onChange={(e) => setConfig({ ...config, scoringModel: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="claude-haiku">Claude Haiku (Fast)</option>
-                  <option value="claude-sonnet">Claude Sonnet</option>
-                  <option value="claude-opus">Claude Opus (Best)</option>
-                  <option value="gpt-4o-mini">GPT-4o Mini (Fast)</option>
-                </select>
+                <div className="w-full border border-purple-200 bg-purple-50 rounded-lg px-3 py-2 text-sm text-purple-950">
+                  {RESEARCH_SCORING_MODEL_LABEL}
+                  <span className="ml-2 text-xs font-medium text-purple-700">Required</span>
+                </div>
                 <p className="text-xs text-gray-800 mt-1">
-                  Haiku is fast & cheap, Opus is most accurate
+                  Every candidate is scored by the latest stable Sonnet model. Provider failures stop the run instead of using fallback scores.
                 </p>
               </div>
             </div>

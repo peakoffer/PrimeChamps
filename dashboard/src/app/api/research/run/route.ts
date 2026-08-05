@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { RESEARCH_SCORING_MODEL } from "@/lib/ai/models";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -1149,7 +1149,6 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
 
 async function scoreAthletes(
   athletes: EnrichedAthlete[],
-  config: ResearchConfig,
   successProfile?: SuccessProfile
 ): Promise<ScoredAthlete[]> {
   log(`Step 4: Scoring ${athletes.length} athletes`);
@@ -1157,7 +1156,7 @@ async function scoreAthletes(
   const scored: ScoredAthlete[] = [];
 
   for (const athlete of athletes) {
-    let score = await scoreAthlete(athlete, config, successProfile);
+    let score = await scoreAthlete(athlete, successProfile);
 
     // Check if age is uncertain and needs verification
     const ageUncertain =
@@ -1222,7 +1221,6 @@ async function scoreAthletes(
 
 async function scoreAthlete(
   athlete: EnrichedAthlete,
-  config: ResearchConfig,
   successProfile?: SuccessProfile
 ): Promise<ScoredAthlete> {
   // Build historical success context for scoring
@@ -1300,108 +1298,46 @@ Respond with ONLY valid JSON:
   "is_minor": <true if under 18 or likely minor, false otherwise>
 }`;
 
-  try {
-    // Use Claude for scoring
-    if (ANTHROPIC_API_KEY) {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: config.scoringModel === "claude-opus"
-            ? "claude-opus-4-20250514"
-            : "claude-3-5-haiku-20241022",
-          max_tokens: 300,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.content[0]?.text || "";
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            ...athlete,
-            score: Math.min(100, Math.max(0, parsed.score || 50)),
-            reasoning: parsed.reasoning || "Evaluated by AI",
-            concerns: parsed.concerns || [],
-            is_minor: parsed.is_minor === true,
-          };
-        }
-      }
-    }
-
-    // Fallback: OpenAI
-    if (OPENAI_API_KEY) {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 300,
-          temperature: 0.3,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices[0]?.message?.content || "";
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            ...athlete,
-            score: Math.min(100, Math.max(0, parsed.score || 50)),
-            reasoning: parsed.reasoning || "Evaluated by AI",
-            concerns: parsed.concerns || [],
-            is_minor: parsed.is_minor === true,
-          };
-        }
-      }
-    }
-  } catch (error) {
-    log(`Scoring error for ${athlete.name}: ${error}`);
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error("Claude Sonnet 5 scoring is not configured");
   }
 
-  // Rule-based fallback
-  let score = 50;
-  const concerns: string[] = [];
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: RESEARCH_SCORING_MODEL,
+      max_tokens: 300,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
 
-  if (athlete.follower_count) {
-    if (athlete.follower_count >= 50000 && athlete.follower_count <= 300000) {
-      score += 25;
-    } else if (athlete.follower_count >= 30000 && athlete.follower_count <= 500000) {
-      score += 10;
-    } else {
-      concerns.push("Follower count outside ideal range");
-    }
+  if (!response.ok) {
+    const details = (await response.text()).slice(0, 500);
+    throw new Error(
+      `Claude Sonnet 5 scoring failed (${response.status}): ${details || response.statusText}`
+    );
   }
 
-  if (athlete.verified) {
-    score += 15;
+  const data = await response.json();
+  const content = data.content[0]?.text || "";
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+  if (!jsonMatch) {
+    throw new Error(`Claude Sonnet 5 returned invalid scoring JSON for ${athlete.name}`);
   }
 
-  if (athlete.context && athlete.context.length > 20) {
-    score += 10;
-  }
-
+  const parsed = JSON.parse(jsonMatch[0]);
   return {
     ...athlete,
-    score: Math.min(100, score),
-    reasoning: "[Rule-based] Scored based on follower count and verification status. Age not verified.",
-    concerns: [...concerns, "Age not verified - manual review required"],
-    is_minor: false, // Unknown, requires manual verification
+    score: Math.min(100, Math.max(0, parsed.score || 50)),
+    reasoning: parsed.reasoning || "Evaluated by Claude Sonnet 5",
+    concerns: parsed.concerns || [],
+    is_minor: parsed.is_minor === true,
   };
 }
 
@@ -1639,9 +1575,7 @@ export async function POST(request: NextRequest) {
     const missingVariables = [
       !PERPLEXITY_API_KEY ? "PERPLEXITY_API_KEY" : null,
       !APIFY_API_KEY ? "APIFY_API_KEY" : null,
-      !ANTHROPIC_API_KEY && !OPENAI_API_KEY
-        ? "one of: ANTHROPIC_API_KEY, OPENAI_API_KEY"
-        : null,
+      !ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : null,
     ].filter((value): value is string => Boolean(value));
     if (missingVariables.length > 0) {
       return NextResponse.json(
@@ -1654,7 +1588,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const config: ResearchConfig = await request.json();
+    const submittedConfig: ResearchConfig = await request.json();
+    const config: ResearchConfig = {
+      ...submittedConfig,
+      scoringModel: RESEARCH_SCORING_MODEL,
+    };
 
     log("═══════════════════════════════════════════════════════════════");
     log("🔬 PRIME CHAMPS RESEARCH AGENT v2.0");
@@ -1793,7 +1731,7 @@ export async function POST(request: NextRequest) {
     }
 
     // STEP 4: Score athletes (with historical success context)
-    const scoredAthletes = await scoreAthletes(enrichedAthletes, config, successProfile);
+    const scoredAthletes = await scoreAthletes(enrichedAthletes, successProfile);
 
     // Take top N results
     const finalResults = scoredAthletes.slice(0, config.resultCount);

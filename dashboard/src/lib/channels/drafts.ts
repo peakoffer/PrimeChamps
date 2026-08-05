@@ -1,6 +1,7 @@
 import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
+import { LATEST_ANTHROPIC_MODELS } from "@/lib/ai/models";
 import type { User } from "@/lib/auth";
 import { getChannelConversation, listChannelMessages } from "@/lib/channels/data";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -34,7 +35,7 @@ export async function generateConversationDraft(user: User, conversationId: stri
     try {
       const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const result = await anthropic.messages.create({
-        model: process.env.ANTHROPIC_DRAFT_MODEL || "claude-sonnet-4-20250514",
+        model: LATEST_ANTHROPIC_MODELS.sonnet,
         max_tokens: 240,
         system:
           "You draft concise, warm, professional athlete outreach replies for Prime Champs. Continue the existing conversation naturally. Never invent facts, make legal or income guarantees, or mention private data. Return only the reply text.",
