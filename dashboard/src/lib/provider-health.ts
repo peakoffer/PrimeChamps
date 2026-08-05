@@ -67,14 +67,13 @@ const providerDefinitions: ProviderDefinition[] = [
   },
   {
     id: "web-search",
-    name: "Source-linked web research",
+    name: "Google search through Apify",
     category: "research",
     description: "Supplies current public-web results and source links for athlete detail pages.",
     capabilities: ["Current web research", "TikTok-handle discovery", "OnlyFans discovery", "Source links"],
-    required: [],
-    anyOf: ["PERPLEXITY_API_KEY", "SERPAPI_KEY", "SERPAPI_API_KEY"],
-    note: "Perplexity Sonar is the primary source-linked provider. SerpApi remains an optional raw-Google-results fallback.",
-    nextAction: "Keep Perplexity configured. Add SerpApi only if raw Google result parity becomes a firm requirement.",
+    required: ["APIFY_API_KEY"],
+    note: "Google, TikTok-handle, and public OnlyFans discovery use maintained Apify actors with bounded result counts. SerpApi is not used.",
+    nextAction: "Add a valid Apify API token beginning with apify_api_, then run one low-volume Google research check.",
   },
   {
     id: "agent-server",

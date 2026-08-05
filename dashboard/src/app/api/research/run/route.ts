@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  runApifyActor,
+  runApifyGoogleSearch,
+  type ApifyInstagramProfile,
+} from "@/lib/apify";
 import { RESEARCH_SCORING_MODEL } from "@/lib/ai/models";
 import {
   parseInstagramPostTimestamp,
@@ -14,7 +19,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const PROVIDER_TIMEOUT_MS = 45_000;
@@ -732,182 +736,31 @@ Respond with JSON array:
 }
 
 // ============================================================================
-// STEP 3: INSTAGRAM LOOKUP (Perplexity + Google Search)
+// STEP 3: INSTAGRAM LOOKUP (Google Search through Apify)
 // ============================================================================
 
-async function findInstagramHandleViaPerplexity(athleteName: string, sport: string): Promise<string | null> {
-  if (!PERPLEXITY_API_KEY) return null;
-
-  const prompt = `What is the Instagram handle/username for ${athleteName}, the professional ${sport} athlete?
-
-If you know their exact Instagram username, respond with ONLY the username (without @).
-If you're not sure or they don't have Instagram, respond with "UNKNOWN".
-
-Examples of valid responses:
-- surfergirl123
-- maria.verschoor
-- UNKNOWN`;
-
+async function findInstagramHandle(athleteName: string, sport: string): Promise<string | null> {
   try {
-    const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "sonar",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 100,
-        temperature: 0.1,
-      }),
-    });
+    const search = await runApifyGoogleSearch(
+      `site:instagram.com "${athleteName}" ${sport} athlete official`,
+      5
+    );
 
-    if (response.ok) {
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content?.trim() || "";
-
-      // Clean up the response
-      const handle = content
-        .replace(/^@/, "")
-        .replace(/['"]/g, "")
-        .split(/[\s\n]/)[0]
-        .toLowerCase();
-
-      if (handle && handle !== "unknown" && handle.length > 1 && handle.length < 31) {
-        return handle;
-      }
-    }
-  } catch (error) {
-    log(`Perplexity Instagram lookup error for ${athleteName}: ${error}`);
-  }
-
-  return null;
-}
-
-async function findInstagramHandleViaGoogle(athleteName: string, sport: string): Promise<string | null> {
-  // Use Perplexity to search Google-style for Instagram
-  if (!PERPLEXITY_API_KEY) return null;
-
-  const prompt = `Search for: "${athleteName} ${sport} instagram"
-
-Find the official Instagram username for this athlete. Look at search results and identify their real Instagram handle.
-
-Respond with ONLY the Instagram username (without @), or "UNKNOWN" if you can't find it.`;
-
-  try {
-    const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "sonar",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 100,
-        temperature: 0.1,
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content?.trim() || "";
-
-      // Extract handle from response
-      // Look for patterns like @username or instagram.com/username
-      const igUrlMatch = content.match(/instagram\.com\/([a-zA-Z0-9_.]+)/i);
-      if (igUrlMatch) {
-        return igUrlMatch[1].toLowerCase();
-      }
-
-      const atMatch = content.match(/@([a-zA-Z0-9_.]+)/);
-      if (atMatch) {
-        return atMatch[1].toLowerCase();
-      }
-
-      // Try to extract clean username
-      const handle = content
-        .replace(/^@/, "")
-        .replace(/['"]/g, "")
-        .split(/[\s\n]/)[0]
-        .toLowerCase();
-
-      if (handle && handle !== "unknown" && handle.length > 1 && handle.length < 31 && !handle.includes(".com")) {
-        return handle;
-      }
-    }
-  } catch (error) {
-    log(`Google-style Instagram lookup error for ${athleteName}: ${error}`);
-  }
-
-  return null;
-}
-
-async function findInstagramHandleViaSerpAPI(athleteName: string, sport: string): Promise<string | null> {
-  if (!SERPAPI_API_KEY) return null;
-
-  try {
-    const query = encodeURIComponent(`${athleteName} ${sport} instagram`);
-    const url = `https://serpapi.com/search.json?q=${query}&api_key=${SERPAPI_API_KEY}&num=5`;
-
-    const response = await fetchWithTimeout(url);
-
-    if (!response.ok) {
-      log(`SerpAPI error: ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json();
-    const results = data.organic_results || [];
-
-    // Look for Instagram links in search results
-    for (const result of results) {
-      const link = result.link || "";
-      const title = result.title || "";
-      const snippet = result.snippet || "";
-
-      // Check if it's an Instagram profile link
-      const igMatch = link.match(/instagram\.com\/([a-zA-Z0-9_.]+)\/?$/);
-      if (igMatch) {
-        const handle = igMatch[1].toLowerCase();
-        // Skip common non-profile pages
-        if (!["p", "reel", "stories", "explore", "accounts"].includes(handle)) {
+    for (const result of search.results) {
+      const match = result.url.match(/instagram\.com\/([a-zA-Z0-9_.]+)\/?(?:[?#].*)?$/i);
+      if (match) {
+        const handle = match[1].toLowerCase();
+        if (!["p", "reel", "reels", "stories", "explore", "accounts"].includes(handle)) {
+          log(`    Found via Google through Apify: @${handle}`);
           return handle;
         }
       }
-
-      // Check title/snippet for @username pattern
-      const atMatch = (title + " " + snippet).match(/@([a-zA-Z0-9_.]{2,30})/);
-      if (atMatch) {
-        return atMatch[1].toLowerCase();
-      }
     }
   } catch (error) {
-    log(`SerpAPI Instagram lookup error for ${athleteName}: ${error}`);
+    log(`Apify Google Instagram lookup error for ${athleteName}: ${error}`);
   }
 
   return null;
-}
-
-async function findInstagramHandle(athleteName: string, sport: string): Promise<string | null> {
-  // Try Perplexity first (faster, uses knowledge)
-  let handle = await findInstagramHandleViaPerplexity(athleteName, sport);
-
-  // If not found, try Perplexity with Google-style search
-  if (!handle) {
-    handle = await findInstagramHandleViaGoogle(athleteName, sport);
-  }
-
-  // If still not found, try SerpAPI (actual Google search)
-  if (!handle && SERPAPI_API_KEY) {
-    handle = await findInstagramHandleViaSerpAPI(athleteName, sport);
-    if (handle) {
-      log(`    Found via SerpAPI: @${handle}`);
-    }
-  }
-
-  return handle;
 }
 
 async function scrapeInstagramProfile(username: string): Promise<{
@@ -924,67 +777,22 @@ async function scrapeInstagramProfile(username: string): Promise<{
 
   try {
     log(`Scraping Instagram profile: @${username}`);
-
-    const runResponse = await fetchWithTimeout(
-      `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs?token=${APIFY_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          usernames: [username],
-        }),
-      }
+    const profiles = await runApifyActor<ApifyInstagramProfile>(
+      "apify/instagram-profile-scraper",
+      { usernames: [username] },
+      { datasetLimit: 1, timeoutMs: 120_000 }
     );
-
-    if (!runResponse.ok) {
-      log(`Profile scraper failed for @${username}: ${runResponse.status}`);
-      return null;
-    }
-
-    const runData = await runResponse.json();
-    const runId = runData.data?.id;
-    const datasetId = runData.data?.defaultDatasetId;
-
-    if (!datasetId) return null;
-
-    // Wait for completion (max 30 seconds)
-    let attempts = 0;
-    let status = "RUNNING";
-
-    while (status === "RUNNING" || status === "READY") {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      attempts++;
-
-      const statusRes = await fetchWithTimeout(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
-      );
-      const statusData = await statusRes.json();
-      status = statusData.data?.status || "UNKNOWN";
-
-      if (attempts >= 15 || status === "SUCCEEDED" || status === "FAILED") break;
-    }
-
-    if (status !== "SUCCEEDED") return null;
-
-    // Fetch results
-    const dataResponse = await fetchWithTimeout(
-      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=1`
-    );
-
-    if (!dataResponse.ok) return null;
-
-    const profiles = await dataResponse.json();
     const profile = profiles[0];
 
     if (!profile) return null;
 
     return {
       followers: profile.followersCount || 0,
-      following: profile.followingCount || 0,
+      following: profile.followsCount || 0,
       posts: profile.postsCount || 0,
       bio: profile.biography || "",
       fullName: profile.fullName || "",
-      profilePicUrl: profile.profilePicUrl || "",
+      profilePicUrl: profile.profilePicUrlHD || profile.profilePicUrl || "",
       verified: profile.verified || false,
       isPrivate: profile.private || false,
     };
@@ -1077,27 +885,30 @@ async function enrichAthletesWithInstagram(
 // STEP 4: QUALIFICATION & SCORING
 // ============================================================================
 
-// Look up athlete's age via Google search when AI can't determine it
+// Look up athlete's age via Google through Apify when AI can't determine it
 async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
   age: number | null;
   birthYear: number | null;
   isMinor: boolean | null;
   source: string | null;
 }> {
-  if (!SERPAPI_API_KEY) {
+  if (!APIFY_API_KEY) {
     return { age: null, birthYear: null, isMinor: null, source: null };
   }
 
   try {
-    const query = encodeURIComponent(`${athleteName} ${sport} athlete age birthday born`);
-    const url = `https://serpapi.com/search.json?q=${query}&api_key=${SERPAPI_API_KEY}&num=5`;
-
-    const response = await fetchWithTimeout(url);
-    if (!response.ok) {
-      return { age: null, birthYear: null, isMinor: null, source: null };
-    }
-
-    const data = await response.json();
+    const search = await runApifyGoogleSearch(
+      `"${athleteName}" ${sport} athlete age birthday born`,
+      5
+    );
+    const data = {
+      knowledge_graph: search.knowledgeGraph,
+      organic_results: search.results.map((result) => ({
+        title: result.title,
+        snippet: result.snippet,
+        link: result.url,
+      })),
+    };
 
     // Check knowledge graph first (most reliable)
     if (data.knowledge_graph) {
@@ -1447,70 +1258,17 @@ async function fetchInstagramPhotosForAthlete(
 
   try {
     log(`  📸 Fetching Instagram photos for @${instagramHandle}...`);
-
-    // Use the Instagram Post Scraper actor
-    const runResponse = await fetchWithTimeout(
-      `https://api.apify.com/v2/acts/apify~instagram-post-scraper/runs?token=${APIFY_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+    const posts = sortInstagramPostsNewestFirst(
+      await runApifyActor<ScrapedInstagramPost>(
+        "apify/instagram-post-scraper",
+        {
           username: [instagramHandle],
           resultsLimit: limit,
           searchType: "user",
           skipPinnedPosts: true,
-        }),
-      }
-    );
-
-    if (!runResponse.ok) {
-      log(`    Photo scraper failed: ${runResponse.status}`);
-      return { success: false, photoCount: 0, error: `API error: ${runResponse.status}` };
-    }
-
-    const runData = await runResponse.json();
-    const runId = runData.data?.id;
-    const datasetId = runData.data?.defaultDatasetId;
-
-    if (!datasetId) {
-      return { success: false, photoCount: 0, error: "No dataset ID returned" };
-    }
-
-    // Wait for completion (max 60 seconds for photos)
-    let attempts = 0;
-    let status = "RUNNING";
-
-    while (status === "RUNNING" || status === "READY") {
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      attempts++;
-
-      const statusRes = await fetchWithTimeout(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
-      );
-      const statusData = await statusRes.json();
-      status = statusData.data?.status || "UNKNOWN";
-
-      if (attempts >= 24 || status === "SUCCEEDED" || status === "FAILED" || status === "ABORTED") {
-        break;
-      }
-    }
-
-    if (status !== "SUCCEEDED") {
-      log(`    Photo scraper did not complete: ${status}`);
-      return { success: false, photoCount: 0, error: `Scraper ${status}` };
-    }
-
-    // Fetch results
-    const dataResponse = await fetchWithTimeout(
-      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=${limit}`
-    );
-
-    if (!dataResponse.ok) {
-      return { success: false, photoCount: 0, error: "Failed to fetch results" };
-    }
-
-    const posts = sortInstagramPostsNewestFirst(
-      (await dataResponse.json()) as ScrapedInstagramPost[]
+        },
+        { datasetLimit: limit, timeoutMs: 120_000 }
+      )
     );
 
     if (!posts || posts.length === 0) {

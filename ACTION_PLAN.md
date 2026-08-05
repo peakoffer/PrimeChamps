@@ -434,8 +434,6 @@ SUPABASE_SERVICE_KEY=
 OPENAI_API_KEY= (or ANTHROPIC_API_KEY)
 
 # Enrichment
-FIRECRAWL_API_KEY=
-SERPAPI_KEY=
 APIFY_API_KEY=
 
 # Instagram (careful with these)

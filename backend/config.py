@@ -24,8 +24,6 @@ class AIConfig(BaseModel):
 
 class EnrichmentConfig(BaseModel):
     """Enrichment API configuration."""
-    firecrawl_api_key: str = os.getenv("FIRECRAWL_API_KEY", "")
-    serpapi_key: str = os.getenv("SERPAPI_KEY", "")
     apify_api_key: str = os.getenv("APIFY_API_KEY", "")
 
 

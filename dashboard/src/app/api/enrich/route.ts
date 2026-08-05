@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { runApifyActor, type ApifyInstagramProfile } from "@/lib/apify";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const apifyApiKey = process.env.APIFY_API_KEY;
-
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function POST(request: NextRequest) {
@@ -15,7 +14,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Missing athleteId" }, { status: 400 });
     }
 
-    if (!apifyApiKey) {
+    if (!process.env.APIFY_API_KEY) {
       return NextResponse.json({ success: false, error: "APIFY_API_KEY not configured" }, { status: 500 });
     }
 
@@ -34,40 +33,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "No Instagram handle" }, { status: 400 });
     }
 
-    // Call Apify to get fresh Instagram data
-    const apifyUrl = "https://api.apify.com/v2/acts/apify~instagram-profile-scraper/run-sync-get-dataset-items";
-
-    const apifyResponse = await fetch(apifyUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const data = await runApifyActor<ApifyInstagramProfile>(
+      "apify/instagram-profile-scraper",
+      {
         usernames: [athlete.instagram_handle],
-      }),
-      // @ts-ignore - Next.js fetch doesn't have timeout in types
-      signal: AbortSignal.timeout(120000),
-    });
-
-    // Add token as query param
-    const urlWithToken = `${apifyUrl}?token=${apifyApiKey}`;
-    const response = await fetch(urlWithToken, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        usernames: [athlete.instagram_handle],
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Apify error:", errorText);
-      return NextResponse.json({ success: false, error: "Apify API error" }, { status: 500 });
-    }
-
-    const data = await response.json();
+      { datasetLimit: 1, timeoutMs: 120_000 }
+    );
 
     if (!data || data.length === 0) {
       // Mark as failed

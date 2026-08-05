@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { runApifyActor } from "@/lib/apify";
 import {
   parseInstagramPostTimestamp,
   sortInstagramPostsNewestFirst,
@@ -213,87 +214,17 @@ export async function POST(request: NextRequest) {
     const existingPostIds = new Set((existingPosts || []).map(p => p.post_id));
     console.log(`[Instagram Photos] Found ${existingPostIds.size} existing posts in database`);
 
-    // Use Apify Instagram Post Scraper with memory optimization for speed
-    const runResponse = await fetch(
-      `https://api.apify.com/v2/acts/apify~instagram-post-scraper/runs?token=${APIFY_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: [instagramHandle],
-          resultsLimit: Math.min(limit, 10), // Cap at 10 for speed
-          searchType: "user", // Faster than hashtag
-          skipPinnedPosts: true, // Return the newest posts, not older items pinned to the grid top
-        }),
-      }
-    );
-
-    if (!runResponse.ok) {
-      const errorText = await runResponse.text().catch(() => "");
-      console.error(`[Instagram Photos] Apify error: ${runResponse.status} - ${errorText}`);
-
-      if (runResponse.status === 402) {
-        return NextResponse.json({ error: "Apify credits exhausted. Please add more credits." }, { status: 402 });
-      } else if (runResponse.status === 403) {
-        return NextResponse.json({ error: "Apify API key invalid or rate limited." }, { status: 403 });
-      }
-
-      return NextResponse.json({ error: `Instagram scraper failed: ${runResponse.status}` }, { status: 500 });
-    }
-
-    const runData = await runResponse.json();
-    const runId = runData.data?.id;
-    const datasetId = runData.data?.defaultDatasetId;
-
-    if (!datasetId) {
-      return NextResponse.json({ error: "No dataset ID returned from Apify" }, { status: 500 });
-    }
-
-    console.log(`[Instagram Photos] Apify run started: ${runId}`);
-
-    // Wait for run to complete (max 2 minutes)
-    let attempts = 0;
-    let status = "RUNNING";
-
-    while (status === "RUNNING" || status === "READY") {
-      await new Promise((resolve) => setTimeout(resolve, 3000)); // 3 second intervals
-      attempts++;
-
-      const statusRes = await fetch(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
-      );
-      const statusData = await statusRes.json();
-      status = statusData.data?.status || "UNKNOWN";
-
-      console.log(`[Instagram Photos] Attempt ${attempts}: Status = ${status}`);
-
-      if (attempts >= 40 || status === "SUCCEEDED" || status === "FAILED" || status === "ABORTED") {
-        break;
-      }
-    }
-
-    if (status !== "SUCCEEDED") {
-      // If still running after timeout, return a helpful message
-      if (status === "RUNNING") {
-        return NextResponse.json({
-          error: "Instagram scraper is taking too long. Try again in a minute.",
-          runId
-        }, { status: 504 });
-      }
-      return NextResponse.json({ error: `Scraper run failed: ${status}` }, { status: 500 });
-    }
-
-    // Fetch results
-    const dataResponse = await fetch(
-      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=${limit}`
-    );
-
-    if (!dataResponse.ok) {
-      return NextResponse.json({ error: "Failed to fetch results from Apify" }, { status: 500 });
-    }
-
     const posts = sortInstagramPostsNewestFirst(
-      (await dataResponse.json()) as ScrapedInstagramPost[]
+      await runApifyActor<ScrapedInstagramPost>(
+        "apify/instagram-post-scraper",
+        {
+          username: [instagramHandle],
+          resultsLimit: Math.min(limit, 10),
+          searchType: "user",
+          skipPinnedPosts: true,
+        },
+        { datasetLimit: Math.min(limit, 10), timeoutMs: 120_000 }
+      )
     );
     console.log(`[Instagram Photos] Apify returned ${posts.length} posts`);
 

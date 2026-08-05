@@ -16,7 +16,7 @@ Automated athlete outreach CRM for managing partnerships with athletes. Features
 - **Frontend**: Next.js 16, React 19, Tailwind CSS
 - **Backend**: Python (agents), Next.js API routes
 - **Database**: Supabase (PostgreSQL)
-- **APIs**: Apify (Instagram scraping), OpenAI/Anthropic (research agent)
+- **APIs**: Apify (Google, Instagram, and TikTok data), Perplexity (candidate discovery), Anthropic (Sonnet scoring)
 - **Storage**: Supabase Storage (profile pics, post images)
 
 ## Project Structure
@@ -54,8 +54,8 @@ NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 SUPABASE_SECRET_KEY=your_server_secret_key
 
-# Apify (Instagram scraping)
-APIFY_API_KEY=your_apify_key
+# Apify (Google search plus Instagram and TikTok enrichment)
+APIFY_API_KEY=apify_api_your_token
 
 # One-time first-owner conversion only; remove after /setup succeeds
 AUTH_USERS=zac:your-current-preview-password:Zac

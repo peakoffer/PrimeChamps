@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { runApifyActor, type ApifyInstagramProfile } from "@/lib/apify";
 import {
   isEnrichmentSource,
   runAthleteEnrichment,
@@ -41,11 +42,6 @@ async function persistEnrichmentResult(
   );
 
   if (error) throw error;
-}
-
-// Helper to wait
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Download and store post image in Supabase storage
@@ -222,62 +218,11 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
 
   console.log(`[IG Scraper] Starting scrape for @${cleanUsername}`);
 
-  // Start the Instagram profile scraper
-  const runResponse = await fetch(
-    `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs?token=${APIFY_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        usernames: [cleanUsername],
-      }),
-    }
+  const results = await runApifyActor<ApifyInstagramProfile>(
+    "apify/instagram-profile-scraper",
+    { usernames: [cleanUsername] },
+    { datasetLimit: 1, timeoutMs: 120_000 }
   );
-
-  if (!runResponse.ok) {
-    const error = await runResponse.text();
-    console.error(`[IG Scraper] Apify request failed:`, error);
-    throw new Error(`Apify request failed: ${error}`);
-  }
-
-  const runData = await runResponse.json();
-  const runId = runData.data?.id;
-
-  if (!runId) {
-    throw new Error("Failed to start Apify run");
-  }
-
-  console.log(`[IG Scraper] Run started with ID: ${runId}`);
-
-  // Poll for completion (max 90 seconds)
-  let status = "RUNNING";
-  let datasetId = null;
-  const maxWait = 90000;
-  const startTime = Date.now();
-
-  while (status === "RUNNING" && Date.now() - startTime < maxWait) {
-    await sleep(2000);
-
-    const statusResponse = await fetch(
-      `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
-    );
-    const statusData = await statusResponse.json();
-    status = statusData.data?.status;
-    datasetId = statusData.data?.defaultDatasetId;
-
-    console.log(`[IG Scraper] Status: ${status}`);
-  }
-
-  if (status !== "SUCCEEDED" || !datasetId) {
-    console.error(`[IG Scraper] Run failed with status: ${status}`);
-    throw new Error(`Apify run failed with status: ${status}`);
-  }
-
-  // Get results - no limit to get full data
-  const resultsResponse = await fetch(
-    `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}`
-  );
-  const results = await resultsResponse.json();
 
   if (!results || results.length === 0) {
     console.log(`[IG Scraper] No results returned for @${cleanUsername}`);
@@ -288,7 +233,7 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
   console.log(`[IG Scraper] Raw profile data keys:`, Object.keys(profile));
 
   // Extract latest posts with engagement data
-  const latestPosts = (profile.latestPosts || []).map((post: any) => ({
+  const latestPosts = (profile.latestPosts || []).map((post) => ({
     id: post.id || "",
     type: post.type || "Image",
     shortCode: post.shortCode || "",
@@ -306,28 +251,30 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
   let avgLikesPerPost = 0;
   let avgCommentsPerPost = 0;
   let engagementRate = 0;
+  const followersCount = profile.followersCount || 0;
+  const followsCount = profile.followsCount || 0;
 
   if (latestPosts.length > 0) {
-    const totalLikes = latestPosts.reduce((sum: number, p: any) => sum + (p.likesCount || 0), 0);
-    const totalComments = latestPosts.reduce((sum: number, p: any) => sum + (p.commentsCount || 0), 0);
+    const totalLikes = latestPosts.reduce((sum, post) => sum + (post.likesCount || 0), 0);
+    const totalComments = latestPosts.reduce((sum, post) => sum + (post.commentsCount || 0), 0);
     avgLikesPerPost = Math.round(totalLikes / latestPosts.length);
     avgCommentsPerPost = Math.round(totalComments / latestPosts.length);
 
     // Engagement rate = (avg likes + avg comments) / followers * 100
-    if (profile.followersCount > 0) {
+    if (followersCount > 0) {
       engagementRate = parseFloat(
-        (((avgLikesPerPost + avgCommentsPerPost) / profile.followersCount) * 100).toFixed(2)
+        (((avgLikesPerPost + avgCommentsPerPost) / followersCount) * 100).toFixed(2)
       );
     }
   }
 
   // Follower/Following ratio
-  const followerFollowingRatio = profile.followsCount > 0
-    ? parseFloat((profile.followersCount / profile.followsCount).toFixed(2))
+  const followerFollowingRatio = followsCount > 0
+    ? parseFloat((followersCount / followsCount).toFixed(2))
     : 0;
 
   // Extract related profiles
-  const relatedProfiles = (profile.relatedProfiles || []).map((rp: any) => ({
+  const relatedProfiles = (profile.relatedProfiles || []).map((rp) => ({
     username: rp.username || "",
     fullName: rp.fullName || "",
     verified: rp.verified || false,
@@ -345,8 +292,8 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
     profilePicUrlHD: profile.profilePicUrlHD || "",
 
     // Metrics
-    followersCount: profile.followersCount || 0,
-    followsCount: profile.followsCount || 0,
+    followersCount,
+    followsCount,
     postsCount: profile.postsCount || 0,
     highlightReelCount: profile.highlightReelCount || 0,
     igtvVideoCount: profile.igtvVideoCount || 0,

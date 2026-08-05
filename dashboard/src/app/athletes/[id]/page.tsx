@@ -1616,7 +1616,7 @@ export default function AthleteDetailPage() {
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <h3 className="text-sm font-semibold text-blue-950">Current research summary</h3>
                         <span className="text-xs font-medium text-blue-700">
-                          {googleData.provider === "serpapi_google" ? "Google via SerpApi" : "Perplexity Sonar"}
+                          Google via Apify
                         </span>
                       </div>
                       <p className="mt-2 whitespace-pre-line text-sm leading-6 text-blue-950/80">
@@ -1627,7 +1627,10 @@ export default function AthleteDetailPage() {
 
                   {googleData?.results && googleData.results.length > 0 && (
                     <div>
-                      <h3 className="mb-2 text-sm font-semibold text-gray-900">Current web results</h3>
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-gray-900">Current web results</h3>
+                        <span className="text-xs font-medium text-blue-700">Google via Apify</span>
+                      </div>
                       <div className="space-y-2">
                         {googleData.results.slice(0, 5).map((result, index) => (
                           <a
@@ -1730,7 +1733,7 @@ export default function AthleteDetailPage() {
               ) : (
                 <div className="text-center text-gray-700">
                   {enrichmentSources.tiktok?.status === "not_configured"
-                    ? "TikTok profile loading needs Apify; handle discovery can use Perplexity or SerpApi."
+                    ? "TikTok profile loading and Google handle discovery need a valid Apify connection."
                     : enrichmentSources.tiktok?.status === "not_found"
                       ? "No verified TikTok profile was found for this athlete."
                     : "Search to discover and load this athlete's TikTok profile."}
@@ -1817,7 +1820,7 @@ export default function AthleteDetailPage() {
               ) : (
                 <div className="text-center text-gray-700">
                   {enrichmentSources.onlyfans?.status === "not_configured"
-                    ? "OnlyFans discovery uses current public web results. It needs Perplexity or SerpApi, not an OnlyFans API."
+                    ? "OnlyFans discovery uses public Google results through Apify and needs a valid Apify connection."
                     : enrichmentSources.onlyfans?.status === "not_found"
                       ? "No public OnlyFans result was found."
                       : "Check public search results for a possible OnlyFans presence."}

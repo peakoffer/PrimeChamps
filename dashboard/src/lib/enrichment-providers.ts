@@ -1,5 +1,7 @@
 import "server-only";
 
+import { runApifyActor, runApifyGoogleSearch } from "@/lib/apify";
+
 export const enrichmentSources = [
   "instagram",
   "google",
@@ -27,39 +29,8 @@ export interface EnrichmentProviderResult {
   message: string;
 }
 
-type SearchResult = {
-  position?: number;
-  title?: string;
-  link?: string;
-  snippet?: string;
-  date?: string;
-};
-
-type SearchProviderResult = {
-  results: Array<{
-    position?: number;
-    title: string;
-    url: string;
-    snippet: string;
-    date?: string;
-  }>;
-  provider: "serpapi_google" | "perplexity_sonar";
-  summary?: string;
-  citations?: string[];
-  knowledgeGraph?: Record<string, unknown> | null;
-  totalResults?: number | null;
-};
-
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function serpApiKey() {
-  return process.env.SERPAPI_KEY || process.env.SERPAPI_API_KEY;
-}
-
-function perplexityApiKey() {
-  return process.env.PERPLEXITY_API_KEY;
 }
 
 async function fetchJson(url: string, init?: RequestInit) {
@@ -80,126 +51,25 @@ async function fetchJson(url: string, init?: RequestInit) {
   return response.json() as Promise<unknown>;
 }
 
-async function runSerpApiSearch(query: string, limit = 10): Promise<SearchProviderResult | null> {
-  const apiKey = serpApiKey();
-  if (!apiKey) return null;
-
-  const url = new URL("https://serpapi.com/search.json");
-  url.searchParams.set("engine", "google");
-  url.searchParams.set("q", query);
-  url.searchParams.set("num", String(limit));
-  url.searchParams.set("api_key", apiKey);
-
-  const payload = (await fetchJson(url.toString())) as {
-    organic_results?: SearchResult[];
-    knowledge_graph?: Record<string, unknown>;
-    search_information?: { total_results?: number };
-  };
-
-  return {
-    results: (payload.organic_results || []).slice(0, limit).map((result) => ({
-      position: result.position,
-      title: cleanText(result.title),
-      url: cleanText(result.link),
-      snippet: cleanText(result.snippet),
-      date: cleanText(result.date) || undefined,
-    })),
-    knowledgeGraph: payload.knowledge_graph || null,
-    totalResults: payload.search_information?.total_results || null,
-    provider: "serpapi_google",
-  };
-}
-
-async function runPerplexitySearch(
-  query: string,
-  limit = 10,
-  domains?: string[]
-): Promise<SearchProviderResult | null> {
-  const apiKey = perplexityApiKey();
-  if (!apiKey) return null;
-
-  const payload = (await fetchJson("https://api.perplexity.ai/v1/sonar", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "sonar",
-      messages: [
-        {
-          role: "user",
-          content: `${query}\n\nReturn a concise factual overview grounded only in current public web sources.`,
-        },
-      ],
-      max_tokens: 700,
-      temperature: 0.1,
-      search_mode: "web",
-      web_search_options: domains?.length
-        ? { search_domain_filter: domains }
-        : undefined,
-    }),
-  })) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    citations?: string[];
-    search_results?: Array<{
-      title?: string;
-      url?: string;
-      snippet?: string;
-      date?: string;
-      last_updated?: string;
-    }>;
-  };
-
-  const results = (payload.search_results || [])
-    .slice(0, limit)
-    .map((result, index) => ({
-      position: index + 1,
-      title: cleanText(result.title),
-      url: cleanText(result.url),
-      snippet: cleanText(result.snippet),
-      date: cleanText(result.last_updated) || cleanText(result.date) || undefined,
-    }))
-    .filter((result) => Boolean(result.url));
-
-  return {
-    results,
-    provider: "perplexity_sonar",
-    summary: cleanText(payload.choices?.[0]?.message?.content),
-    citations: (payload.citations || []).filter((citation) => typeof citation === "string"),
-  };
-}
-
-async function runWebSearch(query: string, limit = 10, domains?: string[]) {
-  if (serpApiKey()) {
-    try {
-      return await runSerpApiSearch(query, limit);
-    } catch (error) {
-      if (!perplexityApiKey()) throw error;
-    }
-  }
-  return runPerplexitySearch(query, limit, domains);
-}
-
 async function enrichGoogle(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
-  if (!serpApiKey() && !perplexityApiKey()) {
+  if (!process.env.APIFY_API_KEY) {
     return {
       status: "not_configured",
       data: {},
-      message: "Web research needs PERPLEXITY_API_KEY or SERPAPI_KEY in the server environment.",
+      message: "Google research needs APIFY_API_KEY in the server environment.",
     };
   }
 
-  const query = `Research the professional athlete "${athlete.name}" (${athlete.sport || "sport"}). Prioritize official league profiles, recent interviews, rankings, and verified social profiles. Exclude unrelated people with the same name.`;
-  const search = await runWebSearch(query);
-  const results = search?.results || [];
+  const query = `"${athlete.name}" ${athlete.sport || "athlete"} official profile interview ranking`;
+  const search = await runApifyGoogleSearch(query);
+  const results = search.results;
 
   return {
     status: results.length > 0 ? "complete" : "not_found",
     data: { query, ...search },
     message:
       results.length > 0
-        ? `Found ${results.length} current, source-linked web result${results.length === 1 ? "" : "s"} with ${search?.provider === "serpapi_google" ? "Google via SerpApi" : "Perplexity Sonar"}.`
+        ? `Found ${results.length} current Google result${results.length === 1 ? "" : "s"} through Apify.`
         : "No matching current web results were found.",
   };
 }
@@ -313,12 +183,11 @@ async function discoverTikTokHandle(athlete: EnrichmentAthlete) {
   const directHandle = extractTikTokHandle(athlete);
   if (directHandle) return directHandle;
 
-  const search = await runWebSearch(
-    `site:tiktok.com/@ Find the official TikTok profile for professional athlete "${athlete.name}" (${athlete.sport || "sport"}). Return only exact profile evidence, not fan accounts.`,
-    5,
-    ["tiktok.com"]
+  const search = await runApifyGoogleSearch(
+    `site:tiktok.com/@ "${athlete.name}" ${athlete.sport || "athlete"}`,
+    5
   );
-  for (const result of search?.results || []) {
+  for (const result of search.results) {
     const match = result.url.match(/tiktok\.com\/@([^/?#]+)/i);
     if (match?.[1]) return match[1];
   }
@@ -340,28 +209,23 @@ async function enrichTikTok(athlete: EnrichmentAthlete): Promise<EnrichmentProvi
     return {
       status: "not_found",
       data: {},
-      message: serpApiKey()
-        ? "No matching TikTok account was found."
-        : perplexityApiKey()
-          ? "No verified TikTok profile URL was found in current web results."
-          : "Add a TikTok handle or configure PERPLEXITY_API_KEY or SERPAPI_KEY so Prime Champs can discover one.",
+      message: "No matching TikTok account was found in current Google results from Apify.",
     };
   }
 
-  const actorId = "0FXVyOXXEmdGcV88a";
-  const actorUrl = new URL(
-    `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items`
-  );
-  actorUrl.searchParams.set("token", process.env.APIFY_API_KEY);
-
-  const payload = (await fetchJson(actorUrl.toString(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      profiles: [`https://www.tiktok.com/@${handle}`],
+  const actorId = process.env.APIFY_TIKTOK_PROFILE_ACTOR || "clockworks/tiktok-profile-scraper";
+  const payload = await runApifyActor<{ authorMeta?: Record<string, unknown> }>(
+    actorId,
+    {
+      profiles: [handle],
       resultsPerPage: 1,
-    }),
-  })) as Array<{ authorMeta?: Record<string, unknown> }>;
+      shouldDownloadCovers: false,
+      shouldDownloadSlideshowImages: false,
+      shouldDownloadSubtitles: false,
+      shouldDownloadVideos: false,
+    },
+    { datasetLimit: 1, timeoutMs: 120_000 }
+  );
 
   const author = payload[0]?.authorMeta;
   if (!author) {
@@ -396,20 +260,19 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
     };
   }
 
-  if (!serpApiKey() && !perplexityApiKey()) {
+  if (!process.env.APIFY_API_KEY) {
     return {
       status: "not_configured",
       data: {},
-      message: "Public OnlyFans discovery needs PERPLEXITY_API_KEY or SERPAPI_KEY in the server environment.",
+      message: "Public OnlyFans discovery needs APIFY_API_KEY in the server environment.",
     };
   }
 
-  const search = await runWebSearch(
-    `site:onlyfans.com Find a public OnlyFans profile that can be confidently matched to professional athlete "${athlete.name}" (${athlete.sport || "sport"}). Do not infer a match without an exact public profile URL.`,
-    10,
-    ["onlyfans.com"]
+  const search = await runApifyGoogleSearch(
+    `site:onlyfans.com "${athlete.name}" ${athlete.sport || "athlete"}`,
+    10
   );
-  const candidates = (search?.results || []).filter((result) => {
+  const candidates = search.results.filter((result) => {
     try {
       const hostname = new URL(result.url).hostname.toLowerCase();
       return hostname === "onlyfans.com" || hostname.endsWith(".onlyfans.com");
@@ -428,7 +291,7 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       snippet: bestMatch?.snippet || null,
       candidates,
       source: "public_web_discovery",
-      provider: search?.provider || null,
+      provider: search.provider,
     },
     message: bestMatch
       ? "Found a possible OnlyFans profile. Verify the match before outreach."

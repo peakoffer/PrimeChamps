@@ -40,7 +40,7 @@ Marketing site stays on `prime-champs.com` (Lovable). The CRM lives on the
 2. Railway auto-detects `Dockerfile` + `railway.json` at the repo root.
 3. Set service **environment variables** (from `.env.example`):
    - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ANON_KEY`
-   - `ANTHROPIC_API_KEY`, `APIFY_API_KEY`, `SERPAPI_KEY` (+ optional `FIRECRAWL_API_KEY`)
+   - `ANTHROPIC_API_KEY`, `APIFY_API_KEY`
    - `INSTAGRAM_SESSION_SECRET` (+ optional `INSTAGRAM_SESSION_SALT`)
    - `BACKEND_API_KEY` = the value from step 0.2
    - `BACKEND_CORS_ORIGINS=https://app.prime-champs.com`
@@ -69,7 +69,7 @@ Marketing site stays on `prime-champs.com` (Lovable). The CRM lives on the
    - `SUPABASE_SERVICE_KEY`
    - `JWT_SECRET` = the value from step 0.2
    - `AUTH_USERS=zac:<strong-password>:Zac` (and anyone else)
-   - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `SERPAPI_API_KEY`,
+   - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`,
      `APIFY_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_WEBHOOK_SECRET`
    - `BACKEND_URL` and `AGENT_SERVER_URL` = the Railway URL from step 1.6
    - `BACKEND_API_KEY` = the SAME value as Railway (step 0.2)
