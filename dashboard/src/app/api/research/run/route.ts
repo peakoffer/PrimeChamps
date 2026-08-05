@@ -7,7 +7,7 @@ const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY;
+const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 

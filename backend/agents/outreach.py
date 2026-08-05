@@ -85,20 +85,42 @@ Prime Champs Team"""
         return results
 
     def _get_outreach_candidates(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get athletes that are ready for outreach."""
-        # Get enriched athletes
+        """Get enriched athletes that do NOT already have an outreach message."""
         from backend.database import EnrichmentStatus
-        enriched = self.db.list_athletes(enrichment_status=EnrichmentStatus.ENRICHED, limit=limit * 2)
 
-        # Filter out those already contacted
-        # (In production, would join with outreach_messages table)
-        candidates = []
-        for athlete in enriched:
-            # Check if already has outreach message
-            # This is simplified - real implementation would be a proper query
-            candidates.append(athlete)
-            if len(candidates) >= limit:
+        # Set of athletes that already have a message of any status. Pulled in
+        # one query rather than per-athlete to avoid N+1.
+        contacted_ids = set()
+        try:
+            existing = (
+                self.db.client.table("outreach_messages")
+                .select("athlete_id")
+                .execute()
+            )
+            contacted_ids = {
+                row["athlete_id"] for row in (existing.data or []) if row.get("athlete_id")
+            }
+        except Exception as e:
+            self.log_error(f"Could not load already-contacted athletes: {e}")
+            # Fail safe: if we can't tell who was contacted, don't message anyone.
+            return []
+
+        candidates: List[Dict[str, Any]] = []
+        offset = 0
+        page = max(limit * 2, 50)
+        # Page through enriched athletes until we collect `limit` uncontacted ones.
+        while len(candidates) < limit:
+            enriched = self.db.list_athletes(
+                enrichment_status=EnrichmentStatus.ENRICHED, limit=page, offset=offset
+            )
+            if not enriched:
                 break
+            for athlete in enriched:
+                if athlete["id"] not in contacted_ids:
+                    candidates.append(athlete)
+                    if len(candidates) >= limit:
+                        break
+            offset += page
 
         return candidates
 
@@ -181,45 +203,109 @@ Return ONLY the hook text, nothing else.
             # Fallback to generic hook
             return f"your work in {athlete.get('sport', 'athletics')}"
 
+    def _get_setting(self, key: str, default: Any) -> Any:
+        """Read a value from outreach_settings, falling back to a default."""
+        try:
+            res = self.db.client.table("outreach_settings").select("value").eq(
+                "key", key
+            ).single().execute()
+            if res.data is not None and res.data.get("value") is not None:
+                return res.data["value"]
+        except Exception:
+            pass
+        return default
+
+    def _dms_sent_today(self) -> int:
+        """Count outreach messages already marked sent in the last 24h."""
+        from datetime import datetime, timedelta
+        since = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        try:
+            res = self.db.client.table("outreach_messages").select(
+                "id", count="exact"
+            ).eq("status", OutreachStatus.SENT.value).gte("sent_at", since).execute()
+            return res.count or 0
+        except Exception:
+            return 0
+
     async def send_approved_messages(self, limit: int = 20) -> Dict[str, Any]:
         """
-        Send messages that have been approved.
+        Send approved outreach messages via Instagram DM.
 
-        NOTE: This is a placeholder. Real implementation needs:
-        - Instagram DM automation (careful with rate limiting)
-        - Email sending for those with emails
-        - Proper error handling and retry logic
+        Guardrails (all enforced before any send):
+        - outreach_settings.pause_all_outreach must be falsy
+        - Instagram kill switch must be off (checked inside send_dm)
+        - daily_dm_limit caps sends per rolling 24h
+        - hourly rate limit + randomized delay (inside send_dm)
 
-        Returns:
-            Dict with send results
+        A message is marked SENT only after Instagram confirms delivery; failures
+        leave it APPROVED so it is retried next run.
         """
-        # Get approved messages
+        from datetime import datetime
+
+        if self._get_setting("pause_all_outreach", False) in (True, "true"):
+            self.log_info("Outreach paused via outreach_settings.pause_all_outreach")
+            return {"sent": 0, "skipped": 0, "failed": 0, "paused": True}
+
+        daily_limit = int(self._get_setting("daily_dm_limit", 50))
+        already_today = self._dms_sent_today()
+        remaining_today = max(0, daily_limit - already_today)
+        if remaining_today == 0:
+            self.log_info(f"Daily DM limit reached ({already_today}/{daily_limit})")
+            return {"sent": 0, "skipped": 0, "failed": 0, "daily_limit_reached": True}
+
+        send_budget = min(limit, remaining_today)
+
         approved = self.db.client.table("outreach_messages").select("*, athletes(*)").eq(
             "approval_status", ApprovalStatus.APPROVED.value
         ).eq(
             "status", OutreachStatus.APPROVED.value
-        ).limit(limit).execute()
+        ).limit(send_budget).execute()
 
-        if not approved.data:
+        rows = approved.data or []
+        if not rows:
             self.log_info("No approved messages to send")
-            return {"sent": 0}
+            return {"sent": 0, "skipped": 0, "failed": 0}
 
-        results = {"sent": 0, "failed": 0}
+        # Imported here to avoid a hard dependency at module load.
+        from backend.sources.instagram_dm import instagram_dm
 
-        for message in approved.data:
-            try:
-                # Placeholder for actual sending
-                # Real implementation would:
-                # 1. Send via Instagram DM API/automation
-                # 2. Or send via email if available
-                # 3. Update status to SENT
-                # 4. Log the event
+        results = {"sent": 0, "skipped": 0, "failed": 0}
 
-                self.log_info(f"Would send message to {message['athletes']['name']} (sending not implemented)")
+        for message in rows:
+            athlete = message.get("athletes") or {}
+            handle = athlete.get("instagram_handle")
+            if not handle:
+                self.log_info(f"Skipping {athlete.get('name')}: no instagram_handle")
+                results["skipped"] += 1
+                continue
+
+            send_result = await instagram_dm.send_dm(handle, message["message_content"])
+
+            if send_result.get("success"):
+                self.db.client.table("outreach_messages").update({
+                    "status": OutreachStatus.SENT.value,
+                    "sent_at": datetime.utcnow().isoformat(),
+                }).eq("id", message["id"]).execute()
+                try:
+                    self.db.log_event(
+                        event_type="outreach_sent",
+                        athlete_id=athlete.get("id"),
+                        metadata={"channel": "instagram_dm", "message_id": message["id"]},
+                    )
+                except Exception:
+                    pass
                 results["sent"] += 1
-
-            except Exception as e:
-                self.log_error(f"Failed to send message {message['id']}: {str(e)}")
+                self.log_info(f"Sent DM to {athlete.get('name')} (@{handle})")
+            elif send_result.get("error") == "kill_switch_active":
+                self.log_info("Kill switch active — stopping send run")
+                break
+            elif send_result.get("error") in ("rate_limited",):
+                self.log_info("Hourly rate limit hit — stopping send run")
+                break
+            else:
+                self.log_error(
+                    f"Failed to DM {athlete.get('name')}: {send_result.get('error')}"
+                )
                 results["failed"] += 1
 
         return results

@@ -1,4 +1,4 @@
--- Research Agent Tables
+-- LEGACY (pre-baseline): Research Agent Tables
 
 -- Research run logs - tracks each research session
 CREATE TABLE IF NOT EXISTS research_logs (

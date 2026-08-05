@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase, type Athlete } from "@/lib/supabase";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import ApprovalModal from "@/components/ApprovalModal";
@@ -698,9 +699,9 @@ export default function AthleteDetailPage() {
     return (
       <div className="text-center py-12">
         <h2 className="text-xl text-gray-800">Athlete not found</h2>
-        <a href="/athletes" className="text-blue-600 hover:underline mt-4 inline-block">
+        <Link href="/athletes" className="text-blue-600 hover:underline mt-4 inline-block">
           ← Back to athletes
-        </a>
+        </Link>
       </div>
     );
   }

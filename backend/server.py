@@ -1,12 +1,18 @@
 """FastAPI server for Prime Champs agent execution."""
 
 import asyncio
+import logging
+import os
+import secrets
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 import uuid
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+logger = logging.getLogger("prime_champs.server")
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -33,7 +39,23 @@ def update_job_progress(job_id: str, current: int, total: int, message: str = ""
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     print("Prime Champs Agent Server starting...")
+    # Auto-start the autonomous pipeline scheduler when enabled. Survives here
+    # so the loop runs without a human POSTing a start endpoint after restart.
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    if pipeline_scheduler.autorun_enabled():
+        try:
+            res = await pipeline_scheduler.start()
+            print(f"Pipeline scheduler: {res.get('message')}")
+        except Exception as e:
+            logger.error("Failed to auto-start pipeline scheduler: %s", e)
+    else:
+        print("Pipeline scheduler autorun disabled (set PIPELINE_AUTORUN_ENABLED=true)")
     yield
+    try:
+        from backend.services.pipeline_scheduler import pipeline_scheduler
+        await pipeline_scheduler.stop()
+    except Exception:
+        pass
     print("Prime Champs Agent Server shutting down...")
 
 
@@ -44,14 +66,47 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS for Next.js dashboard
+# CORS for Next.js dashboard. Override allowed origins in prod via
+# BACKEND_CORS_ORIGINS (comma-separated). CORS only constrains browsers — the
+# API-key check below is what actually protects the API from scripts/curl.
+_cors_origins = os.environ.get(
+    "BACKEND_CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- API key auth -----------------------------------------------------------
+# The dashboard's server-side routes call this API with an X-API-Key header.
+# When BACKEND_API_KEY is set, every request must present it (except liveness
+# probes and CORS preflight). When unset, the API runs OPEN and logs a loud
+# warning — set the key (and bind to 127.0.0.1) for any non-localhost use.
+BACKEND_API_KEY = os.environ.get("BACKEND_API_KEY", "").strip()
+_OPEN_PATHS = {"/health", "/", "/docs", "/openapi.json", "/redoc"}
+
+if not BACKEND_API_KEY:
+    logger.warning(
+        "BACKEND_API_KEY is not set — the agent API is UNAUTHENTICATED. "
+        "Set it and bind to 127.0.0.1 before exposing this server."
+    )
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    if (
+        BACKEND_API_KEY
+        and request.method != "OPTIONS"
+        and request.url.path not in _OPEN_PATHS
+    ):
+        provided = request.headers.get("x-api-key", "")
+        if not secrets.compare_digest(provided, BACKEND_API_KEY):
+            return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
+    return await call_next(request)
+
 
 # Include routers
 app.include_router(instagram_router)
@@ -492,8 +547,11 @@ async def run_bulk_enrich_job(job_id: str, source: str, limit: int, historical: 
                             "raw_data": data,
                         }, on_conflict="athlete_id,data_source").execute()
                         updated += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(
+                            "Failed to upsert onlyfans enrichment for athlete %s: %s",
+                            athlete_id, e,
+                        )
 
                     # Update progress
                     jobs[job_id]["progress"] = {
@@ -563,8 +621,11 @@ async def enrich_single(request: SingleEnrichRequest):
                         "data_source": "instagram",
                         "raw_data": data,
                     }, on_conflict="athlete_id,data_source").execute()
-                except Exception:
-                    pass  # Table might not exist
+                except Exception as e:
+                    logger.error(
+                        "Failed to upsert instagram enrichment for athlete %s: %s",
+                        request.athlete_id, e,
+                    )
 
                 enrichment_result = data
 
@@ -598,8 +659,11 @@ async def enrich_single(request: SingleEnrichRequest):
                         "data_source": "onlyfans",
                         "raw_data": data,
                     }, on_conflict="athlete_id,data_source").execute()
-                except Exception:
-                    pass  # Table might not exist
+                except Exception as e:
+                    logger.error(
+                        "Failed to upsert onlyfans enrichment for athlete %s: %s",
+                        request.athlete_id, e,
+                    )
 
                 enrichment_result = data
             else:
@@ -670,6 +734,37 @@ async def get_stats():
         }
 
 
+# ==================== Pipeline scheduler control ====================
+
+@app.get("/pipeline/scheduler/status")
+async def pipeline_scheduler_status():
+    """Status of the autonomous pipeline scheduler."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.get_status()
+
+
+@app.post("/pipeline/scheduler/start")
+async def pipeline_scheduler_start():
+    """Start the autonomous pipeline scheduler."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.start()
+
+
+@app.post("/pipeline/scheduler/stop")
+async def pipeline_scheduler_stop():
+    """Stop the autonomous pipeline scheduler."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.stop()
+
+
+@app.post("/pipeline/scheduler/run-once")
+async def pipeline_scheduler_run_once():
+    """Run a single pipeline tick on demand (enrich → score → generate → send)."""
+    from backend.services.pipeline_scheduler import pipeline_scheduler
+    return await pipeline_scheduler.trigger_once()
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Default to localhost; the API key check + reverse proxy handle exposure.
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=8000)

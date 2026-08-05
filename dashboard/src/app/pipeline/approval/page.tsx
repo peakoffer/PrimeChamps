@@ -147,7 +147,7 @@ function ApprovalPageContent() {
 
       // Fetch rejection decisions for these athletes
       const athleteIds = (athletes || []).map((a) => a.id);
-      let decisionsMap: Record<string, { reason?: string; notes?: string; decided_at?: string }> = {};
+      const decisionsMap: Record<string, { reason?: string; notes?: string; decided_at?: string }> = {};
 
       if (athleteIds.length > 0) {
         const { data: decisions } = await supabase

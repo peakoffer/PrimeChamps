@@ -32,7 +32,10 @@ export async function POST(request: NextRequest) {
     try {
       const response = await fetch(`${AGENT_SERVER_URL}/outreach/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.BACKEND_API_KEY ? { "X-API-Key": process.env.BACKEND_API_KEY } : {}),
+        },
         body: JSON.stringify({ athlete }),
       });
 

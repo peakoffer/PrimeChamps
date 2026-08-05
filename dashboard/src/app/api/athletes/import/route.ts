@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
           is_historical: false,
         };
       })
-      .filter(Boolean);
+      .filter((athlete): athlete is NonNullable<typeof athlete> => athlete !== null);
 
     // Insert athletes
     if (toInsert.length > 0) {

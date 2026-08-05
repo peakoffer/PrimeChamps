@@ -13,7 +13,7 @@ Automated athlete outreach CRM for managing partnerships with athletes. Features
 
 ## Tech Stack
 
-- **Frontend**: Next.js 15, React, Tailwind CSS
+- **Frontend**: Next.js 16, React 19, Tailwind CSS
 - **Backend**: Python (agents), Next.js API routes
 - **Database**: Supabase (PostgreSQL)
 - **APIs**: Apify (Instagram scraping), OpenAI/Anthropic (research agent)
@@ -63,20 +63,17 @@ AUTH_PASSWORD=your_dashboard_password
 
 ### 2. Database Setup
 
-Run the migrations in order:
+For the existing Supabase project, link the CLI and use managed migrations:
 
 ```bash
-# Core schema
-psql -f scripts/schema.sql
-
-# Research tables
-psql -f scripts/create_research_tables.sql
-
-# Pipeline additions
-psql -f scripts/migration_v3_pipeline.sql
-psql -f scripts/migration_v4_add_rejected_stage.sql
-psql -f scripts/migration_v5_athlete_posts.sql
+npx supabase login
+npx supabase link --project-ref rmxuwyxpoazsuqvdadlo
+npx supabase db push --dry-run
+npx supabase db push
 ```
+
+Managed history starts from the existing production baseline; see
+`scripts/MIGRATIONS.md` before attempting to create a brand-new database.
 
 ### 3. Install Dependencies
 
@@ -86,8 +83,8 @@ cd dashboard
 npm install
 
 # Backend (optional - for Python agents)
-cd backend
-pip install -r requirements.txt
+cd ..
+python -m pip install -r backend/requirements.txt
 ```
 
 ### 4. Run Development Server
@@ -98,6 +95,10 @@ npm run dev
 ```
 
 Visit http://localhost:3000
+
+Before enabling any automation, keep both `PIPELINE_AUTORUN_ENABLED=false` and
+`INSTAGRAM_DM_SENDING_ENABLED=false` until the staging checklist in `DEPLOY.md`
+has passed.
 
 ## Key Features
 

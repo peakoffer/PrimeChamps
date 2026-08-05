@@ -11,7 +11,10 @@ export async function POST(request: NextRequest) {
     // Call Python backend to run bulk enrichment
     const response = await fetch(`${AGENT_SERVER_URL}/bulk-enrich`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.BACKEND_API_KEY ? { "X-API-Key": process.env.BACKEND_API_KEY } : {}),
+      },
       body: JSON.stringify({ source, limit, historical }),
     });
 

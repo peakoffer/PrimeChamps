@@ -1,6 +1,7 @@
 """Instagram DM operations using instagrapi."""
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -21,6 +22,11 @@ class InstagramDMService:
     def __init__(self):
         pass
 
+    @staticmethod
+    def sending_enabled() -> bool:
+        """Return whether outbound Instagram DMs are explicitly enabled."""
+        return os.getenv("INSTAGRAM_DM_SENDING_ENABLED", "false").strip().lower() == "true"
+
     def _get_client(self) -> Optional[Client]:
         """Get the authenticated Instagram client."""
         return instagram_auth.get_client()
@@ -35,6 +41,51 @@ class InstagramDMService:
             return False
 
         return True
+
+    async def send_dm(self, username: str, text: str) -> Dict[str, Any]:
+        """
+        Send a direct message to an Instagram user.
+
+        Requires the outbound-send feature flag, then honors the kill switch,
+        hourly rate limit, and randomized human-like delay. Returns a result
+        dict; never raises.
+
+        Args:
+            username: target Instagram handle (without @)
+            text: message body
+
+        Returns:
+            {"success": bool, "error": str | None, "thread_id": str | None}
+        """
+        if not self.sending_enabled():
+            return {"success": False, "error": "sending_disabled", "thread_id": None}
+
+        if await instagram_auth.is_kill_switch_active():
+            return {"success": False, "error": "kill_switch_active", "thread_id": None}
+
+        client = self._get_client()
+        if not client:
+            return {"success": False, "error": "not_connected", "thread_id": None}
+
+        if not username:
+            return {"success": False, "error": "missing_username", "thread_id": None}
+
+        # Hourly rate limit (shared counter with the rest of IG ops).
+        if not await instagram_auth._check_rate_limit():
+            return {"success": False, "error": "rate_limited", "thread_id": None}
+
+        try:
+            await instagram_auth._random_delay()
+            user_id = client.user_id_from_username(username.lstrip("@"))
+            await instagram_auth._random_delay()
+            dm = client.direct_send(text, user_ids=[user_id])
+            thread_id = str(getattr(dm, "thread_id", "") or "") or None
+            return {"success": True, "error": None, "thread_id": thread_id}
+        except Exception as e:
+            # Never log message/credential content; surface the exception type.
+            err = type(e).__name__
+            print(f"send_dm failed for @{username}: {err}")
+            return {"success": False, "error": err, "thread_id": None}
 
     async def get_conversations(
         self,

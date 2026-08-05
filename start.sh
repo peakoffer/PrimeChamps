@@ -32,19 +32,22 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Start Python Agent Server
+# The venv lives at the project root and modules use absolute `backend.*`
+# imports, so the venv must be activated and uvicorn launched from the root —
+# NOT from inside backend/ (that produces ModuleNotFoundError: backend).
 echo -e "\n${GREEN}Starting Python Agent Server on port 8000...${NC}"
-cd backend
 if [ ! -d ".venv" ]; then
     echo -e "${YELLOW}Creating Python virtual environment...${NC}"
     python3 -m venv .venv
 fi
 
 source .venv/bin/activate
-pip install -q -r requirements.txt
+pip install -q -r backend/requirements.txt
 
-python -m uvicorn backend.server:app --host 0.0.0.0 --port 8000 &
+# Bind to localhost only — the API has no auth of its own (see backend README).
+# Override with HOST=0.0.0.0 deliberately if exposing on the LAN.
+python -m uvicorn backend.server:app --host "${HOST:-127.0.0.1}" --port 8000 &
 AGENT_PID=$!
-cd ..
 
 # Wait a moment for Python server to start
 sleep 2
