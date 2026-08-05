@@ -9,29 +9,46 @@ const supabase = createClient(
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "30d";
+    const period = searchParams.get("period") || "365d";
+    const sport = searchParams.get("sport");
 
     // Parse period (e.g., "30d", "7d", "90d")
     const daysMatch = period.match(/^(\d+)d$/);
-    const days = daysMatch ? parseInt(daysMatch[1]) : 30;
+    const days = daysMatch ? parseInt(daysMatch[1]) : 365;
 
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // Fetch data in parallel
+    let eligibleAthletesQuery = supabase
+      .from("athletes")
+      .select("id")
+      .or("is_historical.eq.false,is_historical.is.null");
+    let athletesQuery = supabase
+        .from("athletes")
+        .select("id, created_at")
+        .or("is_historical.eq.false,is_historical.is.null")
+        .gte("created_at", startDate.toISOString())
+        .order("created_at", { ascending: true });
+    if (sport) {
+      eligibleAthletesQuery = eligibleAthletesQuery.eq("sport", sport);
+      athletesQuery = athletesQuery.eq("sport", sport);
+    }
+
+    const { data: eligibleAthletes, error: eligibleAthletesError } =
+      await eligibleAthletesQuery;
+    if (eligibleAthletesError) throw eligibleAthletesError;
+
+    const eligibleIds = (eligibleAthletes || []).map((athlete) => athlete.id);
     const [
       { data: athletes, error: athletesError },
       { data: messages, error: messagesError },
     ] = await Promise.all([
-      supabase
-        .from("athletes")
-        .select("id, created_at")
-        .gte("created_at", startDate.toISOString())
-        .order("created_at", { ascending: true }),
+      athletesQuery,
       supabase
         .from("outreach_messages")
         .select("id, sent_at, response_received_at, created_at")
+        .in("athlete_id", eligibleIds.length > 0 ? eligibleIds : ["00000000-0000-0000-0000-000000000000"])
         .gte("created_at", startDate.toISOString())
         .order("created_at", { ascending: true }),
     ]);

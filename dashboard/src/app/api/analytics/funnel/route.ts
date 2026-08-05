@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -13,59 +13,83 @@ const STAGE_ORDER = [
   "response",
   "appointment",
   "contract",
-];
+] as const;
 
-export async function GET() {
+function periodStart(period: string) {
+  const match = period.match(/^(\d+)d$/);
+  if (!match) return null;
+  const start = new Date();
+  start.setDate(start.getDate() - Number(match[1]));
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const { data, error } = await supabase
+    const { searchParams } = new URL(request.url);
+    const startDate = periodStart(searchParams.get("period") || "365d");
+    const sport = searchParams.get("sport");
+
+    let athleteQuery = supabase
       .from("athletes")
-      .select("pipeline_stage")
+      .select("id,pipeline_stage,created_at")
       .not("pipeline_stage", "is", null)
-      .neq("pipeline_stage", "rejected");
+      .or("is_historical.eq.false,is_historical.is.null");
+    if (startDate) athleteQuery = athleteQuery.gte("created_at", startDate);
+    if (sport) athleteQuery = athleteQuery.eq("sport", sport);
 
-    if (error) throw error;
+    const { data: athletes, error: athletesError } = await athleteQuery;
+    if (athletesError) throw athletesError;
 
-    // Count athletes by stage
-    const stageCounts: Record<string, number> = {};
-    STAGE_ORDER.forEach((stage) => {
-      stageCounts[stage] = 0;
-    });
+    const athleteIds = (athletes || []).map((athlete) => athlete.id);
+    const reachedByAthlete = new Map<string, Set<string>>();
 
-    (data || []).forEach((athlete) => {
-      if (athlete.pipeline_stage && stageCounts[athlete.pipeline_stage] !== undefined) {
-        stageCounts[athlete.pipeline_stage]++;
+    for (const athlete of athletes || []) {
+      const reached = new Set<string>(["research"]);
+      const currentIndex = STAGE_ORDER.indexOf(
+        athlete.pipeline_stage as (typeof STAGE_ORDER)[number]
+      );
+      if (currentIndex >= 0) {
+        STAGE_ORDER.slice(0, currentIndex + 1).forEach((stage) => reached.add(stage));
       }
+      reachedByAthlete.set(athlete.id, reached);
+    }
+
+    if (athleteIds.length > 0) {
+      const { data: history, error: historyError } = await supabase
+        .from("pipeline_history")
+        .select("athlete_id,to_stage")
+        .in("athlete_id", athleteIds);
+      if (historyError) throw historyError;
+
+      for (const transition of history || []) {
+        const reached = reachedByAthlete.get(transition.athlete_id);
+        const stageIndex = STAGE_ORDER.indexOf(
+          transition.to_stage as (typeof STAGE_ORDER)[number]
+        );
+        if (reached && stageIndex >= 0) {
+          STAGE_ORDER.slice(0, stageIndex + 1).forEach((stage) => reached.add(stage));
+        }
+      }
+    }
+
+    const baseCount = athletes?.length || 0;
+    const stages = STAGE_ORDER.map((stage) => {
+      const count = [...reachedByAthlete.values()].filter((reached) => reached.has(stage)).length;
+      return {
+        name: stage,
+        count,
+        percent: baseCount > 0 ? Math.round((count / baseCount) * 100) : 0,
+      };
     });
 
-    // For funnel, we need cumulative counts
-    // Athletes in later stages have passed through earlier stages
-    const cumulativeCounts: Record<string, number> = {};
-    let cumulative = 0;
-
-    // First pass: get raw counts
-    STAGE_ORDER.forEach((stage) => {
-      cumulative += stageCounts[stage];
+    return NextResponse.json({
+      stages,
+      cohort: {
+        size: baseCount,
+        definition: "Non-historical athletes entering the selected period, including rejections",
+      },
     });
-
-    // For funnel visualization, count everyone who reached at least this stage
-    // This means: research = all, approval = those who passed research, etc.
-    let runningTotal = 0;
-    const reversedStages = [...STAGE_ORDER].reverse();
-    reversedStages.forEach((stage) => {
-      runningTotal += stageCounts[stage];
-      cumulativeCounts[stage] = runningTotal;
-    });
-
-    // Calculate percentages based on the first stage (research)
-    const baseCount = cumulativeCounts["research"] || 1;
-
-    const stages = STAGE_ORDER.map((stage) => ({
-      name: stage,
-      count: cumulativeCounts[stage],
-      percent: Math.round((cumulativeCounts[stage] / baseCount) * 100),
-    }));
-
-    return NextResponse.json({ stages });
   } catch (error) {
     console.error("Analytics funnel error:", error);
     return NextResponse.json(

@@ -95,6 +95,31 @@ interface ContractData {
   contract_end?: string;
 }
 
+interface EnrichmentSourceRecord {
+  source: "instagram" | "google" | "wikipedia" | "tiktok" | "onlyfans";
+  status: "pending" | "running" | "complete" | "not_found" | "not_configured" | "failed";
+  data: {
+    title?: string;
+    summary?: string;
+    url?: string;
+    handle?: string;
+    displayName?: string;
+    bio?: string;
+    followers?: number;
+    following?: number;
+    likes?: number;
+    videos?: number;
+    verified?: boolean;
+    exists?: boolean;
+    snippet?: string;
+    source?: string;
+    results?: Array<{ title?: string; url?: string; snippet?: string; date?: string }>;
+  };
+  fetched_at?: string | null;
+  expires_at?: string | null;
+  last_error?: string | null;
+}
+
 const PIPELINE_STAGES = {
   research: { label: "Research", color: "bg-purple-100 text-purple-800 border-purple-300", icon: "🔍" },
   approval: { label: "Pending Approval", color: "bg-blue-100 text-blue-800 border-blue-300", icon: "✅" },
@@ -256,6 +281,9 @@ export default function AthleteDetailPage() {
   }>>([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState<string | null>(null);
+  const [enrichmentSources, setEnrichmentSources] = useState<
+    Partial<Record<EnrichmentSourceRecord["source"], EnrichmentSourceRecord>>
+  >({});
 
   // Benchmark data for Fit Score
   const [benchmarks, setBenchmarks] = useState<BenchmarkMetrics | null>(null);
@@ -304,6 +332,20 @@ export default function AthleteDetailPage() {
         })
         .catch(err => console.error("Error loading photos:", err));
     }
+  }, [athlete?.id]);
+
+  useEffect(() => {
+    if (!athlete?.id) return;
+
+    fetch(`/api/athletes/${athlete.id}/enrich`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { sources?: EnrichmentSourceRecord[] }) => {
+        const bySource = Object.fromEntries(
+          (data.sources || []).map((record) => [record.source, record])
+        );
+        setEnrichmentSources(bySource);
+      })
+      .catch((error) => console.error("Error loading enrichment sources:", error));
   }, [athlete?.id]);
 
   // Fetch benchmark data for Fit Score calculation
@@ -583,6 +625,20 @@ export default function AthleteDetailPage() {
           setParsedData(parseNotesData(data.notes));
         }
 
+        const sourceResponse = await fetch(`/api/athletes/${athlete.id}/enrich`, {
+          cache: "no-store",
+        });
+        if (sourceResponse.ok) {
+          const sourceData = (await sourceResponse.json()) as {
+            sources?: EnrichmentSourceRecord[];
+          };
+          setEnrichmentSources(
+            Object.fromEntries(
+              (sourceData.sources || []).map((record) => [record.source, record])
+            )
+          );
+        }
+
         const dataInfo = result.data;
         if (source === "instagram" && dataInfo?.followers) {
           setMessage({ type: "success", text: `Enriched from Instagram! ${dataInfo.followers.toLocaleString()} followers` });
@@ -596,7 +652,10 @@ export default function AthleteDetailPage() {
       }
     } catch (error) {
       console.error(`Error enriching from ${source}:`, error);
-      setMessage({ type: "error", text: `Failed to enrich from ${source}. Make sure agent server is running.` });
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : `Failed to enrich from ${source}.`,
+      });
     } finally {
       setEnriching(false);
     }
@@ -708,6 +767,10 @@ export default function AthleteDetailPage() {
 
   const ig = parsedData?.instagram || {};
   const contract = parsedData?.contract || {};
+  const googleData = enrichmentSources.google?.data;
+  const wikipediaData = enrichmentSources.wikipedia?.data;
+  const tiktokData = enrichmentSources.tiktok?.data;
+  const onlyFansData = enrichmentSources.onlyfans?.data;
 
   // Calculate engagement rate if we have the data
   const engagementRate = instagramPhotos.length > 0 && athlete.follower_count
@@ -1456,6 +1519,63 @@ export default function AthleteDetailPage() {
               </div>
             </div>
             <div className="p-6">
+              {(wikipediaData?.summary || googleData?.results?.length) ? (
+                <div className="mb-5 space-y-4">
+                  {wikipediaData?.summary && (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="font-semibold text-gray-950">
+                          {wikipediaData.title || "Wikipedia summary"}
+                        </h3>
+                        {wikipediaData.url && (
+                          <a
+                            href={wikipediaData.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 text-sm font-medium text-blue-600 hover:underline"
+                          >
+                            View source →
+                          </a>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-gray-700">
+                        {wikipediaData.summary}
+                      </p>
+                    </div>
+                  )}
+
+                  {googleData?.results && googleData.results.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold text-gray-900">Current web results</h3>
+                      <div className="space-y-2">
+                        {googleData.results.slice(0, 5).map((result, index) => (
+                          <a
+                            key={`${result.url || result.title}-${index}`}
+                            href={result.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block rounded-lg border border-gray-200 p-3 hover:border-blue-300 hover:bg-blue-50"
+                          >
+                            <span className="text-sm font-medium text-blue-700">
+                              {result.title || result.url}
+                            </span>
+                            {result.snippet && (
+                              <span className="mt-1 block text-xs leading-5 text-gray-600">
+                                {result.snippet}
+                              </span>
+                            )}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="mb-5 text-sm text-gray-600">
+                  Run Google or Wikipedia to load current, source-linked research here.
+                </p>
+              )}
+
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                 <div className="bg-gray-50 rounded-lg p-3">
                   <span className="text-gray-700 font-medium">Sport:</span>
@@ -1493,8 +1613,43 @@ export default function AthleteDetailPage() {
                 {enriching ? "Searching..." : "Search TikTok"}
               </button>
             </div>
-            <div className="p-6 text-center text-gray-700">
-              Click "Search TikTok" to find this athlete's TikTok profile and data.
+            <div className="p-6">
+              {tiktokData?.handle ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-gray-950">
+                        {tiktokData.displayName || `@${tiktokData.handle}`}
+                        {tiktokData.verified ? " ✓" : ""}
+                      </p>
+                      <p className="text-sm text-gray-600">@{tiktokData.handle}</p>
+                    </div>
+                    {tiktokData.url && (
+                      <a
+                        href={tiktokData.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-blue-600 hover:underline"
+                      >
+                        View TikTok →
+                      </a>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+                    <div className="rounded-lg bg-gray-50 p-3"><span className="block text-gray-500">Followers</span><strong>{formatNumber(tiktokData.followers)}</strong></div>
+                    <div className="rounded-lg bg-gray-50 p-3"><span className="block text-gray-500">Following</span><strong>{formatNumber(tiktokData.following)}</strong></div>
+                    <div className="rounded-lg bg-gray-50 p-3"><span className="block text-gray-500">Likes</span><strong>{formatNumber(tiktokData.likes)}</strong></div>
+                    <div className="rounded-lg bg-gray-50 p-3"><span className="block text-gray-500">Videos</span><strong>{formatNumber(tiktokData.videos)}</strong></div>
+                  </div>
+                  {tiktokData.bio && <p className="text-sm leading-6 text-gray-700">{tiktokData.bio}</p>}
+                </div>
+              ) : (
+                <div className="text-center text-gray-700">
+                  {enrichmentSources.tiktok?.status === "not_configured"
+                    ? "TikTok enrichment is ready in the app but needs APIFY_API_KEY."
+                    : "Search to discover and load this athlete's TikTok profile."}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1513,8 +1668,26 @@ export default function AthleteDetailPage() {
               </button>
             </div>
             <div className="p-6">
-              {(contract.of_username || contract.of_url || contract.division) ? (
+              {(onlyFansData?.url || contract.of_username || contract.of_url || contract.division) ? (
                 <div className="grid grid-cols-2 gap-4 text-sm">
+                  {onlyFansData?.url && (
+                    <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                      <p className="font-medium text-blue-950">
+                        {onlyFansData.source === "existing_record" ? "Stored profile" : "Possible public match"}
+                      </p>
+                      {onlyFansData.snippet && (
+                        <p className="mt-1 text-xs leading-5 text-blue-900/75">{onlyFansData.snippet}</p>
+                      )}
+                      <a
+                        href={onlyFansData.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block font-medium text-blue-700 hover:underline"
+                      >
+                        Verify profile →
+                      </a>
+                    </div>
+                  )}
                   {contract.year && (
                     <div className="bg-gray-50 rounded-lg p-3">
                       <span className="text-gray-700 font-medium">Contract Year(s):</span>
@@ -1554,7 +1727,11 @@ export default function AthleteDetailPage() {
                 </div>
               ) : (
                 <div className="text-center text-gray-700">
-                  Click "Check OnlyFans" to see if this athlete has an OnlyFans presence.
+                  {enrichmentSources.onlyfans?.status === "not_configured"
+                    ? "OnlyFans discovery is ready in the app but needs SERPAPI_KEY."
+                    : enrichmentSources.onlyfans?.status === "not_found"
+                      ? "No public OnlyFans result was found."
+                      : "Check public search results for a possible OnlyFans presence."}
                 </div>
               )}
             </div>
