@@ -52,9 +52,9 @@ const providerDefinitions: ProviderDefinition[] = [
     category: "research",
     description: "Discovers athlete candidates and enriches their public profiles.",
     capabilities: ["Candidate discovery", "Research runs", "Approval queue"],
-    required: ["PERPLEXITY_API_KEY", "APIFY_API_KEY"],
-    anyOf: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
-    nextAction: "Add Perplexity, Apify, and at least one scoring-model key, then run one low-volume research test.",
+    required: ["PERPLEXITY_API_KEY", "APIFY_API_KEY", "ANTHROPIC_API_KEY"],
+    note: "Candidate scoring is pinned to the current Prime Champs Sonnet model; OpenAI is not used as a scoring fallback.",
+    nextAction: "Add valid Perplexity, Apify, and Anthropic API credentials, then run one low-volume research test.",
   },
   {
     id: "instagram-enrichment",
@@ -67,13 +67,14 @@ const providerDefinitions: ProviderDefinition[] = [
   },
   {
     id: "web-search",
-    name: "Web search",
+    name: "Source-linked web research",
     category: "research",
-    description: "Supplies Google and public web results for athlete detail pages.",
-    capabilities: ["Google results", "OnlyFans discovery", "Source links"],
+    description: "Supplies current public-web results and source links for athlete detail pages.",
+    capabilities: ["Current web research", "TikTok-handle discovery", "OnlyFans discovery", "Source links"],
     required: [],
-    anyOf: ["SERPAPI_KEY", "SERPAPI_API_KEY"],
-    nextAction: "Add a SerpAPI key for Google, TikTok-handle discovery, OnlyFans discovery, and source links.",
+    anyOf: ["PERPLEXITY_API_KEY", "SERPAPI_KEY", "SERPAPI_API_KEY"],
+    note: "Perplexity Sonar is the primary source-linked provider. SerpApi remains an optional raw-Google-results fallback.",
+    nextAction: "Keep Perplexity configured. Add SerpApi only if raw Google result parity becomes a firm requirement.",
   },
   {
     id: "agent-server",
@@ -181,8 +182,20 @@ type AgentServerProbe = {
   message: string;
 };
 
+const credentialPrefixes: Partial<Record<string, string>> = {
+  ANTHROPIC_API_KEY: "sk-ant-",
+  PERPLEXITY_API_KEY: "pplx-",
+  APIFY_API_KEY: "apify_api_",
+};
+
 function hasEnvironmentVariable(name: string) {
-  return Boolean(process.env[name]?.trim());
+  const value = process.env[name]?.trim();
+  if (!value) return false;
+
+  const expectedPrefix = credentialPrefixes[name];
+  return expectedPrefix
+    ? value.startsWith(expectedPrefix) && value.length >= expectedPrefix.length + 16
+    : true;
 }
 
 function calculateStatus(

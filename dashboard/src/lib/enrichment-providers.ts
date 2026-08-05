@@ -9,7 +9,7 @@ export const enrichmentSources = [
 ] as const;
 
 export type EnrichmentSource = (typeof enrichmentSources)[number];
-export type EnrichmentResultStatus = "complete" | "not_found" | "not_configured";
+export type EnrichmentResultStatus = "complete" | "not_found" | "not_configured" | "failed";
 
 export interface EnrichmentAthlete {
   id: string;
@@ -35,12 +35,31 @@ type SearchResult = {
   date?: string;
 };
 
+type SearchProviderResult = {
+  results: Array<{
+    position?: number;
+    title: string;
+    url: string;
+    snippet: string;
+    date?: string;
+  }>;
+  provider: "serpapi_google" | "perplexity_sonar";
+  summary?: string;
+  citations?: string[];
+  knowledgeGraph?: Record<string, unknown> | null;
+  totalResults?: number | null;
+};
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
 function serpApiKey() {
   return process.env.SERPAPI_KEY || process.env.SERPAPI_API_KEY;
+}
+
+function perplexityApiKey() {
+  return process.env.PERPLEXITY_API_KEY;
 }
 
 async function fetchJson(url: string, init?: RequestInit) {
@@ -61,7 +80,7 @@ async function fetchJson(url: string, init?: RequestInit) {
   return response.json() as Promise<unknown>;
 }
 
-async function runSerpApiSearch(query: string, limit = 10) {
+async function runSerpApiSearch(query: string, limit = 10): Promise<SearchProviderResult | null> {
   const apiKey = serpApiKey();
   if (!apiKey) return null;
 
@@ -87,20 +106,92 @@ async function runSerpApiSearch(query: string, limit = 10) {
     })),
     knowledgeGraph: payload.knowledge_graph || null,
     totalResults: payload.search_information?.total_results || null,
+    provider: "serpapi_google",
   };
 }
 
+async function runPerplexitySearch(
+  query: string,
+  limit = 10,
+  domains?: string[]
+): Promise<SearchProviderResult | null> {
+  const apiKey = perplexityApiKey();
+  if (!apiKey) return null;
+
+  const payload = (await fetchJson("https://api.perplexity.ai/v1/sonar", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "sonar",
+      messages: [
+        {
+          role: "user",
+          content: `${query}\n\nReturn a concise factual overview grounded only in current public web sources.`,
+        },
+      ],
+      max_tokens: 700,
+      temperature: 0.1,
+      search_mode: "web",
+      web_search_options: domains?.length
+        ? { search_domain_filter: domains }
+        : undefined,
+    }),
+  })) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    citations?: string[];
+    search_results?: Array<{
+      title?: string;
+      url?: string;
+      snippet?: string;
+      date?: string;
+      last_updated?: string;
+    }>;
+  };
+
+  const results = (payload.search_results || [])
+    .slice(0, limit)
+    .map((result, index) => ({
+      position: index + 1,
+      title: cleanText(result.title),
+      url: cleanText(result.url),
+      snippet: cleanText(result.snippet),
+      date: cleanText(result.last_updated) || cleanText(result.date) || undefined,
+    }))
+    .filter((result) => Boolean(result.url));
+
+  return {
+    results,
+    provider: "perplexity_sonar",
+    summary: cleanText(payload.choices?.[0]?.message?.content),
+    citations: (payload.citations || []).filter((citation) => typeof citation === "string"),
+  };
+}
+
+async function runWebSearch(query: string, limit = 10, domains?: string[]) {
+  if (serpApiKey()) {
+    try {
+      return await runSerpApiSearch(query, limit);
+    } catch (error) {
+      if (!perplexityApiKey()) throw error;
+    }
+  }
+  return runPerplexitySearch(query, limit, domains);
+}
+
 async function enrichGoogle(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
-  if (!serpApiKey()) {
+  if (!serpApiKey() && !perplexityApiKey()) {
     return {
       status: "not_configured",
       data: {},
-      message: "Google enrichment needs SERPAPI_KEY or SERPAPI_API_KEY in the server environment.",
+      message: "Web research needs PERPLEXITY_API_KEY or SERPAPI_KEY in the server environment.",
     };
   }
 
-  const query = `"${athlete.name}" ${athlete.sport || "athlete"}`;
-  const search = await runSerpApiSearch(query);
+  const query = `Research the professional athlete "${athlete.name}" (${athlete.sport || "sport"}). Prioritize official league profiles, recent interviews, rankings, and verified social profiles. Exclude unrelated people with the same name.`;
+  const search = await runWebSearch(query);
   const results = search?.results || [];
 
   return {
@@ -108,16 +199,50 @@ async function enrichGoogle(athlete: EnrichmentAthlete): Promise<EnrichmentProvi
     data: { query, ...search },
     message:
       results.length > 0
-        ? `Found ${results.length} current web result${results.length === 1 ? "" : "s"}.`
-        : "No matching Google results were found.",
+        ? `Found ${results.length} current, source-linked web result${results.length === 1 ? "" : "s"} with ${search?.provider === "serpapi_google" ? "Google via SerpApi" : "Perplexity Sonar"}.`
+        : "No matching current web results were found.",
   };
+}
+
+function normalizeWikipediaTitle(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isIndividualWikipediaMatch(
+  athlete: EnrichmentAthlete,
+  page: { title?: string; extract?: string }
+) {
+  const title = cleanText(page.title);
+  const extract = cleanText(page.extract).toLowerCase();
+  if (!title || !extract) return false;
+  if (/^(list of|index of)/i.test(title) || /\((surname|disambiguation)\)/i.test(title)) {
+    return false;
+  }
+
+  const athleteName = normalizeWikipediaTitle(athlete.name);
+  const pageTitle = normalizeWikipediaTitle(title);
+  const nameMatches =
+    pageTitle === athleteName ||
+    (athleteName.length >= 8 && pageTitle.includes(athleteName)) ||
+    (pageTitle.length >= 8 && athleteName.includes(pageTitle));
+  if (!nameMatches) return false;
+
+  const sportTerms = cleanText(athlete.sport)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((term) => term.length >= 4);
+  return sportTerms.length === 0 || sportTerms.some((term) => extract.includes(term));
 }
 
 async function enrichWikipedia(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
   const url = new URL("https://en.wikipedia.org/w/api.php");
   url.searchParams.set("action", "query");
   url.searchParams.set("generator", "search");
-  url.searchParams.set("gsrsearch", `${athlete.name} ${athlete.sport || "athlete"}`);
+  url.searchParams.set("gsrsearch", `intitle:\"${athlete.name}\" ${athlete.sport || "athlete"}`);
   url.searchParams.set("gsrnamespace", "0");
   url.searchParams.set("gsrlimit", "5");
   url.searchParams.set("prop", "extracts|info|pageimages");
@@ -147,10 +272,19 @@ async function enrichWikipedia(athlete: EnrichmentAthlete): Promise<EnrichmentPr
   const pages = Object.values(payload.query?.pages || {}).sort(
     (a, b) => (a.index || 999) - (b.index || 999)
   );
-  const page = pages[0];
+  const page = pages.find((candidate) => isIndividualWikipediaMatch(athlete, candidate));
 
   if (!page) {
-    return { status: "not_found", data: {}, message: "No matching Wikipedia page was found." };
+    return {
+      status: "not_found",
+      data: {
+        alternatives: pages.slice(0, 5).map((candidate) => ({
+          title: candidate.title,
+          url: candidate.fullurl,
+        })),
+      },
+      message: `No individual Wikipedia biography matching ${athlete.name} was found. Broad list and surname pages were ignored.`,
+    };
   }
 
   return {
@@ -179,9 +313,10 @@ async function discoverTikTokHandle(athlete: EnrichmentAthlete) {
   const directHandle = extractTikTokHandle(athlete);
   if (directHandle) return directHandle;
 
-  const search = await runSerpApiSearch(
-    `site:tiktok.com/@ "${athlete.name}" ${athlete.sport || "athlete"}`,
-    5
+  const search = await runWebSearch(
+    `site:tiktok.com/@ Find the official TikTok profile for professional athlete "${athlete.name}" (${athlete.sport || "sport"}). Return only exact profile evidence, not fan accounts.`,
+    5,
+    ["tiktok.com"]
   );
   for (const result of search?.results || []) {
     const match = result.url.match(/tiktok\.com\/@([^/?#]+)/i);
@@ -207,7 +342,9 @@ async function enrichTikTok(athlete: EnrichmentAthlete): Promise<EnrichmentProvi
       data: {},
       message: serpApiKey()
         ? "No matching TikTok account was found."
-        : "Add a TikTok handle or configure SERPAPI_KEY so Prime Champs can discover one.",
+        : perplexityApiKey()
+          ? "No verified TikTok profile URL was found in current web results."
+          : "Add a TikTok handle or configure PERPLEXITY_API_KEY or SERPAPI_KEY so Prime Champs can discover one.",
     };
   }
 
@@ -259,18 +396,23 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
     };
   }
 
-  if (!serpApiKey()) {
+  if (!serpApiKey() && !perplexityApiKey()) {
     return {
       status: "not_configured",
       data: {},
-      message: "OnlyFans discovery needs SERPAPI_KEY or SERPAPI_API_KEY in the server environment.",
+      message: "Public OnlyFans discovery needs PERPLEXITY_API_KEY or SERPAPI_KEY in the server environment.",
     };
   }
 
-  const search = await runSerpApiSearch(`site:onlyfans.com "${athlete.name}"`, 10);
+  const search = await runWebSearch(
+    `site:onlyfans.com Find a public OnlyFans profile that can be confidently matched to professional athlete "${athlete.name}" (${athlete.sport || "sport"}). Do not infer a match without an exact public profile URL.`,
+    10,
+    ["onlyfans.com"]
+  );
   const candidates = (search?.results || []).filter((result) => {
     try {
-      return new URL(result.url).hostname.endsWith("onlyfans.com");
+      const hostname = new URL(result.url).hostname.toLowerCase();
+      return hostname === "onlyfans.com" || hostname.endsWith(".onlyfans.com");
     } catch {
       return false;
     }
@@ -285,7 +427,8 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       title: bestMatch?.title || null,
       snippet: bestMatch?.snippet || null,
       candidates,
-      source: "google_discovery",
+      source: "public_web_discovery",
+      provider: search?.provider || null,
     },
     message: bestMatch
       ? "Found a possible OnlyFans profile. Verify the match before outreach."
@@ -301,8 +444,17 @@ export async function runAthleteEnrichment(
   source: Exclude<EnrichmentSource, "instagram">,
   athlete: EnrichmentAthlete
 ): Promise<EnrichmentProviderResult> {
-  if (source === "google") return enrichGoogle(athlete);
-  if (source === "wikipedia") return enrichWikipedia(athlete);
-  if (source === "tiktok") return enrichTikTok(athlete);
-  return enrichOnlyFans(athlete);
+  try {
+    if (source === "google") return await enrichGoogle(athlete);
+    if (source === "wikipedia") return await enrichWikipedia(athlete);
+    if (source === "tiktok") return await enrichTikTok(athlete);
+    return await enrichOnlyFans(athlete);
+  } catch (error) {
+    const providerLabel = source === "google" ? "Web research" : source === "onlyfans" ? "OnlyFans discovery" : source;
+    return {
+      status: "failed",
+      data: {},
+      message: `${providerLabel} failed: ${error instanceof Error ? error.message : "Unknown provider error"}`,
+    };
+  }
 }

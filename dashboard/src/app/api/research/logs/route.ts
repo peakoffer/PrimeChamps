@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const STALE_RUN_MINUTES = 15;
 
 function getLimit(request: NextRequest): number {
   const requested = Number.parseInt(
@@ -31,10 +32,26 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const staleCutoff = new Date(
+      Date.now() - STALE_RUN_MINUTES * 60 * 1000
+    ).toISOString();
+
+    // Serverless invocations can end before their catch block runs. Reconcile any
+    // run that has stopped reporting progress so the UI never polls forever.
+    await supabase
+      .from("research_logs")
+      .update({
+        status: "error",
+        error_message: `Research stopped reporting progress for ${STALE_RUN_MINUTES} minutes and was closed automatically.`,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("status", "running")
+      .lt("heartbeat_at", staleCutoff);
+
     const { data, error } = await supabase
       .from("research_logs")
       .select(
-        "id, created_at, completed_at, status, config_used, context_summary, raw_results, scoring_details, final_results, stats, error_message"
+        "id, created_at, completed_at, heartbeat_at, status, config_used, context_summary, raw_results, scoring_details, final_results, stats, error_message"
       )
       .order("created_at", { ascending: false })
       .limit(getLimit(request));

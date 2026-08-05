@@ -113,6 +113,10 @@ interface EnrichmentSourceRecord {
     exists?: boolean;
     snippet?: string;
     source?: string;
+    provider?: string;
+    message?: string;
+    citations?: string[];
+    alternatives?: Array<{ title?: string; url?: string }>;
     results?: Array<{ title?: string; url?: string; snippet?: string; date?: string }>;
   };
   fetched_at?: string | null;
@@ -129,6 +133,49 @@ const PIPELINE_STAGES = {
   contract: { label: "Contract Signed", color: "bg-green-100 text-green-800 border-green-300", icon: "🎉" },
   rejected: { label: "Rejected", color: "bg-red-100 text-red-800 border-red-300", icon: "❌" },
 };
+
+function EnrichmentOutcome({
+  label,
+  record,
+}: {
+  label: string;
+  record?: EnrichmentSourceRecord;
+}) {
+  if (!record) return null;
+
+  const tone =
+    record.status === "complete"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : record.status === "not_found"
+        ? "border-amber-200 bg-amber-50 text-amber-950"
+        : record.status === "not_configured"
+          ? "border-slate-200 bg-slate-50 text-slate-800"
+          : "border-red-200 bg-red-50 text-red-900";
+  const statusLabel = record.status.replaceAll("_", " ");
+  const fallbackMessage =
+    record.status === "not_configured"
+      ? `${label} is not configured for this request.`
+      : record.status === "not_found"
+        ? `${label} completed, but no verified match was found.`
+        : record.status === "complete"
+          ? `${label} completed successfully.`
+          : `${label} could not be completed.`;
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-sm ${tone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-semibold">{label}</span>
+        <span className="text-xs font-medium uppercase tracking-wide">{statusLabel}</span>
+      </div>
+      <p className="mt-1 leading-5">
+        {record.data.message || record.last_error || fallbackMessage}
+      </p>
+      {record.fetched_at && (
+        <p className="mt-1 text-xs opacity-70">Checked {formatDate(record.fetched_at)}</p>
+      )}
+    </div>
+  );
+}
 
 function parseNotesData(notes: string | null): { instagram: InstagramData; contract: ContractData; other: string } {
   const result = {
@@ -643,7 +690,10 @@ export default function AthleteDetailPage() {
         if (source === "instagram" && dataInfo?.followers) {
           setMessage({ type: "success", text: `Enriched from Instagram! ${dataInfo.followers.toLocaleString()} followers` });
         } else if (dataInfo?.message) {
-          setMessage({ type: "success", text: dataInfo.message });
+          setMessage({
+            type: result.status === "failed" || result.status === "not_configured" ? "error" : "success",
+            text: dataInfo.message,
+          });
         } else {
           setMessage({ type: "success", text: `Enriched from ${source}!` });
         }
@@ -768,9 +818,15 @@ export default function AthleteDetailPage() {
   const ig = parsedData?.instagram || {};
   const contract = parsedData?.contract || {};
   const googleData = enrichmentSources.google?.data;
-  const wikipediaData = enrichmentSources.wikipedia?.data;
-  const tiktokData = enrichmentSources.tiktok?.data;
-  const onlyFansData = enrichmentSources.onlyfans?.data;
+  const wikipediaData = enrichmentSources.wikipedia?.status === "complete"
+    ? enrichmentSources.wikipedia.data
+    : undefined;
+  const tiktokData = enrichmentSources.tiktok?.status === "complete"
+    ? enrichmentSources.tiktok.data
+    : undefined;
+  const onlyFansData = enrichmentSources.onlyfans?.status === "complete"
+    ? enrichmentSources.onlyfans.data
+    : undefined;
 
   // Calculate engagement rate if we have the data
   const engagementRate = instagramPhotos.length > 0 && athlete.follower_count
@@ -1391,30 +1447,30 @@ export default function AthleteDetailPage() {
                     className="w-full h-full object-cover"
                     loading="lazy"
                   />
-                  {/* Always visible engagement overlay with clear labels */}
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/75 p-2">
-                    <div className="flex items-center justify-between gap-2 text-white text-xs">
+                  {/* Always visible engagement overlay with a full-width engagement row. */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/85 to-black/70 p-2 text-white">
+                    <div className="grid grid-cols-2 gap-1 text-xs">
                       {photo.likesCount !== undefined && (
-                        <div className="flex items-center gap-1 bg-white/20 rounded px-1.5 py-0.5">
-                          <span className="text-red-400">♥</span>
-                          <span className="font-medium">{photo.likesCount.toLocaleString()}</span>
-                          <span className="text-white/60">likes</span>
+                        <div className="min-w-0 rounded bg-white/15 px-1.5 py-1 text-center">
+                          <span className="block text-[10px] uppercase tracking-wide text-white/65">Likes</span>
+                          <span className="block font-semibold tabular-nums">{photo.likesCount.toLocaleString()}</span>
                         </div>
                       )}
                       {photo.commentsCount !== undefined && (
-                        <div className="flex items-center gap-1 bg-white/20 rounded px-1.5 py-0.5">
-                          <span className="text-blue-400">💬</span>
-                          <span className="font-medium">{photo.commentsCount.toLocaleString()}</span>
-                          <span className="text-white/60">comments</span>
-                        </div>
-                      )}
-                      {photo.likesCount !== undefined && athlete.follower_count && (
-                        <div className="flex items-center gap-1 bg-green-600/80 rounded px-1.5 py-0.5">
-                          <span className="font-bold">{((photo.likesCount / athlete.follower_count) * 100).toFixed(1)}%</span>
-                          <span className="text-white/80">eng</span>
+                        <div className="min-w-0 rounded bg-white/15 px-1.5 py-1 text-center">
+                          <span className="block text-[10px] uppercase tracking-wide text-white/65">Comments</span>
+                          <span className="block font-semibold tabular-nums">{photo.commentsCount.toLocaleString()}</span>
                         </div>
                       )}
                     </div>
+                    {photo.likesCount !== undefined && athlete.follower_count && (
+                      <div className="mt-1 flex items-center justify-between rounded bg-emerald-500/90 px-2 py-1 text-xs">
+                        <span className="font-medium">Engagement</span>
+                        <span className="font-bold tabular-nums">
+                          {(((photo.likesCount + (photo.commentsCount || 0)) / athlete.follower_count) * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </a>
               ))}
@@ -1495,11 +1551,11 @@ export default function AthleteDetailPage() {
             </div>
           )}
 
-          {/* Google/Wikipedia Data Section */}
+          {/* Source-linked web and Wikipedia research */}
           <div className="bg-white shadow rounded-lg overflow-hidden">
             <div className="px-6 py-4 bg-gray-800 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                🔍 Google / Wikipedia Data
+                🔍 Web / Wikipedia Research
               </h2>
               <div className="flex gap-2">
                 <button
@@ -1507,7 +1563,7 @@ export default function AthleteDetailPage() {
                   disabled={enriching}
                   className="px-3 py-1.5 bg-white/20 text-white text-sm rounded-lg hover:bg-white/30 disabled:opacity-50 font-medium"
                 >
-                  Google
+                  Web research
                 </button>
                 <button
                   onClick={() => handleEnrichFromSource("wikipedia")}
@@ -1519,7 +1575,11 @@ export default function AthleteDetailPage() {
               </div>
             </div>
             <div className="p-6">
-              {(wikipediaData?.summary || googleData?.results?.length) ? (
+              <div className="mb-5 grid gap-2 md:grid-cols-2">
+                <EnrichmentOutcome label="Web research" record={enrichmentSources.google} />
+                <EnrichmentOutcome label="Wikipedia" record={enrichmentSources.wikipedia} />
+              </div>
+              {(wikipediaData?.summary || googleData?.summary || googleData?.results?.length) ? (
                 <div className="mb-5 space-y-4">
                   {wikipediaData?.summary && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -1540,6 +1600,20 @@ export default function AthleteDetailPage() {
                       </div>
                       <p className="mt-2 text-sm leading-6 text-gray-700">
                         {wikipediaData.summary}
+                      </p>
+                    </div>
+                  )}
+
+                  {googleData?.summary && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-blue-950">Current research summary</h3>
+                        <span className="text-xs font-medium text-blue-700">
+                          {googleData.provider === "serpapi_google" ? "Google via SerpApi" : "Perplexity Sonar"}
+                        </span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-blue-950/80">
+                        {googleData.summary}
                       </p>
                     </div>
                   )}
@@ -1572,7 +1646,7 @@ export default function AthleteDetailPage() {
                 </div>
               ) : (
                 <p className="mb-5 text-sm text-gray-600">
-                  Run Google or Wikipedia to load current, source-linked research here.
+                  Run web research for current sources. Wikipedia is checked separately and only accepts an individual biography that matches this athlete.
                 </p>
               )}
 
@@ -1614,6 +1688,9 @@ export default function AthleteDetailPage() {
               </button>
             </div>
             <div className="p-6">
+              <div className="mb-4">
+                <EnrichmentOutcome label="TikTok" record={enrichmentSources.tiktok} />
+              </div>
               {tiktokData?.handle ? (
                 <div className="space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1646,7 +1723,9 @@ export default function AthleteDetailPage() {
               ) : (
                 <div className="text-center text-gray-700">
                   {enrichmentSources.tiktok?.status === "not_configured"
-                    ? "TikTok enrichment is ready in the app but needs APIFY_API_KEY."
+                    ? "TikTok profile loading needs Apify; handle discovery can use Perplexity or SerpApi."
+                    : enrichmentSources.tiktok?.status === "not_found"
+                      ? "No verified TikTok profile was found for this athlete."
                     : "Search to discover and load this athlete's TikTok profile."}
                 </div>
               )}
@@ -1668,6 +1747,9 @@ export default function AthleteDetailPage() {
               </button>
             </div>
             <div className="p-6">
+              <div className="mb-4">
+                <EnrichmentOutcome label="OnlyFans public discovery" record={enrichmentSources.onlyfans} />
+              </div>
               {(onlyFansData?.url || contract.of_username || contract.of_url || contract.division) ? (
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   {onlyFansData?.url && (
@@ -1728,7 +1810,7 @@ export default function AthleteDetailPage() {
               ) : (
                 <div className="text-center text-gray-700">
                   {enrichmentSources.onlyfans?.status === "not_configured"
-                    ? "OnlyFans discovery is ready in the app but needs SERPAPI_KEY."
+                    ? "OnlyFans discovery uses current public web results. It needs Perplexity or SerpApi, not an OnlyFans API."
                     : enrichmentSources.onlyfans?.status === "not_found"
                       ? "No public OnlyFans result was found."
                       : "Check public search results for a possible OnlyFans presence."}

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { RESEARCH_SCORING_MODEL } from "@/lib/ai/models";
 
+export const maxDuration = 300;
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
@@ -10,6 +12,42 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const PROVIDER_TIMEOUT_MS = 45_000;
+const PREFETCH_INSTAGRAM_PHOTOS = process.env.RESEARCH_PREFETCH_PHOTOS === "true";
+
+async function fetchWithTimeout(
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+  timeoutMs = PROVIDER_TIMEOUT_MS
+) {
+  return fetch(input, {
+    ...init,
+    signal: init?.signal || AbortSignal.timeout(timeoutMs),
+  });
+}
+
+async function updateResearchProgress(
+  researchLogId: string | null,
+  phase: string,
+  stats: {
+    discovered: number;
+    enriched: number;
+    scored: number;
+    returned: number;
+    added: number;
+  }
+) {
+  if (!researchLogId) return;
+  const { error } = await supabase
+    .from("research_logs")
+    .update({
+      heartbeat_at: new Date().toISOString(),
+      stats: { ...stats, phase },
+    })
+    .eq("id", researchLogId)
+    .eq("status", "running");
+  if (error) log(`Warning: Could not update research heartbeat: ${error.message}`);
+}
 
 // ============================================================================
 // TYPES
@@ -414,7 +452,7 @@ Respond ONLY with valid JSON in this exact format:
 }`;
 
   try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
@@ -544,7 +582,7 @@ Respond ONLY with valid JSON array:
 Return at least ${targetCount} athletes. Only include athletes you are confident are real professional competitors.`;
 
   try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
@@ -643,7 +681,7 @@ Find female professional ${sport} athletes matching this query. Return only athl
 Respond with JSON array:
 [{"name": "Full Name", "context": "Achievement", "source": "Competition/League"}]`;
 
-        const response = await fetch("https://api.perplexity.ai/chat/completions", {
+        const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
@@ -706,7 +744,7 @@ Examples of valid responses:
 - UNKNOWN`;
 
   try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
@@ -753,7 +791,7 @@ Find the official Instagram username for this athlete. Look at search results an
 Respond with ONLY the Instagram username (without @), or "UNKNOWN" if you can't find it.`;
 
   try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
@@ -808,7 +846,7 @@ async function findInstagramHandleViaSerpAPI(athleteName: string, sport: string)
     const query = encodeURIComponent(`${athleteName} ${sport} instagram`);
     const url = `https://serpapi.com/search.json?q=${query}&api_key=${SERPAPI_API_KEY}&num=5`;
 
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
 
     if (!response.ok) {
       log(`SerpAPI error: ${response.status}`);
@@ -882,7 +920,7 @@ async function scrapeInstagramProfile(username: string): Promise<{
   try {
     log(`Scraping Instagram profile: @${username}`);
 
-    const runResponse = await fetch(
+    const runResponse = await fetchWithTimeout(
       `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs?token=${APIFY_API_KEY}`,
       {
         method: "POST",
@@ -912,7 +950,7 @@ async function scrapeInstagramProfile(username: string): Promise<{
       await new Promise((resolve) => setTimeout(resolve, 2000));
       attempts++;
 
-      const statusRes = await fetch(
+      const statusRes = await fetchWithTimeout(
         `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
       );
       const statusData = await statusRes.json();
@@ -924,7 +962,7 @@ async function scrapeInstagramProfile(username: string): Promise<{
     if (status !== "SUCCEEDED") return null;
 
     // Fetch results
-    const dataResponse = await fetch(
+    const dataResponse = await fetchWithTimeout(
       `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=1`
     );
 
@@ -1049,7 +1087,7 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
     const query = encodeURIComponent(`${athleteName} ${sport} athlete age birthday born`);
     const url = `https://serpapi.com/search.json?q=${query}&api_key=${SERPAPI_API_KEY}&num=5`;
 
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) {
       return { age: null, birthYear: null, isMinor: null, source: null };
     }
@@ -1155,62 +1193,65 @@ async function scoreAthletes(
 
   const scored: ScoredAthlete[] = [];
 
-  for (const athlete of athletes) {
-    let score = await scoreAthlete(athlete, successProfile);
+  // Keep enough concurrency to finish inside the serverless budget without
+  // creating a burst large enough to trip provider rate limits.
+  for (let index = 0; index < athletes.length; index += 3) {
+    const batch = athletes.slice(index, index + 3);
+    const batchScores = await Promise.all(batch.map(async (athlete) => {
+      let score = await scoreAthlete(athlete, successProfile);
 
-    // Check if age is uncertain and needs verification
-    const ageUncertain =
-      score.is_minor === undefined ||
-      score.is_minor === null ||
-      (score.concerns || []).some((c: string) =>
-        c.toLowerCase().includes("age") ||
-        c.toLowerCase().includes("minor") ||
-        c.toLowerCase().includes("verify")
-      );
+      // Check if age is uncertain and needs verification
+      const ageUncertain =
+        score.is_minor === undefined ||
+        score.is_minor === null ||
+        (score.concerns || []).some((c: string) =>
+          c.toLowerCase().includes("age") ||
+          c.toLowerCase().includes("minor") ||
+          c.toLowerCase().includes("verify")
+        );
 
-    // If age is uncertain and athlete has a good score, verify via Google
-    if (ageUncertain && score.score >= 40) {
-      log(`    🔍 Age uncertain for ${athlete.name}, doing Google lookup...`);
+      // If age is uncertain and athlete has a good score, verify via web search
+      if (ageUncertain && score.score >= 40) {
+        log(`    🔍 Age uncertain for ${athlete.name}, doing web lookup...`);
 
-      const ageInfo = await lookupAthleteAge(athlete.name, athlete.sport);
+        const ageInfo = await lookupAthleteAge(athlete.name, athlete.sport);
 
-      if (ageInfo.age !== null) {
-        log(`    📅 Found age: ${ageInfo.age} (from ${ageInfo.source})`);
+        if (ageInfo.age !== null) {
+          log(`    📅 Found age: ${ageInfo.age} (from ${ageInfo.source})`);
 
-        if (ageInfo.isMinor === true) {
-          // MINOR CONFIRMED - block them
-          score = {
-            ...score,
-            score: 0,
-            is_minor: true,
-            reasoning: `${score.reasoning} [BLOCKED: Google search confirmed age is ${ageInfo.age} - minor]`,
-            concerns: [...(score.concerns || []), `Age verified as ${ageInfo.age} via Google - MINOR`],
-          };
-          log(`    ⛔ MINOR CONFIRMED: ${athlete.name} is ${ageInfo.age} years old`);
+          if (ageInfo.isMinor === true) {
+            score = {
+              ...score,
+              score: 0,
+              is_minor: true,
+              reasoning: `${score.reasoning} [BLOCKED: Web research confirmed age is ${ageInfo.age} - minor]`,
+              concerns: [...(score.concerns || []), `Age verified as ${ageInfo.age} via web research - MINOR`],
+            };
+            log(`    ⛔ MINOR CONFIRMED: ${athlete.name} is ${ageInfo.age} years old`);
+          } else {
+            score = {
+              ...score,
+              is_minor: false,
+              reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]`,
+              concerns: (score.concerns || []).filter((c: string) =>
+                !c.toLowerCase().includes("age") && !c.toLowerCase().includes("verify")
+              ),
+            };
+            log(`    ✅ Adult confirmed: ${athlete.name} is ${ageInfo.age} years old`);
+          }
         } else {
-          // Adult confirmed - update reasoning with verified age
           score = {
             ...score,
-            is_minor: false,
-            reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]`,
-            concerns: (score.concerns || []).filter((c: string) =>
-              !c.toLowerCase().includes("age") && !c.toLowerCase().includes("verify")
-            ),
+            concerns: [...(score.concerns || []), "Age could not be verified via web research - manual verification required"],
           };
-          log(`    ✅ Adult confirmed: ${athlete.name} is ${ageInfo.age} years old`);
+          log(`    ⚠️ Could not verify age for ${athlete.name}`);
         }
-      } else {
-        log(`    ⚠️ Could not verify age for ${athlete.name}`);
-        // Keep the original score but add a concern
-        score = {
-          ...score,
-          concerns: [...(score.concerns || []), "Age could not be verified via Google - manual verification required"],
-        };
       }
-    }
 
-    scored.push(score);
-    log(`  ${athlete.name}: Score ${score.score}/100 - ${score.reasoning.slice(0, 100)}`);
+      log(`  ${athlete.name}: Score ${score.score}/100 - ${score.reasoning.slice(0, 100)}`);
+      return score;
+    }));
+    scored.push(...batchScores);
   }
 
   // Sort by score descending
@@ -1302,7 +1343,7 @@ Respond with ONLY valid JSON:
     throw new Error("Claude Sonnet 5 scoring is not configured");
   }
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1352,7 +1393,7 @@ async function downloadAndStoreProfilePic(
   if (!profilePicUrl) return null;
 
   try {
-    const response = await fetch(profilePicUrl, {
+    const response = await fetchWithTimeout(profilePicUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
@@ -1403,7 +1444,7 @@ async function fetchInstagramPhotosForAthlete(
     log(`  📸 Fetching Instagram photos for @${instagramHandle}...`);
 
     // Use the Instagram Post Scraper actor
-    const runResponse = await fetch(
+    const runResponse = await fetchWithTimeout(
       `https://api.apify.com/v2/acts/apify~instagram-post-scraper/runs?token=${APIFY_API_KEY}`,
       {
         method: "POST",
@@ -1437,7 +1478,7 @@ async function fetchInstagramPhotosForAthlete(
       await new Promise((resolve) => setTimeout(resolve, 2500));
       attempts++;
 
-      const statusRes = await fetch(
+      const statusRes = await fetchWithTimeout(
         `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`
       );
       const statusData = await statusRes.json();
@@ -1454,7 +1495,7 @@ async function fetchInstagramPhotosForAthlete(
     }
 
     // Fetch results
-    const dataResponse = await fetch(
+    const dataResponse = await fetchWithTimeout(
       `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}&limit=${limit}`
     );
 
@@ -1483,7 +1524,7 @@ async function fetchInstagramPhotosForAthlete(
 
       // Download and store the image
       try {
-        const imgResponse = await fetch(imageUrl, {
+        const imgResponse = await fetchWithTimeout(imageUrl, {
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
           },
@@ -1591,6 +1632,7 @@ export async function POST(request: NextRequest) {
     const submittedConfig: ResearchConfig = await request.json();
     const config: ResearchConfig = {
       ...submittedConfig,
+      resultCount: Math.min(Math.max(submittedConfig.resultCount || 5, 1), 10),
       scoringModel: RESEARCH_SCORING_MODEL,
     };
 
@@ -1620,6 +1662,7 @@ export async function POST(request: NextRequest) {
         .from("research_logs")
         .insert({
           status: "running",
+          heartbeat_at: new Date().toISOString(),
           config_used: config,
           context_summary: {
             sport: config.sportFocus,
@@ -1634,6 +1677,7 @@ export async function POST(request: NextRequest) {
             scored: 0,
             returned: 0,
             added: 0,
+            phase: "starting",
           },
         })
         .select("id")
@@ -1649,15 +1693,21 @@ export async function POST(request: NextRequest) {
 
     // STEP 1: Discover sport context
     const sportContext = await discoverSportContext(config.sportFocus, config.customContext);
+    await updateResearchProgress(researchLogId, "discovering_candidates", {
+      discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0,
+    });
 
     // STEP 2: Discover athletes (with historical context)
     const discoveredAthletes = await discoverAthletes(
       config.sportFocus,
       sportContext,
       config.customContext,
-      config.resultCount * 3, // Get 3x more than needed to account for filtering
+      config.resultCount * 2,
       successProfile
     );
+    await updateResearchProgress(researchLogId, "enriching_instagram", {
+      discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0, added: 0,
+    });
 
     if (discoveredAthletes.length === 0) {
       log("No athletes discovered");
@@ -1673,6 +1723,7 @@ export async function POST(request: NextRequest) {
               sportContext,
             },
             error_message: "No athletes found for this sport",
+            heartbeat_at: new Date().toISOString(),
             completed_at: new Date().toISOString(),
           }).eq("id", researchLogId);
         } catch {
@@ -1691,6 +1742,13 @@ export async function POST(request: NextRequest) {
 
     // STEP 3: Enrich with Instagram
     const enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config);
+    await updateResearchProgress(researchLogId, "scoring", {
+      discovered: discoveredAthletes.length,
+      enriched: enrichedAthletes.length,
+      scored: 0,
+      returned: 0,
+      added: 0,
+    });
 
     if (enrichedAthletes.length === 0) {
       log("No athletes with valid Instagram profiles found");
@@ -1714,6 +1772,7 @@ export async function POST(request: NextRequest) {
               added: 0,
             },
             error_message: "Found athletes but none matched follower criteria or had valid Instagram",
+            heartbeat_at: new Date().toISOString(),
             completed_at: new Date().toISOString(),
           }).eq("id", researchLogId);
         } catch {
@@ -1735,6 +1794,13 @@ export async function POST(request: NextRequest) {
 
     // Take top N results
     const finalResults = scoredAthletes.slice(0, config.resultCount);
+    await updateResearchProgress(researchLogId, "saving_candidates", {
+      discovered: discoveredAthletes.length,
+      enriched: enrichedAthletes.length,
+      scored: scoredAthletes.length,
+      returned: finalResults.length,
+      added: 0,
+    });
 
     log("═══════════════════════════════════════════════════════════════");
     log(`✅ RESEARCH COMPLETE`);
@@ -1841,8 +1907,9 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Auto-fetch 10 Instagram photos for approval review
-          if (athlete.instagram_handle) {
+          // Photo scraping is intentionally on-demand by default. Doing this for
+          // every candidate here can exhaust the research function's time budget.
+          if (PREFETCH_INSTAGRAM_PHOTOS && athlete.instagram_handle) {
             await fetchInstagramPhotosForAthlete(
               newAthlete.id,
               athlete.instagram_handle,
@@ -1886,7 +1953,9 @@ export async function POST(request: NextRequest) {
             scored: scoredAthletes.length,
             returned: finalResults.length,
             added: addedCount,
+            phase: "completed",
           },
+          heartbeat_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
         }).eq("id", researchLogId);
       } catch (logError) {
@@ -1942,6 +2011,7 @@ export async function POST(request: NextRequest) {
         await supabase.from("research_logs").update({
           status: "error",
           error_message: error instanceof Error ? error.message : "Research failed",
+          heartbeat_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
         }).eq("id", researchLogId);
       } catch {

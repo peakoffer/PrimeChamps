@@ -57,7 +57,9 @@ interface ResearchLog {
   id: string;
   created_at: string;
   completed_at: string | null;
+  heartbeat_at?: string | null;
   status: string;
+  error_message?: string | null;
   config_used: ResearchConfig;
   context_summary: {
     historical_count: number;
@@ -334,7 +336,7 @@ function ResearchStageContent() {
         // Find the specific research run
         const targetLog = logs.find((log: ResearchLog) => log.id === runId);
 
-        if (targetLog && (targetLog.status === "completed" || targetLog.status === "error")) {
+        if (targetLog && ["completed", "error", "failed"].includes(targetLog.status)) {
           // Research finished!
           clearInterval(pollingRef.current!);
           pollingRef.current = null;
@@ -959,7 +961,7 @@ function ResearchStageContent() {
                       className={`w-3 h-3 rounded-full ${
                         log.status === "completed"
                           ? "bg-green-500"
-                          : log.status === "error"
+                          : log.status === "error" || log.status === "failed"
                           ? "bg-red-500"
                           : "bg-yellow-500 animate-pulse"
                       }`}
@@ -1007,6 +1009,12 @@ function ResearchStageContent() {
                 {/* Expanded Log Details */}
                 {expandedLogId === log.id && (
                   <div className="px-4 pb-4 space-y-4">
+                    {(log.status === "error" || log.status === "failed") && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                        <p className="font-semibold">Research stopped before completion</p>
+                        <p className="mt-1">{log.error_message || "The run did not complete. Copy the settings and try a smaller batch."}</p>
+                      </div>
+                    )}
                     {/* Copy & Tweak Button */}
                     <button
                       onClick={(e) => {
@@ -1349,11 +1357,9 @@ function ResearchStageContent() {
                 >
                   <option value={5}>5 results (faster)</option>
                   <option value={10}>10 results</option>
-                  <option value={15}>15 results</option>
-                  <option value={20}>20 results (slower)</option>
                 </select>
                 <p className="text-xs text-gray-800 mt-1">
-                  More results = longer wait (each athlete requires Instagram lookup)
+                  Runs are capped at 10 candidates so discovery, Instagram checks, and scoring finish within the production time budget.
                 </p>
               </div>
 

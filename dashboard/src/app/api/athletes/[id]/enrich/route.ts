@@ -21,15 +21,17 @@ async function persistEnrichmentResult(
   const now = new Date();
   const expiryDays = source === "google" || source === "tiktok" || source === "instagram" ? 7 : 30;
   const expiresAt = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
+  const wasAttempted = result.status !== "not_configured";
+  const isCacheable = result.status === "complete" || result.status === "not_found";
   const { error } = await supabase.from("athlete_enrichment_sources").upsert(
     {
       athlete_id: athleteId,
       source,
       status: result.status,
-      data: result.data,
-      fetched_at: result.status === "not_configured" ? null : now.toISOString(),
-      expires_at: result.status === "not_configured" ? null : expiresAt.toISOString(),
-      last_error: null,
+      data: { ...result.data, message: result.message },
+      fetched_at: wasAttempted ? now.toISOString() : null,
+      expires_at: isCacheable ? expiresAt.toISOString() : null,
+      last_error: result.status === "failed" ? result.message : null,
     },
     { onConflict: "athlete_id,source" }
   );
