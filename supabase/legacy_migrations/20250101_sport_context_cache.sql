@@ -1,4 +1,4 @@
--- Sport context cache table
+-- LEGACY (pre-baseline): Sport context cache table
 CREATE TABLE IF NOT EXISTS sport_context_cache (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sport TEXT UNIQUE NOT NULL,

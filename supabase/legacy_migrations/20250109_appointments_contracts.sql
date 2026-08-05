@@ -1,4 +1,4 @@
--- Migration: Add/update appointments and contracts tables
+-- LEGACY (pre-baseline): Add/update appointments and contracts tables
 -- Created: 2025-01-09
 
 -- Add missing columns to appointments table

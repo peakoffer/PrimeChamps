@@ -1,218 +1,132 @@
 /**
- * Migration script to add research columns and fix snowboarding candidates
+ * Backfill candidates from completed research logs.
  *
- * Usage: node scripts/migrate_and_fix.js
+ * Required environment variables:
+ *   NEXT_PUBLIC_SUPABASE_URL
+ *   SUPABASE_SERVICE_KEY
+ *
+ * Usage: node --env-file=.env.local scripts/migrate_and_fix.js
  */
 
-const { createClient } = require('@supabase/supabase-js');
+const { createClient } = require("@supabase/supabase-js");
 
-const supabaseUrl = 'https://rmxuwyxpoazsuqvdadlo.supabase.co';
-const supabaseServiceKey = 'sb_secret_SvxySm8RApJn_zuqf423GA_b9ldgC51';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error(
+    "NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_KEY are required. " +
+      "Never place a service key in this script."
+  );
+}
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+function candidateRecord(candidate, log, includeResearchColumns = true) {
+  const record = {
+    name: candidate.name,
+    sport: candidate.sport || log.config_used?.sportFocus || "Unknown",
+    instagram_handle: candidate.instagram_handle,
+    instagram_url:
+      candidate.instagram_url ||
+      `https://instagram.com/${candidate.instagram_handle}`,
+    profile_pic_url: candidate.profile_pic_url,
+    follower_count: candidate.follower_count,
+    notes: JSON.stringify({
+      bio: candidate.bio,
+      source: candidate.source,
+      discovered_at: log.created_at,
+      research_run_id: log.id,
+      research_score: candidate.score,
+      research_reasoning: candidate.reasoning,
+      concerns: candidate.concerns || [],
+      similar_to: candidate.similar_to || [],
+    }),
+    pipeline_stage: "approval",
+    source: "research_agent",
+    is_historical: false,
+  };
+
+  if (includeResearchColumns) {
+    record.research_score = candidate.score;
+    record.research_reasoning = candidate.reasoning;
+  }
+
+  return record;
+}
+
+async function insertCandidate(candidate, log) {
+  const { data: existing, error: lookupError } = await supabase
+    .from("athletes")
+    .select("id")
+    .eq("instagram_handle", candidate.instagram_handle)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+  if (existing) return "skipped";
+
+  let { error } = await supabase
+    .from("athletes")
+    .insert(candidateRecord(candidate, log));
+
+  // Older schemas may not yet have the dedicated research columns. Preserve
+  // the values in notes and retry without those columns.
+  if (error?.code === "PGRST204") {
+    ({ error } = await supabase
+      .from("athletes")
+      .insert(candidateRecord(candidate, log, false)));
+  }
+
+  if (error) throw error;
+  return "inserted";
+}
+
 async function main() {
-  console.log('=== Migration and Fix Script ===\n');
+  console.log("Backfilling completed research candidates...");
 
-  // Step 1: Check if research columns exist by trying a test insert
-  console.log('Step 1: Checking if research columns exist...');
+  const { data: logs, error } = await supabase
+    .from("research_logs")
+    .select("id, final_results, config_used, created_at")
+    .eq("status", "completed")
+    .order("created_at", { ascending: false });
 
-  const testHandle = 'test_migration_' + Date.now();
-  const { error: testError } = await supabase
-    .from('athletes')
-    .insert({
-      name: 'Test',
-      sport: 'test',
-      instagram_handle: testHandle,
-      pipeline_stage: 'approval',
-      research_score: 80,
-      research_reasoning: 'test',
-    });
+  if (error) throw error;
 
-  if (testError && testError.code === 'PGRST204') {
-    console.log('❌ Research columns are MISSING. You need to add them via Supabase SQL Editor.');
-    console.log('\nRun this SQL in Supabase Dashboard (https://supabase.com/dashboard/project/rmxuwyxpoazsuqvdadlo/sql):');
-    console.log('');
-    console.log('ALTER TABLE athletes ADD COLUMN IF NOT EXISTS research_score INTEGER;');
-    console.log('ALTER TABLE athletes ADD COLUMN IF NOT EXISTS research_reasoning TEXT;');
-    console.log('');
-    console.log('After running the SQL, run this script again.');
+  let inserted = 0;
+  let skipped = 0;
+  let failed = 0;
 
-    // Still try to add candidates using the notes field workaround
-    console.log('\n--- Attempting to add candidates using notes field workaround ---');
-    await addCandidatesWithWorkaround();
-    return;
-  } else if (!testError) {
-    // Clean up test record
-    await supabase.from('athletes').delete().eq('instagram_handle', testHandle);
-    console.log('✓ Research columns exist!');
-    await addCandidatesWithColumns();
-  } else {
-    console.log('Unexpected error:', testError.message);
-    await addCandidatesWithWorkaround();
-  }
-}
-
-async function addCandidatesWithColumns() {
-  console.log('\nStep 2: Adding pending candidates from research logs...');
-
-  // Get all research logs
-  const { data: logs, error: logError } = await supabase
-    .from('research_logs')
-    .select('id, final_results, config_used, created_at')
-    .eq('status', 'completed')
-    .order('created_at', { ascending: false });
-
-  if (logError) {
-    console.log('Error fetching research logs:', logError.message);
-    return;
-  }
-
-  console.log(`Found ${logs.length} completed research logs`);
-
-  let totalAdded = 0;
-
-  for (const log of logs) {
-    const candidates = log.final_results || [];
-    const sport = log.config_used?.sportFocus || 'Unknown';
-
-    if (candidates.length === 0) continue;
-
-    console.log(`\nProcessing log ${log.id.slice(0, 8)}... (${sport}, ${candidates.length} candidates)`);
-
-    for (const candidate of candidates) {
-      const { data: existing } = await supabase
-        .from('athletes')
-        .select('id')
-        .eq('instagram_handle', candidate.instagram_handle)
-        .single();
-
-      if (!existing) {
-        const { error: createError } = await supabase
-          .from('athletes')
-          .insert({
-            name: candidate.name,
-            sport: candidate.sport || sport,
-            instagram_handle: candidate.instagram_handle,
-            instagram_url: candidate.instagram_url || `https://instagram.com/${candidate.instagram_handle}`,
-            profile_pic_url: candidate.profile_pic_url,
-            follower_count: candidate.follower_count,
-            notes: JSON.stringify({
-              bio: candidate.bio,
-              source: candidate.source,
-              discovered_at: log.created_at,
-            }),
-            pipeline_stage: 'approval',
-            research_score: candidate.score,
-            research_reasoning: candidate.reasoning,
-            source: 'research_agent',
-            is_historical: false,
-          });
-
-        if (createError) {
-          console.log(`  ❌ ${candidate.name}: ${createError.message}`);
-        } else {
-          console.log(`  ✓ Added: ${candidate.name} (@${candidate.instagram_handle})`);
-          totalAdded++;
-        }
+  for (const log of logs || []) {
+    for (const candidate of log.final_results || []) {
+      try {
+        const status = await insertCandidate(candidate, log);
+        if (status === "inserted") inserted += 1;
+        else skipped += 1;
+      } catch (candidateError) {
+        failed += 1;
+        console.error(
+          `Failed to backfill @${candidate.instagram_handle}:`,
+          candidateError.message
+        );
       }
     }
   }
 
-  console.log(`\n=== Done! Added ${totalAdded} athletes to approval queue ===`);
+  console.log({ inserted, skipped, failed });
 
-  // Create notification
-  if (totalAdded > 0) {
-    await supabase.from('activity_notifications').insert({
-      type: 'research_completed',
-      title: 'Migration Complete',
-      message: `Added ${totalAdded} candidates from past research runs to the approval queue.`,
-      metadata: { totalAdded },
+  if (inserted > 0) {
+    await supabase.from("activity_notifications").insert({
+      type: "research_completed",
+      title: "Migration Complete",
+      message: `Added ${inserted} candidates from past research runs to the approval queue.`,
+      metadata: { inserted, skipped, failed },
     });
   }
+
+  if (failed > 0) process.exitCode = 1;
 }
 
-async function addCandidatesWithWorkaround() {
-  console.log('\nStep 2: Adding pending candidates (using notes field workaround)...');
-
-  const { data: logs, error: logError } = await supabase
-    .from('research_logs')
-    .select('id, final_results, config_used, created_at')
-    .eq('status', 'completed')
-    .order('created_at', { ascending: false });
-
-  if (logError) {
-    console.log('Error fetching research logs:', logError.message);
-    return;
-  }
-
-  console.log(`Found ${logs.length} completed research logs`);
-
-  let totalAdded = 0;
-
-  for (const log of logs) {
-    const candidates = log.final_results || [];
-    const sport = log.config_used?.sportFocus || 'Unknown';
-
-    if (candidates.length === 0) continue;
-
-    console.log(`\nProcessing log ${log.id.slice(0, 8)}... (${sport}, ${candidates.length} candidates)`);
-
-    for (const candidate of candidates) {
-      const { data: existing } = await supabase
-        .from('athletes')
-        .select('id')
-        .eq('instagram_handle', candidate.instagram_handle)
-        .single();
-
-      if (!existing) {
-        const { error: createError } = await supabase
-          .from('athletes')
-          .insert({
-            name: candidate.name,
-            sport: candidate.sport || sport,
-            instagram_handle: candidate.instagram_handle,
-            instagram_url: candidate.instagram_url || `https://instagram.com/${candidate.instagram_handle}`,
-            profile_pic_url: candidate.profile_pic_url,
-            follower_count: candidate.follower_count,
-            notes: JSON.stringify({
-              bio: candidate.bio,
-              source: candidate.source,
-              discovered_at: log.created_at,
-              research_run_id: log.id,
-              research_score: candidate.score,
-              research_reasoning: candidate.reasoning,
-              concerns: candidate.concerns || [],
-              similar_to: candidate.similar_to || [],
-            }),
-            pipeline_stage: 'approval',
-            source: 'research_agent',
-            is_historical: false,
-          });
-
-        if (createError) {
-          console.log(`  ❌ ${candidate.name}: ${createError.message}`);
-        } else {
-          console.log(`  ✓ Added: ${candidate.name} (@${candidate.instagram_handle})`);
-          totalAdded++;
-        }
-      }
-    }
-  }
-
-  console.log(`\n=== Done! Added ${totalAdded} athletes to approval queue ===`);
-
-  if (totalAdded > 0) {
-    await supabase.from('activity_notifications').insert({
-      type: 'research_completed',
-      title: 'Migration Complete',
-      message: `Added ${totalAdded} candidates from past research runs to the approval queue.`,
-      metadata: { totalAdded },
-    });
-  }
-}
-
-main().catch(e => {
-  console.error('Fatal error:', e);
+main().catch((error) => {
+  console.error("Fatal error:", error.message);
   process.exit(1);
 });

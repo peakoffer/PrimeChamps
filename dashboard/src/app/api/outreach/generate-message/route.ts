@@ -38,7 +38,9 @@ export async function POST(request: NextRequest) {
         .select("*")
         .eq("athlete_id", athleteId)
         .eq("approval_status", "pending")
-        .single();
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (existingMessage) {
         return NextResponse.json({

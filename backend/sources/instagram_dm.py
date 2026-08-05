@@ -1,6 +1,7 @@
 """Instagram DM operations using instagrapi."""
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -21,6 +22,11 @@ class InstagramDMService:
     def __init__(self):
         pass
 
+    @staticmethod
+    def sending_enabled() -> bool:
+        """Return whether outbound Instagram DMs are explicitly enabled."""
+        return os.getenv("INSTAGRAM_DM_SENDING_ENABLED", "false").strip().lower() == "true"
+
     def _get_client(self) -> Optional[Client]:
         """Get the authenticated Instagram client."""
         return instagram_auth.get_client()
@@ -40,8 +46,9 @@ class InstagramDMService:
         """
         Send a direct message to an Instagram user.
 
-        Honors the kill switch, the hourly rate limit, and a randomized
-        human-like delay before sending. Returns a result dict; never raises.
+        Requires the outbound-send feature flag, then honors the kill switch,
+        hourly rate limit, and randomized human-like delay. Returns a result
+        dict; never raises.
 
         Args:
             username: target Instagram handle (without @)
@@ -50,6 +57,9 @@ class InstagramDMService:
         Returns:
             {"success": bool, "error": str | None, "thread_id": str | None}
         """
+        if not self.sending_enabled():
+            return {"success": False, "error": "sending_disabled", "thread_id": None}
+
         if await instagram_auth.is_kill_switch_active():
             return {"success": False, "error": "kill_switch_active", "thread_id": None}
 

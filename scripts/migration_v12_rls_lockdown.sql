@@ -1,5 +1,8 @@
 -- Migration v12: RLS lockdown & security-advisor remediation
 -- ===========================================================================
+
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
 -- Context: Supabase security advisors (2026-06-11) flagged the public schema
 -- as wide open — 18 tables with RLS disabled, the rest with allow-all policies,
 -- a credential column exposed, 4 SECURITY DEFINER views, and functions with
@@ -60,25 +63,30 @@ ALTER TABLE public.outreach_queue          ENABLE ROW LEVEL SECURITY;
 -- the querying user's RLS instead of the creator's. (Adjust if a view
 -- intentionally needs elevated rights.)
 -- ---------------------------------------------------------------------------
-ALTER VIEW public.outreach_stats            SET (security_invoker = true);
-ALTER VIEW public.athlete_touchpoints_view  SET (security_invoker = true);
-ALTER VIEW public.athlete_overview          SET (security_invoker = true);
-ALTER VIEW public.outreach_queue_view       SET (security_invoker = true);
+ALTER VIEW IF EXISTS public.outreach_stats            SET (security_invoker = true);
+ALTER VIEW IF EXISTS public.athlete_touchpoints_view  SET (security_invoker = true);
+ALTER VIEW IF EXISTS public.athlete_overview          SET (security_invoker = true);
+ALTER VIEW IF EXISTS public.outreach_queue_view       SET (security_invoker = true);
 
 -- ---------------------------------------------------------------------------
 -- TIER 1c: Pin function search_path (prevents search_path injection).
 -- ---------------------------------------------------------------------------
-ALTER FUNCTION public.record_touchpoint()                       SET search_path = public, pg_temp;
-ALTER FUNCTION public.get_outreach_setting(text)                SET search_path = public, pg_temp;
-ALTER FUNCTION public.can_contact_athlete(uuid)                 SET search_path = public, pg_temp;
-ALTER FUNCTION public.get_daily_outreach_counts()              SET search_path = public, pg_temp;
-ALTER FUNCTION public.update_content_engagements_updated_at()   SET search_path = public, pg_temp;
-ALTER FUNCTION public.update_updated_at()                       SET search_path = public, pg_temp;
-ALTER FUNCTION public.update_conversation_last_message()        SET search_path = public, pg_temp;
-ALTER FUNCTION public.move_athlete_pipeline(uuid, text)         SET search_path = public, pg_temp;
--- If any ALTER FUNCTION above errors on signature, run:
---   SELECT oid::regprocedure FROM pg_proc WHERE proname = '<fn>';
--- to get the exact argument types, then adjust.
+ALTER FUNCTION public.record_touchpoint(uuid, text, text, text, uuid, text, text, jsonb)
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.get_outreach_setting(text)
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.can_contact_athlete(uuid)
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.get_daily_outreach_counts()
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.update_content_engagements_updated_at()
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.update_updated_at()
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.update_conversation_last_message()
+  SET search_path = public, pg_temp;
+ALTER FUNCTION public.move_athlete_pipeline(uuid, text, text, text)
+  SET search_path = public, pg_temp;
 
 -- ---------------------------------------------------------------------------
 -- TIER 2: The 5 tables the dashboard anon client uses. Enable RLS but keep
@@ -86,10 +94,43 @@ ALTER FUNCTION public.move_athlete_pipeline(uuid, text)         SET search_path 
 -- "RLS off = wide open"). This is functionally equivalent to today but makes
 -- the access EXPLICIT and ready to tighten.
 -- ---------------------------------------------------------------------------
--- athletes / outreach_messages / approval_decisions / pipeline_history /
--- research_feedback already have RLS enabled with allow-all "USING (true)"
--- policies (per the advisor report), so they keep working. No change needed
--- here unless you want to scope them down.
+-- athletes / outreach_messages / research_feedback already have RLS enabled
+-- with allow-all policies. approval_decisions and pipeline_history did not,
+-- so enable RLS and add temporary compatibility policies for the current
+-- client-side dashboard writes. Remove these policies after the Tier 3
+-- server-route refactor.
+ALTER TABLE public.approval_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pipeline_history   ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'approval_decisions'
+      AND policyname = 'Temporary dashboard access to approval decisions'
+  ) THEN
+    CREATE POLICY "Temporary dashboard access to approval decisions"
+      ON public.approval_decisions
+      FOR ALL TO anon, authenticated
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'pipeline_history'
+      AND policyname = 'Temporary dashboard access to pipeline history'
+  ) THEN
+    CREATE POLICY "Temporary dashboard access to pipeline history"
+      ON public.pipeline_history
+      FOR ALL TO anon, authenticated
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- TIER 3 (RECOMMENDED end-state — DO NOT run until client reads/writes for

@@ -110,7 +110,7 @@ export default function ReachOutStagePage() {
       const dmMessage = dmData.message?.content || dmData.message || "";
 
       // Fetch athlete's photos
-      const photosResponse = await fetch(`/api/instagram/photos?athlete_id=${athlete.id}`);
+      const photosResponse = await fetch(`/api/instagram/photos?athleteId=${athlete.id}`);
       const photosData = await photosResponse.json();
       const photos: InstagramPost[] = photosData.photos || [];
 

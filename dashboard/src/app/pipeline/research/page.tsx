@@ -585,6 +585,8 @@ function ResearchStageContent() {
       const runId = data.runId;
       const results = data.results || [];
       setCurrentResearchRun(data.run);
+      setResearchResults(results);
+      setShowResultsModal(results.length > 0);
 
       // Research is now complete (the API is synchronous)
       // Clear background tracking

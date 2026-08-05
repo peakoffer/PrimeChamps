@@ -7,6 +7,7 @@ Sending only ever touches APPROVED messages, so the human approval gate still
 applies in manual approval mode. Every tick is guarded by:
   - PIPELINE_AUTORUN_ENABLED env (must be "true" to auto-start)
   - outreach_settings.pause_all_outreach (hard stop)
+  - INSTAGRAM_DM_SENDING_ENABLED env (must be "true" to send)
   - the Instagram kill switch (for the send step, inside the outreach agent)
 
 Note: the research/discovery step is intentionally NOT scheduled here — the
@@ -150,6 +151,9 @@ class PipelineScheduler:
         return {
             "is_running": self._is_running,
             "autorun_enabled": self.autorun_enabled(),
+            "instagram_dm_sending_enabled": (
+                os.getenv("INSTAGRAM_DM_SENDING_ENABLED", "false").strip().lower() == "true"
+            ),
             "interval_minutes": self.interval_minutes(),
             "paused": self._is_paused(),
             "last_run": self._last_run.isoformat() if self._last_run else None,

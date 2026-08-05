@@ -19,6 +19,9 @@ node_modules/
 .next/
 out/
 .vercel
+*.tsbuildinfo
+test-results/
+playwright-report/
 
 # IDE
 .idea/
@@ -29,7 +32,7 @@ out/
 
 # Logs
 *.log
-logs/
+/logs/
 
 # Data (may contain PII)
 data/*.csv

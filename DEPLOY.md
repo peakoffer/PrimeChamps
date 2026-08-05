@@ -45,7 +45,9 @@ Marketing site stays on `prime-champs.com` (Lovable). The CRM lives on the
    - `BACKEND_API_KEY` = the value from step 0.2
    - `BACKEND_CORS_ORIGINS=https://app.prime-champs.com`
    - `PIPELINE_AUTORUN_ENABLED=false` (flip to `true` only when you're ready to
-     let the loop run unattended), `PIPELINE_INTERVAL_MINUTES=60`
+     let the loop run unattended)
+   - `INSTAGRAM_DM_SENDING_ENABLED=false` (independent outbound-DM gate; leave
+     off through staging verification), `PIPELINE_INTERVAL_MINUTES=60`
 4. Deploy. Confirm health: `https://<railway-domain>/health` → `200`.
 5. Confirm auth: `https://<railway-domain>/agents` with no key → `401`; with
    `X-API-Key: <BACKEND_API_KEY>` → `200`.
@@ -105,9 +107,11 @@ Marketing site stays on `prime-champs.com` (Lovable). The CRM lives on the
 1. Connect the Instagram account via the dashboard (encrypted session stored).
 2. Sanity-check `outreach_settings`: `daily_dm_limit`, `pause_all_outreach`,
    `min_hours_between_touchpoints`, `approval_mode`.
-3. Set Railway `PIPELINE_AUTORUN_ENABLED=true` and redeploy, OR POST
-   `/pipeline/scheduler/start` (with the API key).
+3. In staging, explicitly set `INSTAGRAM_DM_SENDING_ENABLED=true`, verify one
+   approved-message send, then set `PIPELINE_AUTORUN_ENABLED=true` and redeploy
+   (or POST `/pipeline/scheduler/start` with the API key).
 4. Watch `system_logs` (component `pipeline_scheduler`) for tick results.
 5. Kill switches: `pause_all_outreach=true` (DB) stops sending; the Instagram
-   `kill_switch` config stops all IG ops; `PIPELINE_AUTORUN_ENABLED=false`
-   + redeploy stops the scheduler.
+   `kill_switch` config stops all IG ops; `INSTAGRAM_DM_SENDING_ENABLED=false`
+   blocks outbound DMs; `PIPELINE_AUTORUN_ENABLED=false` + redeploy stops
+   scheduler autorun.

@@ -1,52 +1,44 @@
-# Database migrations — canonical order
+# Database migrations
 
-The live Supabase project (`rmxuwyxpoazsuqvdadlo`) is currently the **source of
-truth**; these files accreted ad-hoc and include duplicates. This document
-records the intended apply order for rebuilding from scratch and flags the
-redundant files.
+Managed Supabase migration history was established on 2026-08-05. Canonical
+migrations now live in `supabase/migrations/`; SQL under `scripts/` and
+`supabase/legacy_migrations/` is historical reference only.
 
-## Recommended way to reproduce the DB
+## Production history
 
-The most reliable reproduction is a dump of the live schema rather than
-replaying this pile:
+| Version | Migration | Status |
+|---|---|---|
+| `20260805160535` | `baseline_existing_production_schema` | Applied |
+| `20260805160540` | `enrichment_unique_constraint` | Applied |
+| `20260805160553` | `rls_lockdown_and_function_hardening` | Applied |
+| `20260805160839` | `remove_backend_anon_policies_and_privileges` | Applied |
+
+The baseline is intentionally a marker: the production schema existed before
+managed history and the available legacy SQL is not a complete, trustworthy
+replay. Do not assume `supabase db reset` can rebuild the pre-baseline schema.
+A vetted full schema dump is still required before creating a brand-new project.
+
+## Workflow for new schema changes
 
 ```bash
-supabase db dump --schema public --project-ref rmxuwyxpoazsuqvdadlo > scripts/schema_full.sql
+npx supabase login
+npx supabase link --project-ref rmxuwyxpoazsuqvdadlo
+npx supabase migration new descriptive_change_name
+# edit the generated SQL, test locally, then:
+npx supabase db push --dry-run
+npx supabase db push
 ```
 
-Commit that file and treat it as the canonical schema. Replay the numbered
-migrations below only if you can't dump.
+Never run the loose SQL files directly against production. Keep every future
+DDL change in a timestamped file under `supabase/migrations/` so local and
+remote history remain aligned.
 
-## Apply order (from empty database)
+## Verification recorded after hardening
 
-| # | File | Notes |
-|---|------|-------|
-| 1 | `schema.sql` | Base tables (athletes, athlete_enrichment, outreach_*) |
-| 2 | `migration_v2_agents.sql` | agent_runs, athlete_scores |
-| 3 | `migration_v3_pipeline.sql` | pipeline_stage, pipeline_history, approval_decisions |
-| 4 | `migration-v3-outreach-templates.sql` | ⚠️ second "v3" — outreach_templates (apply after v3_pipeline) |
-| 5 | `migration_v4_add_rejected_stage.sql` | adds `rejected` pipeline stage |
-| 6 | `migration_v5_athlete_posts.sql` | athlete_posts |
-| 7 | `migration_v6_instagram_dm.sql` | instagram_sessions/config/conversations/messages, dm_sync_log |
-| 8 | `migration_v7_appointments_contracts.sql` | appointments, contracts |
-| 9 | `migration_v8_email.sql` | email_templates, email_messages |
-| 10 | `migration_v9_notifications.sql` | activity_notifications |
-| 11 | `migration_v10_outreach_hub.sql` | touchpoints, content_engagements, outreach_settings, outreach_queue + views/functions |
-| 12 | `migration_v11_enrichment_unique_constraint.sql` | **NEW — not yet applied.** UNIQUE(athlete_id, data_source) |
-| 13 | `migration_v12_rls_lockdown.sql` | **NEW — not yet applied.** RLS + advisor remediation (review first) |
-
-## Redundant / superseded files (do NOT apply in a clean build)
-
-These were one-off patches against a drifting DB. Their effects are already
-folded into the numbered files above or into the live DB:
-
-- `add_missing_columns.sql` — ad-hoc column adds
-- `create_missing_tables.sql` — re-declares tables from v2/v3
-- `create_research_tables.sql` and `create_research_tables_simple.sql` — two
-  versions of the same research tables; superseded by `supabase/migrations/`
-- `migration_combined_missing.sql` — re-declares several earlier tables
-
-## Outstanding
-
-- v11 and v12 still need to be applied to the live DB (DDL requires manual
-  apply / explicit approval). See each file's header for the apply command.
+- `UNIQUE (athlete_id, data_source)` exists on `athlete_enrichment`.
+- Every public table has RLS enabled.
+- Browser roles have no table privileges on Instagram credentials/sessions or
+  the other backend-only tables.
+- Temporary compatibility policies remain only for the dashboard's direct
+  `approval_decisions` and `pipeline_history` access. Move those calls behind
+  authenticated server routes before removing the policies.
