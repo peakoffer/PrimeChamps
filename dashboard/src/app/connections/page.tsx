@@ -9,6 +9,8 @@ import {
   Link2,
   RefreshCw,
   ShieldCheck,
+  Unplug,
+  UserRound,
   Wrench,
 } from "lucide-react";
 import type {
@@ -28,23 +30,29 @@ const categoryLabels: Record<ProviderCategory, string> = {
 const categoryOrder: ProviderCategory[] = ["channels", "research", "delivery", "core"];
 
 const statusStyles: Record<ProviderStatus, string> = {
+  operational: "bg-emerald-50 text-emerald-700 border-emerald-200",
   connected: "bg-emerald-50 text-emerald-700 border-emerald-200",
   ready: "bg-blue-50 text-blue-700 border-blue-200",
   partial: "bg-amber-50 text-amber-700 border-amber-200",
   missing: "bg-red-50 text-red-700 border-red-200",
   manual: "bg-violet-50 text-violet-700 border-violet-200",
+  planned: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 const statusLabels: Record<ProviderStatus, string> = {
+  operational: "Operational",
   connected: "Connected",
-  ready: "Ready to connect",
+  ready: "Configured",
   partial: "Partially configured",
   missing: "Needs configuration",
   manual: "Assisted workflow",
+  planned: "Planned",
 };
 
 function StatusIcon({ status }: { status: ProviderStatus }) {
-  if (status === "connected") return <CheckCircle2 className="h-4 w-4" />;
+  if (status === "connected" || status === "operational") {
+    return <CheckCircle2 className="h-4 w-4" />;
+  }
   if (status === "ready") return <Link2 className="h-4 w-4" />;
   if (status === "manual") return <Wrench className="h-4 w-4" />;
   if (status === "partial") return <Clock3 className="h-4 w-4" />;
@@ -52,6 +60,11 @@ function StatusIcon({ status }: { status: ProviderStatus }) {
 }
 
 function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
+  const statusLabel =
+    provider.status === "ready" && provider.connectPath
+      ? "Ready to connect"
+      : statusLabels[provider.status];
+
   return (
     <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
@@ -63,7 +76,7 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[provider.status]}`}
         >
           <StatusIcon status={provider.status} />
-          {statusLabels[provider.status]}
+          {statusLabel}
         </span>
       </div>
 
@@ -83,6 +96,17 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
           {provider.connectedAccounts} connected account
           {provider.connectedAccounts === 1 ? "" : "s"}
         </p>
+      )}
+
+      {provider.evidence.length > 0 && (
+        <div className="mt-4 space-y-1.5">
+          {provider.evidence.map((item) => (
+            <p key={item} className="flex items-start gap-2 text-xs leading-5 text-gray-600">
+              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+              {item}
+            </p>
+          ))}
+        </div>
       )}
 
       {provider.connectPath && (
@@ -111,6 +135,13 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
           {provider.note}
         </p>
       )}
+
+
+      {provider.nextAction && (
+        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-xs leading-5 text-blue-950">
+          <span className="font-semibold">Next:</span> {provider.nextAction}
+        </div>
+      )}
     </article>
   );
 }
@@ -119,6 +150,7 @@ export default function ConnectionsPage() {
   const [health, setHealth] = useState<ProviderHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
 
   const loadHealth = useCallback(async () => {
     try {
@@ -132,6 +164,23 @@ export default function ConnectionsPage() {
       setLoading(false);
     }
   }, []);
+
+  const accountAction = async (accountId: string, action: "sync" | "disconnect") => {
+    setBusyAccountId(accountId);
+    setError(null);
+    try {
+      const response = await fetch(`/api/channel-accounts/${accountId}/${action}`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(data.error || `${action} failed`);
+      await loadHealth();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : `${action} failed`);
+    } finally {
+      setBusyAccountId(null);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/providers/health", { cache: "no-store" })
@@ -217,6 +266,70 @@ export default function ConnectionsPage() {
               migration and confirm the service key.
             </div>
           )}
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-950">Zac’s connected accounts</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                These identities belong to your user. Teammates connect their own accounts
+                after accepting an invitation.
+              </p>
+            </div>
+            {health.accounts.length ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {health.accounts.map((account) => (
+                  <article
+                    key={account.id}
+                    className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex min-w-0 gap-3">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700">
+                          <UserRound className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-slate-950">{account.label}</p>
+                          <p className="truncate text-sm text-slate-500">
+                            {account.email || (account.username ? `@${account.username}` : account.provider)}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-400">Owned by {account.ownerName}</p>
+                        </div>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${account.status === "connected" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                        {account.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                    <p className="mt-4 text-xs text-slate-500">
+                      {account.lastSyncAt
+                        ? `Last synced ${new Date(account.lastSyncAt).toLocaleString()}`
+                        : "Waiting for first sync"}
+                    </p>
+                    {account.lastError ? (
+                      <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{account.lastError}</p>
+                    ) : null}
+                    <div className="mt-4 flex gap-2">
+                      {(account.provider === "outlook" || account.provider === "instagram") && account.status !== "disconnected" ? (
+                        <button type="button" disabled={busyAccountId === account.id} onClick={() => void accountAction(account.id, "sync")} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                          <RefreshCw className={`h-4 w-4 ${busyAccountId === account.id ? "animate-spin" : ""}`} />
+                          Sync now
+                        </button>
+                      ) : null}
+                      {account.status !== "disconnected" ? (
+                        <button type="button" disabled={busyAccountId === account.id} onClick={() => void accountAction(account.id, "disconnect")} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
+                          <Unplug className="h-4 w-4" />Disconnect
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-600">
+                No personal messaging accounts are connected yet. Configure the provider
+                variables below, then connect Zac’s Microsoft mailbox first.
+              </div>
+            )}
+          </section>
 
           {categoryOrder.map((category) => {
             const providers = health.providers.filter((provider) => provider.category === category);

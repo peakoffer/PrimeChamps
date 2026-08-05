@@ -81,14 +81,20 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: result.error,
+          message_id: result.messageId,
+          queued: Boolean(result.queued),
+        },
+        { status: result.queued ? 503 : 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
       message_id: result.messageId,
       external_id: result.externalId,
-      warning: result.error, // May contain "Resend not configured" warning
     });
   } catch (error) {
     console.error("Error in POST /api/email/send:", error);

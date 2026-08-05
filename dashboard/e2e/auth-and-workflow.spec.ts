@@ -11,16 +11,29 @@ const athlete = {
 };
 
 async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill("e2e");
-  await page.getByLabel("Password").fill("prime-champs-e2e-password");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.context().addCookies([
+    {
+      name: "primechamps-e2e-auth",
+      value: "prime-champs-playwright-only-session",
+      url: "http://127.0.0.1:3100",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+  await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
 }
 
 test("unauthenticated pages and APIs fail closed", async ({ page, request }) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\?next=%2F$/);
+
+  await expect(
+    page.getByRole("link", { name: /Continue with Microsoft/ })
+  ).toBeVisible();
+  await page.getByText("Use email and password").click();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("Password")).toBeVisible();
 
   const response = await request.get("/api/pipeline/athletes", { maxRedirects: 0 });
   expect(response.status()).toBe(401);

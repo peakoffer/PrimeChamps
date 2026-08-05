@@ -50,6 +50,7 @@ export interface SendEmailOptions {
 
 export interface SendEmailResult {
   success: boolean;
+  queued?: boolean;
   messageId?: string;
   externalId?: string;
   error?: string;
@@ -102,10 +103,12 @@ export async function sendOutreachEmail(options: SendEmailOptions): Promise<Send
 
   const messageId = messageRecord.id;
 
-  // If Resend is not configured, return with pending status
+  // Preserve the pending record for auditability, but do not report an unsent
+  // message as a successful delivery.
   if (!resend) {
     return {
-      success: true,
+      success: false,
+      queued: true,
       messageId,
       error: "Resend not configured - email queued but not sent",
     };

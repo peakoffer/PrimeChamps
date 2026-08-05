@@ -39,6 +39,10 @@ function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function serpApiKey() {
+  return process.env.SERPAPI_KEY || process.env.SERPAPI_API_KEY;
+}
+
 async function fetchJson(url: string, init?: RequestInit) {
   const response = await fetch(url, {
     ...init,
@@ -58,7 +62,7 @@ async function fetchJson(url: string, init?: RequestInit) {
 }
 
 async function runSerpApiSearch(query: string, limit = 10) {
-  const apiKey = process.env.SERPAPI_KEY;
+  const apiKey = serpApiKey();
   if (!apiKey) return null;
 
   const url = new URL("https://serpapi.com/search.json");
@@ -87,11 +91,11 @@ async function runSerpApiSearch(query: string, limit = 10) {
 }
 
 async function enrichGoogle(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
-  if (!process.env.SERPAPI_KEY) {
+  if (!serpApiKey()) {
     return {
       status: "not_configured",
       data: {},
-      message: "Google enrichment needs SERPAPI_KEY in the server environment.",
+      message: "Google enrichment needs SERPAPI_KEY or SERPAPI_API_KEY in the server environment.",
     };
   }
 
@@ -201,7 +205,7 @@ async function enrichTikTok(athlete: EnrichmentAthlete): Promise<EnrichmentProvi
     return {
       status: "not_found",
       data: {},
-      message: process.env.SERPAPI_KEY
+      message: serpApiKey()
         ? "No matching TikTok account was found."
         : "Add a TikTok handle or configure SERPAPI_KEY so Prime Champs can discover one.",
     };
@@ -255,11 +259,11 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
     };
   }
 
-  if (!process.env.SERPAPI_KEY) {
+  if (!serpApiKey()) {
     return {
       status: "not_configured",
       data: {},
-      message: "OnlyFans discovery needs SERPAPI_KEY in the server environment.",
+      message: "OnlyFans discovery needs SERPAPI_KEY or SERPAPI_API_KEY in the server environment.",
     };
   }
 

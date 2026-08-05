@@ -1636,6 +1636,24 @@ export async function POST(request: NextRequest) {
   let researchLogId: string | null = null;
 
   try {
+    const missingVariables = [
+      !PERPLEXITY_API_KEY ? "PERPLEXITY_API_KEY" : null,
+      !APIFY_API_KEY ? "APIFY_API_KEY" : null,
+      !ANTHROPIC_API_KEY && !OPENAI_API_KEY
+        ? "one of: ANTHROPIC_API_KEY, OPENAI_API_KEY"
+        : null,
+    ].filter((value): value is string => Boolean(value));
+    if (missingVariables.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Research agent is not fully configured",
+          missingVariables,
+          next: "/connections",
+        },
+        { status: 503 }
+      );
+    }
+
     const config: ResearchConfig = await request.json();
 
     log("═══════════════════════════════════════════════════════════════");

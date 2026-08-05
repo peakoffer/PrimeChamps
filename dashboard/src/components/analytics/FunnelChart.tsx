@@ -27,7 +27,7 @@ const stageLabels: Record<string, string> = {
   reach_out: "Reach Out",
   response: "Response",
   appointment: "Appointment",
-  contract: "Contract",
+  contract: "Contract Signed",
 };
 
 const stageColors: Record<string, string> = {
@@ -49,8 +49,12 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">
-        Conversion Funnel
+        Stage Progression
       </h3>
+      <p className="-mt-2 mb-4 text-sm leading-6 text-gray-500">
+        Cumulative: each bar shows athletes who reached that step or beyond. The
+        final step requires a signed contract.
+      </p>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -68,7 +72,7 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
             <Tooltip
               formatter={(value: number, name: string) => {
                 if (name === "count") return [value, "Athletes"];
-                if (name === "percent") return [`${value}%`, "Rate"];
+                if (name === "percent") return [`${value}%`, "Share of cohort"];
                 return [value, name];
               }}
               contentStyle={{
@@ -108,6 +112,10 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
           </div>
         ))}
       </div>
+      <p className="mt-4 text-center text-xs leading-5 text-gray-500">
+        Rejected athletes remain in the Research total because they entered the
+        cohort before being rejected.
+      </p>
     </div>
   );
 }

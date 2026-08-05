@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateEmailStatus, EmailMessage } from "@/lib/email-service";
-import crypto from "crypto";
+import { Resend } from "resend";
 
 // Resend webhook event types
 type ResendEventType =
@@ -44,52 +44,35 @@ function mapEventToStatus(eventType: ResendEventType): EmailMessage["status"] | 
   }
 }
 
-// Verify webhook signature
-function verifyWebhookSignature(
-  payload: string,
-  signature: string,
-  secret: string
-): boolean {
-  const expectedSignature = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
-
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
-}
-
 export async function POST(request: NextRequest) {
   try {
     const webhookSecret = process.env.EMAIL_WEBHOOK_SECRET;
-    const payload = await request.text();
-
-    // Verify signature if secret is configured
-    if (webhookSecret) {
-      const signature = request.headers.get("svix-signature");
-      if (!signature) {
-        return NextResponse.json(
-          { error: "Missing webhook signature" },
-          { status: 401 }
-        );
-      }
-
-      // Extract the signature value from the header
-      // Resend uses Svix format: v1,signature
-      const signatureParts = signature.split(",");
-      const signatureValue = signatureParts.find((p) => p.startsWith("v1="))?.slice(3);
-
-      if (signatureValue && !verifyWebhookSignature(payload, signatureValue, webhookSecret)) {
-        return NextResponse.json(
-          { error: "Invalid webhook signature" },
-          { status: 401 }
-        );
-      }
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (!webhookSecret || !resendApiKey) {
+      return NextResponse.json(
+        { error: "Resend webhook verification is not configured" },
+        { status: 503 }
+      );
     }
 
-    const event: ResendWebhookEvent = JSON.parse(payload);
+    const resend = new Resend(resendApiKey);
+
+    const payload = await request.text();
+    const id = request.headers.get("svix-id");
+    const timestamp = request.headers.get("svix-timestamp");
+    const signature = request.headers.get("svix-signature");
+    if (!id || !timestamp || !signature) {
+      return NextResponse.json(
+        { error: "Missing Resend webhook signature headers" },
+        { status: 400 }
+      );
+    }
+
+    const event = resend.webhooks.verify({
+      payload,
+      headers: { id, timestamp, signature },
+      webhookSecret,
+    }) as ResendWebhookEvent;
 
     // Map event type to status
     const status = mapEventToStatus(event.type);
@@ -118,8 +101,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Error in POST /api/email/webhook:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { error: "Invalid or unprocessable Resend webhook" },
+      { status: 400 }
     );
   }
 }

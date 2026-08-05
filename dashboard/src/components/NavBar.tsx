@@ -6,8 +6,13 @@ import Link from "next/link";
 import NotificationsBell from "./NotificationsBell";
 
 interface User {
+  id: string;
+  email: string;
   username: string;
   name: string;
+  role: "owner" | "admin" | "member";
+  organizationId: string;
+  organizationName: string;
 }
 
 export default function NavBar() {
@@ -31,7 +36,7 @@ export default function NavBar() {
   };
 
   // Don't show nav on login page
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/setup") {
     return null;
   }
 
@@ -42,6 +47,7 @@ export default function NavBar() {
     { href: "/historical", label: "Historical" },
     { href: "/analytics", label: "Analytics" },
     { href: "/connections", label: "Connections" },
+    { href: "/team", label: "Team" },
   ];
 
   return (

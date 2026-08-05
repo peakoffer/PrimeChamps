@@ -16,12 +16,25 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from("athletes")
-      .select("sport, pipeline_stage")
+      .select("id, sport, pipeline_stage")
       .not("pipeline_stage", "is", null)
       .or("is_historical.eq.false,is_historical.is.null")
       .gte("created_at", startDate.toISOString());
 
     if (error) throw error;
+
+    const athleteIds = (data || []).map((athlete) => athlete.id);
+    const { data: signedContracts, error: contractError } = athleteIds.length
+      ? await supabase
+          .from("contracts")
+          .select("athlete_id")
+          .in("athlete_id", athleteIds)
+          .not("signed_at", "is", null)
+      : { data: [], error: null };
+    if (contractError) throw contractError;
+    const convertedAthleteIds = new Set(
+      (signedContracts || []).map((contract) => contract.athlete_id)
+    );
 
     // Group by sport
     const sportStats: Record<string, { total: number; converted: number }> = {};
@@ -35,7 +48,7 @@ export async function GET(request: NextRequest) {
 
       sportStats[sport].total++;
 
-      if (athlete.pipeline_stage === "contract") {
+      if (convertedAthleteIds.has(athlete.id)) {
         sportStats[sport].converted++;
       }
     });
@@ -53,7 +66,10 @@ export async function GET(request: NextRequest) {
       .filter((s) => s.count > 0)
       .sort((a, b) => b.count - a.count);
 
-    return NextResponse.json({ sports });
+    return NextResponse.json({
+      sports,
+      definition: "Signed-contract athletes divided by non-historical athletes added in the selected period",
+    });
   } catch (error) {
     console.error("Analytics by-sport error:", error);
     return NextResponse.json(

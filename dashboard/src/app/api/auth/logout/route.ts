@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import { logout } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST() {
   try {
-    await logout();
+    const supabase = await createClient();
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Logout error:", error);
-    return NextResponse.json(
-      { error: "Logout failed" },
-      { status: 500 }
-    );
+    console.error("Logout error:", error instanceof Error ? error.message : "unknown");
+    return NextResponse.json({ error: "Logout failed" }, { status: 500 });
   }
 }
