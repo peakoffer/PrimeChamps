@@ -79,7 +79,7 @@ export function buildAuthorizationUrl(provider: ConnectableProvider, state: stri
   if (provider === "instagram") {
     url.searchParams.set("scope", config.scopes.join(","));
     url.searchParams.set("enable_fb_login", "0");
-    url.searchParams.set("force_authentication", "1");
+    url.searchParams.set("force_reauth", "true");
   } else {
     url.searchParams.set("scope", config.scopes.join(" "));
   }
