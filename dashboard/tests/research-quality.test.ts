@@ -88,9 +88,15 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
     new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
     "utf8"
   );
+  const adminClientSource = readFileSync(
+    new URL("../src/lib/supabase/admin.ts", import.meta.url),
+    "utf8"
+  );
 
   assert.doesNotMatch(workflowSource, /next\/server/);
   assert.doesNotMatch(workflowSource, /NextRequest|NextResponse/);
+  assert.match(workflowSource, /createAdminClient\(\{ disableRealtime: true \}\)/);
+  assert.match(adminClientSource, /transport: DisabledRealtimeTransport/);
   assert.match(workflowSource, /"use workflow"/);
   assert.match(workflowSource, /"use step"/);
 });
