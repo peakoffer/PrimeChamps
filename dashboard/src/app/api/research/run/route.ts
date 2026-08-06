@@ -1173,43 +1173,71 @@ Respond with ONLY valid JSON:
     throw new Error("Claude Sonnet 5 scoring is not configured");
   }
 
-  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: scoringModel,
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: scoringModel,
+        max_tokens: 600,
+        temperature: 0,
+        messages: [{
+          role: "user",
+          content: attempt === 1
+            ? prompt
+            : `${prompt}\n\nYour previous response was not valid complete JSON. Return one complete JSON object only, with no markdown fence or extra prose.`,
+        }],
+      }),
+    });
 
-  if (!response.ok) {
-    const details = (await response.text()).slice(0, 500);
-    throw new Error(
-      `Claude Sonnet 5 scoring failed (${response.status}): ${details || response.statusText}`
-    );
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 500);
+      throw new Error(
+        `${scoringModel} scoring failed (${response.status}): ${details || response.statusText}`
+      );
+    }
+
+    const data = (await response.json()) as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    const content = (data.content || [])
+      .filter((block) => block.type === "text" && block.text)
+      .map((block) => block.text)
+      .join("\n");
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]) as {
+          score?: unknown;
+          reasoning?: unknown;
+          concerns?: unknown;
+          is_minor?: unknown;
+        };
+        if (typeof parsed.score === "number" && typeof parsed.reasoning === "string") {
+          return {
+            ...athlete,
+            score: Math.min(100, Math.max(0, parsed.score)),
+            reasoning: parsed.reasoning,
+            concerns: Array.isArray(parsed.concerns)
+              ? parsed.concerns.filter((concern): concern is string => typeof concern === "string")
+              : [],
+            is_minor: parsed.is_minor === true,
+          };
+        }
+      } catch {
+        // Retry once with an explicit JSON-only correction.
+      }
+    }
+
+    log(`    ${scoringModel} returned invalid scoring JSON for ${athlete.name} (attempt ${attempt}/2)`);
   }
 
-  const data = await response.json();
-  const content = data.content[0]?.text || "";
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-
-  if (!jsonMatch) {
-    throw new Error(`Claude Sonnet 5 returned invalid scoring JSON for ${athlete.name}`);
-  }
-
-  const parsed = JSON.parse(jsonMatch[0]);
-  return {
-    ...athlete,
-    score: Math.min(100, Math.max(0, parsed.score || 50)),
-    reasoning: parsed.reasoning || "Evaluated by Claude Sonnet 5",
-    concerns: parsed.concerns || [],
-    is_minor: parsed.is_minor === true,
-  };
+  throw new Error(`${scoringModel} returned invalid scoring JSON twice for ${athlete.name}`);
 }
 
 // ============================================================================
