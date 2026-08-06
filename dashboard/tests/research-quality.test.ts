@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { buildSportDiscoveryQueries, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
-import { calculateResearchScore, parseResearchScoreBreakdown, resolveResearchDisposition } from "../src/lib/research/scoring.ts";
+import {
+  applyResearchObjectiveScoreGuardrails,
+  calculateResearchScore,
+  DEFAULT_RESEARCH_OBJECTIVE,
+  parseResearchScoreBreakdown,
+  resolveResearchDisposition,
+} from "../src/lib/research/scoring.ts";
 
 test("sport strategies cover every major archetype with current discovery queries", () => {
   const samples = {
@@ -83,6 +89,49 @@ test("minor, age, and quality gates keep unsafe or weak candidates out of Approv
   assert.equal(resolveResearchDisposition({ score: 20, ageVerified: false, reasoning: "Athlete is 17 years old" }), "blocked");
 });
 
+test("OnlyFans objective favors verified emerging adults over risky or veteran profiles", () => {
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 85,
+    objective: DEFAULT_RESEARCH_OBJECTIVE,
+    age: 25,
+    careerStage: "emerging",
+  }), 85);
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 85,
+    objective: DEFAULT_RESEARCH_OBJECTIVE,
+    age: 20,
+    careerStage: "emerging",
+  }), 59);
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 85,
+    objective: DEFAULT_RESEARCH_OBJECTIVE,
+    age: 39,
+    careerStage: "established",
+  }), 55);
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 85,
+    objective: DEFAULT_RESEARCH_OBJECTIVE,
+    age: 27,
+    careerStage: "veteran",
+  }), 55);
+});
+
+test("browser data access uses the cookie-aware Supabase SSR client", () => {
+  const clientSource = readFileSync(
+    new URL("../src/lib/supabase/browser.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(clientSource, /@supabase\/ssr/);
+  assert.match(clientSource, /createBrowserClient/);
+  assert.doesNotMatch(clientSource, /@supabase\/supabase-js/);
+  assert.equal(
+    existsSync(new URL("../src/lib/supabase.ts", import.meta.url)),
+    false,
+    "the legacy catch-all Supabase browser module must stay deleted"
+  );
+});
+
 test("durable workflow code stays isolated from the Next.js request runtime", () => {
   const workflowSource = readFileSync(
     new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
@@ -97,6 +146,9 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.doesNotMatch(workflowSource, /NextRequest|NextResponse/);
   assert.match(workflowSource, /createAdminClient\(\{ disableRealtime: true \}\)/);
   assert.match(adminClientSource, /transport: DisabledRealtimeTransport/);
+  assert.match(workflowSource, /MANDATORY SEARCH BRIEF/);
+  assert.match(workflowSource, /Deprioritize retired athletes, late-career veterans/);
+  assert.doesNotMatch(workflowSource, /Include a mix of established stars and rising talents/);
   assert.match(workflowSource, /"use workflow"/);
   assert.match(workflowSource, /"use step"/);
 });

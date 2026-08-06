@@ -5,11 +5,9 @@ import {
   substituteTemplateVariables,
   SendEmailOptions,
 } from "@/lib/email-service";
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createAdminClient();
 
 interface BatchEmailRequest {
   athlete_ids: string[];

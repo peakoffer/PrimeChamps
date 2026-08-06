@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+const supabase = createAdminClient();
 
 async function getBackfillStatus() {
   const [{ data: jobs, error: jobsError }, { data: athletes, error: athletesError }] =

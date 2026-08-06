@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // Force dynamic rendering - prevents static path generation error
 export const dynamic = "force-dynamic";
 export const dynamicParams = true;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createAdminClient();
 
 // Valid outcomes
 const VALID_OUTCOMES = ["no_response", "positive", "negative", "question", "converted"];

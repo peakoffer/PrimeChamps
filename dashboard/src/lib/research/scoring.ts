@@ -1,4 +1,17 @@
-export const RESEARCH_PROMPT_VERSION = "research-v3";
+export const RESEARCH_PROMPT_VERSION = "research-v4-onlyfans-emerging";
+export const DEFAULT_RESEARCH_OBJECTIVE = "onlyfans_creator" as const;
+
+export type ResearchObjective = typeof DEFAULT_RESEARCH_OBJECTIVE;
+export type ResearchCareerStage = "emerging" | "established" | "veteran" | "unknown";
+
+export const ONLYFANS_CREATOR_PROFILE = {
+  label: "OnlyFans creator recruitment",
+  targetAgeMin: 21,
+  targetAgeMax: 30,
+  maximumPriorityAge: 35,
+  idealFollowerMin: 50_000,
+  idealFollowerMax: 300_000,
+} as const;
 
 export const RESEARCH_SCORE_WEIGHTS = {
   professional_legitimacy: 0.2,
@@ -37,6 +50,29 @@ export function calculateResearchScore(breakdown: ResearchScoreBreakdown) {
     0
   );
   return Math.min(100, Math.max(0, Math.round(total)));
+}
+
+export function applyResearchObjectiveScoreGuardrails(input: {
+  score: number;
+  objective?: ResearchObjective;
+  age?: number | null;
+  careerStage?: ResearchCareerStage | null;
+}) {
+  let score = Math.min(100, Math.max(0, Math.round(input.score)));
+  if ((input.objective || DEFAULT_RESEARCH_OBJECTIVE) !== DEFAULT_RESEARCH_OBJECTIVE) {
+    return score;
+  }
+
+  if (typeof input.age === "number") {
+    if (input.age < 18) return 0;
+    // Legal adulthood is required, but the 18-20 cohort needs explicit human
+    // review before this adult-content partnership channel is considered.
+    if (input.age < ONLYFANS_CREATOR_PROFILE.targetAgeMin) score = Math.min(score, 59);
+    if (input.age > ONLYFANS_CREATOR_PROFILE.maximumPriorityAge) score = Math.min(score, 55);
+  }
+
+  if (input.careerStage === "veteran") score = Math.min(score, 55);
+  return score;
 }
 
 export function resolveResearchDisposition(input: {

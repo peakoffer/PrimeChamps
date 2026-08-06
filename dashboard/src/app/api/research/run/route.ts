@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { start } from "workflow/api";
 import { requireAuth } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { RESEARCH_PROMPT_VERSION } from "@/lib/research/scoring";
+import {
+  DEFAULT_RESEARCH_OBJECTIVE,
+  ONLYFANS_CREATOR_PROFILE,
+  RESEARCH_PROMPT_VERSION,
+} from "@/lib/research/scoring";
 import {
   runResearchWorkflow,
   type ResearchConfig,
@@ -45,6 +49,7 @@ export async function POST(request: NextRequest) {
 
     const config: ResearchConfig = {
       sportFocus,
+      partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
       customContext: typeof submitted.customContext === "string"
         ? submitted.customContext.trim().slice(0, 500)
         : undefined,
@@ -78,6 +83,8 @@ export async function POST(request: NextRequest) {
         prompt_version: RESEARCH_PROMPT_VERSION,
         context_summary: {
           sport: config.sportFocus,
+          partnershipGoal: config.partnershipGoal,
+          objectiveProfile: ONLYFANS_CREATOR_PROFILE,
           customContext: config.customContext,
           safety: "draft-only; no outreach is sent by research",
           toolchain: [

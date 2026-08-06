@@ -2,7 +2,7 @@
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
-import type { OutreachMessage } from "@/lib/supabase";
+import type { OutreachMessage } from "@/lib/supabase/types";
 
 interface MessageCardProps {
   message: OutreachMessage;

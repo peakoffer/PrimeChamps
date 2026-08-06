@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase, type Athlete, type OutreachMessage } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/browser";
+import type { Athlete, OutreachMessage } from "@/lib/supabase/types";
 import { formatNumber, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 

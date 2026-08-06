@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase, type Athlete } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/browser";
+import type { Athlete } from "@/lib/supabase/types";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";

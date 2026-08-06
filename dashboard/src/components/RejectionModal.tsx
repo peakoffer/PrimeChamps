@@ -2,7 +2,7 @@
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/browser";
 
 interface Athlete {
   id: string;

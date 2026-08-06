@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import MessageCard from "@/components/MessageCard";
-import type { OutreachMessage } from "@/lib/supabase";
+import type { OutreachMessage } from "@/lib/supabase/types";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 type StatusFilter = "all" | "approved" | "sent" | "delivered" | "replied";

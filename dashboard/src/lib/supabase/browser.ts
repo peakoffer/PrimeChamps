@@ -11,3 +11,7 @@ export function createClient() {
   if (!url || !key) throw new Error("Supabase browser configuration is missing");
   return createBrowserClient(url, key);
 }
+
+// One cookie-aware browser client for client components. Supabase's SSR client
+// reads and refreshes the same session cookies used by the server auth layer.
+export const supabase = createClient();
