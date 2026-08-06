@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { resolveAnthropicScoringModel } from "@/lib/ai/anthropic-models";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const DRAFT_PROMPT_VERSION = "outreach-draft-v2";
 
 // POST - Generate personalized AI message for athlete
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { athleteId, forceRegenerate } = await request.json();
 
     if (!athleteId) {
@@ -22,6 +24,7 @@ export async function POST(request: NextRequest) {
       .from("athletes")
       .select("*")
       .eq("id", athleteId)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (athleteError || !athlete) {
@@ -105,41 +108,73 @@ export async function POST(request: NextRequest) {
       engagement_rate: enrichmentData.engagement_rate,
     };
 
-    // Try to call Python backend for AI generation
+    // Generate a reviewable draft only. This endpoint never sends messages or
+    // advances the athlete's pipeline stage.
     let generatedMessage = "";
     let source: "ai" | "template" = "template";
+    let generationMetadata: Record<string, unknown> = {};
 
     try {
-      const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
-      const aiResponse = await fetch(`${backendUrl}/outreach/generate`, {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error("Anthropic is not configured");
+      const model = await resolveAnthropicScoringModel();
+      const evidence = [
+        bio ? `Public bio: ${bio.slice(0, 300)}` : "",
+        ...recentPostTopics.slice(0, 3).map((topic, index) => `Recent public post ${index + 1}: ${topic}`),
+      ].filter(Boolean);
+      const aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(process.env.BACKEND_API_KEY ? { "X-API-Key": process.env.BACKEND_API_KEY } : {}),
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          athlete: {
-            name: athlete.name,
-            first_name: firstName,
-            sport,
-            bio,
-            followers,
-            follower_tier: followerTier,
-            instagram_handle: athlete.instagram_handle,
-            recent_posts: recentPostTopics,
-          },
+          model,
+          max_tokens: 700,
+          messages: [{
+            role: "user",
+            content: `Write one concise first-contact Instagram DM draft for human review.
+
+Athlete: ${athlete.name}
+Sport: ${sport}
+Followers: ${followers || "unknown"}
+Evidence you may use:
+${evidence.length ? evidence.map((item) => `- ${item}`).join("\n") : "- No specific public evidence is available"}
+
+Rules:
+- 35-70 words, warm and professional, no hype or fake familiarity.
+- Do not invent achievements, results, prior following, or personal details.
+- Do not mention sensitive inferences or imply the message has already been sent.
+- Make the opportunity clear enough to earn a reply without promising revenue.
+- If evidence is thin, keep personalization general and say so in risk_flags.
+
+Return only JSON:
+{"message":"draft","rationale":"why this approach fits","evidence_used":["exact evidence item"],"risk_flags":["flag"]}`,
+          }],
         }),
+        signal: AbortSignal.timeout(45_000),
       });
 
       if (aiResponse.ok) {
-        const aiData = await aiResponse.json();
-        if (aiData.message) {
-          generatedMessage = aiData.message;
+        const aiData = await aiResponse.json() as { content?: Array<{ type?: string; text?: string }> };
+        const text = (aiData.content || []).map((block) => block.text || "").join("\n");
+        const match = text.match(/\{[\s\S]*\}/);
+        const parsed = match ? JSON.parse(match[0]) as Record<string, unknown> : null;
+        if (parsed && typeof parsed.message === "string") {
+          generatedMessage = parsed.message.trim();
           source = "ai";
+          generationMetadata = {
+            model,
+            prompt_version: DRAFT_PROMPT_VERSION,
+            rationale: typeof parsed.rationale === "string" ? parsed.rationale : null,
+            evidence_used: Array.isArray(parsed.evidence_used) ? parsed.evidence_used : [],
+            risk_flags: Array.isArray(parsed.risk_flags) ? parsed.risk_flags : [],
+          };
         }
       }
     } catch (error) {
-      console.log("Backend AI generation unavailable, using template fallback");
+      console.log("Anthropic draft generation unavailable, using template fallback", error);
     }
 
     // Fallback to template-based generation with more variation
@@ -163,9 +198,11 @@ export async function POST(request: NextRequest) {
           : `${firstName}! Love discovering talented ${sport} athletes like yourself. We help creators build revenue streams outside the traditional path. Interested?`,
       ].filter(Boolean);
 
-      // Pick random template
-      const randomIndex = Math.floor(Math.random() * templates.length);
-      generatedMessage = templates[randomIndex] || templates[0] || `Hey ${firstName}! Love your work in ${sport}. Would you be open to discussing a collaboration?`;
+      generatedMessage = templates[0] || `Hey ${firstName}! Love your work in ${sport}. Would you be open to discussing a collaboration?`;
+      generationMetadata = {
+        prompt_version: DRAFT_PROMPT_VERSION,
+        risk_flags: ["AI generation unavailable; template fallback used"],
+      };
     }
 
     // Save the generated message
@@ -178,6 +215,8 @@ export async function POST(request: NextRequest) {
         ai_personalization_context: {
           source,
           generated_at: new Date().toISOString(),
+          safety_mode: "draft_only",
+          ...generationMetadata,
           athlete_context: personalizationContext,
         },
         approval_status: "pending",

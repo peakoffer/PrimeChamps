@@ -39,12 +39,13 @@ test("unauthenticated pages and APIs fail closed", async ({ page, request }) => 
   expect(response.status()).toBe(401);
 });
 
-test("research, enrichment, approval, and outreach stay connected", async ({ page }) => {
+test("durable research and draft-only outreach stay connected", async ({ page }) => {
   await signIn(page);
 
   const calls: string[] = [];
+  let researchQueued = false;
   let approved = false;
-  let sent = false;
+  let manuallyRecorded = false;
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -52,24 +53,54 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
     const path = url.pathname;
 
     if (path === "/api/research/run") {
+      researchQueued = true;
       calls.push("research");
       return route.fulfill({
+        status: 202,
         json: {
           runId: "run-e2e-1",
-          run: { id: "run-e2e-1" },
-          results: [
+          status: "queued",
+          message: "Research queued",
+        },
+      });
+    }
+
+    if (path === "/api/research/evaluations") {
+      return route.fulfill({
+        json: {
+          cases: [],
+          results: [],
+          summary: { total: 4, active: 4, evaluated: 4, passed: 4, passRate: 100 },
+        },
+      });
+    }
+
+    if (path === "/api/ai/models") {
+      return route.fulfill({
+        json: { models: [{ id: "claude-sonnet-latest", displayName: "Latest Sonnet" }] },
+      });
+    }
+
+    if (path.startsWith("/api/research/logs")) {
+      return route.fulfill({
+        json: {
+          logs: researchQueued ? [
             {
-              name: athlete.name,
-              sport: athlete.sport,
-              instagram_handle: athlete.instagram_handle,
-              follower_count: athlete.follower_count,
-              score: 88,
-              reasoning: "Strong audience fit",
-              concerns: [],
-              similar_to: [],
+              id: "run-e2e-1",
+              created_at: "2026-08-05T12:00:00Z",
+              completed_at: null,
+              status: "queued",
+              phase: "queued",
+              prompt_version: "research-v3",
+              scoring_model: "claude-sonnet-latest",
+              config_used: { sportFocus: "MMA", followerMin: 0, followerMax: 500000, resultCount: 5 },
+              context_summary: {},
+              raw_results: [],
+              scoring_details: [],
+              final_results: [],
+              stats: { discovered: 0, returned: 0, added: 0, held: 0, blocked: 0 },
             },
-          ],
-          stats: { returned: 1, added: 1, held: 0, blocked: 0 },
+          ] : [],
         },
       });
     }
@@ -87,15 +118,15 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
 
     if (path === "/api/outreach/send") {
       expect(approved).toBe(true);
-      sent = true;
-      calls.push("outreach-send");
-      return route.fulfill({ json: { success: true } });
+      manuallyRecorded = true;
+      calls.push("manual-send-record");
+      return route.fulfill({ json: { success: true, sent: false, recordedOnly: true } });
     }
 
     if (path === "/api/outreach/queue") {
       return route.fulfill({
         json: {
-          items: sent
+          items: manuallyRecorded
             ? []
             : [
                 {
@@ -109,7 +140,7 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
                   athlete,
                 },
               ],
-          stats: { pendingDms: sent ? 0 : 1, pendingComments: 0, sentToday: sent ? 1 : 0, responseRate: 0 },
+          stats: { pendingDms: manuallyRecorded ? 0 : 1, pendingComments: 0, sentToday: manuallyRecorded ? 1 : 0, responseRate: 0 },
         },
       });
     }
@@ -134,10 +165,6 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
       return route.fulfill({ json: { athletes: [] } });
     }
 
-    if (path.startsWith("/api/research/logs")) {
-      return route.fulfill({ json: { logs: [] } });
-    }
-
     if (path === "/api/historical") {
       return route.fulfill({ json: { athletes: [] } });
     }
@@ -146,9 +173,12 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
   });
 
   await page.goto("/pipeline/research");
+  await expect(page.getByText("Research quality gate")).toBeVisible();
+  await expect(page.getByText("100% passing")).toBeVisible();
   await page.getByRole("button", { name: /Run Research Agent/ }).click();
   await page.getByRole("button", { name: "🔬 Start Research" }).click();
-  await expect(page.getByText("1 finalists: 1 approval, 0 held, 0 blocked.")).toBeVisible();
+  await expect(page.getByText("Research running in background")).toBeVisible();
+  await expect(page.getByText(/Research queued safely/)).toBeVisible();
 
   const enrichment = await page.evaluate(async (athleteId) => {
     const response = await fetch(`/api/athletes/${athleteId}/enrich`, {
@@ -161,17 +191,19 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
   expect(enrichment.success).toBe(true);
 
   await page.goto("/outreach");
+  await expect(page.getByText("Draft-only safety lock")).toBeVisible();
   const queueItem = page.getByRole("button", { name: /Jordan Test Hi Jordan/ });
   await queueItem.click();
-  await page.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("Prime Champs will not send this automatically")).toBeVisible();
+  await page.getByRole("button", { name: "Save approved draft" }).click();
   await queueItem.click();
-  await page.getByRole("button", { name: "Mark Sent" }).click();
+  await page.getByRole("button", { name: "I sent this manually" }).click();
 
   expect(calls).toEqual([
     "research",
     "enrichment",
     "outreach-approval",
-    "outreach-send",
+    "manual-send-record",
   ]);
 });
 

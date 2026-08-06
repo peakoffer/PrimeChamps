@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // Force dynamic rendering
 export const dynamic = "force-dynamic";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
 // GET - List appointments with optional filters
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const athleteId = searchParams.get("athlete_id");
     const status = searchParams.get("status");
@@ -23,15 +21,17 @@ export async function GET(request: NextRequest) {
       .from("appointments")
       .select(`
         *,
-        athletes (
+        athletes!inner (
           id,
           name,
           sport,
           instagram_handle,
           profile_pic_url,
-          follower_count
+          follower_count,
+          organization_id
         )
       `)
+      .eq("athletes.organization_id", user.organizationId)
       .order("scheduled_at", { ascending: true })
       .limit(limit);
 
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     console.error("Error fetching appointments:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error", appointments: [] },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
@@ -67,6 +67,8 @@ export async function GET(request: NextRequest) {
 // POST - Create a new appointment
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const body = await request.json();
     const {
       athlete_id,
@@ -89,7 +91,8 @@ export async function POST(request: NextRequest) {
       .from("athletes")
       .select("id, name")
       .eq("id", athlete_id)
-      .single();
+      .eq("organization_id", user.organizationId)
+      .maybeSingle();
 
     if (athleteError || !athlete) {
       return NextResponse.json({ error: "Athlete not found" }, { status: 404 });
@@ -134,6 +137,8 @@ export async function POST(request: NextRequest) {
       });
 
       await supabase.from("activity_notifications").insert({
+        organization_id: user.organizationId,
+        user_id: user.id,
         type: "appointment",
         title: "Appointment Scheduled",
         message: `Appointment with ${athlete.name} on ${formattedDate}`,
@@ -150,7 +155,7 @@ export async function POST(request: NextRequest) {
     console.error("Error creating appointment:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Approve outreach item (DM or comment)
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { itemId, type, content, scheduledFor } = await request.json();
 
     if (!itemId || !type) {
@@ -18,6 +17,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === "dm") {
+      const { data: ownedMessage } = await supabase
+        .from("outreach_messages")
+        .select("id,athletes!inner(organization_id)")
+        .eq("id", itemId)
+        .eq("athletes.organization_id", user.organizationId)
+        .maybeSingle();
+      if (!ownedMessage) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
       // Update outreach_messages
       const updateData: Record<string, unknown> = {
         approval_status: "approved",
@@ -42,6 +48,13 @@ export async function POST(request: NextRequest) {
         );
       }
     } else if (type === "comment") {
+      const { data: ownedComment } = await supabase
+        .from("content_engagements")
+        .select("id,athletes!inner(organization_id)")
+        .eq("id", itemId)
+        .eq("athletes.organization_id", user.organizationId)
+        .maybeSingle();
+      if (!ownedComment) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
       // Update content_engagements
       const updateData: Record<string, unknown> = {
         approval_status: "approved",
@@ -77,12 +90,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, safetyMode: "draft_only" });
   } catch (error) {
     console.error("Error in approve endpoint:", error);
     return NextResponse.json(
       { error: "Failed to approve item" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

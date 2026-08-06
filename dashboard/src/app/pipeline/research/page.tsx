@@ -24,6 +24,7 @@ interface Athlete {
   age_verified?: boolean;
   age?: number;
   age_source?: string;
+  is_minor?: boolean;
 }
 
 interface ResearchCandidate {
@@ -37,8 +38,8 @@ interface ResearchCandidate {
   bio?: string;
   sport: string;
   source: string;
-  score: number;
-  reasoning: string;
+  score?: number;
+  reasoning?: string;
   concerns?: string[];
   similar_to?: string[];
   age_verified?: boolean;
@@ -47,8 +48,14 @@ interface ResearchCandidate {
   is_minor?: boolean;
   athlete_id?: string;
   pipeline_stage?: string;
-  disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
+  disposition?: "discovered" | "approval" | "held" | "blocked" | "existing" | "skipped" | "rejected";
   disposition_reason?: string;
+  source_evidence?: Array<{ url?: string; title?: string; claim?: string; provider?: string }>;
+  score_breakdown?: Record<string, number>;
+  scoring_model?: string;
+  prompt_version?: string;
+  identity_status?: string;
+  identity_confidence?: number;
 }
 
 interface ResearchConfig {
@@ -61,6 +68,7 @@ interface ResearchConfig {
   targetRegions?: string[];
   voiceContext?: string; // Voice transcription context
   keywords?: string; // Search keywords
+  evaluationMode?: boolean;
 }
 
 interface ResearchLog {
@@ -69,6 +77,12 @@ interface ResearchLog {
   completed_at: string | null;
   heartbeat_at?: string | null;
   status: string;
+  phase?: string;
+  workflow_run_id?: string | null;
+  prompt_version?: string;
+  scoring_model?: string | null;
+  is_evaluation?: boolean;
+  cancel_requested_at?: string | null;
   error_message?: string | null;
   config_used: ResearchConfig;
   context_summary: {
@@ -124,6 +138,14 @@ interface ResearchRun {
 interface ScoringModelOption {
   id: string;
   displayName: string;
+}
+
+interface ResearchBenchmarkSummary {
+  total: number;
+  active: number;
+  evaluated: number;
+  passed: number;
+  passRate: number | null;
 }
 
 // Comprehensive alphabetical list of sports
@@ -261,6 +283,9 @@ function ResearchStageContent() {
   const [followerMaxInput, setFollowerMaxInput] = useState("500000");
 
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
+  const [benchmarkSummary, setBenchmarkSummary] = useState<ResearchBenchmarkSummary | null>(null);
+  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [benchmarkUnavailable, setBenchmarkUnavailable] = useState(false);
 
   // Audio recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -272,34 +297,40 @@ function ResearchStageContent() {
   const [backgroundRunId, setBackgroundRunId] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    fetchAthletes();
-    fetchResearchLogs();
+  const loadBenchmarks = useCallback(async () => {
+    const response = await fetch("/api/research/evaluations", { cache: "no-store" });
+    const data = await response.json() as { summary?: ResearchBenchmarkSummary; error?: string };
+    if (!response.ok) {
+      setBenchmarkUnavailable(true);
+      return;
+    }
+    setBenchmarkUnavailable(false);
+    setBenchmarkSummary(data.summary || null);
+  }, []);
 
-    // Check for any RUNNING research in the database (persists across page navigations)
-    checkForRunningResearch();
+  const fetchAthletes = useCallback(async () => {
+    try {
+      const response = await fetch("/api/pipeline/athletes?stage=research");
+      const data = await response.json();
+      setAthletes(data.athletes || []);
+    } catch (error) {
+      console.error("Error fetching athletes:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    fetch("/api/ai/models", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((data: { models?: ScoringModelOption[]; defaultModel?: string }) => {
-        if (data.models?.length) {
-          setScoringModels(data.models);
-          setConfig((current) => ({
-            ...current,
-            scoringModel: data.models!.some((model) => model.id === current.scoringModel)
-              ? current.scoringModel
-              : data.defaultModel || data.models![0].id,
-          }));
-        }
-      })
-      .catch((error) => console.error("Could not load Anthropic models:", error))
-      .finally(() => setLoadingScoringModels(false));
-
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
+  const fetchResearchLogs = useCallback(async () => {
+    setLoadingLogs(true);
+    try {
+      const response = await fetch("/api/research/logs?limit=20");
+      const data = await response.json();
+      setResearchLogs(data.logs || []);
+    } catch (error) {
+      console.error("Error fetching research logs:", error);
+    } finally {
+      setLoadingLogs(false);
+    }
   }, []);
 
   // Auto-expand session from URL param
@@ -308,60 +339,19 @@ function ResearchStageContent() {
       // Check if the session exists in our logs
       const sessionExists = researchLogs.some(log => log.id === sessionIdFromUrl);
       if (sessionExists) {
-        setExpandedLogId(sessionIdFromUrl);
-        // Scroll to the session after a brief delay
-        setTimeout(() => {
+        // Defer state and scrolling together so the effect does not create a
+        // synchronous render cascade.
+        const timeoutId = setTimeout(() => {
+          setExpandedLogId(sessionIdFromUrl);
           const element = document.getElementById(`research-log-${sessionIdFromUrl}`);
           if (element) {
             element.scrollIntoView({ behavior: "smooth", block: "center" });
           }
         }, 100);
+        return () => clearTimeout(timeoutId);
       }
     }
   }, [sessionIdFromUrl, researchLogs]);
-
-  // Check for running research sessions in the database
-  const checkForRunningResearch = async () => {
-    try {
-      const response = await fetch("/api/research/logs?limit=5");
-      const data = await response.json();
-      const logs = data.logs || [];
-
-      // Find any running research
-      const runningLog = logs.find((log: ResearchLog) => log.status === "running");
-
-      if (runningLog) {
-        setBackgroundRunId(runningLog.id);
-        localStorage.setItem("research_background_run_id", runningLog.id);
-        startPollingForCompletion(runningLog.id);
-
-        setToast({
-          message: "Research is still running in the background...",
-          type: "info",
-        });
-      } else {
-        // No running research - clean up localStorage if there was a stale entry
-        const savedRunId = localStorage.getItem("research_background_run_id");
-        if (savedRunId) {
-          // Check if that saved run is now complete
-          const savedLog = logs.find((log: ResearchLog) => log.id === savedRunId);
-          if (savedLog && savedLog.status === "completed") {
-            localStorage.removeItem("research_background_run_id");
-            // Might have missed the completion - show notification
-            setToast({
-              message: `Research complete: ${savedLog.stats?.returned || 0} finalists, ${savedLog.stats?.added || 0} added to Approval.`,
-              type: "success",
-            });
-          } else if (!savedLog) {
-            // Old/invalid ID, clear it
-            localStorage.removeItem("research_background_run_id");
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error checking for running research:", error);
-    }
-  };
 
   const startPollingForCompletion = useCallback((runId: string) => {
     // Clear any existing polling
@@ -379,7 +369,7 @@ function ResearchStageContent() {
         // Find the specific research run
         const targetLog = logs.find((log: ResearchLog) => log.id === runId);
 
-        if (targetLog && ["completed", "error", "failed"].includes(targetLog.status)) {
+        if (targetLog && ["completed", "error", "failed", "cancelled"].includes(targetLog.status)) {
           // Research finished!
           clearInterval(pollingRef.current!);
           pollingRef.current = null;
@@ -387,7 +377,7 @@ function ResearchStageContent() {
           setBackgroundRunId(null);
 
           // Refresh logs
-          fetchResearchLogs();
+          void fetchResearchLogs();
 
           // Show completion notification
           if (targetLog.status === "completed") {
@@ -405,6 +395,8 @@ function ResearchStageContent() {
                 icon: "/favicon.ico",
               });
             }
+          } else if (targetLog.status === "cancelled") {
+            setToast({ message: "Research run cancelled.", type: "info" });
           } else {
             setToast({
               message: "Research encountered an error. Check the logs for details.",
@@ -416,7 +408,72 @@ function ResearchStageContent() {
         console.error("Polling error:", error);
       }
     }, 3000);
-  }, []);
+  }, [fetchResearchLogs]);
+
+  // Check for running research sessions in the database
+  const checkForRunningResearch = useCallback(async () => {
+    try {
+      const response = await fetch("/api/research/logs?limit=5");
+      const data = await response.json();
+      const logs = data.logs || [];
+      const runningLog = logs.find((log: ResearchLog) => ["queued", "running"].includes(log.status));
+
+      if (runningLog) {
+        setBackgroundRunId(runningLog.id);
+        localStorage.setItem("research_background_run_id", runningLog.id);
+        startPollingForCompletion(runningLog.id);
+        setToast({ message: "Research is still running in the background...", type: "info" });
+        return;
+      }
+
+      const savedRunId = localStorage.getItem("research_background_run_id");
+      if (!savedRunId) return;
+      const savedLog = logs.find((log: ResearchLog) => log.id === savedRunId);
+      if (savedLog?.status === "completed") {
+        localStorage.removeItem("research_background_run_id");
+        setToast({
+          message: `Research complete: ${savedLog.stats?.returned || 0} finalists, ${savedLog.stats?.added || 0} added to Approval.`,
+          type: "success",
+        });
+      } else if (!savedLog) {
+        localStorage.removeItem("research_background_run_id");
+      }
+    } catch (error) {
+      console.error("Error checking for running research:", error);
+    }
+  }, [startPollingForCompletion]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void Promise.all([
+        fetchAthletes(),
+        fetchResearchLogs(),
+        loadBenchmarks(),
+        checkForRunningResearch(),
+      ]).catch((error) => console.error("Could not initialize research:", error));
+
+      void fetch("/api/ai/models", { cache: "no-store" })
+        .then((response) => response.json())
+        .then((data: { models?: ScoringModelOption[]; defaultModel?: string }) => {
+          if (data.models?.length) {
+            setScoringModels(data.models);
+            setConfig((current) => ({
+              ...current,
+              scoringModel: data.models!.some((model) => model.id === current.scoringModel)
+                ? current.scoringModel
+                : data.defaultModel || data.models![0].id,
+            }));
+          }
+        })
+        .catch((error) => console.error("Could not load Anthropic models:", error))
+        .finally(() => setLoadingScoringModels(false));
+    }, 0);
+
+    return () => {
+      window.clearTimeout(initialLoad);
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [checkForRunningResearch, fetchAthletes, fetchResearchLogs, loadBenchmarks]);
 
   // Auto-hide toast after 5 seconds
   useEffect(() => {
@@ -425,31 +482,6 @@ function ResearchStageContent() {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-  const fetchAthletes = async () => {
-    try {
-      const response = await fetch("/api/pipeline/athletes?stage=research");
-      const data = await response.json();
-      setAthletes(data.athletes || []);
-    } catch (error) {
-      console.error("Error fetching athletes:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchResearchLogs = async () => {
-    setLoadingLogs(true);
-    try {
-      const response = await fetch("/api/research/logs?limit=20");
-      const data = await response.json();
-      setResearchLogs(data.logs || []);
-    } catch (error) {
-      console.error("Error fetching research logs:", error);
-    } finally {
-      setLoadingLogs(false);
-    }
-  };
 
   // Audio recording state refs
   const streamRef = useRef<MediaStream | null>(null);
@@ -562,7 +594,7 @@ function ResearchStageContent() {
       });
   };
 
-  const handleRunResearch = async (runInBackground = false) => {
+  const handleRunResearch = async () => {
     setShowConfigModal(false);
 
     // Request notification permission
@@ -605,45 +637,18 @@ function ResearchStageContent() {
       }
 
       const runId = data.runId;
-      const results = data.results || [];
-      setCurrentResearchRun(data.run);
-      setResearchResults(results);
       setShowResultsModal(false);
-      if (runId) setExpandedLogId(runId);
-
-      // Research is now complete (the API is synchronous)
-      // Clear background tracking
-      localStorage.removeItem("research_background_run_id");
-      setBackgroundRunId(null);
-
-      // Refresh logs to get the real data
-      fetchResearchLogs();
-
-      const finalistCount = data.stats?.returned ?? results.length;
-      const addedCount = data.stats?.added || 0;
-      const heldCount = data.stats?.held || 0;
-      const blockedCount = data.stats?.blocked || 0;
-
-      // Show toast notification
-      if (finalistCount > 0) {
-        setToast({
-          message: `${finalistCount} finalists: ${addedCount} approval, ${heldCount} held, ${blockedCount} blocked.`,
-          type: "success",
-        });
-
-        // Browser notification
-        if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("Research Complete!", {
-            body: `${finalistCount} finalists: ${addedCount} approval, ${heldCount} held, ${blockedCount} blocked.`,
-            icon: "/favicon.ico",
-          });
-        }
-      } else {
-        setToast({
-          message: "No candidates found matching your criteria. Try adjusting filters.",
-          type: "info",
-        });
+      if (runId) {
+        setExpandedLogId(runId);
+        setBackgroundRunId(runId);
+        localStorage.setItem("research_background_run_id", runId);
+        startPollingForCompletion(runId);
       }
+      await fetchResearchLogs();
+      setToast({
+        message: "Research queued safely. You can leave this page and come back anytime.",
+        type: "success",
+      });
     } catch (error) {
       console.error("Error running research:", error);
 
@@ -658,6 +663,52 @@ function ResearchStageContent() {
         message: "Research failed: " + (error instanceof Error ? error.message : "Unknown error"),
         type: "error",
       });
+    }
+  };
+
+  const handleCancelResearch = async (runId: string) => {
+    try {
+      const response = await fetch(`/api/research/runs/${runId}/cancel`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not cancel research");
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      pollingRef.current = null;
+      localStorage.removeItem("research_background_run_id");
+      setBackgroundRunId(null);
+      await fetchResearchLogs();
+      setToast({ message: "Research run cancelled.", type: "info" });
+    } catch (error) {
+      setToast({
+        message: error instanceof Error ? error.message : "Could not cancel research",
+        type: "error",
+      });
+    }
+  };
+
+  const handleBenchmarkAction = async (action: "seed" | "run") => {
+    setBenchmarkBusy(true);
+    try {
+      const response = await fetch("/api/research/evaluations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await response.json() as { error?: string; created?: number; evaluated?: number; passed?: number };
+      if (!response.ok) throw new Error(data.error || "Benchmark action failed");
+      await loadBenchmarks();
+      setToast({
+        type: "success",
+        message: action === "seed"
+          ? `${data.created || 0} safety and quality benchmark cases created.`
+          : `${data.passed || 0} of ${data.evaluated || 0} research benchmarks passed.`,
+      });
+    } catch (error) {
+      setToast({
+        type: "error",
+        message: error instanceof Error ? error.message : "Benchmark action failed",
+      });
+    } finally {
+      setBenchmarkBusy(false);
     }
   };
 
@@ -721,14 +772,16 @@ function ResearchStageContent() {
 
   const handleMoveToApproval = async (athleteId: string) => {
     try {
-      await fetch("/api/pipeline/athletes", {
+      const response = await fetch("/api/pipeline/athletes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ athleteId, toStage: "approval" }),
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not move candidate to Approval");
       setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
     } catch (error) {
-      console.error("Error moving athlete:", error);
+      setToast({ message: error instanceof Error ? error.message : "Could not move candidate to Approval", type: "error" });
     }
   };
 
@@ -778,11 +831,13 @@ function ResearchStageContent() {
   const getCandidateDisposition = (candidate: ResearchCandidate) => {
     if (candidate.pipeline_stage === "approval") return "approval";
     if (candidate.pipeline_stage === "research") return "held";
+    if (candidate.disposition === "discovered") return "discovered";
+    if (candidate.disposition === "rejected") return "rejected";
     if (candidate.disposition === "approval") return "approval";
     if (candidate.is_minor === true || candidate.score === 0 || candidate.disposition === "blocked") return "blocked";
     if (candidate.disposition === "existing") return "existing";
     if (candidate.disposition === "skipped") return "skipped";
-    if (candidate.age_verified !== true || candidate.disposition === "held") return "held";
+    if (candidate.age_verified !== true || (candidate.score || 0) < 60 || candidate.disposition === "held") return "held";
     return "approval";
   };
 
@@ -792,6 +847,8 @@ function ResearchStageContent() {
     blocked: { label: "Safety blocked", className: "bg-red-100 text-red-800" },
     existing: { label: "Already in CRM", className: "bg-gray-100 text-gray-800" },
     skipped: { label: "Not saved", className: "bg-gray-100 text-gray-700" },
+    discovered: { label: "Discovered", className: "bg-purple-100 text-purple-800" },
+    rejected: { label: "Rejected", className: "bg-rose-100 text-rose-800" },
   } as const;
 
   const latestOutcomeCounts = (latestCompletedLog?.final_results || []).reduce(
@@ -799,7 +856,7 @@ function ResearchStageContent() {
       counts[getCandidateDisposition(candidate)] += 1;
       return counts;
     },
-    { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0 }
+    { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0, discovered: 0, rejected: 0 }
   );
 
   const fallbackToolchain = (log: ResearchLog) => [
@@ -824,6 +881,7 @@ function ResearchStageContent() {
       resultCount: logConfig.resultCount || 10,
       scoringModel: logConfig.scoringModel || config.scoringModel,
       targetRegions: logConfig.targetRegions || ["usa"],
+      evaluationMode: logConfig.evaluationMode === true,
     });
 
     // Update the follower input fields to match
@@ -930,11 +988,11 @@ function ResearchStageContent() {
                   }
                   localStorage.removeItem("research_background_run_id");
                   setBackgroundRunId(null);
-                  setToast({ message: "Background tracking cancelled (research may still complete)", type: "info" });
+                  void handleCancelResearch(backgroundRunId);
                 }}
                 className="px-3 py-1 text-sm text-blue-700 hover:bg-blue-100 rounded"
               >
-                Stop Tracking
+                Cancel Run
               </button>
             )}
           </div>
@@ -964,6 +1022,43 @@ function ResearchStageContent() {
           </div>
         </div>
       </div>
+
+      <section className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-indigo-950">Research quality gate</h2>
+              {benchmarkSummary?.passRate !== null && benchmarkSummary?.passRate !== undefined ? (
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${benchmarkSummary.passRate === 100 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
+                  {benchmarkSummary.passRate}% passing
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-sm leading-6 text-indigo-900/75">
+              Repeatable controls verify score weighting, adult-age gating, minor blocking, and the minimum quality threshold before candidates can enter Approval.
+            </p>
+            <p className="mt-1 text-xs text-indigo-900">
+              {benchmarkUnavailable
+                ? "Quality suite is waiting for the database migration; research runs remain unavailable until setup is complete."
+                : `${benchmarkSummary?.total || 0} cases · ${benchmarkSummary?.evaluated || 0} evaluated · benchmark replays never create athletes or send outreach`}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={benchmarkBusy || benchmarkUnavailable}
+            onClick={() => void handleBenchmarkAction((benchmarkSummary?.total || 0) === 0 ? "seed" : "run")}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:opacity-60"
+          >
+            {benchmarkBusy
+              ? "Working…"
+              : benchmarkUnavailable
+                ? "Setup required"
+              : (benchmarkSummary?.total || 0) === 0
+                ? "Create baseline suite"
+                : "Run benchmark suite"}
+          </button>
+        </div>
+      </section>
 
       {/* Toast Notification */}
       {toast && (
@@ -1021,13 +1116,13 @@ function ResearchStageContent() {
         ) : (
           <div className="divide-y">
             {researchLogs.map((log) => {
-              const isRunning = log.status === "running" || log.status === "pending";
+              const isRunning = log.status === "queued" || log.status === "running";
               const outcomeCounts = (log.final_results || []).reduce(
                 (counts, candidate) => {
                   counts[getCandidateDisposition(candidate)] += 1;
                   return counts;
                 },
-                { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0 }
+                { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0, discovered: 0, rejected: 0 }
               );
               const toolchain = log.context_summary?.toolchain?.length
                 ? log.context_summary.toolchain
@@ -1054,7 +1149,7 @@ function ResearchStageContent() {
                         {log.config_used?.sportFocus || "Research Run"}
                         {isRunning && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full animate-pulse">
-                            Running...
+                            {log.status === "queued" ? "Queued" : "Running"} · {(log.phase || log.stats?.phase || "starting").replaceAll("_", " ")}
                           </span>
                         )}
                       </div>
@@ -1198,7 +1293,7 @@ function ResearchStageContent() {
                     {/* Outputs */}
                     <div className="bg-green-50 rounded-lg p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <span>📤</span> Finalists and decisions
+                        <span>📤</span> Candidates, evidence, and decisions
                       </h4>
                       <div className="mb-3 flex flex-wrap gap-2 text-xs">
                         <span className="rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-800">
@@ -1245,13 +1340,13 @@ function ResearchStageContent() {
                                   </div>
                                   <div className="flex flex-shrink-0 items-center gap-2">
                                     <span className={`rounded px-2 py-1 text-xs font-bold ${
-                                      result.score >= 80
+                                      (result.score || 0) >= 80
                                         ? "bg-green-100 text-green-800"
-                                        : result.score >= 60
+                                        : (result.score || 0) >= 60
                                           ? "bg-yellow-100 text-yellow-800"
                                           : "bg-gray-100 text-gray-800"
                                     }`}>
-                                      {result.score}/100
+                                      {typeof result.score === "number" ? `${result.score}/100` : "Unscored"}
                                     </span>
                                     <span className="text-gray-500">{isReasoningExpanded ? "▼" : "▶"}</span>
                                   </div>
@@ -1263,10 +1358,55 @@ function ResearchStageContent() {
                                       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Why this score</div>
                                       <p className="mt-1 text-gray-800">{result.reasoning || "No scoring explanation was stored for this legacy run."}</p>
                                     </div>
+                                    {result.score_breakdown && Object.keys(result.score_breakdown).length > 0 && (
+                                      <div>
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Score dimensions</div>
+                                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                                          {Object.entries(result.score_breakdown).map(([dimension, value]) => (
+                                            <div key={dimension} className="rounded-md border bg-white px-3 py-2">
+                                              <div className="text-xs capitalize text-gray-500">{dimension.replaceAll("_", " ")}</div>
+                                              <div className="mt-0.5 font-semibold text-gray-900">{Math.round(value)}/100</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {result.source_evidence && result.source_evidence.length > 0 && (
+                                      <div>
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Source evidence</div>
+                                        <div className="mt-2 space-y-2">
+                                          {result.source_evidence.map((evidence, evidenceIndex) => (
+                                            <div key={`${evidence.url || evidence.title || "evidence"}-${evidenceIndex}`} className="rounded-md border bg-blue-50 px-3 py-2">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                {evidence.url ? (
+                                                  <a href={evidence.url} target="_blank" rel="noreferrer" className="font-medium text-blue-800 hover:underline">
+                                                    {evidence.title || "Open source"}
+                                                  </a>
+                                                ) : (
+                                                  <span className="font-medium text-gray-900">{evidence.title || "Stored source"}</span>
+                                                )}
+                                                {evidence.provider && <span className="text-xs text-gray-500">via {evidence.provider}</span>}
+                                              </div>
+                                              {evidence.claim && <p className="mt-1 text-xs text-gray-700">{evidence.claim}</p>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                     <div className="grid gap-2 sm:grid-cols-2">
                                       <div className="rounded-md bg-gray-50 px-3 py-2">
                                         <span className="text-gray-500">Discovery source:</span>{" "}
                                         <span className="text-gray-900">{result.source || "Not recorded"}</span>
+                                      </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2">
+                                        <span className="text-gray-500">Identity confidence:</span>{" "}
+                                        <span className="text-gray-900">
+                                          {result.identity_status || "legacy"}{typeof result.identity_confidence === "number" ? ` · ${Math.round(result.identity_confidence)}%` : ""}
+                                        </span>
+                                      </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2">
+                                        <span className="text-gray-500">Scoring version:</span>{" "}
+                                        <span className="text-gray-900">{result.scoring_model || log.scoring_model || "legacy"} · {result.prompt_version || log.prompt_version || "legacy"}</span>
                                       </div>
                                       <div className="rounded-md bg-gray-50 px-3 py-2">
                                         <span className="text-gray-500">Age check:</span>{" "}
@@ -1350,7 +1490,19 @@ function ResearchStageContent() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {filteredAthletes.map((athlete) => (
+              {filteredAthletes.map((athlete) => {
+                const approvalEligible = athlete.age_verified === true
+                  && athlete.is_minor !== true
+                  && typeof athlete.research_score === "number"
+                  && athlete.research_score >= 60;
+                const approvalReason = athlete.is_minor
+                  ? "Safety blocked"
+                  : athlete.age_verified !== true
+                    ? "Verify adult age"
+                    : typeof athlete.research_score !== "number" || athlete.research_score < 60
+                      ? "Score below 60"
+                      : "Ready for Approval";
+                return (
                 <tr key={athlete.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -1395,12 +1547,18 @@ function ResearchStageContent() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleMoveToApproval(athlete.id)}
-                        className="px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200"
-                      >
-                        → Approval
-                      </button>
+                      {approvalEligible ? (
+                        <button
+                          onClick={() => handleMoveToApproval(athlete.id)}
+                          className="px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200"
+                        >
+                          → Approval
+                        </button>
+                      ) : (
+                        <span className="rounded bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800" title="Verified adult age and a research score of at least 60 are required">
+                          {approvalReason}
+                        </span>
+                      )}
                       <button
                         onClick={() => handleReject(athlete.id)}
                         className="px-3 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200"
@@ -1410,7 +1568,8 @@ function ResearchStageContent() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1537,7 +1696,7 @@ function ResearchStageContent() {
                   <option value={10}>10 results</option>
                 </select>
                 <p className="text-xs text-gray-800 mt-1">
-                  Runs are capped at 10 candidates so discovery, Instagram checks, and scoring finish within the production time budget.
+                  Runs are capped at 10 finalists. Durable background execution preserves progress across navigation, deploys, and provider retries.
                 </p>
               </div>
 
@@ -1566,6 +1725,21 @@ function ResearchStageContent() {
                   Loaded from Anthropic at runtime. Sonnet is the default; choose another available Claude model for this run.
                 </p>
               </div>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <input
+                  type="checkbox"
+                  checked={config.evaluationMode === true}
+                  onChange={(event) => setConfig({ ...config, evaluationMode: event.target.checked })}
+                  className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-amber-950">Evaluation-only run</span>
+                  <span className="mt-1 block text-xs text-amber-900">
+                    Use live research and scoring, but never create athletes, advance pipeline stages, or generate outreach work.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="p-6 border-t bg-gray-50 flex justify-between items-center">
@@ -1576,7 +1750,7 @@ function ResearchStageContent() {
                 Cancel
               </button>
               <button
-                onClick={() => handleRunResearch(true)}
+                onClick={() => handleRunResearch()}
                 disabled={!!backgroundRunId || isResearching || !config.sportFocus}
                 className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
               >
@@ -1636,14 +1810,14 @@ function ResearchStageContent() {
                           <h3 className="font-semibold text-gray-900">{candidate.name}</h3>
                           <span
                             className={`px-2 py-0.5 rounded text-sm font-medium ${
-                              candidate.score >= 80
+                              (candidate.score || 0) >= 80
                                 ? "bg-green-100 text-green-700"
-                                : candidate.score >= 60
+                                : (candidate.score || 0) >= 60
                                 ? "bg-yellow-100 text-yellow-700"
                                 : "bg-gray-100 text-gray-800"
                             }`}
                           >
-                            Score: {candidate.score}
+                            Score: {candidate.score ?? "—"}
                           </span>
                         </div>
                         <div className="text-sm text-gray-800 mt-1">

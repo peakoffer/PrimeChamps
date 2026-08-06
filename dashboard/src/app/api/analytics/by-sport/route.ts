@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const period = new URL(request.url).searchParams.get("period") || "365d";
     const daysMatch = period.match(/^(\d+)d$/);
     const startDate = new Date();
@@ -17,6 +15,8 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("athletes")
       .select("id, sport, pipeline_stage")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .not("pipeline_stage", "is", null)
       .or("is_historical.eq.false,is_historical.is.null")
       .gte("created_at", startDate.toISOString());
@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
       ? await supabase
           .from("contracts")
           .select("athlete_id")
+          .eq("organization_id", user.organizationId)
+          .eq("is_test_data", false)
           .in("athlete_id", athleteIds)
           .not("signed_at", "is", null)
       : { data: [], error: null };
@@ -68,13 +70,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       sports,
-      definition: "Signed-contract athletes divided by non-historical athletes added in the selected period",
+      definition: "Signed-contract athletes divided by non-historical, non-test athletes added in the selected period",
     });
   } catch (error) {
     console.error("Analytics by-sport error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

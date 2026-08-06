@@ -52,8 +52,8 @@ export default function ReachOutStagePage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [outreachPackages, setOutreachPackages] = useState<Map<string, OutreachPackage>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [generatingAll, setGeneratingAll] = useState(false);
   const [selectedAthlete, setSelectedAthlete] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState("");
 
   // Fetch athletes in reach_out stage
   const fetchAthletes = useCallback(async () => {
@@ -69,17 +69,9 @@ export default function ReachOutStagePage() {
   }, []);
 
   useEffect(() => {
-    fetchAthletes();
+    const timeoutId = window.setTimeout(() => void fetchAthletes(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchAthletes]);
-
-  // Auto-generate outreach for new athletes
-  useEffect(() => {
-    athletes.forEach((athlete) => {
-      if (!outreachPackages.has(athlete.id)) {
-        generateOutreachPackage(athlete);
-      }
-    });
-  }, [athletes]);
 
   // Generate outreach package for an athlete (DM + 3 comments)
   const generateOutreachPackage = async (athlete: Athlete) => {
@@ -134,7 +126,7 @@ export default function ReachOutStagePage() {
           const commentData = await commentResponse.json();
 
           comments.push({
-            id: `comment-${photo.post_id}-${Date.now()}`,
+            id: `comment-${athlete.id}-${photo.post_id}`,
             dbId: commentData.comment?.id,
             postId: photo.post_id,
             postUrl: photo.url,
@@ -253,7 +245,8 @@ export default function ReachOutStagePage() {
     });
   };
 
-  // Approve all for athlete and move to next stage
+  // Save reviewed content as drafts. This page never transmits outreach or
+  // advances the athlete as though a message was sent.
   const handleApproveAll = async (athleteId: string) => {
     const pkg = outreachPackages.get(athleteId);
     if (!pkg) return;
@@ -283,26 +276,7 @@ export default function ReachOutStagePage() {
         }
       }
 
-      // Mark DM as sent and move athlete to response stage
-      if (pkg.dmId) {
-        await fetch("/api/outreach/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemId: pkg.dmId, type: "dm" }),
-        });
-      }
-
-      // Remove from local state
-      setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
-      setOutreachPackages((prev) => {
-        const next = new Map(prev);
-        next.delete(athleteId);
-        return next;
-      });
-
-      if (selectedAthlete === athleteId) {
-        setSelectedAthlete(null);
-      }
+      setSavedNotice("Approved drafts saved. Nothing was sent and the athlete remains in Reach Out.");
     } catch (error) {
       console.error("Error approving outreach:", error);
     }
@@ -371,7 +345,7 @@ export default function ReachOutStagePage() {
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <span className="text-3xl">📤</span> Outreach Queue
           </h1>
-          <p className="text-gray-600">Review and approve generated outreach content</p>
+          <p className="text-gray-600">Review and save generated drafts; sending is always a separate manual action</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -382,6 +356,11 @@ export default function ReachOutStagePage() {
           </button>
         </div>
       </div>
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <strong>Draft-only safety lock:</strong> research and test runs cannot send DMs or comments. Open the provider yourself when you are ready, then record the manual touchpoint separately.
+      </div>
+      {savedNotice ? <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{savedNotice}</div> : null}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
@@ -395,7 +374,7 @@ export default function ReachOutStagePage() {
         </div>
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <div className="text-3xl font-bold text-green-700">{readyCount}</div>
-          <div className="text-sm text-green-600">Ready to Send</div>
+          <div className="text-sm text-green-600">Ready to Save</div>
         </div>
       </div>
 
@@ -463,7 +442,28 @@ export default function ReachOutStagePage() {
             {selectedAthlete ? (
               (() => {
                 const pkg = outreachPackages.get(selectedAthlete);
-                if (!pkg) return null;
+                if (!pkg) {
+                  const athlete = athletes.find((item) => item.id === selectedAthlete);
+                  if (!athlete) return null;
+                  return (
+                    <div className="grid h-full min-h-[520px] place-items-center p-8 text-center">
+                      <div className="max-w-md">
+                        <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
+                        <h2 className="mt-4 text-xl font-semibold text-gray-950">Create drafts for {athlete.name}</h2>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">
+                          This intentionally calls the AI and may use API credits. It creates reviewable drafts only—nothing is posted or sent.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void generateOutreachPackage(athlete)}
+                          className="mt-5 rounded-lg bg-purple-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-800"
+                        >
+                          Generate draft package
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
                   <div className="h-full flex flex-col">
@@ -591,7 +591,7 @@ export default function ReachOutStagePage() {
                                     className="w-full h-16 p-2 text-sm border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                   />
                                   <div className="flex items-center gap-2 mt-2">
-                                    <label className="text-xs text-gray-500">Schedule:</label>
+                                    <label className="text-xs text-gray-500">Manual send reminder:</label>
                                     <input
                                       type="datetime-local"
                                       value={comment.scheduledFor || ""}
@@ -640,7 +640,7 @@ export default function ReachOutStagePage() {
                           disabled={!pkg.dmApproved}
                           className="px-6 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Approve & Send
+                          Save Approved Drafts
                         </button>
                       </div>
                     </div>

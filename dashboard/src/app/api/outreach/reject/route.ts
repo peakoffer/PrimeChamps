@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Reject outreach item (DM or comment)
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { itemId, type, reason } = await request.json();
 
     if (!itemId || !type) {
@@ -18,6 +17,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === "dm") {
+      const { data: ownedItem } = await supabase
+        .from("outreach_messages")
+        .select("id,athletes!inner(organization_id)")
+        .eq("id", itemId)
+        .eq("athletes.organization_id", user.organizationId)
+        .maybeSingle();
+      if (!ownedItem) return NextResponse.json({ error: "Item not found" }, { status: 404 });
       const { error } = await supabase
         .from("outreach_messages")
         .update({
@@ -35,6 +41,13 @@ export async function POST(request: NextRequest) {
         );
       }
     } else if (type === "comment") {
+      const { data: ownedItem } = await supabase
+        .from("content_engagements")
+        .select("id,athletes!inner(organization_id)")
+        .eq("id", itemId)
+        .eq("athletes.organization_id", user.organizationId)
+        .maybeSingle();
+      if (!ownedItem) return NextResponse.json({ error: "Item not found" }, { status: 404 });
       const { error } = await supabase
         .from("content_engagements")
         .update({
@@ -62,7 +75,7 @@ export async function POST(request: NextRequest) {
     console.error("Error in reject endpoint:", error);
     return NextResponse.json(
       { error: "Failed to reject item" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

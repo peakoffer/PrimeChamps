@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET - Fetch touchpoints for an athlete
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const athleteId = searchParams.get("athlete_id");
 
@@ -20,8 +19,9 @@ export async function GET(request: NextRequest) {
 
     const { data: touchpoints, error } = await supabase
       .from("touchpoints")
-      .select("*")
+      .select("id,touchpoint_type,channel,direction,content_preview,created_at,athletes!inner(organization_id)")
       .eq("athlete_id", athleteId)
+      .eq("athletes.organization_id", user.organizationId)
       .order("created_at", { ascending: false })
       .limit(20);
 
@@ -30,12 +30,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ touchpoints: [] });
     }
 
-    return NextResponse.json({ touchpoints: touchpoints || [] });
+    return NextResponse.json({
+      touchpoints: (touchpoints || []).map((touchpoint) => ({
+        id: touchpoint.id,
+        touchpoint_type: touchpoint.touchpoint_type,
+        channel: touchpoint.channel,
+        direction: touchpoint.direction,
+        content_preview: touchpoint.content_preview,
+        created_at: touchpoint.created_at,
+      })),
+    });
   } catch (error) {
     console.error("Error in touchpoints endpoint:", error);
     return NextResponse.json(
       { error: "Failed to fetch touchpoints" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

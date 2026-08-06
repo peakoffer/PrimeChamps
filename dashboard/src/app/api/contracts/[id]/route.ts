@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET - Get contract by ID
 export async function GET(
@@ -12,6 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { id } = await params;
 
     const { data, error } = await supabase
@@ -34,6 +32,7 @@ export async function GET(
         )
       `)
       .eq("id", id)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (error) {
@@ -59,8 +58,18 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { id } = await params;
     const body = await request.json();
+    const { data: existingContract, error: existingError } = await supabase
+      .from("contracts")
+      .select("monthly_guarantee,contract_duration_months,guaranteed_value,projected_revenue_share_value")
+      .eq("id", id)
+      .eq("organization_id", user.organizationId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (!existingContract) return NextResponse.json({ error: "Contract not found" }, { status: 404 });
 
     const allowedFields = [
       "status",
@@ -72,6 +81,13 @@ export async function PUT(
       "terms",
       "document_url",
       "notes",
+      "currency",
+      "guaranteed_value",
+      "projected_revenue_share_value",
+      "total_contract_value",
+      "actual_revenue",
+      "renewal_date",
+      "acquisition_source",
     ];
 
     const updateData: Record<string, unknown> = {};
@@ -79,6 +95,15 @@ export async function PUT(
       if (body[field] !== undefined) {
         updateData[field] = body[field];
       }
+    }
+    const monthly = Number(updateData.monthly_guarantee ?? existingContract.monthly_guarantee ?? 0);
+    const duration = Number(updateData.contract_duration_months ?? existingContract.contract_duration_months ?? 0);
+    if (updateData.guaranteed_value === undefined && (updateData.monthly_guarantee !== undefined || updateData.contract_duration_months !== undefined)) {
+      updateData.guaranteed_value = monthly * duration;
+    }
+    if (updateData.guaranteed_value !== undefined || updateData.projected_revenue_share_value !== undefined) {
+      updateData.total_contract_value = Number(updateData.guaranteed_value ?? existingContract.guaranteed_value ?? 0)
+        + Number(updateData.projected_revenue_share_value ?? existingContract.projected_revenue_share_value ?? 0);
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -92,6 +117,7 @@ export async function PUT(
       .from("contracts")
       .update(updateData)
       .eq("id", id)
+      .eq("organization_id", user.organizationId)
       .select(`
         *,
         athletes (
@@ -116,7 +142,7 @@ export async function PUT(
     console.error("Error updating contract:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

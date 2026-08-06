@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { start } from "workflow/api";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   runApifyActor,
   runApifyGoogleSearch,
@@ -11,16 +13,24 @@ import {
   sortInstagramPostsNewestFirst,
   type ScrapedInstagramPost,
 } from "@/lib/instagram-post-order";
+import {
+  buildSportDiscoveryQueries,
+  getSportResearchStrategy,
+} from "@/lib/research/sport-strategy";
+import {
+  calculateResearchScore,
+  parseResearchScoreBreakdown,
+  RESEARCH_PROMPT_VERSION,
+  resolveResearchDisposition,
+} from "@/lib/research/scoring";
 
 export const maxDuration = 300;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createAdminClient();
 const PROVIDER_TIMEOUT_MS = 45_000;
 const PREFETCH_INSTAGRAM_PHOTOS = process.env.RESEARCH_PREFETCH_PHOTOS === "true";
 
@@ -50,10 +60,23 @@ async function updateResearchProgress(
   }
 ) {
   if (!researchLogId) return;
+  const { data: current } = await supabase
+    .from("research_logs")
+    .select("phase_history")
+    .eq("id", researchLogId)
+    .eq("status", "running")
+    .maybeSingle();
+  const history = Array.isArray(current?.phase_history) ? current.phase_history : [];
+  const lastEntry = history.at(-1);
+  const nextHistory = lastEntry && typeof lastEntry === "object" && (lastEntry as { phase?: unknown }).phase === phase
+    ? history
+    : [...history, { phase, at: new Date().toISOString(), stats }];
   const { error } = await supabase
     .from("research_logs")
     .update({
       heartbeat_at: new Date().toISOString(),
+      phase,
+      phase_history: nextHistory,
       stats: { ...stats, phase },
     })
     .eq("id", researchLogId)
@@ -61,11 +84,41 @@ async function updateResearchProgress(
   if (error) log(`Warning: Could not update research heartbeat: ${error.message}`);
 }
 
+function researchCandidateKey(name: string, sport: string) {
+  return `${name}:${sport}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+async function persistDiscoveredCandidates(
+  input: ResearchWorkflowInput,
+  candidates: DiscoveredAthlete[]
+) {
+  if (candidates.length === 0) return;
+  const { error } = await supabase.from("research_candidates").upsert(
+    candidates.map((candidate, index) => ({
+      organization_id: input.organizationId,
+      research_log_id: input.researchLogId,
+      candidate_key: researchCandidateKey(candidate.name, candidate.sport),
+      name: candidate.name,
+      sport: candidate.sport,
+      discovered_rank: index + 1,
+      raw_candidate: candidate,
+      source_evidence: candidate.evidence || [],
+      identity_status: "unresolved",
+      identity_confidence: 20,
+      disposition: "discovered",
+      prompt_version: RESEARCH_PROMPT_VERSION,
+      is_test_data: input.config.evaluationMode === true,
+    })),
+    { onConflict: "research_log_id,candidate_key" }
+  );
+  if (error) throw error;
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
 
-interface ResearchConfig {
+export interface ResearchConfig {
   sportFocus: string;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls"
   followerMin: number;
@@ -73,6 +126,32 @@ interface ResearchConfig {
   resultCount: number;
   targetRegions?: string[];
   scoringModel?: string;
+  evaluationMode?: boolean;
+}
+
+export interface ResearchWorkflowInput {
+  researchLogId: string;
+  organizationId: string;
+  requestedByUserId: string;
+  config: ResearchConfig;
+}
+
+class ResearchCancelledError extends Error {
+  constructor() {
+    super("Research run was cancelled");
+    this.name = "ResearchCancelledError";
+  }
+}
+
+async function assertRunNotCancelled(researchLogId: string) {
+  const { data, error } = await supabase
+    .from("research_logs")
+    .select("cancel_requested_at")
+    .eq("id", researchLogId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (data?.cancel_requested_at) throw new ResearchCancelledError();
 }
 
 interface DiscoveredAthlete {
@@ -80,6 +159,12 @@ interface DiscoveredAthlete {
   sport: string;
   context: string; // Why they were found (e.g., "WSL Championship Tour competitor")
   source: string;  // Where we found them
+  evidence?: Array<{
+    url?: string;
+    title?: string;
+    claim: string;
+    provider: string;
+  }>;
 }
 
 interface EnrichedAthlete extends DiscoveredAthlete {
@@ -106,6 +191,14 @@ interface ScoredAthlete extends EnrichedAthlete {
   pipeline_stage?: string;
   disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
   disposition_reason?: string;
+  score_breakdown?: {
+    professional_legitimacy: number;
+    audience_fit: number;
+    brand_fit: number;
+    momentum: number;
+    accessibility: number;
+    evidence_quality: number;
+  };
 }
 
 interface SuccessProfile {
@@ -120,27 +213,21 @@ interface SuccessProfile {
   }>;
 }
 
-// Cache for historical data (loaded once per server restart)
-let cachedSuccessProfile: SuccessProfile | null = null;
-let successProfileLoadedAt: number = 0;
+// Historical performance is organization-specific. Keeping a per-org cache
+// avoids leaking one workspace's conversions or exclusions into another.
+const successProfileCache = new Map<string, { profile: SuccessProfile; loadedAt: number }>();
 const SUCCESS_PROFILE_CACHE_MS = 1000 * 60 * 60; // 1 hour cache
 
 // ============================================================================
 // LOGGING
 // ============================================================================
 
-let logBuffer: string[] = [];
-let startTime = Date.now();
-
 function log(message: string, data?: unknown) {
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  const logLine = `[Research +${elapsed}s] ${message}`;
+  const logLine = `[Research] ${message}`;
   console.log(logLine);
-  logBuffer.push(logLine);
   if (data) {
     const dataStr = JSON.stringify(data, null, 2);
     console.log(dataStr);
-    logBuffer.push(dataStr);
   }
 }
 
@@ -148,19 +235,38 @@ function log(message: string, data?: unknown) {
 // HISTORICAL DATA & SUCCESS PROFILE
 // ============================================================================
 
-async function loadSuccessProfile(): Promise<SuccessProfile> {
+async function loadSuccessProfile(organizationId: string): Promise<SuccessProfile> {
   // Check cache
-  if (cachedSuccessProfile && Date.now() - successProfileLoadedAt < SUCCESS_PROFILE_CACHE_MS) {
-    return cachedSuccessProfile;
+  const cached = successProfileCache.get(organizationId);
+  if (cached && Date.now() - cached.loadedAt < SUCCESS_PROFILE_CACHE_MS) {
+    return cached.profile;
   }
 
   log("Loading historical success profile from database...");
 
-  // Load ALL historical athletes from database - this is our source of truth
-  const { data: historicalAthletes, error } = await supabase
+  // Successful context includes both imported historical wins and real signed
+  // or active contracts. This keeps the learning set current without counting
+  // drafts, test data, or ordinary prospects as conversions.
+  const { data: convertedContracts, error: contractError } = await supabase
+    .from("contracts")
+    .select("athlete_id")
+    .eq("organization_id", organizationId)
+    .eq("is_test_data", false)
+    .in("status", ["signed", "active"]);
+  if (contractError) log(`Error loading converted contracts: ${contractError.message}`);
+  const convertedAthleteIds = (convertedContracts || [])
+    .map((contract) => contract.athlete_id)
+    .filter((value): value is string => typeof value === "string");
+
+  let historicalQuery = supabase
     .from("athletes")
     .select("id, name, sport, instagram_handle, follower_count, notes, source, pipeline_stage, created_at")
-    .eq("is_historical", true);
+    .eq("organization_id", organizationId)
+    .eq("is_test_data", false);
+  historicalQuery = convertedAthleteIds.length
+    ? historicalQuery.or(`is_historical.eq.true,id.in.(${convertedAthleteIds.join(",")})`)
+    : historicalQuery.eq("is_historical", true);
+  const { data: historicalAthletes, error } = await historicalQuery;
 
   if (error) {
     log(`Error loading historical athletes: ${error.message}`);
@@ -170,14 +276,14 @@ async function loadSuccessProfile(): Promise<SuccessProfile> {
   const { data: rejectedAthletes } = await supabase
     .from("athletes")
     .select("instagram_handle")
+    .eq("organization_id", organizationId)
     .eq("pipeline_stage", "rejected");
 
   // Build the success profile from database
   const profile = buildSuccessProfileFromDB(historicalAthletes || [], rejectedAthletes || []);
 
   // Cache it
-  cachedSuccessProfile = profile;
-  successProfileLoadedAt = Date.now();
+  successProfileCache.set(organizationId, { profile, loadedAt: Date.now() });
 
   log(`Success profile built: ${profile.totalConversions} conversions, ${profile.exclusionHandles.size} exclusions`);
 
@@ -437,6 +543,8 @@ async function cacheSportContext(sport: string, context: SportContext): Promise<
 
 async function discoverSportContext(sport: string, customContext?: string): Promise<SportContext> {
   log(`Step 1: Discovering context for "${sport}"${customContext ? ` with focus on "${customContext}"` : ""}`);
+  const strategy = getSportResearchStrategy(sport);
+  const currentYear = new Date().getUTCFullYear();
 
   // Check cache first (only if no custom context - custom contexts are unique)
   if (!customContext) {
@@ -450,11 +558,15 @@ async function discoverSportContext(sport: string, customContext?: string): Prom
 
   const prompt = `You are researching the sport: ${sport}${customContext ? `. Focus area: ${customContext}` : ""}.
 
+SPORT ARCHETYPE: ${strategy.archetype}
+PRIORITIZE: ${strategy.discoveryAngles.join("; ")}
+AUTHORITATIVE SOURCES: ${strategy.authoritativeSources.join("; ")}
+
 Provide a JSON response with:
 1. Major professional leagues and tours for this sport (especially women's leagues)
 2. Key competitions and championships
 3. Governing bodies
-4. 5 specific search queries that would find rising female athletes in this sport
+4. 6 specific search queries that would find current professional female athletes in this sport
 
 Focus on finding sources of REAL professional athletes, not amateur or recreational.
 
@@ -464,7 +576,7 @@ Respond ONLY with valid JSON in this exact format:
   "competitions": ["Competition 1", "Competition 2"],
   "governingBodies": ["Body 1"],
   "searchQueries": [
-    "top female ${sport} athletes 2025",
+    "top female ${sport} athletes ${currentYear}",
     "rising ${sport} stars to watch",
     "...3 more specific queries..."
   ]
@@ -505,11 +617,10 @@ Respond ONLY with valid JSON in this exact format:
         leagues: parsed.leagues || [],
         competitions: parsed.competitions || [],
         governingBodies: parsed.governingBodies || [],
-        searchQueries: parsed.searchQueries || [
-          `top female ${sport} athletes 2025`,
-          `rising ${sport} stars`,
-          `best women ${sport} players`,
-        ],
+        searchQueries: Array.from(new Set([
+          ...(Array.isArray(parsed.searchQueries) ? parsed.searchQueries : []),
+          ...buildSportDiscoveryQueries(sport, currentYear),
+        ])).slice(0, 8),
       };
 
       // Cache for future use (only if no custom context)
@@ -529,11 +640,11 @@ Respond ONLY with valid JSON in this exact format:
     competitions: [],
     governingBodies: [],
     searchQueries: [
-      `top female ${sport} athletes 2025`,
-      `rising ${sport} stars to watch`,
-      `best women's ${sport} players`,
-      `${sport} athletes instagram`,
-      `professional female ${sport} competitors`,
+      ...buildSportDiscoveryQueries(sport, currentYear),
+      `top female ${sport} athletes ${currentYear}`,
+      `rising ${sport} stars to watch ${currentYear}`,
+      `best women's ${sport} players current rankings`,
+      `professional female ${sport} competitors official results`,
     ],
   };
 }
@@ -547,7 +658,9 @@ async function discoverAthletes(
   sportContext: SportContext,
   customContext?: string,
   targetCount: number = 20,
-  successProfile?: SuccessProfile
+  successProfile?: SuccessProfile,
+  targetRegions?: string[],
+  extractionModel?: string
 ): Promise<DiscoveredAthlete[]> {
   log(`Step 2: Discovering athletes for "${sport}"`);
 
@@ -557,6 +670,7 @@ async function discoverAthletes(
 
   const athletes: DiscoveredAthlete[] = [];
   const seenNames = new Set<string>();
+  const strategy = getSportResearchStrategy(sport);
 
   // Build a comprehensive search prompt
   const contextInfo = [
@@ -576,6 +690,13 @@ ${contextInfo}
 
 ${historicalContext ? `\n${historicalContext}\n` : ""}
 
+SPORT-SPECIFIC RESEARCH PLAN:
+- Archetype: ${strategy.archetype}
+- Discovery angles: ${strategy.discoveryAngles.join("; ")}
+- Preferred evidence: ${strategy.authoritativeSources.join("; ")}
+- Identity checks: ${strategy.verificationSignals.join("; ")}
+${targetRegions?.length ? `- Target markets: ${targetRegions.join(", ")}` : "- Target markets: global unless the focus says otherwise"}
+
 Requirements:
 - Must be REAL professional athletes (not influencers who do the sport casually)
 - Should be active competitors or recently retired (last 2-3 years)
@@ -588,13 +709,17 @@ For each athlete, provide:
 - Full name
 - Why they're notable (achievements, team, ranking)
 - Their source (which league/competition they compete in)
+- One direct URL to an authoritative roster, ranking, result, or athlete biography supporting the claim
+- A concise title for that source
 
 Respond ONLY with valid JSON array:
 [
   {
     "name": "Full Name",
     "context": "Notable achievement or position (e.g., '2024 WSL Championship Tour competitor, ranked #5')",
-    "source": "League or competition name"
+    "source": "League or competition name",
+    "source_url": "https://direct-source.example/athlete-or-results-page",
+    "source_title": "Official source title"
   }
 ]
 
@@ -655,6 +780,12 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
               sport,
               context: athlete.context || "",
               source: athlete.source || "Perplexity Discovery",
+              evidence: athlete.source_url ? [{
+                url: athlete.source_url,
+                title: athlete.source_title || athlete.source,
+                claim: athlete.context || `Professional ${sport} athlete`,
+                provider: "Perplexity Sonar",
+              }] : [],
             });
           }
         }
@@ -672,6 +803,7 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
               sport,
               context: "Extracted from partial response",
               source: "Perplexity Discovery (fallback)",
+              evidence: [],
             });
           }
         }
@@ -698,7 +830,7 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
 Find female professional ${sport} athletes matching this query. Return only athletes not already in this list: ${athletes.map(a => a.name).join(", ")}.
 
 Respond with JSON array:
-[{"name": "Full Name", "context": "Achievement", "source": "Competition/League"}]`;
+[{"name": "Full Name", "context": "Achievement", "source": "Competition/League", "source_url": "https://direct-authoritative-source", "source_title": "Official source title"}]`;
 
         const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
           method: "POST",
@@ -730,6 +862,12 @@ Respond with JSON array:
                   sport,
                   context: athlete.context || "",
                   source: athlete.source || query,
+                  evidence: athlete.source_url ? [{
+                    url: athlete.source_url,
+                    title: athlete.source_title || athlete.source,
+                    claim: athlete.context || `Professional ${sport} athlete`,
+                    provider: "Perplexity Sonar",
+                  }] : [],
                 });
               }
             }
@@ -741,8 +879,106 @@ Respond with JSON array:
     }
   }
 
+  if (athletes.length < targetCount && extractionModel) {
+    const supplemental = await discoverAthletesFromApify(
+      sport,
+      sportContext.searchQueries,
+      athletes.map((athlete) => athlete.name),
+      targetCount - athletes.length,
+      extractionModel
+    );
+    for (const athlete of supplemental) {
+      if (!seenNames.has(athlete.name.toLowerCase())) {
+        seenNames.add(athlete.name.toLowerCase());
+        athletes.push(athlete);
+      }
+    }
+  }
+
   log(`Total athletes discovered: ${athletes.length}`);
   return athletes;
+}
+
+async function discoverAthletesFromApify(
+  sport: string,
+  queries: string[],
+  existingNames: string[],
+  needed: number,
+  extractionModel: string
+): Promise<DiscoveredAthlete[]> {
+  if (!ANTHROPIC_API_KEY || needed <= 0) return [];
+  log(`Supplementing discovery with Apify Google Search (${needed} candidates needed)`);
+
+  const sourceResults = [];
+  for (const query of queries.slice(0, 2)) {
+    try {
+      const result = await runApifyGoogleSearch(query, 10);
+      sourceResults.push(...result.results);
+    } catch (error) {
+      log(`Apify discovery query failed: ${error}`);
+    }
+  }
+  const uniqueSources = Array.from(
+    new Map(sourceResults.map((result) => [result.url, result])).values()
+  ).slice(0, 20);
+  if (uniqueSources.length === 0) return [];
+
+  const sourceText = uniqueSources.map((result, index) =>
+    `[${index + 1}] ${result.title}\nURL: ${result.url}\nSnippet: ${result.snippet}`
+  ).join("\n\n");
+  const prompt = `Extract up to ${Math.min(needed + 3, 12)} real professional female ${sport} athletes from these Google results.
+
+Do not invent athletes or URLs. Use only the supplied results. Exclude these existing names: ${existingNames.join(", ") || "none"}.
+Prefer an official roster, ranking, result, federation, league, tour, team, or reputable sports-news source. A generic list page may suggest a name but should be marked lower confidence.
+
+SOURCES:
+${sourceText}
+
+Return only a JSON array:
+[{"name":"Full Name","context":"Specific current professional evidence","source":"Organization or competition","source_url":"exact URL copied from SOURCES","source_title":"exact or concise source title"}]`;
+
+  try {
+    const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: extractionModel,
+        max_tokens: 1800,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!response.ok) throw new Error(`Anthropic extraction failed (${response.status})`);
+    const data = await response.json() as { content?: Array<{ type?: string; text?: string }> };
+    const content = (data.content || []).map((block) => block.text || "").join("\n");
+    const match = content.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    const parsed = JSON.parse(match[0]) as Array<Record<string, unknown>>;
+    const allowedUrls = new Set(uniqueSources.map((source) => source.url));
+    return parsed.flatMap((candidate) => {
+      const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+      const url = typeof candidate.source_url === "string" ? candidate.source_url : "";
+      if (!name || !allowedUrls.has(url)) return [];
+      return [{
+        name,
+        sport,
+        context: typeof candidate.context === "string" ? candidate.context : "Professional competition evidence",
+        source: typeof candidate.source === "string" ? candidate.source : "Apify Google Search",
+        evidence: [{
+          url,
+          title: typeof candidate.source_title === "string" ? candidate.source_title : undefined,
+          claim: typeof candidate.context === "string" ? candidate.context : `Professional ${sport} athlete`,
+          provider: "Apify Google Search + Anthropic extraction",
+        }],
+      }];
+    });
+  } catch (error) {
+    log(`Apify discovery extraction failed: ${error}`);
+    return [];
+  }
 }
 
 // ============================================================================
@@ -1205,28 +1441,36 @@ EVALUATION CRITERIA:
 - Look for age indicators in bio, context, or if they're described as "junior", "youth", "teen", etc.
 - When in doubt about age, note it as a concern
 
-1. LEGITIMACY (Is this a real professional athlete?)
+1. PROFESSIONAL LEGITIMACY (20%)
    - Verified account is strong signal
    - Bio mentions sport/team/achievements
    - Follower/following ratio reasonable for athlete
 
-2. FOLLOWER SWEET SPOT (50K-300K is ideal)
+2. AUDIENCE FIT (15%; 50K-300K is ideal)
    - Too small (<30K): May not have enough reach
    - Sweet spot (50K-300K): Engaged audience, responsive to outreach
    - Large (300K-500K): Harder to reach but valuable
    - Too large (>500K): Unlikely to respond
 
-3. PARTNERSHIP FIT
+3. BRAND / PARTNERSHIP FIT (25%)
    - Content style (fitness/lifestyle content works well)
    - Engagement indicators (active posting)
    - MUST be 18+ (this is non-negotiable)
    - Ideal age range: 21-35
    - Not already on OnlyFans
 
-4. OUTREACH LIKELIHOOD
+4. MOMENTUM (15%)
+   - Recent competition, growth, awards, roster promotion, or media interest
+
+5. ACCESSIBILITY (15%)
    - Active account (recent posts)
    - Accessible (not too famous)
    - English-speaking market preferred
+
+6. EVIDENCE QUALITY (10%)
+   - Direct official roster/ranking/result/biography is strongest
+   - Identity, sport, and social profile must agree
+   - Penalize thin, old, circular, listicle, or ambiguous evidence
 
 Score 0-100 where:
 - 0: MUST be given if athlete is under 18 or likely a minor
@@ -1238,6 +1482,14 @@ Score 0-100 where:
 Respond with ONLY valid JSON:
 {
   "score": <number 0-100>,
+  "score_breakdown": {
+    "professional_legitimacy": <0-100>,
+    "audience_fit": <0-100>,
+    "brand_fit": <0-100>,
+    "momentum": <0-100>,
+    "accessibility": <0-100>,
+    "evidence_quality": <0-100>
+  },
   "reasoning": "<2-3 sentence explanation>",
   "concerns": ["<concern 1>", "<concern 2 if any>"],
   "is_minor": <true if under 18 or likely minor, false otherwise>
@@ -1287,14 +1539,17 @@ Respond with ONLY valid JSON:
       try {
         const parsed = JSON.parse(jsonMatch[0]) as {
           score?: unknown;
+          score_breakdown?: unknown;
           reasoning?: unknown;
           concerns?: unknown;
           is_minor?: unknown;
         };
-        if (typeof parsed.score === "number" && typeof parsed.reasoning === "string") {
+        const dimensions = parseResearchScoreBreakdown(parsed.score_breakdown);
+        if (typeof parsed.score === "number" && typeof parsed.reasoning === "string" && dimensions) {
           return {
             ...athlete,
-            score: Math.min(100, Math.max(0, parsed.score)),
+            score: calculateResearchScore(dimensions),
+            score_breakdown: dimensions,
             reasoning: parsed.reasoning,
             concerns: Array.isArray(parsed.concerns)
               ? parsed.concerns.filter((concern): concern is string => typeof concern === "string")
@@ -1472,13 +1727,12 @@ async function fetchInstagramPhotosForAthlete(
 }
 
 // ============================================================================
-// MAIN HANDLER
+// DURABLE EXECUTION
 // ============================================================================
 
-export async function POST(request: NextRequest) {
-  startTime = Date.now();
-  logBuffer = [];
-  let researchLogId: string | null = null;
+export async function executeResearchRun(input: ResearchWorkflowInput) {
+  const startedAt = Date.now();
+  const researchLogId = input.researchLogId;
 
   try {
     const missingVariables = [
@@ -1497,7 +1751,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const submittedConfig: ResearchConfig = await request.json();
+    const submittedConfig = input.config;
     const scoringModel = await resolveAnthropicScoringModel(submittedConfig.scoringModel);
     const config: ResearchConfig = {
       ...submittedConfig,
@@ -1520,69 +1774,84 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Sport is required" }, { status: 400 });
     }
 
-    // LOAD HISTORICAL SUCCESS PROFILE - for context and exclusions
-    log("Loading historical success profile...");
-    const successProfile = await loadSuccessProfile();
-    log(`Historical context: ${successProfile.totalConversions} conversions, ${successProfile.exclusionHandles.size} exclusions`);
-
-    // CREATE A "RUNNING" LOG IMMEDIATELY - so it persists even if user navigates away
-    try {
-      const { data: newLog } = await supabase
-        .from("research_logs")
-        .insert({
-          status: "running",
-          heartbeat_at: new Date().toISOString(),
-          config_used: config,
-          context_summary: {
-            sport: config.sportFocus,
-            customContext: config.customContext,
-            historical_count: successProfile.totalConversions,
-            exclusion_count: successProfile.exclusionHandles.size,
-            toolchain: [
-              { step: "Discovery", provider: "Perplexity", purpose: "Find source-linked athlete candidates" },
-              { step: "Identity lookup", provider: "Apify Google Search", purpose: "Resolve public profiles and age sources" },
-              { step: "Instagram enrichment", provider: "Apify Instagram Profile Scraper", purpose: "Load profile and audience data" },
-              { step: "Fit scoring", provider: scoringModel, purpose: "Score partnership fit and explain the result" },
-              { step: "Persistence", provider: "Supabase", purpose: "Store the run, evidence, and pipeline disposition" },
-            ],
-          },
-          raw_results: [],
-          scoring_details: [],
-          final_results: [],
-          stats: {
-            discovered: 0,
-            enriched: 0,
-            scored: 0,
-            returned: 0,
-            added: 0,
-            phase: "starting",
-          },
-        })
-        .select("id")
-        .single();
-
-      if (newLog) {
-        researchLogId = newLog.id;
-        log(`Created research log: ${researchLogId}`);
-      }
-    } catch (logError) {
-      log(`Warning: Could not create research log: ${logError}`);
+    const { data: checkpoint, error: checkpointError } = await supabase
+      .from("research_logs")
+      .select("status,phase,raw_results,scoring_details,final_results,context_summary")
+      .eq("id", researchLogId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+    if (checkpointError) throw checkpointError;
+    if (!checkpoint) throw new Error("Research run no longer exists");
+    if (checkpoint.status === "completed") {
+      return NextResponse.json({
+        success: true,
+        runId: researchLogId,
+        results: Array.isArray(checkpoint.final_results) ? checkpoint.final_results : [],
+        resumed: true,
+      });
     }
 
+    const phaseOrder = [
+      "queued",
+      "loading_context",
+      "discovering_candidates",
+      "enriching_instagram",
+      "scoring",
+      "saving_candidates",
+      "completed",
+    ];
+    const checkpointPhase = typeof checkpoint.phase === "string" ? checkpoint.phase : "queued";
+    const reachedPhase = (phase: string) => phaseOrder.indexOf(checkpointPhase) >= phaseOrder.indexOf(phase);
+
+    // LOAD HISTORICAL SUCCESS PROFILE - for context and exclusions
+    log("Loading historical success profile...");
+    const successProfile = await loadSuccessProfile(input.organizationId);
+    log(`Historical context: ${successProfile.totalConversions} conversions, ${successProfile.exclusionHandles.size} exclusions`);
+
+    const { error: startError } = await supabase
+      .from("research_logs")
+      .update({
+        status: "running",
+        phase: checkpointPhase,
+        scoring_model: scoringModel,
+        config_used: config,
+        heartbeat_at: new Date().toISOString(),
+        error_message: null,
+        completed_at: null,
+      })
+      .eq("id", researchLogId)
+      .eq("organization_id", input.organizationId);
+    if (startError) throw startError;
+    await assertRunNotCancelled(researchLogId);
+
     // STEP 1: Discover sport context
-    const sportContext = await discoverSportContext(config.sportFocus, config.customContext);
-    await updateResearchProgress(researchLogId, "discovering_candidates", {
-      discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0,
-    });
+    const storedContext = checkpoint.context_summary && typeof checkpoint.context_summary === "object"
+      ? checkpoint.context_summary as Record<string, unknown>
+      : {};
+    const storedSportContext = storedContext.sportContext;
+    const sportContext = storedSportContext && typeof storedSportContext === "object"
+      ? storedSportContext as SportContext
+      : await discoverSportContext(config.sportFocus, config.customContext);
 
     // STEP 2: Discover athletes (with historical context)
-    const allDiscoveredAthletes = await discoverAthletes(
-      config.sportFocus,
-      sportContext,
-      config.customContext,
-      config.resultCount * 2,
-      successProfile
-    );
+    let allDiscoveredAthletes: DiscoveredAthlete[];
+    if (reachedPhase("enriching_instagram") && Array.isArray(checkpoint.raw_results) && checkpoint.raw_results.length > 0) {
+      allDiscoveredAthletes = checkpoint.raw_results as unknown as DiscoveredAthlete[];
+      log(`Resuming from discovery checkpoint with ${allDiscoveredAthletes.length} candidates`);
+    } else {
+      await updateResearchProgress(researchLogId, "discovering_candidates", {
+        discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0,
+      });
+      allDiscoveredAthletes = await discoverAthletes(
+        config.sportFocus,
+        sportContext,
+        config.customContext,
+        config.resultCount * 2,
+        successProfile,
+        config.targetRegions,
+        scoringModel
+      );
+    }
     // Discovery providers can return more names than requested. Bound the
     // expensive Google + Instagram stage so a five-result run does not enrich
     // 20+ profiles and collide with the serverless time budget.
@@ -1591,9 +1860,15 @@ export async function POST(request: NextRequest) {
     if (allDiscoveredAthletes.length > discoveredAthletes.length) {
       log(`Capped Instagram enrichment pool at ${discoveredAthletes.length} of ${allDiscoveredAthletes.length} discoveries`);
     }
+    await persistDiscoveredCandidates(input, allDiscoveredAthletes);
     await updateResearchProgress(researchLogId, "enriching_instagram", {
       discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0, added: 0,
     });
+    await supabase
+      .from("research_logs")
+      .update({ raw_results: discoveredAthletes })
+      .eq("id", researchLogId);
+    await assertRunNotCancelled(researchLogId);
 
     if (discoveredAthletes.length === 0) {
       log("No athletes discovered");
@@ -1627,7 +1902,13 @@ export async function POST(request: NextRequest) {
     }
 
     // STEP 3: Enrich with Instagram
-    const enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config);
+    let enrichedAthletes: EnrichedAthlete[];
+    if (reachedPhase("scoring") && Array.isArray(checkpoint.scoring_details) && checkpoint.scoring_details.length > 0) {
+      enrichedAthletes = checkpoint.scoring_details as unknown as EnrichedAthlete[];
+      log(`Resuming from Instagram checkpoint with ${enrichedAthletes.length} enriched candidates`);
+    } else {
+      enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config);
+    }
     await updateResearchProgress(researchLogId, "scoring", {
       discovered: discoveredAthletes.length,
       enriched: enrichedAthletes.length,
@@ -1635,6 +1916,11 @@ export async function POST(request: NextRequest) {
       returned: 0,
       added: 0,
     });
+    await supabase
+      .from("research_logs")
+      .update({ scoring_details: enrichedAthletes })
+      .eq("id", researchLogId);
+    await assertRunNotCancelled(researchLogId);
 
     if (enrichedAthletes.length === 0) {
       log("No athletes with valid Instagram profiles found");
@@ -1676,7 +1962,14 @@ export async function POST(request: NextRequest) {
     }
 
     // STEP 4: Score athletes (with historical success context)
-    const scoredAthletes = await scoreAthletes(enrichedAthletes, scoringModel, successProfile);
+    const scoredAthletes = reachedPhase("saving_candidates")
+      && Array.isArray(checkpoint.final_results)
+      && checkpoint.final_results.length > 0
+      ? checkpoint.final_results as unknown as ScoredAthlete[]
+      : await scoreAthletes(enrichedAthletes, scoringModel, successProfile);
+    if (reachedPhase("saving_candidates") && scoredAthletes.length > 0) {
+      log(`Resuming from scoring checkpoint with ${scoredAthletes.length} finalists`);
+    }
 
     // Take top N results
     const finalResults = scoredAthletes.slice(0, config.resultCount);
@@ -1687,6 +1980,11 @@ export async function POST(request: NextRequest) {
       returned: finalResults.length,
       added: 0,
     });
+    await supabase
+      .from("research_logs")
+      .update({ final_results: finalResults })
+      .eq("id", researchLogId);
+    await assertRunNotCancelled(researchLogId);
 
     log("═══════════════════════════════════════════════════════════════");
     log(`✅ RESEARCH COMPLETE`);
@@ -1706,13 +2004,109 @@ export async function POST(request: NextRequest) {
     let blockedCount = 0;
     let duplicateCount = 0;
     let skippedCount = 0;
-    for (const athlete of finalResults) {
+    for (const [finalistIndex, athlete] of finalResults.entries()) {
       try {
+        const candidateKey = researchCandidateKey(athlete.name, athlete.sport);
+        const sourceEvidence = [
+          ...(athlete.evidence || []),
+          {
+            type: "discovery",
+            provider: "Discovery providers",
+            source: athlete.source,
+            claim: athlete.context,
+          },
+          athlete.instagram_url
+            ? {
+                type: "identity",
+                provider: "Apify",
+                url: athlete.instagram_url,
+                claim: `Instagram profile @${athlete.instagram_handle}`,
+              }
+            : null,
+          athlete.age_source
+            ? {
+                type: "age",
+                provider: "Apify Google Search",
+                source: athlete.age_source,
+                claim: athlete.age ? `Public source reports age ${athlete.age}` : "Age source",
+              }
+            : null,
+        ].filter(Boolean);
+
+        const { data: candidateRecord, error: candidateError } = await supabase
+          .from("research_candidates")
+          .upsert({
+            organization_id: input.organizationId,
+            research_log_id: researchLogId,
+            candidate_key: candidateKey,
+            name: athlete.name,
+            sport: athlete.sport,
+            discovered_rank: finalistIndex + 1,
+            raw_candidate: athlete,
+            source_evidence: sourceEvidence,
+            identity_status: athlete.instagram_handle
+              ? athlete.age_verified
+                ? "verified"
+                : "probable"
+              : "unresolved",
+            identity_confidence: athlete.instagram_handle
+              ? athlete.age_verified
+                ? 90
+                : 70
+              : 25,
+            instagram_handle: athlete.instagram_handle || null,
+            follower_count: athlete.follower_count || null,
+            age: athlete.age || null,
+            age_verified: athlete.age_verified === true,
+            age_source: athlete.age_source || null,
+            score: athlete.score,
+            score_breakdown: athlete.score_breakdown || {},
+            scoring_reasoning: athlete.reasoning,
+            scoring_model: scoringModel,
+            prompt_version: RESEARCH_PROMPT_VERSION,
+            is_minor: athlete.is_minor ?? null,
+            is_test_data: config.evaluationMode === true,
+          }, { onConflict: "research_log_id,candidate_key" })
+          .select("id,athlete_id,disposition")
+          .single();
+        if (candidateError) throw candidateError;
+
+        if (!config.evaluationMode && candidateRecord.athlete_id) {
+          athlete.athlete_id = candidateRecord.athlete_id;
+          athlete.disposition = candidateRecord.disposition;
+          if (candidateRecord.disposition === "approval") addedCount++;
+          else if (candidateRecord.disposition === "held") heldCount++;
+          else if (candidateRecord.disposition === "blocked") blockedCount++;
+          else if (candidateRecord.disposition === "existing") duplicateCount++;
+          else skippedCount++;
+          log(`  Resumed saved candidate ${athlete.name} (${candidateRecord.disposition})`);
+          continue;
+        }
+
+        if (config.evaluationMode) {
+          athlete.disposition = resolveResearchDisposition({
+            score: athlete.score,
+            isMinor: athlete.is_minor,
+            ageVerified: athlete.age_verified,
+            reasoning: athlete.reasoning,
+          });
+          athlete.disposition_reason = "Evaluation only — the live athlete pipeline was not changed";
+          await supabase
+            .from("research_candidates")
+            .update({
+              disposition: athlete.disposition,
+              disposition_reason: athlete.disposition_reason,
+            })
+            .eq("id", candidateRecord.id);
+          continue;
+        }
+
         // Check if already exists (use maybeSingle to avoid error when no match)
         const { data: existingList } = await supabase
           .from("athletes")
           .select("id, pipeline_stage")
           .eq("instagram_handle", athlete.instagram_handle)
+          .eq("organization_id", input.organizationId)
           .limit(1);
 
         const existing = existingList && existingList.length > 0 ? existingList[0] : null;
@@ -1724,6 +2118,14 @@ export async function POST(request: NextRequest) {
           athlete.disposition = "existing";
           athlete.disposition_reason = `Already exists in ${existingStage.replaceAll("_", " ")}`;
           duplicateCount++;
+          await supabase
+            .from("research_candidates")
+            .update({
+              athlete_id: existing.id,
+              disposition: "existing",
+              disposition_reason: athlete.disposition_reason,
+            })
+            .eq("id", candidateRecord.id);
           log(`  Skipping ${athlete.name} (@${athlete.instagram_handle}) - already in database`);
           continue;
         }
@@ -1732,6 +2134,10 @@ export async function POST(request: NextRequest) {
           athlete.disposition = "skipped";
           athlete.disposition_reason = "No Instagram handle was resolved";
           skippedCount++;
+          await supabase
+            .from("research_candidates")
+            .update({ disposition: "skipped", disposition_reason: athlete.disposition_reason })
+            .eq("id", candidateRecord.id);
           log(`  Skipping ${athlete.name} - no Instagram handle`);
           continue;
         }
@@ -1742,24 +2148,23 @@ export async function POST(request: NextRequest) {
           athlete.disposition = "skipped";
           athlete.disposition_reason = exclusionCheck.reason || "Matched a historical exclusion";
           skippedCount++;
+          await supabase
+            .from("research_candidates")
+            .update({ disposition: "skipped", disposition_reason: athlete.disposition_reason })
+            .eq("id", candidateRecord.id);
           log(`  ⏭️ EXCLUDED ${athlete.name} (@${athlete.instagram_handle}) - ${exclusionCheck.reason}`);
           continue;
         }
 
         // CRITICAL: Block minors from being added
         // Check multiple indicators: explicit is_minor flag, score of 0, or minor-related keywords in reasoning
-        const reasoningLower = (athlete.reasoning || "").toLowerCase();
-        const isLikelyMinor = athlete.is_minor === true ||
-          athlete.score === 0 ||
-          (athlete.score < 30 && (
-            reasoningLower.includes("under 18") ||
-            reasoningLower.includes("minor") ||
-            reasoningLower.includes("17 years") ||
-            reasoningLower.includes("16 years") ||
-            reasoningLower.includes("15 years") ||
-            reasoningLower.includes("14 years") ||
-            reasoningLower.includes("year old") && reasoningLower.match(/1[4-7]\s*year/i)
-          ));
+        const resolvedDisposition = resolveResearchDisposition({
+          score: athlete.score,
+          isMinor: athlete.is_minor,
+          ageVerified: athlete.age_verified,
+          reasoning: athlete.reasoning,
+        });
+        const isLikelyMinor = resolvedDisposition === "blocked";
 
         if (isLikelyMinor) {
           athlete.disposition = "blocked";
@@ -1767,11 +2172,15 @@ export async function POST(request: NextRequest) {
             ? `Blocked: source-verified age ${athlete.age}`
             : "Blocked by the minor-safety screen";
           blockedCount++;
+          await supabase
+            .from("research_candidates")
+            .update({ disposition: "blocked", disposition_reason: athlete.disposition_reason })
+            .eq("id", candidateRecord.id);
           log(`  ⛔ BLOCKED ${athlete.name} (@${athlete.instagram_handle}) - flagged as minor (score: ${athlete.score}, is_minor: ${athlete.is_minor})`);
           continue;
         }
 
-        const destinationStage = athlete.age_verified === true ? "approval" : "research";
+        const destinationStage = resolvedDisposition === "approval" ? "approval" : "research";
         if (destinationStage === "research") {
           athlete.disposition = "held";
           athlete.disposition_reason = "Held for manual review because age lacks a trustworthy public source";
@@ -1787,6 +2196,7 @@ export async function POST(request: NextRequest) {
         const { data: newAthlete, error: createError } = await supabase
             .from("athletes")
             .insert({
+              organization_id: input.organizationId,
               name: athlete.name,
               sport: athlete.sport,
               instagram_handle: athlete.instagram_handle,
@@ -1805,6 +2215,7 @@ export async function POST(request: NextRequest) {
                 age_verified: athlete.age_verified,
                 age: athlete.age,
                 age_source: athlete.age_source,
+                is_minor: athlete.is_minor === true,
                 research_run_id: researchLogId,
                 review_status: athlete.disposition,
                 disposition_reason: athlete.disposition_reason,
@@ -1813,6 +2224,8 @@ export async function POST(request: NextRequest) {
               pipeline_stage: destinationStage,
               enrichment_status: "enriched",
               is_historical: false,
+              is_test_data: false,
+              source_research_log_id: researchLogId,
             })
             .select("id")
             .single();
@@ -1822,6 +2235,14 @@ export async function POST(request: NextRequest) {
           athlete.pipeline_stage = destinationStage;
           if (destinationStage === "approval") addedCount++;
           else heldCount++;
+          await supabase
+            .from("research_candidates")
+            .update({
+              athlete_id: newAthlete.id,
+              disposition: destinationStage,
+              disposition_reason: athlete.disposition_reason,
+            })
+            .eq("id", candidateRecord.id);
 
           // Store profile pic in Supabase
           if (athlete.profile_pic_url) {
@@ -1850,6 +2271,10 @@ export async function POST(request: NextRequest) {
           athlete.disposition = "skipped";
           athlete.disposition_reason = `Database insert failed: ${createError.message}`;
           skippedCount++;
+          await supabase
+            .from("research_candidates")
+            .update({ disposition: "skipped", disposition_reason: athlete.disposition_reason })
+            .eq("id", candidateRecord.id);
           log(`  Error adding ${athlete.name}: ${createError.message}`);
         }
       } catch (e) {
@@ -1862,7 +2287,7 @@ export async function POST(request: NextRequest) {
 
     log(`Disposition summary: ${addedCount} approval, ${heldCount} held, ${blockedCount} blocked, ${duplicateCount} existing, ${skippedCount} skipped`);
 
-    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    const totalTime = ((Date.now() - startedAt) / 1000).toFixed(1);
     log(`Total time: ${totalTime}s`);
 
     // Update the research log with final results
@@ -1870,6 +2295,7 @@ export async function POST(request: NextRequest) {
       try {
         await supabase.from("research_logs").update({
           status: "completed",
+          phase: "completed",
           context_summary: {
             sport: config.sportFocus,
             customContext: config.customContext,
@@ -1912,11 +2338,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ALWAYS create a notification on completion (so it appears in notification center)
-    try {
+    // Evaluation runs are deliberately isolated from pipeline notifications.
+    if (!config.evaluationMode) try {
       const notificationMessage = `Research complete for ${config.sportFocus}: ${finalResults.length} finalists, ${addedCount} added to Approval, ${heldCount} held, ${blockedCount} blocked.`;
 
       await supabase.from("activity_notifications").insert({
+        organization_id: input.organizationId,
+        user_id: input.requestedByUserId,
         type: "research_completed",
         title: "Research Complete",
         message: notificationMessage,
@@ -1955,20 +2383,28 @@ export async function POST(request: NextRequest) {
         skipped: skippedCount,
         timeSeconds: parseFloat(totalTime),
       },
-      logs: logBuffer,
+      logs: [],
     });
 
   } catch (error) {
     log(`Research error: ${error}`);
+    const cancelled = error instanceof ResearchCancelledError;
 
-    // Update log to error status if we have one
+    // A durable step can retry transient provider failures. Preserve the last
+    // successful phase and its artifacts until the workflow exhausts retries.
     if (researchLogId) {
       try {
-        await supabase.from("research_logs").update({
-          status: "error",
+        await supabase.from("research_logs").update(cancelled ? {
+          status: "cancelled",
+          phase: "cancelled",
           error_message: error instanceof Error ? error.message : "Research failed",
           heartbeat_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
+        } : {
+          status: "running",
+          error_message: error instanceof Error ? error.message : "Research step failed; retrying",
+          heartbeat_at: new Date().toISOString(),
+          completed_at: null,
         }).eq("id", researchLogId);
       } catch {
         // Non-critical
@@ -1979,9 +2415,165 @@ export async function POST(request: NextRequest) {
       {
         error: error instanceof Error ? error.message : "Research failed",
         runId: researchLogId,
-        logs: logBuffer,
+        logs: [],
       },
-      { status: 500 }
+      { status: cancelled ? 409 : 500 }
     );
+  }
+}
+
+async function executeResearchStep(input: ResearchWorkflowInput) {
+  "use step";
+
+  const response = await executeResearchRun(input);
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok && response.status !== 409) {
+    throw new Error(typeof payload.error === "string" ? payload.error : "Research execution failed");
+  }
+  return payload;
+}
+executeResearchStep.maxRetries = 2;
+
+async function markResearchWorkflowFailed(researchLogId: string, organizationId: string, message: string) {
+  "use step";
+
+  await supabase.from("research_logs").update({
+    status: "error",
+    phase: "error",
+    error_message: message,
+    heartbeat_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  }).eq("id", researchLogId).eq("organization_id", organizationId);
+}
+markResearchWorkflowFailed.maxRetries = 1;
+
+export async function runResearchWorkflow(input: ResearchWorkflowInput) {
+  "use workflow";
+
+  try {
+    return await executeResearchStep(input);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Research workflow failed";
+    await markResearchWorkflowFailed(input.researchLogId, input.organizationId, message);
+    throw error;
+  }
+}
+
+function getMissingResearchVariables() {
+  return [
+    !PERPLEXITY_API_KEY ? "PERPLEXITY_API_KEY" : null,
+    !APIFY_API_KEY ? "APIFY_API_KEY" : null,
+    !ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : null,
+  ].filter((value): value is string => Boolean(value));
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const user = await requireAuth();
+    const missingVariables = getMissingResearchVariables();
+    if (missingVariables.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Research agent is not fully configured",
+          missingVariables,
+          next: "/connections",
+        },
+        { status: 503 }
+      );
+    }
+
+    const submitted = await request.json() as Partial<ResearchConfig>;
+    const sportFocus = typeof submitted.sportFocus === "string"
+      ? submitted.sportFocus.trim()
+      : "";
+    if (!sportFocus) {
+      return NextResponse.json({ error: "Sport is required" }, { status: 400 });
+    }
+
+    const config: ResearchConfig = {
+      sportFocus,
+      customContext: typeof submitted.customContext === "string"
+        ? submitted.customContext.trim().slice(0, 500)
+        : undefined,
+      followerMin: Math.max(0, Number(submitted.followerMin) || 30_000),
+      followerMax: Math.max(1, Number(submitted.followerMax) || 500_000),
+      resultCount: Math.min(Math.max(Number(submitted.resultCount) || 5, 1), 10),
+      targetRegions: Array.isArray(submitted.targetRegions)
+        ? submitted.targetRegions.filter((region): region is string => typeof region === "string").slice(0, 10)
+        : undefined,
+      scoringModel: typeof submitted.scoringModel === "string" ? submitted.scoringModel : undefined,
+      evaluationMode: submitted.evaluationMode === true,
+    };
+
+    if (config.followerMin > config.followerMax) {
+      return NextResponse.json(
+        { error: "Minimum followers cannot exceed maximum followers" },
+        { status: 400 }
+      );
+    }
+
+    const { data: logRecord, error: logError } = await supabase
+      .from("research_logs")
+      .insert({
+        organization_id: user.organizationId,
+        requested_by_user_id: user.id,
+        status: "queued",
+        phase: "queued",
+        heartbeat_at: new Date().toISOString(),
+        config_used: config,
+        is_evaluation: config.evaluationMode === true,
+        prompt_version: RESEARCH_PROMPT_VERSION,
+        context_summary: {
+          sport: config.sportFocus,
+          customContext: config.customContext,
+          safety: "draft-only; no outreach is sent by research",
+          toolchain: [
+            { step: "Discovery", provider: "Perplexity Sonar", purpose: "Source-linked candidate discovery" },
+            { step: "Identity", provider: "Apify Google + Instagram", purpose: "Public identity and audience evidence" },
+            { step: "Scoring", provider: "Latest Anthropic Sonnet", purpose: "Transparent partnership-fit scoring" },
+            { step: "Storage", provider: "Supabase", purpose: "Evidence ledger and pipeline disposition" },
+          ],
+        },
+        raw_results: [],
+        scoring_details: [],
+        final_results: [],
+        stats: {
+          discovered: 0,
+          enriched: 0,
+          scored: 0,
+          returned: 0,
+          added: 0,
+          phase: "queued",
+        },
+      })
+      .select("id")
+      .single();
+
+    if (logError || !logRecord) throw logError || new Error("Could not create research run");
+
+    const workflow = await start(runResearchWorkflow, [{
+      researchLogId: logRecord.id,
+      organizationId: user.organizationId,
+      requestedByUserId: user.id,
+      config,
+    }]);
+
+    const { error: workflowLinkError } = await supabase
+      .from("research_logs")
+      .update({ workflow_run_id: workflow.runId })
+      .eq("id", logRecord.id)
+      .eq("organization_id", user.organizationId);
+    if (workflowLinkError) throw workflowLinkError;
+
+    return NextResponse.json({
+      success: true,
+      status: "queued",
+      runId: logRecord.id,
+      workflowRunId: workflow.runId,
+    }, { status: 202 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not start research";
+    const status = message === "Not authenticated" ? 401 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

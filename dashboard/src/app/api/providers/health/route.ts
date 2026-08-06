@@ -12,7 +12,7 @@ export async function GET() {
       getProviderHealth(user),
       listChannelAccounts(user),
     ]);
-    return NextResponse.json({ ...health, accounts }, {
+    return NextResponse.json({ ...health, accounts, currentUserName: user.name }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

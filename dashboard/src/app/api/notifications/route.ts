@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export interface ActivityNotification {
   id: string;
@@ -20,13 +16,17 @@ export interface ActivityNotification {
 // GET - Fetch recent notifications
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get("limit") || "50");
+    const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "50"), 1), 100);
     const unreadOnly = searchParams.get("unread") === "true";
 
     let query = supabase
       .from("activity_notifications")
       .select("*")
+      .eq("organization_id", user.organizationId)
+      .or(`user_id.is.null,user_id.eq.${user.id}`)
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
     const { count: unreadCount } = await supabase
       .from("activity_notifications")
       .select("*", { count: "exact", head: true })
+      .eq("organization_id", user.organizationId)
+      .or(`user_id.is.null,user_id.eq.${user.id}`)
       .eq("read", false);
 
     return NextResponse.json({
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest) {
     console.error("Notifications error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to fetch notifications" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
@@ -63,6 +65,8 @@ export async function GET(request: NextRequest) {
 // POST - Create a new notification
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { type, title, message, metadata, user_name, athlete_id, link } = await request.json();
 
     if (!type || !title) {
@@ -72,6 +76,8 @@ export async function POST(request: NextRequest) {
     const { data: notification, error } = await supabase
       .from("activity_notifications")
       .insert({
+        organization_id: user.organizationId,
+        user_id: user.id,
         type,
         title,
         message: message || "",
@@ -94,7 +100,7 @@ export async function POST(request: NextRequest) {
     console.error("Create notification error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to create notification" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
@@ -102,12 +108,16 @@ export async function POST(request: NextRequest) {
 // PATCH - Mark notifications as read
 export async function PATCH(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { ids, markAllRead } = await request.json();
 
     if (markAllRead) {
       const { error } = await supabase
         .from("activity_notifications")
         .update({ read: true })
+        .eq("organization_id", user.organizationId)
+        .or(`user_id.is.null,user_id.eq.${user.id}`)
         .eq("read", false);
 
       if (error) {
@@ -124,7 +134,9 @@ export async function PATCH(request: NextRequest) {
     const { error } = await supabase
       .from("activity_notifications")
       .update({ read: true })
-      .in("id", ids);
+      .in("id", ids)
+      .eq("organization_id", user.organizationId)
+      .or(`user_id.is.null,user_id.eq.${user.id}`);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -135,7 +147,7 @@ export async function PATCH(request: NextRequest) {
     console.error("Mark read error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update notifications" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const PIPELINE_STAGES = ["research", "approval", "reach_out", "response", "appointment", "contract"];
 
 export async function GET() {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     // Get counts for each pipeline stage directly from the column
     const counts: Record<string, number> = {};
 
@@ -17,6 +15,7 @@ export async function GET() {
       const { count } = await supabase
         .from("athletes")
         .select("id", { count: "exact", head: true })
+        .eq("organization_id", user.organizationId)
         .eq("pipeline_stage", stage)
         .eq("is_historical", false);
 
@@ -26,11 +25,13 @@ export async function GET() {
     // Also get totals including historical
     const { count: totalCount } = await supabase
       .from("athletes")
-      .select("id", { count: "exact", head: true });
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", user.organizationId);
 
     const { count: historicalCount } = await supabase
       .from("athletes")
       .select("id", { count: "exact", head: true })
+      .eq("organization_id", user.organizationId)
       .eq("is_historical", true);
 
     return NextResponse.json({
@@ -45,7 +46,7 @@ export async function GET() {
     console.error("Error fetching pipeline:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error", counts: {} },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

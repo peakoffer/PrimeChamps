@@ -125,35 +125,39 @@ export default function ApprovalModal({ athlete, isOpen, onClose, onComplete }: 
       }
 
       // Log to research_feedback for AI learning (this is the key data!)
-      const { error: feedbackError } = await supabase.from("research_feedback").insert({
-        research_log_id: parsedNotes.research_run_id || null,
-        athlete_id: athlete.id,
-        candidate_data: {
+      const feedbackResponse = await fetch("/api/research/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          research_log_id: parsedNotes.research_run_id || null,
+          athlete_id: athlete.id,
+          candidate_data: {
           name: athlete.name,
           instagram_handle: athlete.instagram_handle,
           sport: athlete.sport,
           follower_count: athlete.follower_count,
           bio: parsedNotes.bio,
-        },
-        decision: "approved",
-        approval_reason: primaryReason,
-        approval_notes: notes || null,
-        score: parsedNotes.research_score || parsedNotes.score,
-        reasoning: parsedNotes.research_reasoning || parsedNotes.reasoning,
-        feedback_data: {
-          primary_reason: primaryReason,
-          follower_assessment: followerAssessment,
-          content_quality: contentQuality,
-          content_quality_score: CONTENT_QUALITY.find(c => c.value === contentQuality)?.score,
-          engagement_quality: engagementQuality,
-          priority: priority,
-          similar_to: similarTo || null,
-          additional_notes: notes || null,
-        },
+          },
+          decision: "approved",
+          approval_reason: primaryReason,
+          approval_notes: notes || null,
+          score: parsedNotes.research_score || parsedNotes.score,
+          reasoning: parsedNotes.research_reasoning || parsedNotes.reasoning,
+          feedback_data: {
+            primary_reason: primaryReason,
+            follower_assessment: followerAssessment,
+            content_quality: contentQuality,
+            content_quality_score: CONTENT_QUALITY.find(c => c.value === contentQuality)?.score,
+            engagement_quality: engagementQuality,
+            priority: priority,
+            similar_to: similarTo || null,
+            additional_notes: notes || null,
+          },
+        }),
       });
 
-      if (feedbackError) {
-        console.error("Error logging research feedback:", feedbackError);
+      if (!feedbackResponse.ok) {
+        console.error("Error logging research feedback:", await feedbackResponse.text());
         // Non-critical, continue
       }
 

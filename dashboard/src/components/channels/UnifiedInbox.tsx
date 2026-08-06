@@ -425,6 +425,7 @@ export default function UnifiedInbox() {
   const connectedInstagramAccount = accounts.find(
     (account) => account.provider === "instagram" && account.status === "connected"
   );
+  const accountOwners = new Map(accounts.map((account) => [account.id, account.ownerName]));
   const isEmailThread = selected?.channel === "email";
 
   return (
@@ -479,12 +480,12 @@ export default function UnifiedInbox() {
                   <span className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold">{workspace.label}</span>
                     {channelCounts[workspace.id] ? (
-                      <span className={`text-xs ${active ? "text-slate-300" : "text-slate-400"}`}>
+                      <span className={`text-xs ${active ? "text-slate-300" : "text-slate-600"}`}>
                         {channelCounts[workspace.id]}
                       </span>
                     ) : null}
                   </span>
-                  <span className={`mt-0.5 block text-[11px] ${active ? "text-slate-300" : "text-slate-400"}`}>
+                  <span className={`mt-0.5 block text-[11px] ${active ? "text-slate-300" : "text-slate-600"}`}>
                     {workspace.description}
                   </span>
                 </span>
@@ -552,9 +553,9 @@ export default function UnifiedInbox() {
                       key={view}
                       type="button"
                       onClick={() => switchEmailView(view)}
-                      className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${emailView === view ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                      className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${emailView === view ? "bg-white text-slate-950 shadow-sm" : "text-slate-700 hover:text-slate-950"}`}
                     >
-                      {label} <span className="ml-1 text-[10px] text-slate-400">{count}</span>
+                      {label} <span className="ml-1 text-[10px] text-slate-600">{count}</span>
                     </button>
                   ))}
                 </div>
@@ -625,6 +626,11 @@ export default function UnifiedInbox() {
                           {cleanMailText(conversation.lastMessagePreview) || "No preview available"}
                         </p>
                         <div className="mt-2 flex items-center gap-2">
+                          {scope === "team" ? (
+                            <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                              {accountOwners.get(conversation.accountId) || "Team member"}
+                            </span>
+                          ) : null}
                           {conversation.athlete ? (
                             <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
                               Athlete · {conversation.athlete.sport}
@@ -742,7 +748,7 @@ export default function UnifiedInbox() {
                           <>
                             <h2 className="truncate font-semibold text-slate-950">{contactLabel(selected)}</h2>
                             <p className="truncate text-sm text-slate-500">
-                              {selected.accountLabel}{selected.subject ? ` · ${selected.subject}` : ""}
+                              {selected.accountLabel}{scope === "team" ? ` · ${accountOwners.get(selected.accountId) || "Team member"}` : ""}{selected.subject ? ` · ${selected.subject}` : ""}
                             </p>
                           </>
                         )}

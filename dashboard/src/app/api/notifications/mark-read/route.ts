@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { markAsRead, markAllAsRead } from "@/lib/notifications";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Mark notifications as read
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const body = await request.json();
     const { notification_ids } = body;
 
     // Mark all if 'all' is passed
     if (notification_ids === "all") {
-      const success = await markAllAsRead();
-      if (!success) {
-        return NextResponse.json({ error: "Failed to mark all as read" }, { status: 500 });
-      }
+      const { error } = await supabase
+        .from("activity_notifications")
+        .update({ read: true })
+        .eq("organization_id", user.organizationId)
+        .or(`user_id.is.null,user_id.eq.${user.id}`)
+        .eq("read", false);
+      if (error) throw error;
       return NextResponse.json({ success: true, message: "All notifications marked as read" });
     }
 
@@ -21,17 +27,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "notification_ids array required" }, { status: 400 });
     }
 
-    const success = await markAsRead(notification_ids);
-    if (!success) {
-      return NextResponse.json({ error: "Failed to mark as read" }, { status: 500 });
-    }
+    const { error } = await supabase
+      .from("activity_notifications")
+      .update({ read: true })
+      .in("id", notification_ids)
+      .eq("organization_id", user.organizationId)
+      .or(`user_id.is.null,user_id.eq.${user.id}`);
+    if (error) throw error;
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Mark read error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to update notifications" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

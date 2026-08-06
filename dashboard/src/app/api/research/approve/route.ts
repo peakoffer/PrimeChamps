@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Approve a research candidate and add to athletes
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { candidate, researchRunId } = await request.json();
 
     if (!candidate || !candidate.instagram_handle) {
@@ -26,12 +24,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const candidateId = typeof candidate.id === "string" ? candidate.id : null;
+    if (candidateId) {
+      const { data: candidateRecord, error: candidateError } = await supabase
+        .from("research_candidates")
+        .select("id,research_log_id")
+        .eq("id", candidateId)
+        .eq("organization_id", user.organizationId)
+        .maybeSingle();
+      if (candidateError) throw candidateError;
+      if (!candidateRecord || (researchRunId && candidateRecord.research_log_id !== researchRunId)) {
+        return NextResponse.json({ error: "Research candidate not found" }, { status: 404 });
+      }
+    } else if (researchRunId) {
+      const { data: run } = await supabase
+        .from("research_logs")
+        .select("id")
+        .eq("id", researchRunId)
+        .eq("organization_id", user.organizationId)
+        .maybeSingle();
+      if (!run) return NextResponse.json({ error: "Research run not found" }, { status: 404 });
+    }
+
     // Check if already exists
     const { data: existing } = await supabase
       .from("athletes")
       .select("id")
       .eq("instagram_handle", candidate.instagram_handle)
-      .single();
+      .eq("organization_id", user.organizationId)
+      .maybeSingle();
 
     if (existing) {
       return NextResponse.json({ error: "Athlete already exists", athleteId: existing.id }, { status: 409 });
@@ -41,6 +62,7 @@ export async function POST(request: NextRequest) {
     const { data: newAthlete, error: createError } = await supabase
       .from("athletes")
       .insert({
+        organization_id: user.organizationId,
         name: candidate.name,
         sport: candidate.sport,
         instagram_handle: candidate.instagram_handle,
@@ -62,6 +84,8 @@ export async function POST(request: NextRequest) {
         pipeline_stage: "approval", // Goes to Approval stage for human review
         source: "research_agent",
         is_historical: false,
+        is_test_data: false,
+        source_research_log_id: researchRunId || null,
       })
       .select()
       .single();
@@ -74,6 +98,9 @@ export async function POST(request: NextRequest) {
     // Log the approval in research_feedback
     try {
       await supabase.from("research_feedback").insert({
+        organization_id: user.organizationId,
+        created_by_user_id: user.id,
+        research_candidate_id: candidateId,
         research_log_id: researchRunId,
         athlete_id: newAthlete.id,
         candidate_data: candidate,
@@ -81,6 +108,13 @@ export async function POST(request: NextRequest) {
         score: candidate.score,
         reasoning: candidate.reasoning,
       });
+      if (candidateId) {
+        await supabase.from("research_candidates").update({
+          athlete_id: newAthlete.id,
+          disposition: "approval",
+          disposition_reason: "Approved by a user after research review",
+        }).eq("id", candidateId).eq("organization_id", user.organizationId);
+      }
     } catch {
       // Non-critical, continue even if feedback logging fails
       console.error("Failed to log approval feedback");
@@ -89,6 +123,8 @@ export async function POST(request: NextRequest) {
     // Log activity notification
     try {
       await supabase.from("activity_notifications").insert({
+        organization_id: user.organizationId,
+        user_id: user.id,
         type: "candidate_approved",
         title: "Candidate Added",
         message: `${candidate.name} (@${candidate.instagram_handle}) added to Approval queue`,
@@ -108,7 +144,7 @@ export async function POST(request: NextRequest) {
     console.error("Approve error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to approve" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

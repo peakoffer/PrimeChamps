@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET - List contracts with optional filters
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const athleteId = searchParams.get("athlete_id");
     const status = searchParams.get("status");
@@ -32,6 +30,8 @@ export async function GET(request: NextRequest) {
           outcome
         )
       `)
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -61,6 +61,8 @@ export async function GET(request: NextRequest) {
 // POST - Create a new contract
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const body = await request.json();
     const {
       athlete_id,
@@ -72,6 +74,12 @@ export async function POST(request: NextRequest) {
       start_date,
       terms,
       notes,
+      currency = "USD",
+      guaranteed_value,
+      projected_revenue_share_value,
+      actual_revenue,
+      renewal_date,
+      acquisition_source,
     } = body;
 
     if (!athlete_id) {
@@ -86,25 +94,43 @@ export async function POST(request: NextRequest) {
       .from("athletes")
       .select("id, name")
       .eq("id", athlete_id)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (athleteError || !athlete) {
       return NextResponse.json({ error: "Athlete not found" }, { status: 404 });
     }
 
+    const normalizedMonthlyGuarantee = monthly_guarantee == null ? null : Number(monthly_guarantee);
+    const normalizedDuration = contract_duration_months == null ? null : Number(contract_duration_months);
+    const guaranteedValue = guaranteed_value == null
+      ? (normalizedMonthlyGuarantee || 0) * (normalizedDuration || 0)
+      : Number(guaranteed_value);
+    const projectedRevenueShareValue = Number(projected_revenue_share_value || 0);
+    const totalContractValue = guaranteedValue + projectedRevenueShareValue;
+
     const { data, error } = await supabase
       .from("contracts")
       .insert({
+        organization_id: user.organizationId,
         athlete_id,
         appointment_id,
         contract_type,
         revenue_share_percent,
-        monthly_guarantee,
-        contract_duration_months,
+        monthly_guarantee: normalizedMonthlyGuarantee,
+        contract_duration_months: normalizedDuration,
         start_date,
         terms: terms || {},
         notes,
         status: "draft",
+        currency: String(currency).toUpperCase(),
+        guaranteed_value: guaranteedValue,
+        projected_revenue_share_value: projectedRevenueShareValue,
+        total_contract_value: totalContractValue,
+        actual_revenue: actual_revenue == null ? null : Number(actual_revenue),
+        renewal_date: renewal_date || null,
+        acquisition_source: acquisition_source || null,
+        is_test_data: false,
       })
       .select(`
         *,
@@ -127,7 +153,7 @@ export async function POST(request: NextRequest) {
     console.error("Error creating contract:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

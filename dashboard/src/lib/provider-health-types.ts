@@ -29,6 +29,7 @@ export interface ProviderHealthItem {
 export interface ProviderHealthResponse {
   generatedAt: string;
   databaseAvailable: boolean;
+  currentUserName: string;
   providers: ProviderHealthItem[];
   accounts: ChannelAccountDTO[];
 }

@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   analyticsPeriodStart,
   buildFunnelStages,
 } from "@/lib/analytics/funnel";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
-
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const startDate = analyticsPeriodStart(searchParams.get("period") || "365d");
     const sport = searchParams.get("sport");
@@ -19,6 +17,8 @@ export async function GET(request: NextRequest) {
     let athleteQuery = supabase
       .from("athletes")
       .select("id,pipeline_stage,created_at")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .not("pipeline_stage", "is", null)
       .or("is_historical.eq.false,is_historical.is.null");
     if (startDate) athleteQuery = athleteQuery.gte("created_at", startDate);
@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
           supabase
             .from("contracts")
             .select("athlete_id")
+            .eq("organization_id", user.organizationId)
+            .eq("is_test_data", false)
             .in("athlete_id", athleteIds)
             .not("signed_at", "is", null),
         ])
@@ -56,7 +58,7 @@ export async function GET(request: NextRequest) {
       cohort: {
         size: cohort.length,
         definition:
-          "Non-historical athletes added during the selected period, including rejections",
+          "Non-historical, non-test athletes added during the selected period, including rejections",
         stageDefinition:
           "Cumulative progression. Research through Appointment use current stage plus stage history; Contract requires signed_at.",
       },
@@ -65,7 +67,7 @@ export async function GET(request: NextRequest) {
     console.error("Analytics funnel error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

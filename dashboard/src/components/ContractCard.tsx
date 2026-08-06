@@ -24,6 +24,12 @@ interface Contract {
   start_date?: string | null;
   signed_at?: string | null;
   notes?: string | null;
+  currency?: string | null;
+  guaranteed_value?: number | null;
+  projected_revenue_share_value?: number | null;
+  total_contract_value?: number | null;
+  actual_revenue?: number | null;
+  renewal_date?: string | null;
   athletes?: Athlete;
 }
 
@@ -83,9 +89,7 @@ export default function ContractCard({
       const response = await fetch(`/api/contracts/${contract.id}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mark_historical: true,
-        }),
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) {
@@ -104,7 +108,7 @@ export default function ContractCard({
     if (!amount) return null;
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "USD",
+      currency: contract.currency || "USD",
       minimumFractionDigits: 0,
     }).format(amount);
   };
@@ -173,6 +177,24 @@ export default function ContractCard({
               <span className="font-medium">
                 {formatCurrency(contract.monthly_guarantee)}/mo
               </span>
+            </div>
+          )}
+          {contract.total_contract_value != null && (
+            <div>
+              <span className="text-gray-800">Projected Value:</span>{" "}
+              <span className="font-semibold text-green-700">{formatCurrency(contract.total_contract_value)}</span>
+            </div>
+          )}
+          {contract.actual_revenue != null && (
+            <div>
+              <span className="text-gray-800">Actual Revenue:</span>{" "}
+              <span className="font-medium">{formatCurrency(contract.actual_revenue)}</span>
+            </div>
+          )}
+          {contract.renewal_date && (
+            <div>
+              <span className="text-gray-800">Renewal:</span>{" "}
+              <span className="font-medium">{new Date(contract.renewal_date).toLocaleDateString()}</span>
             </div>
           )}
           {contract.contract_duration_months && (

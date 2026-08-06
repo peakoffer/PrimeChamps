@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 
 const AGENT_SERVER_URL = process.env.AGENT_SERVER_URL || "http://localhost:8000";
 
 // POST - Trigger bulk enrichment for athletes (profile pics, etc)
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
     const body = await request.json();
     const { source = "instagram", limit = 50, historical = true } = body;
 
@@ -15,7 +17,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         ...(process.env.BACKEND_API_KEY ? { "X-API-Key": process.env.BACKEND_API_KEY } : {}),
       },
-      body: JSON.stringify({ source, limit, historical }),
+      body: JSON.stringify({ source, limit, historical, organization_id: user.organizationId, requested_by_user_id: user.id }),
     });
 
     if (!response.ok) {
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

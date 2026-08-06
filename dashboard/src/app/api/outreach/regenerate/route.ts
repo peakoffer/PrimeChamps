@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Regenerate message or comment content
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { itemId, type } = await request.json();
 
     if (!itemId || !type) {
@@ -18,23 +17,27 @@ export async function POST(request: NextRequest) {
     }
 
     let athleteId: string | null = null;
+    let generationVersion = 1;
 
     // Get the athlete ID from the existing item
     if (type === "dm") {
       const { data } = await supabase
         .from("outreach_messages")
-        .select("athlete_id, generation_version")
+        .select("athlete_id, generation_version, athletes!inner(organization_id)")
         .eq("id", itemId)
+        .eq("athletes.organization_id", user.organizationId)
         .single();
 
       if (data) {
         athleteId = data.athlete_id;
+        generationVersion = Number(data.generation_version) || 1;
       }
     } else if (type === "comment") {
       const { data } = await supabase
         .from("content_engagements")
-        .select("athlete_id, post_id")
+        .select("athlete_id, post_id, athletes!inner(organization_id)")
         .eq("id", itemId)
+        .eq("athletes.organization_id", user.organizationId)
         .single();
 
       if (data) {
@@ -54,6 +57,7 @@ export async function POST(request: NextRequest) {
       .from("athletes")
       .select("*")
       .eq("id", athleteId)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (!athlete) {
@@ -109,7 +113,7 @@ export async function POST(request: NextRequest) {
         .from("outreach_messages")
         .update({
           message_content: newContent,
-          generation_version: supabase.rpc("increment", { x: 1 }),
+          generation_version: generationVersion + 1,
         })
         .eq("id", itemId);
     } else if (type === "comment") {
@@ -139,7 +143,7 @@ export async function POST(request: NextRequest) {
     console.error("Error regenerating content:", error);
     return NextResponse.json(
       { error: "Failed to regenerate content" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

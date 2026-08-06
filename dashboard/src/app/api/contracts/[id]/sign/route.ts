@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Mark contract as signed
 export async function POST(
@@ -12,15 +8,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { id } = await params;
     const body = await request.json();
-    const { signed_at, mark_historical } = body;
+    const { signed_at } = body;
 
     // Get the contract to find the athlete
     const { data: contract, error: fetchError } = await supabase
       .from("contracts")
       .select("athlete_id, status")
       .eq("id", id)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (fetchError || !contract) {
@@ -39,6 +38,7 @@ export async function POST(
         signed_at: signed_at || new Date().toISOString(),
       })
       .eq("id", id)
+      .eq("organization_id", user.organizationId)
       .select(`
         *,
         athletes (
@@ -55,39 +55,25 @@ export async function POST(
       throw error;
     }
 
-    // If mark_historical is true, mark the athlete as a success story
-    if (mark_historical) {
-      const { error: athleteError } = await supabase
-        .from("athletes")
-        .update({
-          is_historical: true,
-          pipeline_stage: null,
-        })
-        .eq("id", contract.athlete_id);
-
-      if (athleteError) {
-        console.error("Error marking athlete as historical:", athleteError);
-      }
-
-      // Log pipeline history
-      await supabase.from("pipeline_history").insert({
-        athlete_id: contract.athlete_id,
-        from_stage: "contract",
-        to_stage: null,
-        reason: "Contract signed - converted to success story",
-      });
-    }
+    // A newly signed athlete is a live conversion, not imported historical
+    // data. Keep them in Contract so funnel and economics analytics agree.
+    await supabase.from("pipeline_history").insert({
+      athlete_id: contract.athlete_id,
+      from_stage: "contract",
+      to_stage: "contract",
+      reason: "Contract signed",
+    });
 
     return NextResponse.json({
       contract: data,
       success: true,
-      athlete_marked_historical: mark_historical || false,
+      athlete_marked_historical: false,
     });
   } catch (error) {
     console.error("Error signing contract:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

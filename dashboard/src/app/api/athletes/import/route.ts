@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const VALID_STAGES = new Set(["research", "approval", "reach_out", "response", "appointment", "contract", "rejected"]);
 
 interface CSVRow {
   name: string;
@@ -73,6 +71,8 @@ function parseCSV(csvText: string): CSVRow[] {
 // POST /api/athletes/import - Import athletes from CSV
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const defaultStage = formData.get("default_stage") as string | null;
@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
     const { data: existingAthletes } = await supabase
       .from("athletes")
       .select("instagram_handle")
+      .eq("organization_id", user.organizationId)
       .in("instagram_handle", handles as string[]);
 
     const existingHandles = new Set(
@@ -129,7 +130,15 @@ export async function POST(request: NextRequest) {
 
         imported.push(row.name);
 
+        const requestedStage = row.pipeline_stage || defaultStage || "research";
+        if (!VALID_STAGES.has(requestedStage)) {
+          errors.push({ row: index + 2, error: `Invalid pipeline stage: ${requestedStage}` });
+          imported.pop();
+          return null;
+        }
+
         return {
+          organization_id: user.organizationId,
           name: row.name,
           sport: row.sport || "Unknown",
           instagram_handle: row.instagram_handle || null,
@@ -137,11 +146,12 @@ export async function POST(request: NextRequest) {
           follower_count: row.follower_count
             ? parseInt(String(row.follower_count).replace(/,/g, ""))
             : null,
-          pipeline_stage: row.pipeline_stage || defaultStage || "research",
+          pipeline_stage: requestedStage,
           country: row.country || null,
           source: "csv_import",
           enrichment_status: "pending",
           is_historical: false,
+          is_test_data: false,
         };
       })
       .filter((athlete): athlete is NonNullable<typeof athlete> => athlete !== null);
@@ -157,17 +167,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Log notification
-    await fetch(`${request.nextUrl.origin}/api/notifications`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await supabase.from("activity_notifications").insert({
+        organization_id: user.organizationId,
+        user_id: user.id,
         type: "csv_import",
         title: "Athletes Imported",
         message: `Imported ${imported.length} athletes, skipped ${skipped.length} duplicates`,
         metadata: { imported: imported.length, skipped: skipped.length },
-      }),
-    }).catch(() => {});
+        read: false,
+      });
 
     return NextResponse.json({
       success: true,
@@ -181,7 +189,7 @@ export async function POST(request: NextRequest) {
     console.error("Error in POST /api/athletes/import:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
