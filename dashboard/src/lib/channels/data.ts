@@ -24,7 +24,7 @@ export async function listChannelAccounts(
   let query = admin
     .from("channel_accounts")
     .select(
-      "id,owner_user_id,provider,account_label,email,username,status,scopes,last_sync_at,last_error,sync_enabled,profiles!channel_accounts_owner_user_id_fkey(display_name)"
+      "id,owner_user_id,provider,account_label,email,username,status,scopes,last_sync_at,last_sync_started_at,last_error,sync_enabled,profiles!channel_accounts_owner_user_id_fkey(display_name)"
     )
     .eq("organization_id", user.organizationId)
     .order("created_at", { ascending: true });
@@ -50,6 +50,7 @@ export async function listChannelAccounts(
     status: account.status,
     scopes: Array.isArray(account.scopes) ? account.scopes : [],
     lastSyncAt: account.last_sync_at,
+    lastSyncStartedAt: account.last_sync_started_at,
     lastError: account.last_error,
     syncEnabled: account.sync_enabled,
   }));

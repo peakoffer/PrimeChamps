@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { getOwnedChannelAccount, recordChannelAuditEvent } from "@/lib/channels/data";
 import { ensureMicrosoftSubscription, syncMicrosoftAccount } from "@/lib/channels/microsoft";
-import { subscribeInstagramAccount } from "@/lib/channels/instagram";
+import {
+  subscribeInstagramAccount,
+  syncInstagramAccount,
+} from "@/lib/channels/instagram";
 
 export async function POST(
   _request: NextRequest,
@@ -18,6 +21,7 @@ export async function POST(
       await ensureMicrosoftSubscription(account);
     } else if (account.provider === "instagram") {
       await subscribeInstagramAccount(account);
+      result = await syncInstagramAccount(account, "manual");
     } else {
       throw new Error(`${account.provider} sync is not implemented yet`);
     }

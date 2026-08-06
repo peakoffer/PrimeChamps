@@ -1,7 +1,10 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { recordChannelAuditEvent } from "@/lib/channels/data";
-import { subscribeInstagramAccount } from "@/lib/channels/instagram";
+import {
+  subscribeInstagramAccount,
+  syncInstagramAccount,
+} from "@/lib/channels/instagram";
 import {
   ensureMicrosoftSubscription,
   syncMicrosoftAccount,
@@ -115,6 +118,7 @@ export async function GET(
           await ensureMicrosoftSubscription(connectedAccount);
         } else if (provider === "instagram") {
           await subscribeInstagramAccount(connectedAccount);
+          await syncInstagramAccount(connectedAccount, "connect");
         }
       } catch (initializationError) {
         console.error(

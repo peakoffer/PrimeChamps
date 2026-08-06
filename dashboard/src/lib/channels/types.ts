@@ -34,6 +34,7 @@ export interface ChannelAccountDTO {
   status: ChannelAccountRecord["status"];
   scopes: string[];
   lastSyncAt: string | null;
+  lastSyncStartedAt: string | null;
   lastError: string | null;
   syncEnabled: boolean;
 }

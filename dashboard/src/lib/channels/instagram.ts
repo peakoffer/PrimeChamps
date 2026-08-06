@@ -9,7 +9,12 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ChannelAccountRecord } from "@/lib/channels/types";
 
-const INSTAGRAM_API_VERSION = process.env.META_API_VERSION || "v24.0";
+const INSTAGRAM_API_VERSION = process.env.META_API_VERSION || "v26.0";
+const INSTAGRAM_MESSAGE_DETAIL_LIMIT = 20;
+const INSTAGRAM_CONVERSATION_PAGE_LIMIT = 50;
+const INSTAGRAM_MAX_CONVERSATION_PAGES = 10;
+
+type SyncTrigger = "connect" | "manual" | "cron" | "webhook";
 
 type InstagramProfile = {
   id?: string;
@@ -19,6 +24,37 @@ type InstagramProfile = {
   profile_pic?: string;
   profile_picture_url?: string;
   error?: { message?: string };
+};
+
+type InstagramMessageParty = {
+  id?: string;
+  username?: string;
+  name?: string;
+};
+
+type InstagramMessageDetail = {
+  id?: string;
+  created_time?: string;
+  from?: InstagramMessageParty;
+  to?: { data?: InstagramMessageParty[] };
+  message?: string;
+  error?: { message?: string };
+};
+
+type InstagramConversation = {
+  id?: string;
+  updated_time?: string;
+};
+
+type InstagramConversationPage = {
+  data?: InstagramConversation[];
+  paging?: { next?: string };
+};
+
+type InstagramConversationMessages = {
+  messages?: {
+    data?: InstagramMessageDetail[];
+  };
 };
 
 type InstagramWebhookMessage = {
@@ -110,11 +146,17 @@ export async function getInstagramAccessToken(account: ChannelAccountRecord) {
 
 async function instagramRequest<T>(
   account: ChannelAccountRecord,
-  path: string,
+  pathOrUrl: string,
   init: RequestInit = {}
 ) {
   const token = await getInstagramAccessToken(account);
-  const response = await fetch(`https://graph.instagram.com/${INSTAGRAM_API_VERSION}${path}`, {
+  const url = pathOrUrl.startsWith("http")
+    ? pathOrUrl
+    : `https://graph.instagram.com/${INSTAGRAM_API_VERSION}${pathOrUrl}`;
+  if (pathOrUrl.startsWith("http") && new URL(pathOrUrl).hostname !== "graph.instagram.com") {
+    throw new Error("Instagram pagination returned an unexpected host");
+  }
+  const response = await fetch(url, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -128,6 +170,31 @@ async function instagramRequest<T>(
     throw new Error(payload.error?.message || `Instagram API request failed (${response.status})`);
   }
   return payload;
+}
+
+function instagramMessageTimestamp(message: InstagramMessageDetail) {
+  const parsed = message.created_time ? new Date(message.created_time) : new Date();
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function instagramMessageContent(message: InstagramMessageDetail) {
+  return message.message?.trim() || "[Instagram media or shared content]";
+}
+
+function instagramRecipients(message: InstagramMessageDetail) {
+  return (message.to?.data || [])
+    .map((recipient) => recipient.username || recipient.id)
+    .filter((value): value is string => Boolean(value));
+}
+
+function sanitizeInstagramPageUrl(value?: string | null) {
+  if (!value) return null;
+  const url = new URL(value);
+  if (url.hostname !== "graph.instagram.com") {
+    throw new Error("Instagram pagination returned an unexpected host");
+  }
+  url.searchParams.delete("access_token");
+  return url.toString();
 }
 
 async function loadParticipantProfile(account: ChannelAccountRecord, participantId: string) {
@@ -150,6 +217,203 @@ async function findAthleteByHandle(handle?: string | null) {
     .limit(1)
     .maybeSingle();
   return data || null;
+}
+
+function isInstagramAccountParty(
+  party: InstagramMessageParty | undefined,
+  selfIds: Set<string>,
+  accountUsername: string | null
+) {
+  if (!party) return false;
+  if (party.id && selfIds.has(party.id)) return true;
+  return Boolean(
+    party.username &&
+      accountUsername &&
+      party.username.toLowerCase() === accountUsername.toLowerCase()
+  );
+}
+
+function instagramParticipant(
+  messages: InstagramMessageDetail[],
+  selfIds: Set<string>,
+  accountUsername: string | null
+) {
+  for (const message of messages) {
+    const outbound = isInstagramAccountParty(message.from, selfIds, accountUsername);
+    const participant = outbound
+      ? (message.to?.data || []).find(
+          (recipient) => !isInstagramAccountParty(recipient, selfIds, accountUsername)
+        )
+      : message.from;
+    if (participant?.id) return participant;
+  }
+  return null;
+}
+
+async function loadInstagramConversationMessages(
+  account: ChannelAccountRecord,
+  conversationId: string
+) {
+  const fields = `messages.limit(${INSTAGRAM_MESSAGE_DETAIL_LIMIT}){id,created_time,from,to,message}`;
+  const result = await instagramRequest<InstagramConversationMessages>(
+    account,
+    `/${encodeURIComponent(conversationId)}?fields=${encodeURIComponent(fields)}`
+  );
+  return (result.messages?.data || []).filter(
+    (message): message is InstagramMessageDetail & { id: string } => Boolean(message.id)
+  );
+}
+
+async function upsertImportedInstagramConversation(
+  account: ChannelAccountRecord,
+  providerConversation: InstagramConversation & { id: string },
+  messages: Array<InstagramMessageDetail & { id: string }>,
+  selfIds: Set<string>
+) {
+  if (!messages.length) return { messagesSeen: 0, messagesWritten: 0, conversationId: null };
+
+  const sortedMessages = [...messages].sort(
+    (left, right) =>
+      new Date(left.created_time || 0).getTime() - new Date(right.created_time || 0).getTime()
+  );
+  const newestFirst = [...sortedMessages].reverse();
+  const participant = instagramParticipant(newestFirst, selfIds, account.username);
+  if (!participant?.id) {
+    return { messagesSeen: messages.length, messagesWritten: 0, conversationId: null };
+  }
+
+  const profile = await loadParticipantProfile(account, participant.id);
+  const participantUsername = profile.username || participant.username || null;
+  const athlete = await findAthleteByHandle(participantUsername);
+  const admin = createAdminClient();
+  const { data: canonicalConversation, error: canonicalError } = await admin
+    .from("channel_conversations")
+    .select("id,provider_conversation_id,last_message_at,unread_count,metadata")
+    .eq("channel_account_id", account.id)
+    .eq("provider_conversation_id", providerConversation.id)
+    .maybeSingle();
+  if (canonicalError) throw canonicalError;
+
+  let existingConversation = canonicalConversation;
+  if (!existingConversation) {
+    const { data: participantConversation, error: participantError } = await admin
+      .from("channel_conversations")
+      .select("id,provider_conversation_id,last_message_at,unread_count,metadata")
+      .eq("channel_account_id", account.id)
+      .eq("participant_address", participant.id)
+      .maybeSingle();
+    if (participantError) throw participantError;
+    existingConversation = participantConversation;
+  }
+
+  const latestMessage = newestFirst[0];
+  const latestTimestamp = instagramMessageTimestamp(latestMessage);
+  const latestInbound = newestFirst.find(
+    (message) => !isInstagramAccountParty(message.from, selfIds, account.username)
+  );
+  const existingMetadata = (existingConversation?.metadata || {}) as Record<string, unknown>;
+  const metadata = {
+    ...existingMetadata,
+    instagramScopedId: participant.id,
+    instagramConversationId: providerConversation.id,
+    profilePictureUrl:
+      profile.profile_pic ||
+      profile.profile_picture_url ||
+      existingMetadata.profilePictureUrl ||
+      null,
+    historicalDetailLimit: INSTAGRAM_MESSAGE_DETAIL_LIMIT,
+    ...(latestInbound ? { lastInboundAt: instagramMessageTimestamp(latestInbound) } : {}),
+  };
+  const importedIsNewest =
+    !existingConversation?.last_message_at ||
+    new Date(latestTimestamp).getTime() >=
+      new Date(existingConversation.last_message_at).getTime();
+  const conversationValues = {
+    organization_id: account.organization_id,
+    channel_account_id: account.id,
+    provider_conversation_id: providerConversation.id,
+    channel: "instagram",
+    participant_name:
+      profile.name || participant.name || participantUsername || "Instagram contact",
+    participant_handle: participantUsername,
+    participant_address: participant.id,
+    assigned_user_id: account.owner_user_id,
+    athlete_id: athlete?.id || null,
+    status: "open",
+    metadata,
+    ...(importedIsNewest
+      ? {
+          last_message_at: latestTimestamp,
+          last_message_preview: instagramMessageContent(latestMessage).slice(0, 240),
+        }
+      : {}),
+  };
+
+  let conversation: { id: string } | null = null;
+  if (existingConversation) {
+    const { data, error } = await admin
+      .from("channel_conversations")
+      .update(conversationValues)
+      .eq("id", existingConversation.id)
+      .select("id")
+      .single();
+    if (error) throw error;
+    conversation = data;
+  } else {
+    const { data, error } = await admin
+      .from("channel_conversations")
+      .insert({ ...conversationValues, unread_count: 0 })
+      .select("id")
+      .single();
+    if (error) throw error;
+    conversation = data;
+  }
+  if (!conversation) throw new Error("Instagram conversation could not be saved");
+
+  const providerMessageIds = sortedMessages.map((message) => message.id);
+  const { data: existingMessages, error: existingMessagesError } = await admin
+    .from("channel_messages")
+    .select("provider_message_id")
+    .eq("conversation_id", conversation.id)
+    .in("provider_message_id", providerMessageIds);
+  if (existingMessagesError) throw existingMessagesError;
+  const existingMessageIds = new Set(
+    (existingMessages || []).map((message) => message.provider_message_id)
+  );
+  const newMessages = sortedMessages.filter(
+    (message) => !existingMessageIds.has(message.id)
+  );
+
+  if (newMessages.length) {
+    const { error: messageError } = await admin.from("channel_messages").insert(
+      newMessages.map((message) => {
+        const outbound = isInstagramAccountParty(message.from, selfIds, account.username);
+        const timestamp = instagramMessageTimestamp(message);
+        return {
+          organization_id: account.organization_id,
+          conversation_id: conversation.id,
+          athlete_id: athlete?.id || null,
+          provider_message_id: message.id,
+          direction: outbound ? "outbound" : "inbound",
+          sender: message.from?.username || message.from?.id || null,
+          recipients: instagramRecipients(message),
+          content: instagramMessageContent(message),
+          status: outbound ? "sent" : "received",
+          sent_at: outbound ? timestamp : null,
+          received_at: outbound ? null : timestamp,
+          created_at: timestamp,
+          metadata: { importedFromInstagram: true },
+        };
+      })
+    );
+    if (messageError) throw messageError;
+  }
+
+  return {
+    messagesSeen: messages.length,
+    messagesWritten: newMessages.length,
+    conversationId: conversation.id,
+  };
 }
 
 export function verifyInstagramWebhookSignature(rawBody: string, signature: string | null) {
@@ -198,6 +462,186 @@ export async function subscribeInstagramAccount(account: ChannelAccountRecord) {
   if (error) throw error;
 }
 
+export async function syncInstagramAccount(
+  account: ChannelAccountRecord,
+  triggeredBy: SyncTrigger
+) {
+  if (account.provider !== "instagram") throw new Error("Not an Instagram account");
+  const admin = createAdminClient();
+  const { data: run, error: runError } = await admin
+    .from("channel_sync_runs")
+    .insert({
+      channel_account_id: account.id,
+      organization_id: account.organization_id,
+      triggered_by: triggeredBy,
+      status: "running",
+    })
+    .select("id")
+    .single();
+  if (runError || !run) throw runError;
+
+  const startedAt = new Date().toISOString();
+  const { error: startedError } = await admin
+    .from("channel_accounts")
+    .update({ last_sync_started_at: startedAt, last_error: null })
+    .eq("id", account.id);
+  if (startedError) throw startedError;
+
+  let messagesSeen = 0;
+  let messagesWritten = 0;
+  let pageCount = 0;
+  let emptyPageCount = 0;
+  let newestConversationAt: string | null = null;
+  const touchedConversations = new Set<string>();
+
+  try {
+    const identity = await instagramRequest<InstagramProfile>(
+      account,
+      "/me?fields=id,user_id,username,name,profile_picture_url"
+    );
+    const selfIds = new Set(
+      [identity.id, identity.user_id, account.external_account_id].filter(
+        (value): value is string => Boolean(value)
+      )
+    );
+    let nextUrl: string | null =
+      `/me/conversations?platform=instagram&fields=id,updated_time` +
+      `&limit=${INSTAGRAM_CONVERSATION_PAGE_LIMIT}`;
+    const visitedPages = new Set<string>();
+
+    while (nextUrl && pageCount < INSTAGRAM_MAX_CONVERSATION_PAGES) {
+      if (visitedPages.has(nextUrl)) break;
+      visitedPages.add(nextUrl);
+      pageCount += 1;
+      const page = await instagramRequest<InstagramConversationPage>(account, nextUrl);
+      const conversations = (page.data || []).filter(
+        (conversation): conversation is InstagramConversation & { id: string } =>
+          Boolean(conversation.id)
+      );
+
+      emptyPageCount = conversations.length ? 0 : emptyPageCount + 1;
+      for (const conversation of conversations) {
+        if (
+          conversation.updated_time &&
+          (!newestConversationAt || conversation.updated_time > newestConversationAt)
+        ) {
+          newestConversationAt = conversation.updated_time;
+        }
+        const messages = await loadInstagramConversationMessages(account, conversation.id);
+        const result = await upsertImportedInstagramConversation(
+          account,
+          conversation,
+          messages,
+          selfIds
+        );
+        messagesSeen += result.messagesSeen;
+        messagesWritten += result.messagesWritten;
+        if (result.conversationId) touchedConversations.add(result.conversationId);
+      }
+
+      if (emptyPageCount >= 3) break;
+      nextUrl = sanitizeInstagramPageUrl(page.paging?.next);
+    }
+
+    const completedAt = new Date().toISOString();
+    const { error: cursorError } = await admin.from("provider_sync_cursors").upsert(
+      {
+        channel_account_id: account.id,
+        resource: "instagram:conversations",
+        cursor_value: newestConversationAt,
+        last_synced_at: completedAt,
+        metadata: {
+          pagesChecked: pageCount,
+          maxDetailedMessagesPerConversation: INSTAGRAM_MESSAGE_DETAIL_LIMIT,
+          inactiveRequestFolderDays: 30,
+        },
+      },
+      { onConflict: "channel_account_id,resource" }
+    );
+    if (cursorError) throw cursorError;
+
+    await Promise.all([
+      admin
+        .from("channel_sync_runs")
+        .update({
+          status: "complete",
+          messages_seen: messagesSeen,
+          messages_written: messagesWritten,
+          conversations_written: touchedConversations.size,
+          completed_at: completedAt,
+        })
+        .eq("id", run.id),
+      admin
+        .from("channel_accounts")
+        .update({
+          last_sync_at: completedAt,
+          last_sync_started_at: null,
+          last_error: null,
+          status: "connected",
+        })
+        .eq("id", account.id),
+    ]);
+
+    return {
+      messagesSeen,
+      messagesWritten,
+      conversationsWritten: touchedConversations.size,
+      pagesChecked: pageCount,
+      completedAt,
+      limitations: {
+        detailedMessagesPerConversation: INSTAGRAM_MESSAGE_DETAIL_LIMIT,
+        inactiveRequestFolderDays: 30,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Instagram sync failed";
+    const status = /token|oauth|permission|unauthorized|access/i.test(message)
+      ? "reauthorization_required"
+      : "error";
+    const completedAt = new Date().toISOString();
+    await Promise.all([
+      admin
+        .from("channel_sync_runs")
+        .update({ status: "failed", error: message, completed_at: completedAt })
+        .eq("id", run.id),
+      admin
+        .from("channel_accounts")
+        .update({ status, last_error: message, last_sync_started_at: null })
+        .eq("id", account.id),
+    ]);
+    throw error;
+  }
+}
+
+export async function syncAllInstagramAccounts() {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("channel_accounts")
+    .select("*")
+    .eq("provider", "instagram")
+    .eq("status", "connected")
+    .eq("sync_enabled", true)
+    .limit(20);
+  if (error) throw error;
+
+  const results = [];
+  for (const row of data || []) {
+    const account = row as ChannelAccountRecord;
+    try {
+      await subscribeInstagramAccount(account);
+      const sync = await syncInstagramAccount(account, "cron");
+      results.push({ accountId: account.id, ok: true, sync });
+    } catch (syncError) {
+      results.push({
+        accountId: account.id,
+        ok: false,
+        error: syncError instanceof Error ? syncError.message : "Sync failed",
+      });
+    }
+  }
+  return results;
+}
+
 async function processInstagramMessage(
   account: ChannelAccountRecord,
   event: InstagramWebhookMessage
@@ -229,12 +673,24 @@ async function processInstagramMessage(
     : event.message?.text ||
       (event.message?.attachments?.length ? "[Instagram media]" : "[Instagram message]");
 
-  const { data: existingConversation } = await admin
+  const { data: participantConversation, error: participantConversationError } = await admin
     .from("channel_conversations")
-    .select("id,unread_count,metadata")
+    .select("id,provider_conversation_id,unread_count,metadata")
     .eq("channel_account_id", account.id)
-    .eq("provider_conversation_id", participantId)
+    .eq("participant_address", participantId)
     .maybeSingle();
+  if (participantConversationError) throw participantConversationError;
+  let existingConversation = participantConversation;
+  if (!existingConversation) {
+    const { data: legacyConversation, error: legacyConversationError } = await admin
+      .from("channel_conversations")
+      .select("id,provider_conversation_id,unread_count,metadata")
+      .eq("channel_account_id", account.id)
+      .eq("provider_conversation_id", participantId)
+      .maybeSingle();
+    if (legacyConversationError) throw legacyConversationError;
+    existingConversation = legacyConversation;
+  }
   const existingMetadata = (existingConversation?.metadata || {}) as Record<string, unknown>;
   const nextMetadata = {
     ...existingMetadata,
@@ -261,7 +717,8 @@ async function processInstagramMessage(
       {
         organization_id: account.organization_id,
         channel_account_id: account.id,
-        provider_conversation_id: participantId,
+        provider_conversation_id:
+          existingConversation?.provider_conversation_id || participantId,
         channel: "instagram",
         participant_name: profile.name || profile.username || "Instagram contact",
         participant_handle: profile.username || null,

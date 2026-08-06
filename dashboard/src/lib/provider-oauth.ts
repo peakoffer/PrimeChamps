@@ -158,7 +158,8 @@ export async function fetchProviderIdentity(
   accessToken: string
 ) {
   if (provider === "instagram") {
-    const url = new URL("https://graph.instagram.com/v24.0/me");
+    const apiVersion = process.env.META_API_VERSION || "v26.0";
+    const url = new URL(`https://graph.instagram.com/${apiVersion}/me`);
     url.searchParams.set("fields", "user_id,username,name,profile_picture_url");
     url.searchParams.set("access_token", accessToken);
     const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });

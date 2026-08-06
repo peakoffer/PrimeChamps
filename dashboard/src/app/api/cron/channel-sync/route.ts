@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { syncAllInstagramAccounts } from "@/lib/channels/instagram";
 import { syncAllMicrosoftAccounts } from "@/lib/channels/microsoft";
 
 export const maxDuration = 300;
@@ -8,5 +9,9 @@ export async function GET(request: NextRequest) {
   if (!configuredSecret || request.headers.get("authorization") !== `Bearer ${configuredSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return NextResponse.json({ results: await syncAllMicrosoftAccounts("cron") });
+  const [microsoft, instagram] = await Promise.all([
+    syncAllMicrosoftAccounts("cron"),
+    syncAllInstagramAccounts(),
+  ]);
+  return NextResponse.json({ results: { microsoft, instagram } });
 }

@@ -221,6 +221,8 @@ export default function UnifiedInbox() {
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const loadInbox = useCallback(async () => {
@@ -329,6 +331,7 @@ export default function UnifiedInbox() {
     setDetail(null);
     setComposer("");
     setQuery("");
+    setSyncStatus(null);
   };
 
   const switchEmailView = (view: EmailView) => {
@@ -385,12 +388,43 @@ export default function UnifiedInbox() {
     }
   };
 
+  const syncInstagram = async (account: ChannelAccountDTO) => {
+    setSyncingAccountId(account.id);
+    setSyncStatus(null);
+    setError("");
+    try {
+      const response = await fetch(`/api/channel-accounts/${account.id}/sync`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as {
+        result?: { conversationsWritten?: number; messagesSeen?: number };
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || "Instagram sync failed");
+      await loadInbox();
+      const conversations = data.result?.conversationsWritten || 0;
+      const messages = data.result?.messagesSeen || 0;
+      setSyncStatus(
+        conversations
+          ? `Imported ${conversations} conversation${conversations === 1 ? "" : "s"} and checked ${messages} recent message${messages === 1 ? "" : "s"}.`
+          : "Instagram is connected, but Meta returned no eligible conversations. Confirm access to messages is enabled, then send a new inbound test DM."
+      );
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "Instagram sync failed");
+    } finally {
+      setSyncingAccountId(null);
+    }
+  };
+
   const emailAccounts = accounts.filter((account) => account.provider === "outlook" || account.provider === "gmail");
   const workspaceAccounts = accounts.filter((account) => {
     if (activeChannel === "unified") return true;
     if (activeChannel === "email") return account.provider === "outlook" || account.provider === "gmail";
     return account.provider === activeChannel;
   });
+  const connectedInstagramAccount = accounts.find(
+    (account) => account.provider === "instagram" && account.status === "connected"
+  );
   const isEmailThread = selected?.channel === "email";
 
   return (
@@ -614,17 +648,36 @@ export default function UnifiedInbox() {
 
               {!loading && visibleConversations.length === 0 ? (
                 <div className="p-8 text-center">
-                  <Inbox className="mx-auto h-8 w-8 text-slate-300" />
+                  {activeChannel === "instagram" ? (
+                    <Instagram className="mx-auto h-8 w-8 text-fuchsia-300" />
+                  ) : (
+                    <Inbox className="mx-auto h-8 w-8 text-slate-300" />
+                  )}
                   <p className="mt-3 font-medium text-slate-700">
-                    {activeChannel === "email" && emailView === "focused"
+                    {activeChannel === "instagram"
+                      ? "Instagram is connected"
+                      : activeChannel === "email" && emailView === "focused"
                       ? "No focused mail in this view"
                       : "No conversations found"}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-slate-500">
-                    {activeChannel === "email" && emailView === "focused"
+                    {activeChannel === "instagram"
+                      ? syncStatus || "Import the conversations Meta makes available, or wait for the next inbound message to arrive through the live webhook."
+                      : activeChannel === "email" && emailView === "focused"
                       ? "Switch to All mail to see automated notices and financial email."
                       : "Try another filter or connect an account."}
                   </p>
+                  {activeChannel === "instagram" && connectedInstagramAccount ? (
+                    <button
+                      type="button"
+                      onClick={() => void syncInstagram(connectedInstagramAccount)}
+                      disabled={syncingAccountId === connectedInstagramAccount.id}
+                      className="mt-5 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${syncingAccountId === connectedInstagramAccount.id ? "animate-spin" : ""}`} />
+                      {syncingAccountId === connectedInstagramAccount.id ? "Syncing Instagram" : "Sync from Instagram"}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -649,6 +702,11 @@ export default function UnifiedInbox() {
                     <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       Exchange synced
+                    </div>
+                  ) : activeChannel === "instagram" && connectedInstagramAccount ? (
+                    <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      @{connectedInstagramAccount.username || connectedInstagramAccount.label} connected
                     </div>
                   ) : null}
                 </div>

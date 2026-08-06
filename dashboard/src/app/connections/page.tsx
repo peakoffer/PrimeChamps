@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -28,6 +29,19 @@ const categoryLabels: Record<ProviderCategory, string> = {
 };
 
 const categoryOrder: ProviderCategory[] = ["channels", "research", "delivery", "core"];
+
+type PageNotice = {
+  kind: "success" | "error" | "info";
+  title: string;
+  message: string;
+};
+
+type SyncResult = {
+  conversationsWritten?: number;
+  messagesSeen?: number;
+  messagesWritten?: number;
+  completedAt?: string;
+};
 
 const statusStyles: Record<ProviderStatus, string> = {
   operational: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -109,13 +123,23 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
         </div>
       )}
 
-      {provider.connectPath && (
+      {provider.connectPath && provider.connectedAccounts === 0 && (
         <a
           href={provider.connectPath}
           className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gray-950 px-3.5 py-2 text-sm font-medium text-white hover:bg-gray-800"
         >
           <Link2 className="h-4 w-4" />
-          {provider.connectedAccounts > 0 ? `Connect another ${provider.name} account` : `Connect ${provider.name}`}
+          Connect {provider.name}
+        </a>
+      )}
+
+      {provider.connectPath && provider.connectedAccounts > 0 && (
+        <a
+          href="#connected-accounts"
+          className="mt-4 inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          <ShieldCheck className="h-4 w-4 text-emerald-600" />
+          Manage connected account
         </a>
       )}
 
@@ -146,11 +170,39 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
   );
 }
 
-export default function ConnectionsPage() {
+function ConnectionsPageContent() {
+  const searchParams = useSearchParams();
   const [health, setHealth] = useState<ProviderHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<PageNotice | null>(null);
+  const connectedProvider = searchParams.get("connected");
+  const connectionError = searchParams.get("error");
+  const oauthNotice: PageNotice | null = connectedProvider
+    ? {
+        kind: "success",
+        title: `${connectedProvider === "instagram" ? "Instagram" : connectedProvider === "outlook" ? "Microsoft" : connectedProvider} connected`,
+        message:
+          connectedProvider === "instagram"
+            ? "Your account is secure and Prime Champs is importing the conversations Meta makes available. You can stay on this page while the first sync finishes."
+            : "Your account is secure and its first sync has started.",
+      }
+    : connectionError
+      ? {
+          kind: "error",
+          title: "Connection not completed",
+          message:
+            ({
+              access_denied: "Access was not approved. Nothing was connected, and you can try again when ready.",
+              invalid_oauth_state: "The login session expired or was opened twice. Start again from this Connections page.",
+              invalid_oauth_owner: "The provider login did not belong to the current Prime Champs user.",
+              connection_failed: "The provider returned an error while completing the connection. Try once more from this page.",
+            } as Record<string, string>)[connectionError] ||
+            "The provider connection could not be completed.",
+        }
+      : null;
+  const notice = actionNotice || oauthNotice;
 
   const loadHealth = useCallback(async () => {
     try {
@@ -172,9 +224,27 @@ export default function ConnectionsPage() {
       const response = await fetch(`/api/channel-accounts/${accountId}/${action}`, {
         method: "POST",
       });
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as { error?: string; result?: SyncResult };
       if (!response.ok) throw new Error(data.error || `${action} failed`);
       await loadHealth();
+      if (action === "sync") {
+        const conversations = data.result?.conversationsWritten || 0;
+        const messages = data.result?.messagesSeen || 0;
+        setActionNotice({
+          kind: "success",
+          title: "Sync complete",
+          message:
+            conversations > 0
+              ? `${conversations} conversation${conversations === 1 ? "" : "s"} and ${messages} recent message${messages === 1 ? "" : "s"} are available in Conversations.`
+              : "The account is healthy, but the provider returned no eligible conversations yet. For Instagram, confirm message access is enabled and test with a new inbound DM.",
+        });
+      } else {
+        setActionNotice({
+          kind: "info",
+          title: "Account disconnected",
+          message: "This account will no longer sync or send through Prime Champs.",
+        });
+      }
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : `${action} failed`);
     } finally {
@@ -183,17 +253,20 @@ export default function ConnectionsPage() {
   };
 
   useEffect(() => {
-    fetch("/api/providers/health", { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) throw new Error("Could not load provider status");
-        return response.json() as Promise<ProviderHealthResponse>;
-      })
-      .then((data) => setHealth(data))
-      .catch((loadError) =>
-        setError(loadError instanceof Error ? loadError.message : "Could not load provider status")
-      )
-      .finally(() => setLoading(false));
-  }, []);
+    const initialLoad = window.setTimeout(() => void loadHealth(), 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [loadHealth]);
+
+  useEffect(() => {
+    if (!connectedProvider) return;
+    let attempts = 0;
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+      void loadHealth();
+      if (attempts >= 10) window.clearInterval(intervalId);
+    }, 2_000);
+    return () => window.clearInterval(intervalId);
+  }, [connectedProvider, loadHealth]);
 
   return (
     <div className="space-y-8 pb-12">
@@ -252,6 +325,31 @@ export default function ConnectionsPage() {
         </div>
       )}
 
+      {notice && (
+        <div
+          role={notice.kind === "error" ? "alert" : "status"}
+          className={`flex items-start gap-3 rounded-xl border p-4 ${
+            notice.kind === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+              : notice.kind === "error"
+                ? "border-red-200 bg-red-50 text-red-900"
+                : "border-blue-200 bg-blue-50 text-blue-950"
+          }`}
+        >
+          {notice.kind === "success" ? (
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          ) : notice.kind === "error" ? (
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+          ) : (
+            <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+          )}
+          <div>
+            <p className="font-semibold">{notice.title}</p>
+            <p className="mt-1 text-sm leading-6 opacity-80">{notice.message}</p>
+          </div>
+        </div>
+      )}
+
       {loading && !health && (
         <div className="flex h-48 items-center justify-center text-gray-600">
           <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading connections…
@@ -267,7 +365,7 @@ export default function ConnectionsPage() {
             </div>
           )}
 
-          <section className="space-y-3">
+          <section id="connected-accounts" className="scroll-mt-6 space-y-3">
             <div>
               <h2 className="text-lg font-semibold text-gray-950">Zac’s connected accounts</h2>
               <p className="mt-1 text-sm text-gray-500">
@@ -300,18 +398,25 @@ export default function ConnectionsPage() {
                       </span>
                     </div>
                     <p className="mt-4 text-xs text-slate-500">
-                      {account.lastSyncAt
+                      {account.lastSyncStartedAt
+                        ? "Syncing conversations…"
+                        : account.lastSyncAt
                         ? `Last synced ${new Date(account.lastSyncAt).toLocaleString()}`
                         : "Waiting for first sync"}
                     </p>
+                    {account.provider === "instagram" ? (
+                      <p className="mt-2 text-xs leading-5 text-slate-500">
+                        Meta supplies up to 20 recent detailed messages per conversation and may omit inactive message requests older than 30 days.
+                      </p>
+                    ) : null}
                     {account.lastError ? (
                       <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{account.lastError}</p>
                     ) : null}
                     <div className="mt-4 flex gap-2">
                       {(account.provider === "outlook" || account.provider === "instagram") && account.status !== "disconnected" ? (
-                        <button type="button" disabled={busyAccountId === account.id} onClick={() => void accountAction(account.id, "sync")} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                          <RefreshCw className={`h-4 w-4 ${busyAccountId === account.id ? "animate-spin" : ""}`} />
-                          Sync now
+                        <button type="button" disabled={busyAccountId === account.id || Boolean(account.lastSyncStartedAt)} onClick={() => void accountAction(account.id, "sync")} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                          <RefreshCw className={`h-4 w-4 ${busyAccountId === account.id || account.lastSyncStartedAt ? "animate-spin" : ""}`} />
+                          {account.lastSyncStartedAt ? "Syncing" : "Sync now"}
                         </button>
                       ) : null}
                       {account.status !== "disconnected" ? (
@@ -349,5 +454,19 @@ export default function ConnectionsPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function ConnectionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-48 items-center justify-center text-gray-600">
+          <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading connections…
+        </div>
+      }
+    >
+      <ConnectionsPageContent />
+    </Suspense>
   );
 }
