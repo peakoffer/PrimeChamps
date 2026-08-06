@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildSportDiscoveryQueries, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
 import { calculateResearchScore, parseResearchScoreBreakdown, resolveResearchDisposition } from "../src/lib/research/scoring.ts";
@@ -80,4 +81,16 @@ test("minor, age, and quality gates keep unsafe or weak candidates out of Approv
   assert.equal(resolveResearchDisposition({ score: 59, isMinor: false, ageVerified: true }), "held");
   assert.equal(resolveResearchDisposition({ score: 60, isMinor: false, ageVerified: true }), "approval");
   assert.equal(resolveResearchDisposition({ score: 20, ageVerified: false, reasoning: "Athlete is 17 years old" }), "blocked");
+});
+
+test("durable workflow code stays isolated from the Next.js request runtime", () => {
+  const workflowSource = readFileSync(
+    new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.doesNotMatch(workflowSource, /next\/server/);
+  assert.doesNotMatch(workflowSource, /NextRequest|NextResponse/);
+  assert.match(workflowSource, /"use workflow"/);
+  assert.match(workflowSource, /"use step"/);
 });
