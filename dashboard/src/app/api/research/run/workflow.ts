@@ -25,7 +25,7 @@ const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-const supabase = createAdminClient();
+const supabase = createAdminClient({ disableRealtime: true });
 const PROVIDER_TIMEOUT_MS = 45_000;
 const PREFETCH_INSTAGRAM_PHOTOS = process.env.RESEARCH_PREFETCH_PHOTOS === "true";
 
