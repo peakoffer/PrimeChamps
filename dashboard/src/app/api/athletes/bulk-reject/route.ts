@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     const user = await requireAuth();
     const supabase = createAdminClient();
     const body = await request.json();
-    const { athlete_ids, reason, notes, avoid_similar } = body;
+    const { athlete_ids, reason, notes, avoid_similar, feedback_data } = body;
 
     if (!athlete_ids || !Array.isArray(athlete_ids) || athlete_ids.length === 0) {
       return NextResponse.json(
@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
       feedback_data: {
         avoid_similar: avoid_similar || "yes",
         bulk_rejection: true,
+        ...(feedback_data && typeof feedback_data === "object" ? feedback_data : {}),
       },
     }));
 

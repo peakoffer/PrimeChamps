@@ -2,7 +2,6 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase/browser";
 import Link from "next/link";
 import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";
@@ -114,20 +113,10 @@ function ApprovalPageContent() {
 
   async function fetchAthletes() {
     try {
-      const { data, error } = await supabase
-        .from("athletes")
-        .select("*")
-        .eq("pipeline_stage", "approval")
-        .eq("is_historical", false)
-        .order("created_at", { ascending: false });
-
-      // Ensure most recent first (double-check ordering)
-      if (data) {
-        data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      }
-
-      if (error) throw error;
-      setAthletes(data || []);
+      const response = await fetch("/api/athletes?stage=approval&historical=false&sort=created_at&direction=desc&limit=500", { cache: "no-store" });
+      const payload = await response.json() as { athletes?: Athlete[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not load Approval");
+      setAthletes(payload.athletes || []);
     } catch (error) {
       console.error("Error fetching athletes:", error);
     }
@@ -135,44 +124,17 @@ function ApprovalPageContent() {
 
   async function fetchRejectedAthletes() {
     try {
-      // Fetch rejected athletes with their rejection decisions
-      const { data: athletes, error: athletesError } = await supabase
-        .from("athletes")
-        .select("*")
-        .eq("pipeline_stage", "rejected")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (athletesError) throw athletesError;
-
-      // Fetch rejection decisions for these athletes
-      const athleteIds = (athletes || []).map((a) => a.id);
-      const decisionsMap: Record<string, { reason?: string; notes?: string; decided_at?: string }> = {};
-
-      if (athleteIds.length > 0) {
-        const { data: decisions } = await supabase
-          .from("approval_decisions")
-          .select("athlete_id, reason, notes, created_at")
-          .in("athlete_id", athleteIds)
-          .eq("decision", "rejected");
-
-        if (decisions) {
-          for (const d of decisions) {
-            decisionsMap[d.athlete_id] = {
-              reason: d.reason,
-              notes: d.notes,
-              decided_at: d.created_at,
-            };
-          }
-        }
-      }
-
-      // Merge rejection info with athlete data
-      const rejectedWithInfo: RejectedAthlete[] = (athletes || []).map((a) => ({
+      const response = await fetch("/api/athletes?stage=rejected&sort=created_at&direction=desc&limit=100&include_decisions=true", { cache: "no-store" });
+      const payload = await response.json() as {
+        athletes?: Array<Athlete & { latest_decision?: { reason?: string; notes?: string; created_at?: string } }>;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "Could not load rejected athletes");
+      const rejectedWithInfo: RejectedAthlete[] = (payload.athletes || []).map((a) => ({
         ...a,
-        rejection_reason: decisionsMap[a.id]?.reason,
-        rejection_notes: decisionsMap[a.id]?.notes,
-        rejected_at: decisionsMap[a.id]?.decided_at,
+        rejection_reason: a.latest_decision?.reason,
+        rejection_notes: a.latest_decision?.notes,
+        rejected_at: a.latest_decision?.created_at,
       }));
 
       setRejectedAthletes(rejectedWithInfo);
@@ -183,15 +145,10 @@ function ApprovalPageContent() {
 
   async function fetchApprovedCount() {
     try {
-      // Count athletes that have moved past approval (reach_out and beyond)
-      const { count, error } = await supabase
-        .from("athletes")
-        .select("*", { count: "exact", head: true })
-        .in("pipeline_stage", ["reach_out", "response", "appointment", "contract"])
-        .eq("is_historical", false);
-
-      if (error) throw error;
-      setApprovedCount(count || 0);
+      const response = await fetch("/api/athletes?stages=reach_out,response,appointment,contract&historical=false&limit=1000", { cache: "no-store" });
+      const payload = await response.json() as { count?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not load approved count");
+      setApprovedCount(payload.count || 0);
     } catch (error) {
       console.error("Error fetching approved count:", error);
     }
@@ -199,17 +156,10 @@ function ApprovalPageContent() {
 
   async function fetchApprovedAthletes() {
     try {
-      // Fetch athletes in reach_out stage (recently approved)
-      const { data, error } = await supabase
-        .from("athletes")
-        .select("*")
-        .eq("pipeline_stage", "reach_out")
-        .eq("is_historical", false)
-        .order("updated_at", { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-      setApprovedAthletes(data || []);
+      const response = await fetch("/api/athletes?stage=reach_out&historical=false&sort=updated_at&direction=desc&limit=50", { cache: "no-store" });
+      const payload = await response.json() as { athletes?: Athlete[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not load approved athletes");
+      setApprovedAthletes(payload.athletes || []);
     } catch (error) {
       console.error("Error fetching approved athletes:", error);
     }
@@ -294,31 +244,13 @@ function ApprovalPageContent() {
     const athletesToApprove = athletes.filter((a) => selectedAthletes.has(a.id));
 
     try {
-      for (const athleteId of selectedAthletes) {
-        // Move to reach_out stage (simple bulk approve)
-        await supabase
-          .from("athletes")
-          .update({ pipeline_stage: "reach_out" })
-          .eq("id", athleteId);
-
-        // Log approval decision
-        await supabase.from("approval_decisions").insert({
-          athlete_id: athleteId,
-          decision: "approved",
-          decided_by: "dashboard_user",
-          reason: "bulk_approve",
-          notes: "Bulk approved from approval queue",
-        });
-
-        // Log pipeline history
-        await supabase.from("pipeline_history").insert({
-          athlete_id: athleteId,
-          from_stage: "approval",
-          to_stage: "reach_out",
-          changed_by: "dashboard_user",
-          reason: "Bulk approved",
-        });
-      }
+      const response = await fetch("/api/athletes/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ athlete_ids: Array.from(selectedAthletes) }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Bulk approve failed");
 
       // Store recently approved athletes and switch to that tab
       setRecentlyApproved(athletesToApprove);
@@ -342,56 +274,18 @@ function ApprovalPageContent() {
     setBulkActionLoading(true);
 
     try {
-      for (const athleteId of selectedAthletes) {
-        // Move to rejected stage
-        await supabase
-          .from("athletes")
-          .update({ pipeline_stage: "rejected" })
-          .eq("id", athleteId);
-
-        // Log rejection decision
-        await supabase.from("approval_decisions").insert({
-          athlete_id: athleteId,
-          decision: "rejected",
-          decided_by: "dashboard_user",
+      const response = await fetch("/api/athletes/bulk-reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athlete_ids: Array.from(selectedAthletes),
           reason: bulkRejectReason,
           notes: "Bulk rejected from approval queue",
-        });
-
-        // Log research feedback for AI learning
-        const athlete = athletes.find((a) => a.id === athleteId);
-        if (athlete) {
-          await fetch("/api/research/feedback", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              athlete_id: athleteId,
-              candidate_data: {
-              name: athlete.name,
-              instagram_handle: athlete.instagram_handle,
-              sport: athlete.sport,
-              follower_count: athlete.follower_count,
-              },
-              decision: "rejected",
-              rejection_reason: bulkRejectReason,
-              rejection_notes: "Bulk rejected",
-              feedback_data: {
-                avoid_similar: bulkAvoidSimilar,
-                bulk_rejection: true,
-              },
-            }),
-          });
-        }
-
-        // Log pipeline history
-        await supabase.from("pipeline_history").insert({
-          athlete_id: athleteId,
-          from_stage: "approval",
-          to_stage: "rejected",
-          changed_by: "dashboard_user",
-          reason: `Bulk rejected: ${bulkRejectReason}`,
-        });
-      }
+          avoid_similar: bulkAvoidSimilar,
+        }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Bulk reject failed");
 
       // Remove from list, clear selection, close modal
       setAthletes((prev) => prev.filter((a) => !selectedAthletes.has(a.id)));
