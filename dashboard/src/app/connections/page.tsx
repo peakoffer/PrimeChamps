@@ -236,7 +236,7 @@ function ConnectionsPageContent() {
           message:
             conversations > 0
               ? `${conversations} conversation${conversations === 1 ? "" : "s"} and ${messages} recent message${messages === 1 ? "" : "s"} are available in Conversations.`
-              : "The account is healthy, but the provider returned no eligible conversations yet. For Instagram, confirm message access is enabled and test with a new inbound DM.",
+              : "The account is healthy, but the provider returned no eligible conversations yet. If Instagram permissions changed after this account was connected, reconnect it once to refresh consent.",
         });
       } else {
         setActionNotice({
@@ -412,12 +412,21 @@ function ConnectionsPageContent() {
                     {account.lastError ? (
                       <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{account.lastError}</p>
                     ) : null}
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2">
                       {(account.provider === "outlook" || account.provider === "instagram") && account.status !== "disconnected" ? (
                         <button type="button" disabled={busyAccountId === account.id || Boolean(account.lastSyncStartedAt)} onClick={() => void accountAction(account.id, "sync")} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                           <RefreshCw className={`h-4 w-4 ${busyAccountId === account.id || account.lastSyncStartedAt ? "animate-spin" : ""}`} />
                           {account.lastSyncStartedAt ? "Syncing" : "Sync now"}
                         </button>
+                      ) : null}
+                      {(account.provider === "outlook" || account.provider === "instagram") && account.status !== "disconnected" ? (
+                        <a
+                          href={`/api/providers/${account.provider}/connect`}
+                          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                        >
+                          <Link2 className="h-4 w-4" />
+                          Reconnect {account.provider === "instagram" ? "Instagram" : "Microsoft"}
+                        </a>
                       ) : null}
                       {account.status !== "disconnected" ? (
                         <button type="button" disabled={busyAccountId === account.id} onClick={() => void accountAction(account.id, "disconnect")} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
