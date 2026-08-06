@@ -2201,6 +2201,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             isMinor: athlete.is_minor,
             ageVerified: athlete.age_verified,
             reasoning: athlete.reasoning,
+            careerStage: athlete.career_stage,
+            objectiveFit: athlete.objective_fit,
           });
           athlete.disposition_reason = athlete.disposition === "approval"
             ? "Simulation qualified — source-linked adult age and score passed the current objective gates; the live pipeline was not changed"
@@ -2279,6 +2281,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           isMinor: athlete.is_minor,
           ageVerified: athlete.age_verified,
           reasoning: athlete.reasoning,
+          careerStage: athlete.career_stage,
+          objectiveFit: athlete.objective_fit,
         });
         const isLikelyMinor = resolvedDisposition === "blocked";
 
