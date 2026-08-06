@@ -140,6 +140,30 @@ interface EnrichmentSourceRecord {
   last_error?: string | null;
 }
 
+interface EnrichmentJob {
+  id: string;
+  source: EnrichmentSourceRecord["source"];
+  status: "queued" | "running" | "complete" | "failed" | "cancelled";
+  result?: Record<string, unknown>;
+  last_error?: string | null;
+}
+
+async function waitForEnrichmentJob(jobId: string): Promise<EnrichmentJob> {
+  for (let attempt = 0; attempt < 150; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const response = await fetch(`/api/enrichment/jobs?jobId=${jobId}`, { cache: "no-store" });
+    const payload = (await response.json()) as { job?: EnrichmentJob; error?: string };
+    if (!response.ok || !payload.job) {
+      throw new Error(payload.error || "Could not read enrichment job status");
+    }
+    if (payload.job.status === "complete") return payload.job;
+    if (payload.job.status === "failed" || payload.job.status === "cancelled") {
+      throw new Error(payload.job.last_error || `Enrichment ${payload.job.status}`);
+    }
+  }
+  throw new Error("Enrichment is still running in the background. You can safely return later.");
+}
+
 const PIPELINE_STAGES = {
   research: { label: "Research", color: "bg-purple-100 text-purple-800 border-purple-300", icon: "🔍" },
   approval: { label: "Pending Approval", color: "bg-blue-100 text-blue-800 border-blue-300", icon: "✅" },
@@ -162,6 +186,8 @@ function EnrichmentOutcome({
   const tone =
     record.status === "complete"
       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : record.status === "running" || record.status === "pending"
+        ? "border-blue-200 bg-blue-50 text-blue-900"
       : record.status === "not_found"
         ? "border-amber-200 bg-amber-50 text-amber-950"
         : record.status === "not_configured"
@@ -283,7 +309,9 @@ export default function AthleteDetailPage() {
   const [athlete, setAthlete] = useState<Athlete | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [enriching, setEnriching] = useState(false);
+  const [enrichingSources, setEnrichingSources] = useState<
+    Partial<Record<EnrichmentSourceRecord["source"], boolean>>
+  >({});
   const [isEditing, setIsEditing] = useState(false);
   const [parsedData, setParsedData] = useState<ReturnType<typeof parseNotesData> | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -412,6 +440,47 @@ export default function AthleteDetailPage() {
       .catch((error) => console.error("Error loading enrichment sources:", error));
   }, [athlete?.id]);
 
+  // Reattach to any queued/running source jobs after navigation or refresh.
+  useEffect(() => {
+    if (!athlete?.id) return;
+    let cancelled = false;
+
+    fetch(`/api/enrichment/jobs?athleteId=${athlete.id}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload: { jobs?: EnrichmentJob[] }) => {
+        const activeJobs = (payload.jobs || []).filter(
+          (job) => job.status === "queued" || job.status === "running"
+        );
+        if (cancelled || activeJobs.length === 0) return;
+
+        setEnrichingSources((current) => ({
+          ...current,
+          ...Object.fromEntries(activeJobs.map((job) => [job.source, true])),
+        }));
+
+        activeJobs.forEach((job) => {
+          waitForEnrichmentJob(job.id)
+            .catch((error) => console.error(`Background ${job.source} enrichment:`, error))
+            .finally(() => {
+              if (cancelled) return;
+              setEnrichingSources((current) => ({ ...current, [job.source]: false }));
+              fetch(`/api/athletes/${athlete.id}/enrich`, { cache: "no-store" })
+                .then((response) => response.json())
+                .then((data: { sources?: EnrichmentSourceRecord[] }) => {
+                  if (!cancelled) {
+                    setEnrichmentSources(Object.fromEntries(
+                      (data.sources || []).map((record) => [record.source, record])
+                    ));
+                  }
+                });
+            });
+        });
+      })
+      .catch((error) => console.error("Could not restore enrichment jobs:", error));
+
+    return () => { cancelled = true; };
+  }, [athlete?.id]);
+
   // Fetch benchmark data for Fit Score calculation
   useEffect(() => {
     fetch("/api/benchmarks")
@@ -529,7 +598,9 @@ export default function AthleteDetailPage() {
         if (data.stats) {
           const msg = data.stats.new > 0
             ? `Loaded ${data.stats.new} new photo${data.stats.new > 1 ? "s" : ""} (${data.stats.total} total)`
-            : `All ${data.stats.total} photos already loaded`;
+            : data.stats.updated > 0
+              ? `Refreshed dates and engagement for ${data.stats.updated} photo${data.stats.updated === 1 ? "" : "s"}`
+              : `All ${data.stats.total} photos are current`;
           setMessage({ type: "success", text: msg });
         }
       } else {
@@ -652,7 +723,7 @@ export default function AthleteDetailPage() {
     }
   };
 
-  const handleEnrichFromSource = async (source: string) => {
+  const handleEnrichFromSource = async (source: EnrichmentSourceRecord["source"]) => {
     if (!athlete) return;
 
     if (source === "instagram" && !athlete.instagram_handle) {
@@ -660,23 +731,36 @@ export default function AthleteDetailPage() {
       return;
     }
 
-    setEnriching(true);
+    setEnrichingSources((current) => ({ ...current, [source]: true }));
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/athletes/${athlete.id}/enrich`, {
+      const response = await fetch("/api/enrichment/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source }),
+        body: JSON.stringify({ athleteId: athlete.id, source }),
       });
 
-      const result = await response.json();
+      const queued = (await response.json()) as { job?: EnrichmentJob; error?: string };
 
-      if (result.error) {
-        throw new Error(result.error);
+      if (!response.ok || !queued.job) {
+        throw new Error(queued.error || `Could not queue ${source} enrichment`);
       }
 
-      if (result.success) {
+      setMessage({
+        type: "success",
+        text: `${source} enrichment started. It will keep running if you leave this page.`,
+      });
+
+      const completedJob = await waitForEnrichmentJob(queued.job.id);
+      const result = completedJob.result as {
+        success?: boolean;
+        status?: string;
+        data?: { followers?: number; message?: string };
+        error?: string;
+      } | undefined;
+
+      if (result?.success) {
         // Refresh the page data
         const { data } = await supabase
           .from("athletes")
@@ -715,7 +799,7 @@ export default function AthleteDetailPage() {
           setMessage({ type: "success", text: `Enriched from ${source}!` });
         }
       } else {
-        throw new Error(result.error || "Enrichment failed");
+        throw new Error(result?.error || "Enrichment failed");
       }
     } catch (error) {
       console.error(`Error enriching from ${source}:`, error);
@@ -724,12 +808,9 @@ export default function AthleteDetailPage() {
         text: error instanceof Error ? error.message : `Failed to enrich from ${source}.`,
       });
     } finally {
-      setEnriching(false);
+      setEnrichingSources((current) => ({ ...current, [source]: false }));
     }
   };
-
-  // Backward compatibility
-  const handleReEnrich = () => handleEnrichFromSource("instagram");
 
   const handleDelete = async () => {
     if (!athlete) return;
@@ -846,8 +927,15 @@ export default function AthleteDetailPage() {
     : undefined;
 
   // Calculate engagement rate if we have the data
-  const engagementRate = instagramPhotos.length > 0 && athlete.follower_count
-    ? (instagramPhotos.reduce((sum, p) => sum + (p.likesCount || 0) + (p.commentsCount || 0), 0) / instagramPhotos.length / athlete.follower_count * 100).toFixed(2)
+  const engagementSample = instagramPhotos.slice(0, 8);
+  const recentAverageLikes = engagementSample.length > 0
+    ? Math.round(engagementSample.reduce((sum, post) => sum + (post.likesCount || 0), 0) / engagementSample.length)
+    : null;
+  const recentAverageComments = engagementSample.length > 0
+    ? Math.round(engagementSample.reduce((sum, post) => sum + (post.commentsCount || 0), 0) / engagementSample.length)
+    : null;
+  const engagementRate = engagementSample.length > 0 && athlete.follower_count
+    ? (engagementSample.reduce((sum, p) => sum + (p.likesCount || 0) + (p.commentsCount || 0), 0) / engagementSample.length / athlete.follower_count * 100).toFixed(2)
     : null;
 
   return (
@@ -964,7 +1052,10 @@ export default function AthleteDetailPage() {
             <div className="space-y-2 mb-4">
               {/* Row 1 - Main Metrics */}
               <div className="flex flex-wrap gap-4">
-                <div className="text-center min-w-[60px]">
+                <div
+                  className="text-center min-w-[60px]"
+                  title="Average likes plus comments on the 8 newest non-pinned posts, divided by followers"
+                >
                   <div className="text-lg font-bold text-gray-900">{formatNumber(athlete.follower_count)}</div>
                   <div className="text-xs text-gray-600">Followers</div>
                 </div>
@@ -978,11 +1069,11 @@ export default function AthleteDetailPage() {
                 </div>
                 <div className="text-center min-w-[60px]">
                   <div className="text-lg font-bold text-green-600">
-                    {ig.engagement_rate
-                      ? `${ig.engagement_rate}%`
-                      : engagementRate
+                    {engagementRate
                       ? `${engagementRate}%`
-                      : "—"}
+                      : ig.engagement_rate
+                        ? `${ig.engagement_rate}%`
+                        : "—"}
                   </div>
                   <div className="text-xs text-gray-600">Engagement</div>
                 </div>
@@ -990,11 +1081,11 @@ export default function AthleteDetailPage() {
               {/* Row 2 - Secondary Metrics */}
               <div className="flex flex-wrap gap-4">
                 <div className="text-center min-w-[60px]">
-                  <div className="text-sm font-semibold text-gray-800">{ig.avg_likes ? formatNumber(ig.avg_likes) : "—"}</div>
+                  <div className="text-sm font-semibold text-gray-800">{formatNumber(recentAverageLikes ?? ig.avg_likes) || "—"}</div>
                   <div className="text-xs text-gray-500">Avg Likes</div>
                 </div>
                 <div className="text-center min-w-[60px]">
-                  <div className="text-sm font-semibold text-gray-800">{ig.avg_comments ? formatNumber(ig.avg_comments) : "—"}</div>
+                  <div className="text-sm font-semibold text-gray-800">{formatNumber(recentAverageComments ?? ig.avg_comments) || "—"}</div>
                   <div className="text-xs text-gray-500">Avg Comments</div>
                 </div>
                 <div className="text-center min-w-[60px]">
@@ -1411,6 +1502,14 @@ export default function AthleteDetailPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Instagram Photos</h2>
             <div className="flex gap-2">
+              <button
+                onClick={() => handleEnrichFromSource("instagram")}
+                disabled={enrichingSources.instagram}
+                className="px-3 py-1.5 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50"
+                title="Refresh profile counts and recent engagement metrics"
+              >
+                {enrichingSources.instagram ? "Refreshing Profile..." : "Refresh Profile"}
+              </button>
               {instagramPhotos.length > 0 && (
                 <button
                   onClick={() => fetchInstagramPhotos(true)}
@@ -1582,17 +1681,17 @@ export default function AthleteDetailPage() {
               <div className="flex gap-2">
                 <button
                   onClick={() => handleEnrichFromSource("google")}
-                  disabled={enriching}
+                  disabled={enrichingSources.google}
                   className="px-3 py-1.5 bg-white/20 text-white text-sm rounded-lg hover:bg-white/30 disabled:opacity-50 font-medium"
                 >
-                  Web research
+                  {enrichingSources.google ? "Researching..." : "Web research"}
                 </button>
                 <button
                   onClick={() => handleEnrichFromSource("wikipedia")}
-                  disabled={enriching}
+                  disabled={enrichingSources.wikipedia}
                   className="px-3 py-1.5 bg-white/20 text-white text-sm rounded-lg hover:bg-white/30 disabled:opacity-50 font-medium"
                 >
-                  Wikipedia
+                  {enrichingSources.wikipedia ? "Loading..." : "Wikipedia"}
                 </button>
               </div>
             </div>
@@ -1706,10 +1805,10 @@ export default function AthleteDetailPage() {
               </h2>
               <button
                 onClick={() => handleEnrichFromSource("tiktok")}
-                disabled={enriching}
+                disabled={enrichingSources.tiktok}
                 className="px-3 py-1.5 bg-white/20 text-white text-sm rounded-lg hover:bg-white/30 disabled:opacity-50 font-medium"
               >
-                {enriching ? "Searching..." : "Search TikTok"}
+                {enrichingSources.tiktok ? "Searching..." : "Search TikTok"}
               </button>
             </div>
             <div className="p-6">
@@ -1765,10 +1864,10 @@ export default function AthleteDetailPage() {
               </h2>
               <button
                 onClick={() => handleEnrichFromSource("onlyfans")}
-                disabled={enriching}
+                disabled={enrichingSources.onlyfans}
                 className="px-3 py-1.5 bg-white/20 text-white text-sm rounded-lg hover:bg-white/30 disabled:opacity-50 font-medium"
               >
-                {enriching ? "Checking..." : "Check OnlyFans"}
+                {enrichingSources.onlyfans ? "Checking..." : "Check OnlyFans"}
               </button>
             </div>
             <div className="p-6">

@@ -205,14 +205,17 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Instagram Photos] Fetching posts for @${instagramHandle} (athlete: ${targetAthleteId})`);
 
-    // Get existing post IDs to avoid duplicates
+    // Load existing rows so a refresh can repair stale timestamps and metrics
+    // without downloading the same image again.
     const { data: existingPosts } = await supabase
       .from("athlete_posts")
-      .select("post_id")
+      .select("post_id,image_url,posted_at")
       .eq("athlete_id", targetAthleteId);
 
-    const existingPostIds = new Set((existingPosts || []).map(p => p.post_id));
-    console.log(`[Instagram Photos] Found ${existingPostIds.size} existing posts in database`);
+    const existingPostsById = new Map(
+      (existingPosts || []).map((post) => [post.post_id, post])
+    );
+    console.log(`[Instagram Photos] Found ${existingPostsById.size} existing posts in database`);
 
     const posts = sortInstagramPostsNewestFirst(
       await runApifyActor<ScrapedInstagramPost>(
@@ -238,39 +241,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         photos: [],
         message: "No posts available (account may be private)",
-        stats: { fetched: 0, new: 0, existing: existingPostIds.size },
+        stats: { fetched: 0, new: 0, existing: existingPostsById.size },
       });
     }
 
-    // Process each post - only save NEW posts (incremental loading)
+    // Process every returned post. Existing rows still need their source
+    // timestamp, counts, caption, and URL refreshed.
     let newCount = 0;
-    let skippedCount = 0;
-    const newPhotos: Array<{ id: string; url: string; displayUrl: string }> = [];
+    let updatedCount = 0;
 
     for (const post of posts) {
       const postId = post.shortCode || post.id || `post_${Date.now()}_${newCount}`;
-
-      // Skip if we already have this post
-      if (existingPostIds.has(postId)) {
-        skippedCount++;
-        console.log(`[Instagram Photos] Skipping existing post: ${postId}`);
-        continue;
-      }
+      const existingPost = existingPostsById.get(postId);
 
       const originalImageUrl = post.displayUrl || post.imageUrl || post.thumbnailUrl;
 
-      if (!originalImageUrl) {
+      if (!originalImageUrl && !existingPost?.image_url) {
         console.log(`[Instagram Photos] Skipping post ${postId}: no image URL`);
         continue;
       }
 
-      // Download and store the image
-      const storedImageUrl = await downloadAndStorePostImage(originalImageUrl, targetAthleteId, postId);
+      const storedImageUrl = existingPost?.image_url || (
+        originalImageUrl
+          ? await downloadAndStorePostImage(originalImageUrl, targetAthleteId, postId)
+          : null
+      );
 
       if (storedImageUrl) {
-        const postedAt = parseInstagramPostTimestamp(post.timestamp);
+        const postedAt = parseInstagramPostTimestamp(post.timestamp) || existingPost?.posted_at || null;
 
-        // Save to database
         const { error } = await supabase.from("athlete_posts").upsert({
           athlete_id: targetAthleteId,
           post_id: postId,
@@ -284,12 +283,8 @@ export async function POST(request: NextRequest) {
         }, { onConflict: "athlete_id,post_id" });
 
         if (!error) {
-          newCount++;
-          newPhotos.push({
-            id: postId,
-            url: post.url || `https://instagram.com/p/${postId}`,
-            displayUrl: storedImageUrl,
-          });
+          if (existingPost) updatedCount++;
+          else newCount++;
         }
       }
     }
@@ -300,7 +295,7 @@ export async function POST(request: NextRequest) {
       .update({ posts_scraped_at: new Date().toISOString() })
       .eq("id", targetAthleteId);
 
-    console.log(`[Instagram Photos] Done: ${newCount} new posts saved, ${skippedCount} already existed`);
+    console.log(`[Instagram Photos] Done: ${newCount} new posts saved, ${updatedCount} existing posts refreshed`);
 
     // Fetch all posts for this athlete to return
     const { data: allPosts } = await supabase
@@ -327,12 +322,12 @@ export async function POST(request: NextRequest) {
       stats: {
         fetched: posts.length,
         new: newCount,
-        skipped: skippedCount,
+        updated: updatedCount,
         total: photos.length,
       },
       message: newCount > 0
-        ? `Added ${newCount} new photo${newCount > 1 ? "s" : ""}`
-        : `All ${skippedCount} photos already loaded`,
+        ? `Added ${newCount} new photo${newCount > 1 ? "s" : ""} and refreshed ${updatedCount}`
+        : `Refreshed dates and metrics for ${updatedCount} photo${updatedCount === 1 ? "" : "s"}`,
     });
   } catch (error) {
     console.error("[Instagram Photos POST] Error:", error);

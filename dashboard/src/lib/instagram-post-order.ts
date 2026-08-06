@@ -20,6 +20,7 @@ export type ScrapedInstagramPost = InstagramTimestampedItem & {
 };
 
 const MILLISECOND_EPOCH_THRESHOLD = 10_000_000_000;
+const INSTAGRAM_LAUNCH_YEAR = 2010;
 
 export function parseInstagramPostTimestamp(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
@@ -47,7 +48,16 @@ export function parseInstagramPostTimestamp(value: unknown): string | null {
     return null;
   }
 
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  if (Number.isNaN(date.getTime())) return null;
+
+  // Actor payloads occasionally contain scrape timestamps or malformed future
+  // epochs. Do not let those masquerade as a post's publication date.
+  const year = date.getUTCFullYear();
+  if (year < INSTAGRAM_LAUNCH_YEAR || date.getTime() > Date.now() + 86_400_000) {
+    return null;
+  }
+
+  return date.toISOString();
 }
 
 export function sortInstagramPostsNewestFirst<T extends InstagramTimestampedItem>(

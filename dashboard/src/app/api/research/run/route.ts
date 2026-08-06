@@ -5,7 +5,7 @@ import {
   runApifyGoogleSearch,
   type ApifyInstagramProfile,
 } from "@/lib/apify";
-import { RESEARCH_SCORING_MODEL } from "@/lib/ai/models";
+import { resolveAnthropicScoringModel } from "@/lib/ai/anthropic-models";
 import {
   parseInstagramPostTimestamp,
   sortInstagramPostsNewestFirst,
@@ -96,6 +96,9 @@ interface ScoredAthlete extends EnrichedAthlete {
   reasoning: string;
   concerns: string[];
   is_minor?: boolean;
+  age_verified?: boolean;
+  age?: number;
+  age_source?: string;
 }
 
 interface SuccessProfile {
@@ -910,12 +913,20 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
       })),
     };
 
-    // Check knowledge graph first (most reliable)
+    const normalizedName = athleteName.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const nameTokens = normalizedName.split(" ").filter((token) => token.length > 1);
+    const matchesAthleteName = (value: string) => {
+      const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+      return nameTokens.length >= 2 && nameTokens.every((token) => normalizedValue.includes(token));
+    };
+
+    // Check knowledge graph first, but only when its returned identity matches.
     if (data.knowledge_graph) {
       const kg = data.knowledge_graph;
+      const knowledgeGraphIdentity = String(kg.title || kg.name || "");
 
       // Look for age directly
-      if (kg.age) {
+      if (kg.age && matchesAthleteName(knowledgeGraphIdentity)) {
         const ageMatch = String(kg.age).match(/(\d+)/);
         if (ageMatch) {
           const age = parseInt(ageMatch[1]);
@@ -929,7 +940,7 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
       }
 
       // Look for born/birthday
-      if (kg.born) {
+      if (kg.born && matchesAthleteName(knowledgeGraphIdentity)) {
         const yearMatch = String(kg.born).match(/(\d{4})/);
         if (yearMatch) {
           const birthYear = parseInt(yearMatch[1]);
@@ -948,6 +959,7 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
     const results = data.organic_results || [];
     for (const result of results) {
       const text = `${result.title || ""} ${result.snippet || ""}`;
+      if (!matchesAthleteName(text)) continue;
 
       // Look for "X years old" pattern
       const ageMatch = text.match(/(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
@@ -1003,6 +1015,7 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
 
 async function scoreAthletes(
   athletes: EnrichedAthlete[],
+  scoringModel: string,
   successProfile?: SuccessProfile
 ): Promise<ScoredAthlete[]> {
   log(`Step 4: Scoring ${athletes.length} athletes`);
@@ -1014,21 +1027,12 @@ async function scoreAthletes(
   for (let index = 0; index < athletes.length; index += 3) {
     const batch = athletes.slice(index, index + 3);
     const batchScores = await Promise.all(batch.map(async (athlete) => {
-      let score = await scoreAthlete(athlete, successProfile);
+      let score = await scoreAthlete(athlete, scoringModel, successProfile);
 
-      // Check if age is uncertain and needs verification
-      const ageUncertain =
-        score.is_minor === undefined ||
-        score.is_minor === null ||
-        (score.concerns || []).some((c: string) =>
-          c.toLowerCase().includes("age") ||
-          c.toLowerCase().includes("minor") ||
-          c.toLowerCase().includes("verify")
-        );
-
-      // If age is uncertain and athlete has a good score, verify via web search
-      if (ageUncertain && score.score >= 40) {
-        log(`    🔍 Age uncertain for ${athlete.name}, doing web lookup...`);
+      // A model saying "not a minor" is not identity evidence. Every candidate
+      // that could reach Approval must pass source-linked age verification.
+      if (score.score >= 40) {
+        log(`    🔍 Verifying age for ${athlete.name} with source-linked web research...`);
 
         const ageInfo = await lookupAthleteAge(athlete.name, athlete.sport);
 
@@ -1040,6 +1044,9 @@ async function scoreAthletes(
               ...score,
               score: 0,
               is_minor: true,
+              age_verified: true,
+              age: ageInfo.age,
+              age_source: ageInfo.source || undefined,
               reasoning: `${score.reasoning} [BLOCKED: Web research confirmed age is ${ageInfo.age} - minor]`,
               concerns: [...(score.concerns || []), `Age verified as ${ageInfo.age} via web research - MINOR`],
             };
@@ -1048,6 +1055,9 @@ async function scoreAthletes(
             score = {
               ...score,
               is_minor: false,
+              age_verified: true,
+              age: ageInfo.age,
+              age_source: ageInfo.source || undefined,
               reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]`,
               concerns: (score.concerns || []).filter((c: string) =>
                 !c.toLowerCase().includes("age") && !c.toLowerCase().includes("verify")
@@ -1058,7 +1068,10 @@ async function scoreAthletes(
         } else {
           score = {
             ...score,
-            concerns: [...(score.concerns || []), "Age could not be verified via web research - manual verification required"],
+            score: Math.min(score.score, 59),
+            age_verified: false,
+            reasoning: `${score.reasoning} [HOLD: age was not verified by a matching public source]`,
+            concerns: [...(score.concerns || []), "Age not source-verified; blocked from Approval"],
           };
           log(`    ⚠️ Could not verify age for ${athlete.name}`);
         }
@@ -1078,6 +1091,7 @@ async function scoreAthletes(
 
 async function scoreAthlete(
   athlete: EnrichedAthlete,
+  scoringModel: string,
   successProfile?: SuccessProfile
 ): Promise<ScoredAthlete> {
   // Build historical success context for scoring
@@ -1167,7 +1181,7 @@ Respond with ONLY valid JSON:
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: RESEARCH_SCORING_MODEL,
+      model: scoringModel,
       max_tokens: 300,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -1383,10 +1397,11 @@ export async function POST(request: NextRequest) {
     }
 
     const submittedConfig: ResearchConfig = await request.json();
+    const scoringModel = await resolveAnthropicScoringModel(submittedConfig.scoringModel);
     const config: ResearchConfig = {
       ...submittedConfig,
       resultCount: Math.min(Math.max(submittedConfig.resultCount || 5, 1), 10),
-      scoringModel: RESEARCH_SCORING_MODEL,
+      scoringModel,
     };
 
     log("═══════════════════════════════════════════════════════════════");
@@ -1543,7 +1558,7 @@ export async function POST(request: NextRequest) {
     }
 
     // STEP 4: Score athletes (with historical success context)
-    const scoredAthletes = await scoreAthletes(enrichedAthletes, successProfile);
+    const scoredAthletes = await scoreAthletes(enrichedAthletes, scoringModel, successProfile);
 
     // Take top N results
     const finalResults = scoredAthletes.slice(0, config.resultCount);
@@ -1615,6 +1630,11 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
+        if (athlete.age_verified !== true) {
+          log(`  ⏸️ HELD ${athlete.name} (@${athlete.instagram_handle}) - age was not verified by a matching public source`);
+          continue;
+        }
+
         log(`  Adding ${athlete.name} (@${athlete.instagram_handle}) to approval queue`);
         const { data: newAthlete, error: createError } = await supabase
             .from("athletes")
@@ -1634,6 +1654,9 @@ export async function POST(request: NextRequest) {
                 research_reasoning: athlete.reasoning,
                 concerns: athlete.concerns,
                 verified: athlete.verified,
+                age_verified: athlete.age_verified,
+                age: athlete.age,
+                age_source: athlete.age_source,
               }),
               source: "research_agent",
               pipeline_stage: "approval",

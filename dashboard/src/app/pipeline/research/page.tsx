@@ -7,7 +7,6 @@ import { AthleteAvatar } from "@/components/AthleteAvatar";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
 import {
   RESEARCH_SCORING_MODEL,
-  RESEARCH_SCORING_MODEL_LABEL,
 } from "@/lib/ai/models";
 
 interface Athlete {
@@ -96,6 +95,11 @@ interface ResearchRun {
     filtered: number;
     duplicates: number;
   };
+}
+
+interface ScoringModelOption {
+  id: string;
+  displayName: string;
 }
 
 // Comprehensive alphabetical list of sports
@@ -225,6 +229,8 @@ function ResearchStageContent() {
     scoringModel: RESEARCH_SCORING_MODEL,
     targetRegions: ["usa"],
   });
+  const [scoringModels, setScoringModels] = useState<ScoringModelOption[]>([]);
+  const [loadingScoringModels, setLoadingScoringModels] = useState(true);
 
   // Separate state for follower inputs to allow empty values while typing
   const [followerMinInput, setFollowerMinInput] = useState("30000");
@@ -251,6 +257,22 @@ function ResearchStageContent() {
 
     // Check for any RUNNING research in the database (persists across page navigations)
     checkForRunningResearch();
+
+    fetch("/api/ai/models", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { models?: ScoringModelOption[]; defaultModel?: string }) => {
+        if (data.models?.length) {
+          setScoringModels(data.models);
+          setConfig((current) => ({
+            ...current,
+            scoringModel: data.models!.some((model) => model.id === current.scoringModel)
+              ? current.scoringModel
+              : data.defaultModel || data.models![0].id,
+          }));
+        }
+      })
+      .catch((error) => console.error("Could not load Anthropic models:", error))
+      .finally(() => setLoadingScoringModels(false));
 
     return () => {
       if (pollingRef.current) {
@@ -747,7 +769,7 @@ function ResearchStageContent() {
       followerMin: logConfig.followerMin || 30000,
       followerMax: logConfig.followerMax || 500000,
       resultCount: logConfig.resultCount || 10,
-      scoringModel: RESEARCH_SCORING_MODEL,
+      scoringModel: logConfig.scoringModel || config.scoringModel,
       targetRegions: logConfig.targetRegions || ["usa"],
     });
 
@@ -1368,12 +1390,24 @@ function ResearchStageContent() {
                 <label className="block text-sm font-medium text-gray-900 mb-2">
                   Scoring Model
                 </label>
-                <div className="w-full border border-purple-200 bg-purple-50 rounded-lg px-3 py-2 text-sm text-purple-950">
-                  {RESEARCH_SCORING_MODEL_LABEL}
-                  <span className="ml-2 text-xs font-medium text-purple-700">Required</span>
-                </div>
+                <select
+                  value={config.scoringModel}
+                  onChange={(event) => setConfig({ ...config, scoringModel: event.target.value })}
+                  disabled={loadingScoringModels}
+                  className="w-full rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-950 disabled:opacity-60"
+                >
+                  {scoringModels.length > 0 ? (
+                    scoringModels.map((model) => (
+                      <option key={model.id} value={model.id}>{model.displayName}</option>
+                    ))
+                  ) : (
+                    <option value={config.scoringModel}>
+                      {loadingScoringModels ? "Loading current Anthropic models..." : config.scoringModel}
+                    </option>
+                  )}
+                </select>
                 <p className="text-xs text-gray-800 mt-1">
-                  Every candidate is scored by the latest stable Sonnet model. Provider failures stop the run instead of using fallback scores.
+                  Loaded from Anthropic at runtime. Sonnet is the default; choose another available Claude model for this run.
                 </p>
               </div>
             </div>

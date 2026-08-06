@@ -114,21 +114,23 @@ async function savePostsToDatabase(
   for (const post of sortInstagramPostsNewestFirst(posts)) {
     const postId = post.shortCode || post.id || `post_${Date.now()}_${savedCount}`;
 
-    // Check if already exists
+    // Existing posts still need metadata repairs. Actor-provided dates and
+    // engagement counts can change, while the stored image can be reused.
     const { data: existing } = await supabase
       .from("athlete_posts")
-      .select("post_id")
+      .select("post_id,image_url,posted_at")
       .eq("athlete_id", athleteId)
       .eq("post_id", postId)
-      .single();
+      .maybeSingle();
 
-    if (existing) continue; // Skip duplicates
-
-    // Download and store image
-    const storedImageUrl = await downloadAndStorePostImage(post.displayUrl, athleteId, postId);
+    const storedImageUrl = existing?.image_url || (
+      post.displayUrl
+        ? await downloadAndStorePostImage(post.displayUrl, athleteId, postId)
+        : null
+    );
 
     if (storedImageUrl) {
-      const postedAt = parseInstagramPostTimestamp(post.timestamp);
+      const postedAt = parseInstagramPostTimestamp(post.timestamp) || existing?.posted_at || null;
 
       const { error } = await supabase.from("athlete_posts").upsert({
         athlete_id: athleteId,
@@ -233,19 +235,23 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
   console.log(`[IG Scraper] Raw profile data keys:`, Object.keys(profile));
 
   // Extract latest posts with engagement data
-  const latestPosts = (profile.latestPosts || []).map((post) => ({
-    id: post.id || "",
-    type: post.type || "Image",
-    shortCode: post.shortCode || "",
-    caption: post.caption || "",
-    hashtags: post.hashtags || [],
-    mentions: post.mentions || [],
-    url: post.url || "",
-    commentsCount: post.commentsCount || 0,
-    likesCount: post.likesCount || 0,
-    timestamp: post.timestamp || "",
-    displayUrl: post.displayUrl || "",
-  }));
+  // Profile actors often place pinned, older viral posts first. Normalize by
+  // the publication timestamp before both display and engagement calculation.
+  const latestPosts = sortInstagramPostsNewestFirst(
+    (profile.latestPosts || []).map((post) => ({
+      id: post.id || "",
+      type: post.type || "Image",
+      shortCode: post.shortCode || "",
+      caption: post.caption || "",
+      hashtags: post.hashtags || [],
+      mentions: post.mentions || [],
+      url: post.url || "",
+      commentsCount: post.commentsCount || 0,
+      likesCount: post.likesCount || 0,
+      timestamp: post.timestamp || "",
+      displayUrl: post.displayUrl || "",
+    }))
+  );
 
   // Calculate engagement metrics
   let avgLikesPerPost = 0;
@@ -254,11 +260,12 @@ async function scrapeInstagramProfile(username: string): Promise<InstagramProfil
   const followersCount = profile.followersCount || 0;
   const followsCount = profile.followsCount || 0;
 
-  if (latestPosts.length > 0) {
-    const totalLikes = latestPosts.reduce((sum, post) => sum + (post.likesCount || 0), 0);
-    const totalComments = latestPosts.reduce((sum, post) => sum + (post.commentsCount || 0), 0);
-    avgLikesPerPost = Math.round(totalLikes / latestPosts.length);
-    avgCommentsPerPost = Math.round(totalComments / latestPosts.length);
+  const engagementSample = latestPosts.slice(0, 8);
+  if (engagementSample.length > 0) {
+    const totalLikes = engagementSample.reduce((sum, post) => sum + (post.likesCount || 0), 0);
+    const totalComments = engagementSample.reduce((sum, post) => sum + (post.commentsCount || 0), 0);
+    avgLikesPerPost = Math.round(totalLikes / engagementSample.length);
+    avgCommentsPerPost = Math.round(totalComments / engagementSample.length);
 
     // Engagement rate = (avg likes + avg comments) / followers * 100
     if (followersCount > 0) {
@@ -425,6 +432,8 @@ export async function POST(
         avg_likes: igData.avgLikesPerPost,
         avg_comments: igData.avgCommentsPerPost,
         engagement_rate: igData.engagementRate,
+        engagement_sample_size: Math.min(igData.latestPosts.length, 8),
+        engagement_method: "mean interactions on the 8 newest posts divided by followers",
         follower_following_ratio: igData.followerFollowingRatio,
 
         // Related profiles (up to 5)

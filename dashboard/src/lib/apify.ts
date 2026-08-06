@@ -217,7 +217,11 @@ export async function runApifyActor<T>(
   const timeoutMs = options.timeoutMs || DEFAULT_RUN_TIMEOUT_MS;
   const startedAt = Date.now();
   const runParameters = new URLSearchParams();
-  const maxItems = options.maxItems ?? options.datasetLimit;
+  // datasetLimit only limits how many completed dataset rows we read back.
+  // It must not be forwarded as maxItems: some pay-per-result Actors translate
+  // maxItems into a maximum run charge and reject small values below their
+  // minimum charge (for example, Google and TikTok reject it below $0.50).
+  const maxItems = options.maxItems;
   if (maxItems && maxItems > 0) {
     runParameters.set("maxItems", String(Math.floor(maxItems)));
   }

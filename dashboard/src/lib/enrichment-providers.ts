@@ -403,6 +403,29 @@ function onlyFansReverseLookupData(profile: ApifyOnlyFansReverseLookup) {
   };
 }
 
+function matchOnlyFansReverseLookup(
+  profile: ApifyOnlyFansReverseLookup,
+  athlete: EnrichmentAthlete
+) {
+  const confidence = cleanText(profile.matchConfidence).toLowerCase();
+  if (profile.ofFound !== true || confidence !== "exact") return null;
+
+  const profileUsername = normalizeIdentity(profile.ofUsername);
+  const profileName = normalizeIdentity(profile.ofName);
+  const athleteName = normalizeIdentity(athlete.name);
+  const knownHandles = [athlete.instagram_handle, athlete.tiktok_handle]
+    .map(normalizeIdentity)
+    .filter(Boolean);
+
+  if (profileUsername && knownHandles.includes(profileUsername)) {
+    return "corroborated_handle";
+  }
+  if (athleteName && profileName === athleteName) {
+    return "corroborated_name";
+  }
+  return null;
+}
+
 async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
   const storedUsername = athlete.onlyfans_url
     ? extractSocialHandle(athlete.onlyfans_url, "onlyfans.com")
@@ -504,23 +527,34 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       : "OnlyFans reverse lookup actor failed";
   }
 
-  const reverseLookupMatch = reverseLookupCandidates.find((candidate) => {
-    const confidence = cleanText(candidate.matchConfidence).toLowerCase();
-    return candidate.ofFound === true && (confidence === "exact" || confidence === "high");
-  });
+  const reverseLookupMatch = reverseLookupCandidates
+    .map((candidate) => ({
+      candidate,
+      reason: matchOnlyFansReverseLookup(candidate, athlete),
+    }))
+    .find(({ reason }) => Boolean(reason));
 
   if (reverseLookupMatch) {
     return {
       status: "complete",
       data: {
-        ...onlyFansReverseLookupData(reverseLookupMatch),
+        ...onlyFansReverseLookupData(reverseLookupMatch.candidate),
+        matchReason: reverseLookupMatch.reason,
         reverseLookupSeedsChecked: reverseLookupSeeds.length,
         reverseLookupCandidatesChecked: reverseLookupCandidates.length,
         profileActorError,
       },
-      message: `Found a ${cleanText(reverseLookupMatch.matchConfidence).toLowerCase()}-confidence OnlyFans identity match from the athlete's public social information. Verify it before outreach.`,
+      message: "Found an exact OnlyFans result whose returned name or handle independently matches this athlete. Verify it before outreach.",
     };
   }
+
+  const rejectedReverseLookupCandidates = reverseLookupCandidates
+    .filter((candidate) => candidate.ofFound === true)
+    .map((candidate) => ({
+      username: cleanText(candidate.ofUsername) || null,
+      confidence: cleanText(candidate.matchConfidence) || null,
+      reason: "The actor result was not independently corroborated by the athlete's name or known social handles.",
+    }));
 
   const actorId = process.env.APIFY_ONLYFANS_DISCOVERY_ACTOR ||
     "sentry/onlyfans-discovery-scraper";
@@ -602,6 +636,7 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       profileActorError,
       reverseLookupError,
       reverseLookupCandidatesChecked: reverseLookupCandidates.length,
+      rejectedReverseLookupCandidates,
       source: googleMatch ? "apify_google_fallback" : "onlyfans_discovery_checked",
       provider: googleMatch ? search.provider : "apify_onlyfans_discovery",
     },
