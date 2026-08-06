@@ -3,6 +3,7 @@ export const DEFAULT_RESEARCH_OBJECTIVE = "onlyfans_creator" as const;
 
 export type ResearchObjective = typeof DEFAULT_RESEARCH_OBJECTIVE;
 export type ResearchCareerStage = "emerging" | "established" | "veteran" | "unknown";
+export type ResearchObjectiveFit = "strong" | "possible" | "weak";
 
 export const ONLYFANS_CREATOR_PROFILE = {
   label: "OnlyFans creator recruitment",
@@ -57,6 +58,7 @@ export function applyResearchObjectiveScoreGuardrails(input: {
   objective?: ResearchObjective;
   age?: number | null;
   careerStage?: ResearchCareerStage | null;
+  objectiveFit?: ResearchObjectiveFit | null;
 }) {
   let score = Math.min(100, Math.max(0, Math.round(input.score)));
   if ((input.objective || DEFAULT_RESEARCH_OBJECTIVE) !== DEFAULT_RESEARCH_OBJECTIVE) {
@@ -71,6 +73,13 @@ export function applyResearchObjectiveScoreGuardrails(input: {
     if (input.age > ONLYFANS_CREATOR_PROFILE.maximumPriorityAge) score = Math.min(score, 55);
   }
 
+  // A candidate cannot numerically qualify when the model's own structured
+  // assessment says they conflict with the active objective. Established
+  // athletes need a strong, evidence-backed exception; veterans remain out.
+  if (input.objectiveFit === "weak") score = Math.min(score, 59);
+  if (input.careerStage === "established" && input.objectiveFit !== "strong") {
+    score = Math.min(score, 59);
+  }
   if (input.careerStage === "veteran") score = Math.min(score, 55);
   return score;
 }
