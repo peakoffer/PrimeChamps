@@ -35,8 +35,14 @@ export default function NavBar() {
     router.refresh();
   };
 
-  // Don't show nav on login page
-  if (pathname === "/login" || pathname === "/setup") {
+  // Keep authentication and public legal pages free of the signed-in workspace navigation.
+  if (
+    pathname === "/login" ||
+    pathname === "/setup" ||
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
+    pathname === "/data-deletion"
+  ) {
     return null;
   }
 

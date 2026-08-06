@@ -5,6 +5,9 @@ import { refreshSupabaseSession } from "@/lib/supabase/proxy";
 const PUBLIC_ROUTES = [
   "/login",
   "/setup",
+  "/privacy",
+  "/terms",
+  "/data-deletion",
   "/auth/callback",
   "/auth/confirm",
   "/api/auth/login",
