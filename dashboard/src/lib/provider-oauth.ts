@@ -100,18 +100,26 @@ export async function exchangeAuthorizationCode(
   code: string
 ): Promise<ProviderToken> {
   const config = getOAuthConfig(provider);
-  const body = new URLSearchParams({
+  const fields = {
     client_id: config.clientId,
     client_secret: config.clientSecret,
     redirect_uri: config.redirectUri,
     grant_type: "authorization_code",
     code,
-  });
-  if (provider === "outlook") body.set("scope", config.scopes.join(" "));
+  };
+  const body = provider === "instagram" ? new FormData() : new URLSearchParams(fields);
+  if (provider === "instagram") {
+    for (const [key, value] of Object.entries(fields)) body.set(key, value);
+  } else if (provider === "outlook") {
+    body.set("scope", config.scopes.join(" "));
+  }
 
   const response = await fetch(config.tokenUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers:
+      provider === "instagram"
+        ? undefined
+        : { "Content-Type": "application/x-www-form-urlencoded" },
     body,
     signal: AbortSignal.timeout(30_000),
   });
