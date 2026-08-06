@@ -4,6 +4,7 @@ import {
   runApifyActor,
   runApifyGoogleSearch,
   type ApifyOnlyFansProfile,
+  type ApifyOnlyFansReverseLookup,
   type ApifyOnlyFansUsernameProfile,
 } from "@/lib/apify";
 
@@ -362,6 +363,46 @@ function onlyFansUsernameProfileData(
   };
 }
 
+function onlyFansReverseLookupData(profile: ApifyOnlyFansReverseLookup) {
+  const username = cleanText(profile.ofUsername);
+  const url = cleanText(profile.ofUrl) || (username ? `https://onlyfans.com/${username}` : "");
+  return {
+    exists: Boolean(profile.ofFound && url),
+    url: url || null,
+    username: username || null,
+    name: cleanText(profile.ofName) || null,
+    bio: cleanText(profile.ofBioShort) || null,
+    avatar: cleanText(profile.ofAvatar) || null,
+    header: cleanText(profile.ofHeader) || null,
+    price: profile.ofCurrentPrice ?? profile.ofPrice ?? null,
+    listPrice: profile.ofPrice ?? null,
+    isFree: profile.ofIsFree ?? null,
+    likes: profile.ofLikesCount ?? null,
+    subscribers: profile.ofSubscribers ?? null,
+    posts: profile.ofPostsCount ?? null,
+    photos: profile.ofPhotosCount ?? null,
+    videos: profile.ofVideosCount ?? null,
+    audios: profile.ofAudiosCount ?? null,
+    media: profile.ofMediasCount ?? null,
+    lastSeen: cleanText(profile.ofLastSeen) || null,
+    joinDate: cleanText(profile.ofJoinDate) || null,
+    firstPost: cleanText(profile.ofFirstPost) || null,
+    verified: profile.ofIsVerified ?? null,
+    performer: profile.ofIsPerformer ?? null,
+    active: profile.ofIsActive ?? null,
+    subscriptionsOpen: profile.ofCanAddSubscriber ?? null,
+    website: cleanText(profile.ofWebsite) || null,
+    location: cleanText(profile.ofLocation) || null,
+    matchConfidence: cleanText(profile.matchConfidence) || null,
+    matchMethod: cleanText(profile.matchMethod) || null,
+    matchedInput: cleanText(profile.displayInput) || null,
+    seedType: cleanText(profile.seedType) || null,
+    matchReason: `reverse_lookup_${cleanText(profile.matchConfidence) || "confirmed"}`,
+    source: "onlyfans_reverse_lookup_actor",
+    provider: "apify_onlyfans_reverse_lookup",
+  };
+}
+
 async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
   const storedUsername = athlete.onlyfans_url
     ? extractSocialHandle(athlete.onlyfans_url, "onlyfans.com")
@@ -432,6 +473,55 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
     };
   }
 
+  const reverseLookupSeeds = Array.from(
+    new Set([
+      athlete.instagram_handle
+        ? `https://www.instagram.com/${athlete.instagram_handle.replace(/^@/, "").trim()}/`
+        : "",
+      athlete.tiktok_url || "",
+      athlete.tiktok_handle ? `@${athlete.tiktok_handle.replace(/^@/, "").trim()}` : "",
+      athlete.name,
+    ].filter(Boolean))
+  );
+  let reverseLookupError: string | null = null;
+  let reverseLookupCandidates: ApifyOnlyFansReverseLookup[] = [];
+
+  try {
+    const reverseLookupActorId = process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR ||
+      "sentry/onlyfans-reverse-lookup";
+    reverseLookupCandidates = await runApifyActor<ApifyOnlyFansReverseLookup>(
+      reverseLookupActorId,
+      { seeds: reverseLookupSeeds },
+      {
+        datasetLimit: reverseLookupSeeds.length,
+        timeoutMs: 120_000,
+        maxTotalChargeUsd: 0.15,
+      }
+    );
+  } catch (error) {
+    reverseLookupError = error instanceof Error
+      ? error.message
+      : "OnlyFans reverse lookup actor failed";
+  }
+
+  const reverseLookupMatch = reverseLookupCandidates.find((candidate) => {
+    const confidence = cleanText(candidate.matchConfidence).toLowerCase();
+    return candidate.ofFound === true && (confidence === "exact" || confidence === "high");
+  });
+
+  if (reverseLookupMatch) {
+    return {
+      status: "complete",
+      data: {
+        ...onlyFansReverseLookupData(reverseLookupMatch),
+        reverseLookupSeedsChecked: reverseLookupSeeds.length,
+        reverseLookupCandidatesChecked: reverseLookupCandidates.length,
+        profileActorError,
+      },
+      message: `Found a ${cleanText(reverseLookupMatch.matchConfidence).toLowerCase()}-confidence OnlyFans identity match from the athlete's public social information. Verify it before outreach.`,
+    };
+  }
+
   const actorId = process.env.APIFY_ONLYFANS_DISCOVERY_ACTOR ||
     "sentry/onlyfans-discovery-scraper";
   const keywords = Array.from(
@@ -471,6 +561,8 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
         ...onlyFansProfileData(actorMatch.profile, actorMatch.reason, "onlyfans_discovery_actor"),
         candidatesChecked: actorCandidates.length,
         profileActorError,
+        reverseLookupError,
+        reverseLookupCandidatesChecked: reverseLookupCandidates.length,
       },
       message: "Found a matching public OnlyFans profile through the Apify Discovery actor. Verify it before outreach.",
     };
@@ -508,12 +600,14 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       googleCandidatesChecked: googleCandidates.length,
       actorError,
       profileActorError,
+      reverseLookupError,
+      reverseLookupCandidatesChecked: reverseLookupCandidates.length,
       source: googleMatch ? "apify_google_fallback" : "onlyfans_discovery_checked",
       provider: googleMatch ? search.provider : "apify_onlyfans_discovery",
     },
     message: googleMatch
       ? "Found a matching public OnlyFans profile through Google on Apify. Verify it before outreach."
-      : `No OnlyFans profile matched this athlete after checking ${actorCandidates.length} actor result${actorCandidates.length === 1 ? "" : "s"} and ${googleCandidates.length} public Google result${googleCandidates.length === 1 ? "" : "s"}.`,
+      : `No OnlyFans profile matched this athlete after checking ${reverseLookupCandidates.length} reverse-lookup result${reverseLookupCandidates.length === 1 ? "" : "s"}, ${actorCandidates.length} discovery result${actorCandidates.length === 1 ? "" : "s"}, and ${googleCandidates.length} public Google result${googleCandidates.length === 1 ? "" : "s"}.`,
   };
 }
 

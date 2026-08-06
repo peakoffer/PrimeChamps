@@ -72,7 +72,7 @@ const providerDefinitions: ProviderDefinition[] = [
     description: "Supplies current public-web results and source links for athlete detail pages.",
     capabilities: ["Current web research", "TikTok-handle discovery", "OnlyFans discovery", "Source links"],
     required: ["APIFY_API_KEY"],
-    note: "Google and TikTok-handle discovery use maintained Apify actors. OnlyFans checks use the lower-cost username profile actor first, then strict Discovery matching and an Apify Google fallback. Result counts and charges are capped; SerpApi is not used.",
+    note: "Google and TikTok-handle discovery use maintained Apify actors. OnlyFans checks use the lower-cost username actor first, then a confidence-gated social reverse lookup, strict Discovery matching, and an Apify Google fallback. Result counts and charges are capped; SerpApi is not used.",
     nextAction: "Add a valid Apify API token beginning with apify_api_, then run one low-volume Google research check.",
   },
   {

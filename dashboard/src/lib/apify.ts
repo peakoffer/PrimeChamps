@@ -127,6 +127,39 @@ export type ApifyOnlyFansUsernameProfile = {
   isPerformer?: boolean;
 };
 
+export type ApifyOnlyFansReverseLookup = {
+  displayInput?: string;
+  seedType?: "handle" | "name" | "url" | string;
+  matchConfidence?: "exact" | "high" | "low" | string;
+  matchMethod?: string;
+  ofFound?: boolean;
+  ofUsername?: string;
+  ofUrl?: string;
+  ofName?: string;
+  ofAvatar?: string;
+  ofHeader?: string;
+  ofBioShort?: string;
+  ofIsVerified?: boolean;
+  ofIsPerformer?: boolean;
+  ofIsActive?: boolean;
+  ofCanAddSubscriber?: boolean;
+  ofIsFree?: boolean;
+  ofPrice?: number | null;
+  ofCurrentPrice?: number | null;
+  ofSubscribers?: number | null;
+  ofLikesCount?: number | null;
+  ofPostsCount?: number | null;
+  ofPhotosCount?: number | null;
+  ofVideosCount?: number | null;
+  ofAudiosCount?: number | null;
+  ofMediasCount?: number | null;
+  ofJoinDate?: string;
+  ofFirstPost?: string;
+  ofLastSeen?: string;
+  ofLocation?: string;
+  ofWebsite?: string;
+};
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
