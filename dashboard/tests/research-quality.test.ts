@@ -116,20 +116,26 @@ test("OnlyFans objective favors verified emerging adults over risky or veteran p
   }), 55);
 });
 
-test("browser data access uses the cookie-aware Supabase SSR client", () => {
-  const clientSource = readFileSync(
-    new URL("../src/lib/supabase/browser.ts", import.meta.url),
-    "utf8"
-  );
-
-  assert.match(clientSource, /@supabase\/ssr/);
-  assert.match(clientSource, /createBrowserClient/);
-  assert.doesNotMatch(clientSource, /@supabase\/supabase-js/);
+test("browser pages use authenticated app APIs instead of a Supabase client", () => {
   assert.equal(
     existsSync(new URL("../src/lib/supabase.ts", import.meta.url)),
     false,
     "the legacy catch-all Supabase browser module must stay deleted"
   );
+  assert.equal(
+    existsSync(new URL("../src/lib/supabase/browser.ts", import.meta.url)),
+    false,
+    "browser-side Supabase data access must stay deleted"
+  );
+  for (const path of [
+    "../src/app/page.tsx",
+    "../src/app/athletes/page.tsx",
+    "../src/app/athletes/[id]/page.tsx",
+    "../src/app/pipeline/approval/page.tsx",
+  ]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /supabase\/browser|@supabase\/supabase-js/);
+  }
 });
 
 test("durable workflow code stays isolated from the Next.js request runtime", () => {

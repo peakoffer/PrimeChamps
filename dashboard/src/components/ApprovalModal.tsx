@@ -2,7 +2,6 @@
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase/browser";
 
 interface Athlete {
   id: string;
@@ -92,36 +91,25 @@ export default function ApprovalModal({ athlete, isOpen, onClose, onComplete }: 
         parsedNotes = { bio: athlete.notes };
       }
 
-      // Move athlete to reach_out stage
-      const { error: updateError } = await supabase
-        .from("athletes")
-        .update({ pipeline_stage: "reach_out" })
-        .eq("id", athlete.id);
-
-      if (updateError) {
-        console.error("Supabase update error:", updateError.message, updateError.code, updateError.details);
-        throw new Error(updateError.message || "Failed to update athlete stage");
-      }
-
-      // Log comprehensive approval decision
-      const { error: decisionError } = await supabase.from("approval_decisions").insert({
-        athlete_id: athlete.id,
-        decision: "approved",
-        decided_by: "dashboard_user",
-        reason: primaryReason,
-        notes: notes || null,
-        metadata: {
+      const approvalResponse = await fetch("/api/athletes/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athlete_ids: [athlete.id],
+          reason: primaryReason,
+          notes: notes || null,
+          metadata: {
           follower_assessment: followerAssessment,
           content_quality: contentQuality,
           engagement_quality: engagementQuality,
           priority: priority,
           similar_to: similarTo || null,
-        },
+          },
+        }),
       });
-
-      if (decisionError) {
-        console.error("Error logging approval decision:", decisionError);
-        // Non-critical, continue
+      if (!approvalResponse.ok) {
+        const payload = await approvalResponse.json() as { error?: string };
+        throw new Error(payload.error || "Failed to update athlete stage");
       }
 
       // Log to research_feedback for AI learning (this is the key data!)
@@ -160,32 +148,6 @@ export default function ApprovalModal({ athlete, isOpen, onClose, onComplete }: 
         console.error("Error logging research feedback:", await feedbackResponse.text());
         // Non-critical, continue
       }
-
-      // Log pipeline history
-      const { error: historyError } = await supabase.from("pipeline_history").insert({
-        athlete_id: athlete.id,
-        from_stage: "approval",
-        to_stage: "reach_out",
-        changed_by: "dashboard_user",
-        reason: `Approved: ${APPROVAL_REASONS.find(r => r.value === primaryReason)?.label}`,
-      });
-
-      if (historyError) {
-        console.error("Error logging pipeline history:", historyError);
-        // Non-critical, continue
-      }
-
-      // Log activity notification
-      await fetch("/api/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "candidate_approved",
-          title: "Athlete Approved",
-          message: `${athlete.name} approved (${priority} priority)`,
-          metadata: { athleteId: athlete.id, sport: athlete.sport, reason: primaryReason, priority },
-        }),
-      }).catch(() => {});
 
       onComplete();
     } catch (err: unknown) {

@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase/browser";
 import type { Athlete } from "@/lib/supabase/types";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import ApprovalModal from "@/components/ApprovalModal";
@@ -386,15 +385,12 @@ export default function AthleteDetailPage() {
       if (!params.id) return;
 
       try {
-        const { data, error } = await supabase
-          .from("athletes")
-          .select("*")
-          .eq("id", params.id)
-          .single();
-
-        if (error) throw error;
+        const response = await fetch(`/api/athletes/${params.id}`, { cache: "no-store" });
+        const payload = await response.json() as { athlete?: Athlete; error?: string };
+        if (!response.ok || !payload.athlete) throw new Error(payload.error || "Athlete not found");
+        const data = payload.athlete;
         setAthlete(data);
-        setParsedData(parseNotesData(data?.notes));
+        setParsedData(parseNotesData(data.notes));
         setEditForm({
           name: data?.name || "",
           sport: data?.sport || "",
@@ -696,24 +692,22 @@ export default function AthleteDetailPage() {
     setMessage(null);
 
     try {
-      const { error } = await supabase
-        .from("athletes")
-        .update({
+      const response = await fetch(`/api/athletes/${athlete.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: editForm.name,
           sport: editForm.sport,
           instagram_handle: editForm.instagram_handle,
           instagram_url: editForm.instagram_url,
           email: editForm.email || null,
-        })
-        .eq("id", athlete.id);
-
-      if (error) throw error;
+        }),
+      });
+      const payload = await response.json() as { athlete?: Athlete; error?: string };
+      if (!response.ok || !payload.athlete) throw new Error(payload.error || "Could not save athlete");
 
       // Update local state
-      setAthlete({
-        ...athlete,
-        ...editForm,
-      });
+      setAthlete(payload.athlete);
       setIsEditing(false);
       setMessage({ type: "success", text: "Athlete saved successfully!" });
     } catch (error) {
@@ -763,15 +757,11 @@ export default function AthleteDetailPage() {
 
       if (result?.success) {
         // Refresh the page data
-        const { data } = await supabase
-          .from("athletes")
-          .select("*")
-          .eq("id", athlete.id)
-          .single();
-
-        if (data) {
-          setAthlete(data);
-          setParsedData(parseNotesData(data.notes));
+        const athleteResponse = await fetch(`/api/athletes/${athlete.id}`, { cache: "no-store" });
+        const athletePayload = await athleteResponse.json() as { athlete?: Athlete };
+        if (athletePayload.athlete) {
+          setAthlete(athletePayload.athlete);
+          setParsedData(parseNotesData(athletePayload.athlete.notes));
         }
 
         const sourceResponse = await fetch(`/api/athletes/${athlete.id}/enrich`, {
@@ -818,12 +808,11 @@ export default function AthleteDetailPage() {
     if (!confirm(`Are you sure you want to delete ${athlete.name}?`)) return;
 
     try {
-      const { error } = await supabase
-        .from("athletes")
-        .delete()
-        .eq("id", athlete.id);
-
-      if (error) throw error;
+      const response = await fetch(`/api/athletes/${athlete.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "Could not delete athlete");
+      }
       router.push("/athletes");
     } catch (error) {
       console.error("Error deleting athlete:", error);
@@ -835,15 +824,18 @@ export default function AthleteDetailPage() {
     if (!athlete) return;
 
     try {
-      const { error } = await supabase
-        .from("athletes")
-        .update({
+      const response = await fetch(`/api/athletes/${athlete.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           enrichment_status: "pending",
           follower_count: null,
-        })
-        .eq("id", athlete.id);
-
-      if (error) throw error;
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "Could not reset enrichment");
+      }
 
       setAthlete({
         ...athlete,
@@ -864,21 +856,17 @@ export default function AthleteDetailPage() {
     setMessage(null);
 
     try {
-      const { error } = await supabase
-        .from("athletes")
-        .update({ pipeline_stage: newStage })
-        .eq("id", athlete.id);
-
-      if (error) throw error;
-
-      // Log pipeline history
-      await supabase.from("pipeline_history").insert({
-        athlete_id: athlete.id,
-        from_stage: athlete.pipeline_stage,
-        to_stage: newStage,
-        changed_by: "dashboard_user",
-        reason: "Manual stage change from athlete profile",
+      const response = await fetch("/api/pipeline/athletes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athleteId: athlete.id,
+          toStage: newStage,
+          reason: "Manual stage change from athlete profile",
+        }),
       });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not move athlete");
 
       setAthlete({
         ...athlete,

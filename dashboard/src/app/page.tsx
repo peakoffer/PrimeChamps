@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase/browser";
-import type { Athlete, OutreachMessage } from "@/lib/supabase/types";
+import type { Athlete } from "@/lib/supabase/types";
 import { formatNumber, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 
@@ -35,48 +34,17 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        // Fetch recent athletes (active pipeline only, not historical)
-        const { data: athletes, error: athletesError } = await supabase
-          .from("athletes")
-          .select("*")
-          .neq("pipeline_stage", "rejected")
-          .or("is_historical.is.null,is_historical.eq.false")
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        if (athletesError) throw athletesError;
-
-        // Fetch active pipeline athletes for stats (exclude historical and rejected)
-        const { data: activeAthletes } = await supabase
-          .from("athletes")
-          .select("enrichment_status, sport, pipeline_stage, is_historical")
-          .neq("pipeline_stage", "rejected")
-          .or("is_historical.is.null,is_historical.eq.false");
-
-        // Fetch messages for stats
-        const { data: messages } = await supabase.from("outreach_messages").select("status, approval_status");
-
-        // Calculate stats from active athletes only
-        const pending = activeAthletes?.filter((a) => a.enrichment_status === "pending").length || 0;
-        const enriched = activeAthletes?.filter((a) => a.enrichment_status === "enriched").length || 0;
-        const pendingApprovals = messages?.filter((m) => m.approval_status === "pending").length || 0;
-        const sent = messages?.filter((m) => m.status === "sent" || m.status === "delivered" || m.status === "read" || m.status === "replied").length || 0;
-        const replied = messages?.filter((m) => m.status === "replied").length || 0;
-
-        // Count unique sports
-        const uniqueSports = new Set(activeAthletes?.map((a) => a.sport).filter(Boolean));
-
-        setStats({
-          totalAthletes: activeAthletes?.length || 0,
-          pendingEnrichment: pending,
-          enrichedAthletes: enriched,
-          pendingApprovals,
-          messagesSent: sent,
-          repliesReceived: replied,
-          sportsCovered: uniqueSports.size,
-        });
-
-        setRecentAthletes(athletes || []);
+        const response = await fetch("/api/dashboard/summary", { cache: "no-store" });
+        const payload = await response.json() as {
+          stats?: Stats;
+          recentAthletes?: Athlete[];
+          error?: string;
+        };
+        if (!response.ok || !payload.stats) {
+          throw new Error(payload.error || "Could not load dashboard data");
+        }
+        setStats(payload.stats);
+        setRecentAthletes(payload.recentAthletes || []);
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {

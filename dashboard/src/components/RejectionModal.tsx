@@ -2,7 +2,6 @@
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase/browser";
 
 interface Athlete {
   id: string;
@@ -84,104 +83,26 @@ export default function RejectionModal({ athlete, isOpen, onClose, onComplete }:
     setError(null);
 
     try {
-      // Parse existing notes for research data
-      let parsedNotes: Record<string, unknown> = {};
-      try {
-        if (athlete.notes) parsedNotes = JSON.parse(athlete.notes);
-      } catch {
-        parsedNotes = { bio: athlete.notes };
-      }
-
-      // Move athlete to rejected stage
-      const { error: updateError } = await supabase
-        .from("athletes")
-        .update({ pipeline_stage: "rejected" })
-        .eq("id", athlete.id);
-
-      if (updateError) {
-        console.error("Supabase update error:", updateError.message, updateError.code, updateError.details);
-        throw new Error(updateError.message || "Failed to update athlete stage");
-      }
-
-      // Log comprehensive rejection decision
-      const { error: decisionError } = await supabase.from("approval_decisions").insert({
-        athlete_id: athlete.id,
-        decision: "rejected",
-        decided_by: "dashboard_user",
-        reason: primaryReason,
-        notes: notes || null,
-        metadata: {
+      const rejectionResponse = await fetch("/api/athletes/bulk-reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athlete_ids: [athlete.id],
+          reason: primaryReason,
+          notes: notes || null,
+          avoid_similar: avoidSimilar,
+          feedback_data: {
           secondary_issues: secondaryIssues,
           avoid_similar: avoidSimilar,
           what_would_help: whatWouldHelp || null,
-        },
-      });
-
-      if (decisionError) {
-        console.error("Error logging approval decision:", decisionError);
-        // Non-critical, continue
-      }
-
-      // Log to research_feedback for AI learning (critical data!)
-      const feedbackResponse = await fetch("/api/research/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          research_log_id: parsedNotes.research_run_id || null,
-          athlete_id: athlete.id,
-          candidate_data: {
-          name: athlete.name,
-          instagram_handle: athlete.instagram_handle,
-          sport: athlete.sport,
-          follower_count: athlete.follower_count,
-          bio: parsedNotes.bio,
-          },
-          decision: "rejected",
-          rejection_reason: primaryReason,
-          rejection_notes: notes || null,
-          score: parsedNotes.research_score || parsedNotes.score,
-          reasoning: parsedNotes.research_reasoning || parsedNotes.reasoning,
-          feedback_data: {
-            primary_reason: primaryReason,
             primary_reason_label: REJECTION_REASONS.find(r => r.value === primaryReason)?.label,
-            secondary_issues: secondaryIssues,
-            avoid_similar: avoidSimilar,
-            what_would_help: whatWouldHelp || null,
-            additional_notes: notes || null,
           },
         }),
       });
-
-      if (!feedbackResponse.ok) {
-        console.error("Error logging research feedback:", await feedbackResponse.text());
-        // Non-critical, continue
+      if (!rejectionResponse.ok) {
+        const payload = await rejectionResponse.json() as { error?: string };
+        throw new Error(payload.error || "Failed to update athlete stage");
       }
-
-      // Log pipeline history
-      const { error: historyError } = await supabase.from("pipeline_history").insert({
-        athlete_id: athlete.id,
-        from_stage: "approval",
-        to_stage: "rejected",
-        changed_by: "dashboard_user",
-        reason: `Rejected: ${REJECTION_REASONS.find(r => r.value === primaryReason)?.label}`,
-      });
-
-      if (historyError) {
-        console.error("Error logging pipeline history:", historyError);
-        // Non-critical, continue
-      }
-
-      // Log activity notification
-      await fetch("/api/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "candidate_rejected",
-          title: "Athlete Rejected",
-          message: `${athlete.name} rejected (${REJECTION_REASONS.find(r => r.value === primaryReason)?.label})`,
-          metadata: { athleteId: athlete.id, sport: athlete.sport, reason: primaryReason },
-        }),
-      }).catch(() => {});
 
       onComplete();
     } catch (err: unknown) {

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase/browser";
 import type { Athlete } from "@/lib/supabase/types";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
@@ -42,35 +41,19 @@ export default function AthletesPage() {
   useEffect(() => {
     async function fetchAthletes() {
       try {
-        let query = supabase.from("athletes").select("*");
-
-        // Apply sorting
-        if (sortKey === "followers") {
-          query = query.order("follower_count", {
-            ascending: sortDirection === "asc",
-            nullsFirst: false,
-          });
-        } else if (sortKey === "name") {
-          query = query.order("name", { ascending: sortDirection === "asc" });
-        } else {
-          query = query.order("created_at", { ascending: sortDirection === "asc" });
-        }
-
-        if (sportFilter) {
-          query = query.eq("sport", sportFilter);
-        }
-        if (statusFilter) {
-          query = query.eq("enrichment_status", statusFilter);
-        }
-
-        const { data, error } = await query;
-        if (error) throw error;
-
-        setAthletes(data || []);
-
-        // Extract unique sports
-        const uniqueSports = [...new Set((data || []).map((a) => a.sport))];
-        setSports(uniqueSports);
+        const sort = sortKey === "followers" ? "follower_count" : sortKey;
+        const search = new URLSearchParams({ sort, direction: sortDirection, limit: "1000" });
+        if (sportFilter) search.set("sport", sportFilter);
+        if (statusFilter) search.set("status", statusFilter);
+        const response = await fetch(`/api/athletes?${search}`, { cache: "no-store" });
+        const payload = await response.json() as {
+          athletes?: Athlete[];
+          sports?: string[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Could not load athletes");
+        setAthletes(payload.athletes || []);
+        setSports(payload.sports || []);
       } catch (error) {
         console.error("Error fetching athletes:", error);
       } finally {

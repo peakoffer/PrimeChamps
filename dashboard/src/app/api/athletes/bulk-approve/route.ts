@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     const user = await requireAuth();
     const supabase = createAdminClient();
     const body = await request.json();
-    const { athlete_ids, notes } = body;
+    const { athlete_ids, reason, notes, metadata } = body;
 
     if (!athlete_ids || !Array.isArray(athlete_ids) || athlete_ids.length === 0) {
       return NextResponse.json(
@@ -51,8 +51,9 @@ export async function POST(request: NextRequest) {
       athlete_id: athleteId,
       decision: "approved",
       decided_by: approvedByUser,
-      reason: "bulk_approve",
+      reason: reason || "bulk_approve",
       notes: notes || "Bulk approved from pipeline",
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
     }));
 
     await supabase.from("approval_decisions").insert(decisions);
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
       from_stage: athlete.pipeline_stage || "approval",
       to_stage: "reach_out",
       changed_by: approvedByUser,
-      reason: "Bulk approved",
+      reason: reason ? `Approved: ${reason}` : "Bulk approved",
     }));
 
     if (historyEntries.length > 0) {
