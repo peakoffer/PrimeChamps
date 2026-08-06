@@ -1466,13 +1466,21 @@ export async function POST(request: NextRequest) {
     });
 
     // STEP 2: Discover athletes (with historical context)
-    const discoveredAthletes = await discoverAthletes(
+    const allDiscoveredAthletes = await discoverAthletes(
       config.sportFocus,
       sportContext,
       config.customContext,
       config.resultCount * 2,
       successProfile
     );
+    // Discovery providers can return more names than requested. Bound the
+    // expensive Google + Instagram stage so a five-result run does not enrich
+    // 20+ profiles and collide with the serverless time budget.
+    const enrichmentPoolLimit = Math.min(config.resultCount * 2, 12);
+    const discoveredAthletes = allDiscoveredAthletes.slice(0, enrichmentPoolLimit);
+    if (allDiscoveredAthletes.length > discoveredAthletes.length) {
+      log(`Capped Instagram enrichment pool at ${discoveredAthletes.length} of ${allDiscoveredAthletes.length} discoveries`);
+    }
     await updateResearchProgress(researchLogId, "enriching_instagram", {
       discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0, added: 0,
     });
