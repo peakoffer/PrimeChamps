@@ -103,6 +103,30 @@ export type ApifyOnlyFansProfile = {
   scrapedAt?: string;
 };
 
+export type ApifyOnlyFansUsernameProfile = {
+  id?: number | string;
+  name?: string;
+  username?: string;
+  avatar?: string;
+  header?: string;
+  about?: string;
+  website?: string | null;
+  location?: string | null;
+  subscribePrice?: number | null;
+  currentSubscribePrice?: number | null;
+  postsCount?: number;
+  photosCount?: number;
+  videosCount?: number;
+  audiosCount?: number;
+  mediasCount?: number;
+  favoritesCount?: number;
+  favoritedCount?: number;
+  joinDate?: string;
+  lastSeen?: string;
+  isVerified?: boolean;
+  isPerformer?: boolean;
+};
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }

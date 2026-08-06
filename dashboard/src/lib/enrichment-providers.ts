@@ -4,6 +4,7 @@ import {
   runApifyActor,
   runApifyGoogleSearch,
   type ApifyOnlyFansProfile,
+  type ApifyOnlyFansUsernameProfile,
 } from "@/lib/apify";
 
 export const enrichmentSources = [
@@ -326,20 +327,108 @@ function onlyFansProfileData(
   };
 }
 
+function onlyFansUsernameProfileData(
+  profile: ApifyOnlyFansUsernameProfile,
+  matchReason: "existing_url" | "matching_handle"
+) {
+  const username = cleanText(profile.username);
+  const price = profile.currentSubscribePrice ?? profile.subscribePrice ?? null;
+  return {
+    exists: Boolean(username),
+    url: username ? `https://onlyfans.com/${username}` : null,
+    username: username || null,
+    name: cleanText(profile.name) || null,
+    bio: cleanText(profile.about) || null,
+    avatar: cleanText(profile.avatar) || null,
+    header: cleanText(profile.header) || null,
+    price,
+    isFree: price === 0,
+    likes: profile.favoritedCount ?? profile.favoritesCount ?? null,
+    subscribers: null,
+    posts: profile.postsCount ?? null,
+    photos: profile.photosCount ?? null,
+    videos: profile.videosCount ?? null,
+    audios: profile.audiosCount ?? null,
+    media: profile.mediasCount ?? null,
+    lastSeen: cleanText(profile.lastSeen) || null,
+    joinDate: cleanText(profile.joinDate) || null,
+    verified: profile.isVerified ?? null,
+    performer: profile.isPerformer ?? null,
+    website: cleanText(profile.website) || null,
+    location: cleanText(profile.location) || null,
+    matchReason,
+    source: "onlyfans_profile_actor",
+    provider: "apify_onlyfans_profile",
+  };
+}
+
 async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
-  if (athlete.onlyfans_url) {
-    return {
-      status: "complete",
-      data: { exists: true, url: athlete.onlyfans_url, source: "existing_record" },
-      message: "Confirmed the OnlyFans URL already stored on this athlete.",
-    };
-  }
+  const storedUsername = athlete.onlyfans_url
+    ? extractSocialHandle(athlete.onlyfans_url, "onlyfans.com")
+    : "";
 
   if (!process.env.APIFY_API_KEY) {
+    if (athlete.onlyfans_url) {
+      return {
+        status: "complete",
+        data: { exists: true, url: athlete.onlyfans_url, source: "existing_record" },
+        message: "Confirmed the OnlyFans URL already stored on this athlete. Add a valid Apify token to refresh its profile metrics.",
+      };
+    }
     return {
       status: "not_configured",
       data: {},
       message: "Public OnlyFans discovery needs APIFY_API_KEY in the server environment.",
+    };
+  }
+
+  const directUsername = storedUsername ||
+    athlete.instagram_handle?.replace(/^@/, "").trim() ||
+    "";
+  let profileActorError: string | null = null;
+
+  if (directUsername) {
+    try {
+      const profileActorId = process.env.APIFY_ONLYFANS_PROFILE_ACTOR ||
+        "hello.datawizards/onlyfans-scraper";
+      const directProfiles = await runApifyActor<ApifyOnlyFansUsernameProfile>(
+        profileActorId,
+        { search_queries: [directUsername] },
+        {
+          datasetLimit: 1,
+          timeoutMs: 120_000,
+          maxTotalChargeUsd: 0.1,
+        }
+      );
+      const directMatch = directProfiles.find(
+        (profile) => normalizeIdentity(profile.username) === normalizeIdentity(directUsername)
+      );
+      if (directMatch) {
+        return {
+          status: "complete",
+          data: onlyFansUsernameProfileData(
+            directMatch,
+            storedUsername ? "existing_url" : "matching_handle"
+          ),
+          message: "Found an exact public OnlyFans username match through the lower-cost Apify profile actor. Verify it before outreach.",
+        };
+      }
+    } catch (error) {
+      profileActorError = error instanceof Error ? error.message : "OnlyFans profile actor failed";
+    }
+  }
+
+  if (athlete.onlyfans_url) {
+    return {
+      status: "complete",
+      data: {
+        exists: true,
+        url: athlete.onlyfans_url,
+        username: storedUsername || null,
+        source: "existing_record",
+        profileActorError,
+      },
+      message: "Preserved the stored OnlyFans URL, but the profile actor returned no fresh metrics.",
     };
   }
 
@@ -381,6 +470,7 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       data: {
         ...onlyFansProfileData(actorMatch.profile, actorMatch.reason, "onlyfans_discovery_actor"),
         candidatesChecked: actorCandidates.length,
+        profileActorError,
       },
       message: "Found a matching public OnlyFans profile through the Apify Discovery actor. Verify it before outreach.",
     };
@@ -417,6 +507,7 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
       actorCandidatesChecked: actorCandidates.length,
       googleCandidatesChecked: googleCandidates.length,
       actorError,
+      profileActorError,
       source: googleMatch ? "apify_google_fallback" : "onlyfans_discovery_checked",
       provider: googleMatch ? search.provider : "apify_onlyfans_discovery",
     },

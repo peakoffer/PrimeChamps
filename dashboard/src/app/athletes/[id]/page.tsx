@@ -119,7 +119,12 @@ interface EnrichmentSourceRecord {
     price?: string | number | null;
     isFree?: boolean | null;
     subscribers?: number | null;
+    posts?: number | null;
     photos?: number | null;
+    audios?: number | null;
+    joinDate?: string | null;
+    location?: string | null;
+    website?: string | null;
     lastSeen?: string | null;
     instagramUrl?: string | null;
     matchReason?: string | null;
@@ -1777,9 +1782,12 @@ export default function AthleteDetailPage() {
                       <p className="font-medium text-blue-950">
                         {onlyFansData.source === "existing_record"
                           ? "Stored profile"
+                          : onlyFansData.source === "onlyfans_profile_actor"
+                            ? "Exact username match from OnlyFans profile actor"
                           : onlyFansData.source === "onlyfans_discovery_actor"
                             ? "Matched by OnlyFans Discovery actor"
                             : "Matched by Google through Apify"}
+                        {onlyFansData.verified ? " ✓" : ""}
                       </p>
                       {(onlyFansData.bio || onlyFansData.snippet) && (
                         <p className="mt-1 text-xs leading-5 text-blue-900/75">
@@ -1824,6 +1832,12 @@ export default function AthleteDetailPage() {
                     <div className="rounded-lg bg-gray-50 p-3">
                       <span className="block text-gray-600">Likes</span>
                       <strong className="text-gray-950">{formatNumber(onlyFansData.likes)}</strong>
+                    </div>
+                  )}
+                  {onlyFansData?.posts !== undefined && onlyFansData.posts !== null && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Posts</span>
+                      <strong className="text-gray-950">{formatNumber(onlyFansData.posts)}</strong>
                     </div>
                   )}
                   {onlyFansData?.photos !== undefined && onlyFansData.photos !== null && (
