@@ -112,7 +112,17 @@ interface EnrichmentSourceRecord {
     videos?: number;
     verified?: boolean;
     exists?: boolean;
+    username?: string;
+    name?: string;
     snippet?: string;
+    avatar?: string;
+    price?: string | number | null;
+    isFree?: boolean | null;
+    subscribers?: number | null;
+    photos?: number | null;
+    lastSeen?: string | null;
+    instagramUrl?: string | null;
+    matchReason?: string | null;
     source?: string;
     provider?: string;
     message?: string;
@@ -1765,10 +1775,16 @@ export default function AthleteDetailPage() {
                   {onlyFansData?.url && (
                     <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
                       <p className="font-medium text-blue-950">
-                        {onlyFansData.source === "existing_record" ? "Stored profile" : "Possible public match"}
+                        {onlyFansData.source === "existing_record"
+                          ? "Stored profile"
+                          : onlyFansData.source === "onlyfans_discovery_actor"
+                            ? "Matched by OnlyFans Discovery actor"
+                            : "Matched by Google through Apify"}
                       </p>
-                      {onlyFansData.snippet && (
-                        <p className="mt-1 text-xs leading-5 text-blue-900/75">{onlyFansData.snippet}</p>
+                      {(onlyFansData.bio || onlyFansData.snippet) && (
+                        <p className="mt-1 text-xs leading-5 text-blue-900/75">
+                          {onlyFansData.bio || onlyFansData.snippet}
+                        </p>
                       )}
                       <a
                         href={onlyFansData.url}
@@ -1777,6 +1793,60 @@ export default function AthleteDetailPage() {
                         className="mt-2 inline-block font-medium text-blue-700 hover:underline"
                       >
                         Verify profile →
+                      </a>
+                    </div>
+                  )}
+                  {onlyFansData?.username && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Username</span>
+                      <strong className="text-gray-950">@{onlyFansData.username}</strong>
+                    </div>
+                  )}
+                  {onlyFansData?.price !== undefined && onlyFansData.price !== null && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Subscription</span>
+                      <strong className="text-gray-950">
+                        {onlyFansData.isFree
+                          ? "Free"
+                          : typeof onlyFansData.price === "number"
+                            ? `$${onlyFansData.price.toFixed(2)}`
+                            : String(onlyFansData.price)}
+                      </strong>
+                    </div>
+                  )}
+                  {onlyFansData?.subscribers !== undefined && onlyFansData.subscribers !== null && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Subscribers</span>
+                      <strong className="text-gray-950">{formatNumber(onlyFansData.subscribers)}</strong>
+                    </div>
+                  )}
+                  {onlyFansData?.likes !== undefined && onlyFansData.likes !== null && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Likes</span>
+                      <strong className="text-gray-950">{formatNumber(onlyFansData.likes)}</strong>
+                    </div>
+                  )}
+                  {onlyFansData?.photos !== undefined && onlyFansData.photos !== null && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Photos</span>
+                      <strong className="text-gray-950">{formatNumber(onlyFansData.photos)}</strong>
+                    </div>
+                  )}
+                  {onlyFansData?.videos !== undefined && onlyFansData.videos !== null && (
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <span className="block text-gray-600">Videos</span>
+                      <strong className="text-gray-950">{formatNumber(onlyFansData.videos)}</strong>
+                    </div>
+                  )}
+                  {onlyFansData?.instagramUrl && (
+                    <div className="col-span-2 rounded-lg bg-gray-50 p-3">
+                      <a
+                        href={onlyFansData.instagramUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-blue-700 hover:underline"
+                      >
+                        View linked Instagram →
                       </a>
                     </div>
                   )}
@@ -1820,7 +1890,7 @@ export default function AthleteDetailPage() {
               ) : (
                 <div className="text-center text-gray-700">
                   {enrichmentSources.onlyfans?.status === "not_configured"
-                    ? "OnlyFans discovery uses public Google results through Apify and needs a valid Apify connection."
+                    ? "OnlyFans discovery uses the configured Apify actor and Google fallback, and needs a valid Apify connection."
                     : enrichmentSources.onlyfans?.status === "not_found"
                       ? "No public OnlyFans result was found."
                       : "Check public search results for a possible OnlyFans presence."}

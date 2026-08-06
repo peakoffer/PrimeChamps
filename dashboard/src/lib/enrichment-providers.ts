@@ -1,6 +1,10 @@
 import "server-only";
 
-import { runApifyActor, runApifyGoogleSearch } from "@/lib/apify";
+import {
+  runApifyActor,
+  runApifyGoogleSearch,
+  type ApifyOnlyFansProfile,
+} from "@/lib/apify";
 
 export const enrichmentSources = [
   "instagram",
@@ -251,6 +255,77 @@ async function enrichTikTok(athlete: EnrichmentAthlete): Promise<EnrichmentProvi
   };
 }
 
+function normalizeIdentity(value: unknown) {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function extractSocialHandle(value: string, hostname: "instagram.com" | "onlyfans.com") {
+  try {
+    const url = new URL(value);
+    if (url.hostname === hostname || url.hostname.endsWith(`.${hostname}`)) {
+      return url.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
+    }
+  } catch {
+    return value.replace(/^@/, "").trim().toLowerCase();
+  }
+  return "";
+}
+
+function matchOnlyFansProfile(profile: ApifyOnlyFansProfile, athlete: EnrichmentAthlete) {
+  const athleteName = normalizeIdentity(athlete.name);
+  const instagramHandle = normalizeIdentity(athlete.instagram_handle);
+  const onlyFansUsername = normalizeIdentity(profile.username);
+  const profileName = normalizeIdentity(profile.name);
+  const linkedInstagramHandles = [
+    profile.instagramUsername || "",
+    profile.instagramUrl || "",
+    ...(profile.instagram || []),
+  ].map((value) => normalizeIdentity(extractSocialHandle(value, "instagram.com")));
+
+  if (instagramHandle && linkedInstagramHandles.includes(instagramHandle)) {
+    return "linked_instagram";
+  }
+  if (instagramHandle && onlyFansUsername === instagramHandle) {
+    return "matching_handle";
+  }
+  if (athleteName && (profileName === athleteName || onlyFansUsername === athleteName)) {
+    return "matching_name";
+  }
+  return null;
+}
+
+function onlyFansProfileData(
+  profile: ApifyOnlyFansProfile,
+  matchReason: string,
+  source: string
+) {
+  const url = cleanText(profile.profileUrl) ||
+    (cleanText(profile.username) ? `https://onlyfans.com/${cleanText(profile.username)}` : "");
+  return {
+    exists: Boolean(url),
+    url: url || null,
+    username: cleanText(profile.username) || null,
+    name: cleanText(profile.name) || null,
+    bio: cleanText(profile.bio) || cleanText(profile.bioSnippet) || null,
+    avatar: cleanText(profile.avatar) || null,
+    price: profile.price ?? null,
+    isFree: profile.isFree ?? null,
+    likes: profile.likes ?? null,
+    subscribers: profile.subscribers ?? null,
+    photos: profile.photos ?? null,
+    videos: profile.videos ?? null,
+    lastSeen: cleanText(profile.lastSeen) || null,
+    instagramUrl: cleanText(profile.instagramUrl) || profile.instagram?.[0] || null,
+    tiktokUrls: profile.tiktok || [],
+    keywords: profile.keywords || [],
+    score: profile.score ?? null,
+    scrapedAt: cleanText(profile.scrapedAt) || null,
+    matchReason,
+    source,
+    provider: "apify_onlyfans_discovery",
+  };
+}
+
 async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentProviderResult> {
   if (athlete.onlyfans_url) {
     return {
@@ -268,34 +343,86 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
     };
   }
 
+  const actorId = process.env.APIFY_ONLYFANS_DISCOVERY_ACTOR ||
+    "sentry/onlyfans-discovery-scraper";
+  const keywords = Array.from(
+    new Set([athlete.instagram_handle?.replace(/^@/, ""), athlete.name].filter(Boolean))
+  ) as string[];
+  let actorError: string | null = null;
+  let actorCandidates: ApifyOnlyFansProfile[] = [];
+
+  try {
+    actorCandidates = await runApifyActor<ApifyOnlyFansProfile>(
+      actorId,
+      {
+        searchMode: "query",
+        keywords,
+        maxResults: 5,
+        requireInstagram: false,
+        sortBy: "relevance",
+      },
+      {
+        datasetLimit: Math.max(5, keywords.length * 5),
+        timeoutMs: 120_000,
+        maxTotalChargeUsd: 0.25,
+      }
+    );
+  } catch (error) {
+    actorError = error instanceof Error ? error.message : "OnlyFans actor failed";
+  }
+
+  const actorMatch = actorCandidates
+    .map((profile) => ({ profile, reason: matchOnlyFansProfile(profile, athlete) }))
+    .find((candidate) => Boolean(candidate.reason));
+
+  if (actorMatch?.reason) {
+    return {
+      status: "complete",
+      data: {
+        ...onlyFansProfileData(actorMatch.profile, actorMatch.reason, "onlyfans_discovery_actor"),
+        candidatesChecked: actorCandidates.length,
+      },
+      message: "Found a matching public OnlyFans profile through the Apify Discovery actor. Verify it before outreach.",
+    };
+  }
+
   const search = await runApifyGoogleSearch(
-    `site:onlyfans.com "${athlete.name}" ${athlete.sport || "athlete"}`,
-    10
+    `site:onlyfans.com "${athlete.name}" ${athlete.instagram_handle || athlete.sport || "athlete"}`,
+    5
   );
-  const candidates = search.results.filter((result) => {
-    try {
-      const hostname = new URL(result.url).hostname.toLowerCase();
-      return hostname === "onlyfans.com" || hostname.endsWith(".onlyfans.com");
-    } catch {
-      return false;
-    }
-  });
-  const bestMatch = candidates[0];
+  const googleCandidates = search.results
+    .map((result) => {
+      const username = extractSocialHandle(result.url, "onlyfans.com");
+      return {
+        ...result,
+        username,
+        reason: matchOnlyFansProfile(
+          { username, name: result.title, profileUrl: result.url },
+          athlete
+        ),
+      };
+    })
+    .filter((result) => Boolean(result.username));
+  const googleMatch = googleCandidates.find((candidate) => Boolean(candidate.reason));
 
   return {
-    status: bestMatch ? "complete" : "not_found",
+    status: googleMatch ? "complete" : "not_found",
     data: {
-      exists: Boolean(bestMatch),
-      url: bestMatch?.url || null,
-      title: bestMatch?.title || null,
-      snippet: bestMatch?.snippet || null,
-      candidates,
-      source: "public_web_discovery",
-      provider: search.provider,
+      exists: Boolean(googleMatch),
+      url: googleMatch?.url || null,
+      username: googleMatch?.username || null,
+      title: googleMatch?.title || null,
+      snippet: googleMatch?.snippet || null,
+      matchReason: googleMatch?.reason || null,
+      actorCandidatesChecked: actorCandidates.length,
+      googleCandidatesChecked: googleCandidates.length,
+      actorError,
+      source: googleMatch ? "apify_google_fallback" : "onlyfans_discovery_checked",
+      provider: googleMatch ? search.provider : "apify_onlyfans_discovery",
     },
-    message: bestMatch
-      ? "Found a possible OnlyFans profile. Verify the match before outreach."
-      : "No public OnlyFans result was found.",
+    message: googleMatch
+      ? "Found a matching public OnlyFans profile through Google on Apify. Verify it before outreach."
+      : `No OnlyFans profile matched this athlete after checking ${actorCandidates.length} actor result${actorCandidates.length === 1 ? "" : "s"} and ${googleCandidates.length} public Google result${googleCandidates.length === 1 ? "" : "s"}.`,
   };
 }
 

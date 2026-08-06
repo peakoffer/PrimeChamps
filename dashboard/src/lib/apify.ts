@@ -78,6 +78,31 @@ export type ApifyInstagramProfile = {
   }>;
 };
 
+export type ApifyOnlyFansProfile = {
+  username?: string;
+  name?: string;
+  profileUrl?: string;
+  avatar?: string;
+  bio?: string;
+  bioSnippet?: string;
+  price?: string | number;
+  isFree?: boolean;
+  likes?: number;
+  subscribers?: number;
+  photos?: number;
+  videos?: number;
+  lastSeen?: string;
+  score?: number;
+  instagram?: string[];
+  instagramUrl?: string;
+  instagramUsername?: string;
+  twitter?: string[];
+  tiktok?: string[];
+  fansly?: string[];
+  keywords?: string[];
+  scrapedAt?: string;
+};
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -125,12 +150,26 @@ function pause(durationMs: number) {
 export async function runApifyActor<T>(
   actorId: string,
   input: Record<string, unknown>,
-  options: { datasetLimit?: number; timeoutMs?: number } = {}
+  options: {
+    datasetLimit?: number;
+    timeoutMs?: number;
+    maxItems?: number;
+    maxTotalChargeUsd?: number;
+  } = {}
 ): Promise<T[]> {
   const timeoutMs = options.timeoutMs || DEFAULT_RUN_TIMEOUT_MS;
   const startedAt = Date.now();
+  const runParameters = new URLSearchParams();
+  const maxItems = options.maxItems ?? options.datasetLimit;
+  if (maxItems && maxItems > 0) {
+    runParameters.set("maxItems", String(Math.floor(maxItems)));
+  }
+  if (options.maxTotalChargeUsd && options.maxTotalChargeUsd > 0) {
+    runParameters.set("maxTotalChargeUsd", String(options.maxTotalChargeUsd));
+  }
+  const runQuery = runParameters.size > 0 ? `?${runParameters.toString()}` : "";
   const runPayload = await apifyFetch<{ data?: ApifyRun }>(
-    `/acts/${encodeURIComponent(actorPath(actorId))}/runs`,
+    `/acts/${encodeURIComponent(actorPath(actorId))}/runs${runQuery}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
