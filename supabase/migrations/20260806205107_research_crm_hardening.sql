@@ -290,7 +290,8 @@ begin
 end;
 $$;
 
-revoke all on function public.default_prime_champs_organization() from public;
+revoke all on function public.default_prime_champs_organization() from public, anon, authenticated;
+grant execute on function public.default_prime_champs_organization() to service_role;
 
 drop trigger if exists research_logs_default_organization on public.research_logs;
 create trigger research_logs_default_organization
@@ -326,7 +327,7 @@ create or replace function public.current_user_is_organization_member(check_orga
 returns boolean
 language sql
 stable
-security definer
+security invoker
 set search_path = public
 as $$
   select exists (
@@ -338,7 +339,7 @@ as $$
   );
 $$;
 
-revoke all on function public.current_user_is_organization_member(uuid) from public;
+revoke all on function public.current_user_is_organization_member(uuid) from public, anon;
 grant execute on function public.current_user_is_organization_member(uuid) to authenticated;
 
 drop trigger if exists research_logs_updated_at on public.research_logs;
@@ -364,6 +365,7 @@ drop policy if exists "Organization members can select athletes" on public.athle
 drop policy if exists "Organization members can insert athletes" on public.athletes;
 drop policy if exists "Organization members can update athletes" on public.athletes;
 drop policy if exists "Organization members can delete athletes" on public.athletes;
+drop policy if exists "Users can read own organization memberships" on public.organization_memberships;
 
 alter table public.research_logs enable row level security;
 alter table public.research_candidates enable row level security;
@@ -373,6 +375,10 @@ alter table public.research_evaluation_cases enable row level security;
 alter table public.research_evaluation_results enable row level security;
 alter table public.activity_notifications enable row level security;
 alter table public.athletes enable row level security;
+
+create policy "Users can read own organization memberships"
+  on public.organization_memberships for select to authenticated
+  using (user_id = auth.uid());
 
 create policy "Organization members can select athletes"
   on public.athletes for select to authenticated
