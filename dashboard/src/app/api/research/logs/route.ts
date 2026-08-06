@@ -96,13 +96,14 @@ export async function GET(request: NextRequest) {
     }
     const logsWithCandidates = logs.map((log) => ({
       ...log,
-      final_results: candidatesByRun.get(log.id)?.length
-        ? candidatesByRun.get(log.id)
-        : log.final_results,
+      candidate_ledger: candidatesByRun.get(log.id) || [],
     }));
     const handles = Array.from(new Set(logsWithCandidates.flatMap((log) => {
-      if (!Array.isArray(log.final_results)) return [];
-      return log.final_results.flatMap((candidate) => {
+      const candidates = [
+        ...(Array.isArray(log.final_results) ? log.final_results : []),
+        ...(Array.isArray(log.candidate_ledger) ? log.candidate_ledger : []),
+      ];
+      return candidates.flatMap((candidate) => {
         if (!candidate || typeof candidate !== "object") return [];
         const handle = (candidate as JsonRecord).instagram_handle;
         return typeof handle === "string" && handle ? [handle.toLowerCase()] : [];
@@ -132,32 +133,36 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const enrichCandidate = (candidate: unknown) => {
+      if (!candidate || typeof candidate !== "object") return candidate;
+      const result = candidate as JsonRecord;
+      const handle = typeof result.instagram_handle === "string"
+        ? result.instagram_handle.toLowerCase()
+        : "";
+      const profile = profilesByHandle.get(handle);
+      if (!profile) return result;
+
+      const currentStage = profile.pipeline_stage || undefined;
+      const currentReason = typeof profile.notes.disposition_reason === "string"
+        ? profile.notes.disposition_reason
+        : currentStage === "research" && result.age_verified === true
+          ? "Currently held in Research because the original age source did not meet the stricter trusted-source policy."
+          : undefined;
+
+      return {
+        ...result,
+        athlete_id: profile.id,
+        pipeline_stage: currentStage,
+        disposition_reason: currentReason || result.disposition_reason,
+      };
+    };
     const enrichedLogs = logsWithCandidates.map((log) => ({
       ...log,
       final_results: Array.isArray(log.final_results)
-        ? log.final_results.map((candidate) => {
-            if (!candidate || typeof candidate !== "object") return candidate;
-            const result = candidate as JsonRecord;
-            const handle = typeof result.instagram_handle === "string"
-              ? result.instagram_handle.toLowerCase()
-              : "";
-            const profile = profilesByHandle.get(handle);
-            if (!profile) return result;
-
-            const currentStage = profile.pipeline_stage || undefined;
-            const currentReason = typeof profile.notes.disposition_reason === "string"
-              ? profile.notes.disposition_reason
-              : currentStage === "research" && result.age_verified === true
-                ? "Currently held in Research because the original age source did not meet the stricter trusted-source policy."
-                : undefined;
-
-            return {
-              ...result,
-              athlete_id: profile.id,
-              pipeline_stage: currentStage,
-              disposition_reason: currentReason || result.disposition_reason,
-            };
-          })
+        ? log.final_results.map(enrichCandidate)
+        : [],
+      candidate_ledger: Array.isArray(log.candidate_ledger)
+        ? log.candidate_ledger.map(enrichCandidate)
         : [],
     }));
 

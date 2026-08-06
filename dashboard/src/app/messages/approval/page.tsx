@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import MessageCard from "@/components/MessageCard";
 import MessageEditModal from "@/components/MessageEditModal";
-import type { OutreachMessage } from "@/lib/supabase";
+import type { OutreachMessage } from "@/lib/supabase/types";
 
 type SortOption = "created_at" | "follower_count" | "athlete_name";
 type SortOrder = "asc" | "desc";

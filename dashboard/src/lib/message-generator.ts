@@ -1,11 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { LATEST_ANTHROPIC_MODELS } from "@/lib/ai/models";
-import type { Athlete } from "./supabase";
+import type { Athlete } from "@/lib/supabase/types";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createAdminClient();
 
 // Types
 export interface EnrichmentData {

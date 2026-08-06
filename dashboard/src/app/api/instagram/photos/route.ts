@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { runApifyActor } from "@/lib/apify";
 import {
   parseInstagramPostTimestamp,
@@ -7,10 +7,8 @@ import {
   type ScrapedInstagramPost,
 } from "@/lib/instagram-post-order";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createAdminClient();
 
 // GET - Fetch Instagram photos for an athlete from our database
 export async function GET(request: NextRequest) {

@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 280;
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+const supabase = createAdminClient();
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as { jobId?: string };

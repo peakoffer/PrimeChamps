@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase, type Athlete } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/browser";
+import type { Athlete } from "@/lib/supabase/types";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";

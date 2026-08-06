@@ -15,10 +15,15 @@ import {
   getSportResearchStrategy,
 } from "@/lib/research/sport-strategy";
 import {
+  applyResearchObjectiveScoreGuardrails,
   calculateResearchScore,
+  DEFAULT_RESEARCH_OBJECTIVE,
+  ONLYFANS_CREATOR_PROFILE,
   parseResearchScoreBreakdown,
   RESEARCH_PROMPT_VERSION,
   resolveResearchDisposition,
+  type ResearchCareerStage,
+  type ResearchObjective,
 } from "@/lib/research/scoring";
 
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
@@ -44,6 +49,7 @@ async function updateResearchProgress(
   researchLogId: string | null,
   phase: string,
   stats: {
+    sourced?: number;
     discovered: number;
     enriched: number;
     scored: number;
@@ -115,6 +121,7 @@ async function persistDiscoveredCandidates(
 
 export interface ResearchConfig {
   sportFocus: string;
+  partnershipGoal?: ResearchObjective;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls"
   followerMin: number;
   followerMax: number;
@@ -184,6 +191,9 @@ interface ScoredAthlete extends EnrichedAthlete {
   age_source?: string;
   athlete_id?: string;
   pipeline_stage?: string;
+  career_stage?: ResearchCareerStage;
+  objective_fit?: "strong" | "possible" | "weak";
+  creator_signals?: string[];
   disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
   disposition_reason?: string;
   score_breakdown?: {
@@ -194,6 +204,25 @@ interface ScoredAthlete extends EnrichedAthlete {
     accessibility: number;
     evidence_quality: number;
   };
+}
+
+function explainResearchHold(athlete: ScoredAthlete) {
+  if (athlete.age_verified !== true) {
+    return "age was not verified by a matching trustworthy public source";
+  }
+  if (typeof athlete.age === "number" && athlete.age < ONLYFANS_CREATOR_PROFILE.targetAgeMin) {
+    return `source-verified age ${athlete.age} requires manual review for this adult-content partnership channel`;
+  }
+  if (typeof athlete.age === "number" && athlete.age > ONLYFANS_CREATOR_PROFILE.maximumPriorityAge) {
+    return `source-verified age ${athlete.age} is outside the current emerging-talent objective`;
+  }
+  if (athlete.career_stage === "veteran") {
+    return "the profile is categorized as veteran/late-career rather than emerging talent";
+  }
+  if (athlete.score < 60) {
+    return `the evidence-backed objective score (${athlete.score}) is below the 60-point Approval threshold`;
+  }
+  return "the profile requires manual review before Approval";
 }
 
 interface SuccessProfile {
@@ -551,11 +580,12 @@ async function discoverSportContext(sport: string, customContext?: string): Prom
     throw new Error("Perplexity API key not configured");
   }
 
-  const prompt = `You are researching the sport: ${sport}${customContext ? `. Focus area: ${customContext}` : ""}.
+  const prompt = `You are researching the sport: ${sport}${customContext ? `. MANDATORY SEARCH BRIEF: ${customContext}` : ""}.
 
 SPORT ARCHETYPE: ${strategy.archetype}
 PRIORITIZE: ${strategy.discoveryAngles.join("; ")}
 AUTHORITATIVE SOURCES: ${strategy.authoritativeSources.join("; ")}
+CURRENT PARTNERSHIP OBJECTIVE: find verified-adult, upcoming talent with strong personal audiences and realistic accessibility for OnlyFans creator recruitment. Focus on breakout, newly professional, roster-promotion, award-watchlist, or fast-growth signals. Deprioritize retired athletes, late-career veterans, and famous multi-cycle icons.
 
 Provide a JSON response with:
 1. Major professional leagues and tours for this sport (especially women's leagues)
@@ -563,7 +593,7 @@ Provide a JSON response with:
 3. Governing bodies
 4. 6 specific search queries that would find current professional female athletes in this sport
 
-Focus on finding sources of REAL professional athletes, not amateur or recreational.
+Focus on finding sources of REAL professional athletes, not amateur or recreational. When a mandatory search brief exists, every query must directly support it.
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -671,7 +701,7 @@ async function discoverAthletes(
   const contextInfo = [
     sportContext.leagues.length > 0 ? `Major leagues: ${sportContext.leagues.join(", ")}` : "",
     sportContext.competitions.length > 0 ? `Key competitions: ${sportContext.competitions.join(", ")}` : "",
-    customContext ? `Focus: ${customContext}` : "",
+    customContext ? `MANDATORY SEARCH BRIEF: ${customContext}` : "",
   ].filter(Boolean).join("\n");
 
   // Build historical success context
@@ -679,7 +709,7 @@ async function discoverAthletes(
     ? formatSuccessProfileForPrompt(successProfile, sport)
     : "";
 
-  const prompt = `Find ${targetCount + 10} real professional ${sport} athletes who are active on Instagram.
+  const prompt = `Find ${targetCount + 10} real professional ${sport} athletes who are active on Instagram and are realistic emerging creator-partnership prospects.
 
 ${contextInfo}
 
@@ -694,11 +724,15 @@ ${targetRegions?.length ? `- Target markets: ${targetRegions.join(", ")}` : "- T
 
 Requirements:
 - Must be REAL professional athletes (not influencers who do the sport casually)
-- Should be active competitors or recently retired (last 2-3 years)
-- Include a mix of established stars and rising talents
-- Focus on athletes aged 18-35 with personal brands and engaged fanbases
-- Prefer athletes similar to our successful conversions: individual competitors with fitness/lifestyle content
-- AVOID: athletes already on OnlyFans, minors, inactive accounts
+- The current business objective is recruiting verified adults for potential OnlyFans creator partnerships
+- Treat the MANDATORY SEARCH BRIEF as hard ranking criteria, not optional flavor text
+- Prioritize upcoming or emerging talent: recent roster promotion, breakout season, new pro contract, award watchlist, fast audience growth, or early-career momentum
+- Target ages ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}; candidates 18-20 require manual review and candidates over ${ONLYFANS_CREATOR_PROFILE.maximumPriorityAge} are normally low priority
+- Prefer active competitors, ideally in the first several years of their professional career
+- Prefer 30K-500K Instagram followers, a strong personal brand, regular fitness/lifestyle content, direct fan engagement, and realistic accessibility
+- Deprioritize retired athletes, late-career veterans, mega-celebrities, and multi-cycle icons unless the brief explicitly requests them
+- Do not infer willingness to create adult content from appearance, clothing, body type, gender expression, or sexuality; use only professional, audience, creator, and business evidence
+- AVOID: athletes already on OnlyFans, minors, inactive accounts, team-only pages, and identities without authoritative sport evidence
 
 For each athlete, provide:
 - Full name
@@ -824,6 +858,11 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
 
 Find female professional ${sport} athletes matching this query. Return only athletes not already in this list: ${athletes.map(a => a.name).join(", ")}.
 
+CURRENT OBJECTIVE: verified-adult OnlyFans creator recruitment, prioritizing ages ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}, upcoming talent, 30K-500K Instagram followers, creator/audience fit, and realistic accessibility.
+${customContext ? `MANDATORY SEARCH BRIEF: ${customContext}` : ""}
+${targetRegions?.length ? `TARGET MARKETS: ${targetRegions.join(", ")}` : "TARGET MARKETS: global"}
+Deprioritize veterans, retired athletes, mega-celebrities, and famous multi-cycle icons. Never infer adult-content interest from appearance or sexuality.
+
 Respond with JSON array:
 [{"name": "Full Name", "context": "Achievement", "source": "Competition/League", "source_url": "https://direct-authoritative-source", "source_title": "Official source title"}]`;
 
@@ -880,7 +919,9 @@ Respond with JSON array:
       sportContext.searchQueries,
       athletes.map((athlete) => athlete.name),
       targetCount - athletes.length,
-      extractionModel
+      extractionModel,
+      customContext,
+      targetRegions
     );
     for (const athlete of supplemental) {
       if (!seenNames.has(athlete.name.toLowerCase())) {
@@ -899,7 +940,9 @@ async function discoverAthletesFromApify(
   queries: string[],
   existingNames: string[],
   needed: number,
-  extractionModel: string
+  extractionModel: string,
+  customContext?: string,
+  targetRegions?: string[]
 ): Promise<DiscoveredAthlete[]> {
   if (!ANTHROPIC_API_KEY || needed <= 0) return [];
   log(`Supplementing discovery with Apify Google Search (${needed} candidates needed)`);
@@ -925,6 +968,10 @@ async function discoverAthletesFromApify(
 
 Do not invent athletes or URLs. Use only the supplied results. Exclude these existing names: ${existingNames.join(", ") || "none"}.
 Prefer an official roster, ranking, result, federation, league, tour, team, or reputable sports-news source. A generic list page may suggest a name but should be marked lower confidence.
+Prioritize verified adults ages ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}, recent breakout or early-career momentum, a personal social brand, and realistic accessibility for an OnlyFans creator partnership.
+${customContext ? `MANDATORY SEARCH BRIEF: ${customContext}` : ""}
+${targetRegions?.length ? `TARGET MARKETS: ${targetRegions.join(", ")}` : "TARGET MARKETS: global"}
+Deprioritize late-career veterans, retired athletes, mega-celebrities, and multi-cycle icons. Never infer adult-content interest from appearance or sexuality.
 
 SOURCES:
 ${sourceText}
@@ -1321,6 +1368,7 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
 async function scoreAthletes(
   athletes: EnrichedAthlete[],
   scoringModel: string,
+  config: ResearchConfig,
   successProfile?: SuccessProfile
 ): Promise<ScoredAthlete[]> {
   log(`Step 4: Scoring ${athletes.length} athletes`);
@@ -1332,7 +1380,7 @@ async function scoreAthletes(
   for (let index = 0; index < athletes.length; index += 3) {
     const batch = athletes.slice(index, index + 3);
     const batchScores = await Promise.all(batch.map(async (athlete) => {
-      let score = await scoreAthlete(athlete, scoringModel, successProfile);
+      let score = await scoreAthlete(athlete, scoringModel, config, successProfile);
 
       // A model saying "not a minor" is not identity evidence. Every candidate
       // that could reach Approval must pass source-linked age verification.
@@ -1357,16 +1405,28 @@ async function scoreAthletes(
             };
             log(`    ⛔ MINOR CONFIRMED: ${athlete.name} is ${ageInfo.age} years old`);
           } else {
+            const objectiveScore = applyResearchObjectiveScoreGuardrails({
+              score: score.score,
+              objective: config.partnershipGoal,
+              age: ageInfo.age,
+              careerStage: score.career_stage,
+            });
+            const objectiveHold = objectiveScore < score.score
+              ? ageInfo.age < ONLYFANS_CREATOR_PROFILE.targetAgeMin
+                ? ` [HOLD: age ${ageInfo.age} requires manual review for this adult-content partnership channel]`
+                : ` [LOW PRIORITY: age ${ageInfo.age} is outside the emerging-talent objective]`
+              : "";
             score = {
               ...score,
+              score: objectiveScore,
               is_minor: false,
               age_verified: true,
               age: ageInfo.age,
               age_source: ageInfo.source || undefined,
-              reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]`,
+              reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]${objectiveHold}`,
               concerns: (score.concerns || []).filter((c: string) =>
                 !c.toLowerCase().includes("age") && !c.toLowerCase().includes("verify")
-              ),
+              ).concat(objectiveHold ? [objectiveHold.replace(/^ \[|\]$/g, "")] : []),
             };
             log(`    ✅ Adult confirmed: ${athlete.name} is ${ageInfo.age} years old`);
           }
@@ -1397,6 +1457,7 @@ async function scoreAthletes(
 async function scoreAthlete(
   athlete: EnrichedAthlete,
   scoringModel: string,
+  config: ResearchConfig,
   successProfile?: SuccessProfile
 ): Promise<ScoredAthlete> {
   // Build historical success context for scoring
@@ -1413,7 +1474,17 @@ Our most successful conversions share these traits:
 Give a SCORING BOOST (+5-10 points) if this athlete matches these success patterns.`
     : "";
 
-  const prompt = `You are evaluating an athlete for potential OnlyFans partnership recruitment.
+  const prompt = `You are evaluating an athlete for potential OnlyFans creator partnership recruitment.
+
+CURRENT OBJECTIVE:
+- Find verified adults who are upcoming or emerging talent, not merely the most famous names in the sport
+- Target age: ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}; ages 18-20 require manual review; over ${ONLYFANS_CREATOR_PROFILE.maximumPriorityAge} is normally low priority
+- Target Instagram audience: 30K-500K, ideally ${ONLYFANS_CREATOR_PROFILE.idealFollowerMin.toLocaleString()}-${ONLYFANS_CREATOR_PROFILE.idealFollowerMax.toLocaleString()}
+- Favor recent breakout, new professional contract, roster promotion, award/watchlist momentum, fast audience growth, a strong personal brand, direct fan engagement, and realistic accessibility
+- Deprioritize retired athletes, late-career veterans, mega-celebrities, and famous multi-cycle icons unless the mandatory brief explicitly requests them
+- Do not infer willingness to create adult content from appearance, clothing, body type, gender expression, or sexuality. Score only professional, audience, creator, and business evidence.
+${config.customContext ? `- MANDATORY SEARCH BRIEF: ${config.customContext}` : "- MANDATORY SEARCH BRIEF: prioritize emerging talent with OnlyFans creator-business potential"}
+${config.targetRegions?.length ? `- TARGET MARKETS: ${config.targetRegions.join(", ")}` : "- TARGET MARKETS: global"}
 
 ATHLETE PROFILE:
 - Name: ${athlete.name}
@@ -1447,15 +1518,17 @@ EVALUATION CRITERIA:
    - Large (300K-500K): Harder to reach but valuable
    - Too large (>500K): Unlikely to respond
 
-3. BRAND / PARTNERSHIP FIT (25%)
+3. CREATOR / PARTNERSHIP FIT (25%)
    - Content style (fitness/lifestyle content works well)
    - Engagement indicators (active posting)
    - MUST be 18+ (this is non-negotiable)
-   - Ideal age range: 21-35
+   - Ideal age range: ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}
+   - Personal-brand ownership, creator consistency, direct audience relationship, and partnership accessibility
    - Not already on OnlyFans
 
 4. MOMENTUM (15%)
    - Recent competition, growth, awards, roster promotion, or media interest
+   - Emerging or breakout career stage scores higher than legacy fame without current momentum
 
 5. ACCESSIBILITY (15%)
    - Active account (recent posts)
@@ -1487,7 +1560,10 @@ Respond with ONLY valid JSON:
   },
   "reasoning": "<2-3 sentence explanation>",
   "concerns": ["<concern 1>", "<concern 2 if any>"],
-  "is_minor": <true if under 18 or likely minor, false otherwise>
+  "is_minor": <true if under 18 or likely minor, false otherwise>,
+  "career_stage": <"emerging" | "established" | "veteran" | "unknown">,
+  "objective_fit": <"strong" | "possible" | "weak">,
+  "creator_signals": ["<specific evidence-backed creator or audience signal>"]
 }`;
 
   if (!ANTHROPIC_API_KEY) {
@@ -1538,18 +1614,36 @@ Respond with ONLY valid JSON:
           reasoning?: unknown;
           concerns?: unknown;
           is_minor?: unknown;
+          career_stage?: unknown;
+          objective_fit?: unknown;
+          creator_signals?: unknown;
         };
         const dimensions = parseResearchScoreBreakdown(parsed.score_breakdown);
         if (typeof parsed.score === "number" && typeof parsed.reasoning === "string" && dimensions) {
+          const careerStage = ["emerging", "established", "veteran", "unknown"].includes(String(parsed.career_stage))
+            ? parsed.career_stage as ResearchCareerStage
+            : "unknown";
+          const weightedScore = calculateResearchScore(dimensions);
           return {
             ...athlete,
-            score: calculateResearchScore(dimensions),
+            score: applyResearchObjectiveScoreGuardrails({
+              score: weightedScore,
+              objective: config.partnershipGoal,
+              careerStage,
+            }),
             score_breakdown: dimensions,
             reasoning: parsed.reasoning,
             concerns: Array.isArray(parsed.concerns)
               ? parsed.concerns.filter((concern): concern is string => typeof concern === "string")
               : [],
             is_minor: parsed.is_minor === true,
+            career_stage: careerStage,
+            objective_fit: ["strong", "possible", "weak"].includes(String(parsed.objective_fit))
+              ? parsed.objective_fit as "strong" | "possible" | "weak"
+              : "weak",
+            creator_signals: Array.isArray(parsed.creator_signals)
+              ? parsed.creator_signals.filter((signal): signal is string => typeof signal === "string")
+              : [],
           };
         }
       } catch {
@@ -1755,6 +1849,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     const scoringModel = await resolveAnthropicScoringModel(submittedConfig.scoringModel);
     const config: ResearchConfig = {
       ...submittedConfig,
+      partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
       resultCount: Math.min(Math.max(submittedConfig.resultCount || 5, 1), 10),
       scoringModel,
     };
@@ -1764,6 +1859,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     log("═══════════════════════════════════════════════════════════════");
     log("Configuration:", {
       sport: config.sportFocus,
+      partnershipGoal: config.partnershipGoal,
       context: config.customContext,
       followers: `${config.followerMin.toLocaleString()} - ${config.followerMax.toLocaleString()}`,
       targetResults: config.resultCount,
@@ -1840,29 +1936,35 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       log(`Resuming from discovery checkpoint with ${allDiscoveredAthletes.length} candidates`);
     } else {
       await updateResearchProgress(researchLogId, "discovering_candidates", {
-        discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0,
+        sourced: 0, discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0,
       });
+      const discoveryTarget = Math.min(config.resultCount * 3, 20);
       allDiscoveredAthletes = await discoverAthletes(
         config.sportFocus,
         sportContext,
         config.customContext,
-        config.resultCount * 2,
+        discoveryTarget,
         successProfile,
         config.targetRegions,
         scoringModel
       );
     }
-    // Discovery providers can return more names than requested. Bound the
-    // expensive Google + Instagram stage so a five-result run does not enrich
-    // 20+ profiles and collide with the serverless time budget.
-    const enrichmentPoolLimit = Math.min(config.resultCount * 2, 12);
+    // A wider identity pool gives emerging prospects a fair chance to survive
+    // handle resolution and follower filters while the durable workflow keeps
+    // the provider work bounded.
+    const enrichmentPoolLimit = Math.min(Math.max(config.resultCount * 3, 15), 20);
     const discoveredAthletes = allDiscoveredAthletes.slice(0, enrichmentPoolLimit);
     if (allDiscoveredAthletes.length > discoveredAthletes.length) {
       log(`Capped Instagram enrichment pool at ${discoveredAthletes.length} of ${allDiscoveredAthletes.length} discoveries`);
     }
     await persistDiscoveredCandidates(input, allDiscoveredAthletes);
     await updateResearchProgress(researchLogId, "enriching_instagram", {
-      discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0, added: 0,
+      sourced: allDiscoveredAthletes.length,
+      discovered: discoveredAthletes.length,
+      enriched: 0,
+      scored: 0,
+      returned: 0,
+      added: 0,
     });
     await supabase
       .from("research_logs")
@@ -1880,6 +1982,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             status: "completed",
             context_summary: {
               sport: config.sportFocus,
+              partnershipGoal: config.partnershipGoal,
+              objectiveProfile: ONLYFANS_CREATOR_PROFILE,
               customContext: config.customContext,
               sportContext,
             },
@@ -1897,7 +2001,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         error: "No athletes found for this sport. Try a different search.",
         results: [],
         runId: researchLogId,
-        stats: { discovered: 0, enriched: 0, scored: 0, returned: 0 },
+        stats: { sourced: 0, discovered: 0, enriched: 0, scored: 0, returned: 0 },
       };
     }
 
@@ -1910,6 +2014,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config);
     }
     await updateResearchProgress(researchLogId, "scoring", {
+      sourced: allDiscoveredAthletes.length,
       discovered: discoveredAthletes.length,
       enriched: enrichedAthletes.length,
       scored: 0,
@@ -1932,11 +2037,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             status: "completed",
             context_summary: {
               sport: config.sportFocus,
+              partnershipGoal: config.partnershipGoal,
+              objectiveProfile: ONLYFANS_CREATOR_PROFILE,
               customContext: config.customContext,
               sportContext,
             },
             raw_results: discoveredAthletes,
             stats: {
+              sourced: allDiscoveredAthletes.length,
               discovered: discoveredAthletes.length,
               enriched: 0,
               scored: 0,
@@ -1957,7 +2065,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         error: "Found athletes but couldn't find their Instagram profiles. Try adjusting follower range.",
         results: [],
         runId: researchLogId,
-        stats: { discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0 },
+        stats: { sourced: allDiscoveredAthletes.length, discovered: discoveredAthletes.length, enriched: 0, scored: 0, returned: 0 },
       };
     }
 
@@ -1966,7 +2074,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       && Array.isArray(checkpoint.final_results)
       && checkpoint.final_results.length > 0
       ? checkpoint.final_results as unknown as ScoredAthlete[]
-      : await scoreAthletes(enrichedAthletes, scoringModel, successProfile);
+      : await scoreAthletes(enrichedAthletes, scoringModel, config, successProfile);
     if (reachedPhase("saving_candidates") && scoredAthletes.length > 0) {
       log(`Resuming from scoring checkpoint with ${scoredAthletes.length} finalists`);
     }
@@ -1974,6 +2082,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // Take top N results
     const finalResults = scoredAthletes.slice(0, config.resultCount);
     await updateResearchProgress(researchLogId, "saving_candidates", {
+      sourced: allDiscoveredAthletes.length,
       discovered: discoveredAthletes.length,
       enriched: enrichedAthletes.length,
       scored: scoredAthletes.length,
@@ -2090,7 +2199,11 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             ageVerified: athlete.age_verified,
             reasoning: athlete.reasoning,
           });
-          athlete.disposition_reason = "Evaluation only — the live athlete pipeline was not changed";
+          athlete.disposition_reason = athlete.disposition === "approval"
+            ? "Simulation qualified — source-linked adult age and score passed the current objective gates; the live pipeline was not changed"
+            : athlete.disposition === "blocked"
+              ? "Simulation blocked by the minor-safety screen; the live pipeline was not changed"
+              : `Simulation held because ${explainResearchHold(athlete)}; the live pipeline was not changed`;
           await supabase
             .from("research_candidates")
             .update({
@@ -2183,8 +2296,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         const destinationStage = resolvedDisposition === "approval" ? "approval" : "research";
         if (destinationStage === "research") {
           athlete.disposition = "held";
-          athlete.disposition_reason = "Held for manual review because age lacks a trustworthy public source";
-          log(`  ⏸️ HELD ${athlete.name} (@${athlete.instagram_handle}) - age was not verified by a matching public source`);
+          athlete.disposition_reason = `Held for manual review because ${explainResearchHold(athlete)}`;
+          log(`  ⏸️ HELD ${athlete.name} (@${athlete.instagram_handle}) - ${explainResearchHold(athlete)}`);
         } else {
           athlete.disposition = "approval";
           athlete.disposition_reason = athlete.age
@@ -2298,6 +2411,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           phase: "completed",
           context_summary: {
             sport: config.sportFocus,
+            partnershipGoal: config.partnershipGoal,
+            objectiveProfile: ONLYFANS_CREATOR_PROFILE,
             customContext: config.customContext,
             sportContext,
             historical_count: successProfile.totalConversions,
@@ -2319,6 +2434,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           })),
           final_results: finalResults,
           stats: {
+            sourced: allDiscoveredAthletes.length,
             discovered: discoveredAthletes.length,
             enriched: enrichedAthletes.length,
             scored: scoredAthletes.length,
@@ -2357,6 +2473,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           blockedCount,
           sport: config.sportFocus,
           runId: researchLogId,
+          sourced: allDiscoveredAthletes.length,
           discovered: discoveredAthletes.length,
           enriched: enrichedAthletes.length,
         },
@@ -2372,6 +2489,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       runId: researchLogId,
       results: finalResults,
       stats: {
+        sourced: allDiscoveredAthletes.length,
         discovered: discoveredAthletes.length,
         enriched: enrichedAthletes.length,
         scored: scoredAthletes.length,

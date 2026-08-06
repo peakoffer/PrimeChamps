@@ -8,6 +8,11 @@ import { PipelineStageNav } from "@/components/PipelineStageNav";
 import {
   RESEARCH_SCORING_MODEL,
 } from "@/lib/ai/models";
+import {
+  DEFAULT_RESEARCH_OBJECTIVE,
+  ONLYFANS_CREATOR_PROFILE,
+  type ResearchObjective,
+} from "@/lib/research/scoring";
 
 interface Athlete {
   id: string;
@@ -56,10 +61,14 @@ interface ResearchCandidate {
   prompt_version?: string;
   identity_status?: string;
   identity_confidence?: number;
+  career_stage?: "emerging" | "established" | "veteran" | "unknown";
+  objective_fit?: "strong" | "possible" | "weak";
+  creator_signals?: string[];
 }
 
 interface ResearchConfig {
   sportFocus: string;
+  partnershipGoal?: ResearchObjective;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls", "rising stars under 25"
   followerMin: number;
   followerMax: number;
@@ -87,6 +96,8 @@ interface ResearchLog {
   config_used: ResearchConfig;
   context_summary: {
     sport?: string;
+    partnershipGoal?: ResearchObjective;
+    objectiveProfile?: typeof ONLYFANS_CREATOR_PROFILE;
     customContext?: string;
     historical_count?: number;
     exclusion_count?: number;
@@ -107,7 +118,9 @@ interface ResearchLog {
     reasoning: string;
   }>;
   final_results: ResearchCandidate[];
+  candidate_ledger?: ResearchCandidate[];
   stats: {
+    sourced?: number;
     searched?: number;
     discovered?: number;
     enriched?: number;
@@ -268,6 +281,7 @@ function ResearchStageContent() {
   // Config form
   const [config, setConfig] = useState<ResearchConfig>({
     sportFocus: "mma",
+    partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
     customContext: "",
     followerMin: 30000,
     followerMax: 500000,
@@ -608,17 +622,20 @@ function ResearchStageContent() {
       type: "success",
     });
 
-    // IMMEDIATELY log "Research Started" notification
-    fetch("/api/notifications", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "research_started",
-        title: "Research Started",
-        message: `Searching for ${config.sportFocus} athletes (${config.followerMin.toLocaleString()}-${config.followerMax.toLocaleString()} followers)`,
-        metadata: { config },
-      }),
-    }).catch(() => {});
+    // Evaluation runs stay out of the live notification stream as well as the
+    // athlete pipeline and outreach queues.
+    if (!config.evaluationMode) {
+      fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "research_started",
+          title: "Research Started",
+          message: `Searching for ${config.sportFocus} athletes (${config.followerMin.toLocaleString()}-${config.followerMax.toLocaleString()} followers)`,
+          metadata: { config },
+        }),
+      }).catch(() => {});
+    }
 
     // Set a temporary placeholder while waiting for real ID
     setBackgroundRunId("starting");
@@ -828,7 +845,9 @@ function ResearchStageContent() {
   const latestCompletedLog = researchLogs.find((log) => log.status === "completed");
   const latestStats = latestCompletedLog?.stats;
 
-  const getCandidateDisposition = (candidate: ResearchCandidate) => {
+  const getCandidateDisposition = (
+    candidate: ResearchCandidate
+  ): NonNullable<ResearchCandidate["disposition"]> => {
     if (candidate.pipeline_stage === "approval") return "approval";
     if (candidate.pipeline_stage === "research") return "held";
     if (candidate.disposition === "discovered") return "discovered";
@@ -841,15 +860,24 @@ function ResearchStageContent() {
     return "approval";
   };
 
-  const dispositionPresentation = {
-    approval: { label: "Added to Approval", className: "bg-blue-100 text-blue-800" },
-    held: { label: "Held in Research", className: "bg-amber-100 text-amber-800" },
+  const getDispositionPresentation = (
+    disposition: ReturnType<typeof getCandidateDisposition>,
+    isEvaluation: boolean
+  ) => ({
+    approval: {
+      label: isEvaluation ? "Qualified in simulation" : "Added to Approval",
+      className: "bg-blue-100 text-blue-800",
+    },
+    held: {
+      label: isEvaluation ? "Held in simulation" : "Held in Research",
+      className: "bg-amber-100 text-amber-800",
+    },
     blocked: { label: "Safety blocked", className: "bg-red-100 text-red-800" },
     existing: { label: "Already in CRM", className: "bg-gray-100 text-gray-800" },
     skipped: { label: "Not saved", className: "bg-gray-100 text-gray-700" },
-    discovered: { label: "Discovered", className: "bg-purple-100 text-purple-800" },
+    discovered: { label: "Sourced, not finalized", className: "bg-purple-100 text-purple-800" },
     rejected: { label: "Rejected", className: "bg-rose-100 text-rose-800" },
-  } as const;
+  } as const)[disposition];
 
   const latestOutcomeCounts = (latestCompletedLog?.final_results || []).reduce(
     (counts, candidate) => {
@@ -875,6 +903,7 @@ function ResearchStageContent() {
     // Update config state
     setConfig({
       sportFocus: logConfig.sportFocus || "mma",
+      partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
       customContext: logConfig.customContext || "",
       followerMin: logConfig.followerMin || 30000,
       followerMax: logConfig.followerMax || 500000,
@@ -1002,22 +1031,25 @@ function ResearchStageContent() {
       {/* Latest run funnel */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-purple-700">{latestStats?.discovered || 0}</div>
-          <div className="text-sm text-purple-700">Latest discoveries</div>
+          <div className="text-3xl font-bold text-purple-700">{latestStats?.sourced || latestStats?.discovered || 0}</div>
+          <div className="text-sm text-purple-700">Sourced candidates</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">{latestStats?.returned || 0}</div>
-          <div className="text-sm text-gray-700">Scored finalists</div>
+          <div className="text-3xl font-bold text-gray-800">{latestStats?.discovered || 0}</div>
+          <div className="text-sm text-gray-700">Identity research pool</div>
+        </div>
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="text-3xl font-bold text-green-800">{latestStats?.returned || 0}</div>
+          <div className="text-sm text-green-700">Scored finalists</div>
         </div>
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-blue-800">{latestOutcomeCounts.approval}</div>
-          <div className="text-sm text-blue-700">Currently in Approval</div>
-        </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-amber-800">
-            {latestOutcomeCounts.held + latestOutcomeCounts.blocked}
+          <div className="text-3xl font-bold text-blue-800">
+            {latestOutcomeCounts.approval}
           </div>
-          <div className="text-sm text-amber-800">
+          <div className="text-sm text-blue-700">
+            {latestCompletedLog?.is_evaluation ? "Qualified in simulation" : "Added to Approval"}
+          </div>
+          <div className="mt-1 text-xs text-blue-700">
             {latestOutcomeCounts.held} held · {latestOutcomeCounts.blocked} blocked
           </div>
         </div>
@@ -1127,6 +1159,9 @@ function ResearchStageContent() {
               const toolchain = log.context_summary?.toolchain?.length
                 ? log.context_summary.toolchain
                 : fallbackToolchain(log);
+              const candidateLedger = log.candidate_ledger?.length
+                ? log.candidate_ledger
+                : log.final_results || [];
               return (
               <div key={log.id} id={`research-log-${log.id}`} className={`hover:bg-gray-50 ${isRunning ? "bg-yellow-50/50" : ""} ${expandedLogId === log.id ? "ring-2 ring-purple-300 rounded-lg" : ""}`}>
                 {/* Log Header - Clickable */}
@@ -1147,6 +1182,11 @@ function ResearchStageContent() {
                     <div>
                       <div className="font-medium text-gray-900 flex items-center gap-2">
                         {log.config_used?.sportFocus || "Research Run"}
+                        {log.is_evaluation && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                            Evaluation only
+                          </span>
+                        )}
                         {isRunning && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full animate-pulse">
                             {log.status === "queued" ? "Queued" : "Running"} · {(log.phase || log.stats?.phase || "starting").replaceAll("_", " ")}
@@ -1174,7 +1214,10 @@ function ResearchStageContent() {
                           {log.stats?.returned || log.final_results?.length || 0} finalists
                         </div>
                         <div className="text-xs text-gray-800">
-                          from {log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0} discoveries
+                          {log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0} identity researched
+                          {(log.stats?.sourced || 0) > (log.stats?.discovered || 0)
+                            ? ` · ${log.stats?.sourced} sourced`
+                            : ""}
                         </div>
                       </div>
                     )}
@@ -1206,11 +1249,11 @@ function ResearchStageContent() {
 
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                       {[
-                        ["Discovered", log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0],
+                        ["Sourced", log.stats?.sourced || log.candidate_ledger?.length || log.stats?.discovered || 0],
+                        ["Identity researched", log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0],
                         ["Enriched", log.stats?.enriched || 0],
                         ["Scored", log.stats?.scored || log.scoring_details?.length || 0],
                         ["Finalists", log.stats?.returned || log.final_results?.length || 0],
-                        ["Auto-approved", log.stats?.added ?? outcomeCounts.approval],
                       ].map(([label, value]) => (
                         <div key={String(label)} className="rounded-lg border bg-white px-3 py-2 text-center">
                           <div className="text-xl font-bold text-gray-900">{value}</div>
@@ -1228,6 +1271,10 @@ function ResearchStageContent() {
                         <div>
                           <span className="text-gray-800">Sport:</span>{" "}
                           <span className="text-gray-900">{log.config_used?.sportFocus}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-800">Objective:</span>{" "}
+                          <span className="text-gray-900">OnlyFans · emerging creator talent</span>
                         </div>
                         <div>
                           <span className="text-gray-800">Followers:</span>{" "}
@@ -1297,10 +1344,10 @@ function ResearchStageContent() {
                       </h4>
                       <div className="mb-3 flex flex-wrap gap-2 text-xs">
                         <span className="rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-800">
-                          {outcomeCounts.approval} now in approval
+                          {outcomeCounts.approval} {log.is_evaluation ? "qualified in simulation" : "now in approval"}
                         </span>
                         <span className="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800">
-                          {outcomeCounts.held} held
+                          {outcomeCounts.held} {log.is_evaluation ? "held in simulation" : "held"}
                         </span>
                         <span className="rounded-full bg-red-100 px-2.5 py-1 font-medium text-red-800">
                           {outcomeCounts.blocked} blocked
@@ -1311,11 +1358,11 @@ function ResearchStageContent() {
                           </span>
                         )}
                       </div>
-                      {log.final_results && log.final_results.length > 0 && (
+                      {candidateLedger.length > 0 && (
                         <div className="space-y-2">
-                          {log.final_results.map((result, idx) => {
+                          {candidateLedger.map((result, idx) => {
                             const disposition = getCandidateDisposition(result);
-                            const presentation = dispositionPresentation[disposition];
+                            const presentation = getDispositionPresentation(disposition, log.is_evaluation === true);
                             const reasoningKey = `${log.id}:${result.instagram_handle || idx}`;
                             const isReasoningExpanded = expandedReasoning.has(reasoningKey);
                             return (
@@ -1405,6 +1452,14 @@ function ResearchStageContent() {
                                         </span>
                                       </div>
                                       <div className="rounded-md bg-gray-50 px-3 py-2">
+                                        <span className="text-gray-500">Career stage:</span>{" "}
+                                        <span className="capitalize text-gray-900">{result.career_stage || "Not recorded"}</span>
+                                      </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2">
+                                        <span className="text-gray-500">Objective fit:</span>{" "}
+                                        <span className="capitalize text-gray-900">{result.objective_fit || "Not recorded"}</span>
+                                      </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2">
                                         <span className="text-gray-500">Scoring version:</span>{" "}
                                         <span className="text-gray-900">{result.scoring_model || log.scoring_model || "legacy"} · {result.prompt_version || log.prompt_version || "legacy"}</span>
                                       </div>
@@ -1423,6 +1478,14 @@ function ResearchStageContent() {
                                         <span className="break-all text-gray-900">{result.age_source || "No trustworthy source stored"}</span>
                                       </div>
                                     </div>
+                                    {result.creator_signals && result.creator_signals.length > 0 && (
+                                      <div>
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Creator-business signals</div>
+                                        <ul className="mt-1 list-disc space-y-1 pl-5 text-gray-800">
+                                          {result.creator_signals.map((signal) => <li key={signal}>{signal}</li>)}
+                                        </ul>
+                                      </div>
+                                    )}
                                     {(result.disposition_reason || result.concerns?.length) && (
                                       <div className="rounded-md bg-amber-50 px-3 py-2 text-amber-950">
                                         {result.disposition_reason && <p className="font-medium">{result.disposition_reason}</p>}
@@ -1581,10 +1644,10 @@ function ResearchStageContent() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <span>🔬</span> Research Agent v2
+                <span>🔬</span> Research Agent v4
               </h2>
               <p className="text-sm text-gray-800 mt-1">
-                Powered by Perplexity AI - finds real professional athletes
+                Source-linked discovery, identity enrichment, and Sonnet scoring
               </p>
             </div>
 
@@ -1598,6 +1661,14 @@ function ResearchStageContent() {
                   <li>Looks up their Instagram handles</li>
                   <li>Scores them on partnership fit</li>
                 </ol>
+              </div>
+
+              <div className="rounded-lg border border-fuchsia-200 bg-fuchsia-50 p-4">
+                <div className="text-sm font-semibold text-fuchsia-950">Current recruitment objective</div>
+                <div className="mt-1 text-sm text-fuchsia-900">OnlyFans · emerging creator talent</div>
+                <p className="mt-2 text-xs leading-5 text-fuchsia-900/80">
+                  Prioritizes source-verified adults, ideally ages {ONLYFANS_CREATOR_PROFILE.targetAgeMin}-{ONLYFANS_CREATOR_PROFILE.targetAgeMax}, with recent career momentum, 30K-500K Instagram followers, a strong personal brand, and realistic partnership accessibility. Veterans and athletes over {ONLYFANS_CREATOR_PROFILE.maximumPriorityAge} are low priority unless the search brief explicitly asks for them.
+                </p>
               </div>
 
               {/* Sport Focus */}
