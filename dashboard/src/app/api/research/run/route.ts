@@ -955,53 +955,120 @@ async function lookupAthleteAge(athleteName: string, sport: string): Promise<{
       }
     }
 
-    // Check organic results for age mentions
+    const trustedAgeDomains = [
+      "wikipedia.org",
+      "britannica.com",
+      "olympics.com",
+      "teamusa.com",
+      "ncaa.com",
+      "espn.com",
+      "ufc.com",
+      "mlb.com",
+      "nba.com",
+      "nfl.com",
+      "nhl.com",
+      "atptour.com",
+      "wtatennis.com",
+      "worldathletics.org",
+      "gymnastics.sport",
+      "usagym.org",
+      "usagymnastics.org",
+    ];
+    const sourceHostname = (source: string) => {
+      try { return new URL(source).hostname.toLowerCase().replace(/^www\./, ""); }
+      catch { return ""; }
+    };
+    const isTrustedAgeSource = (source: string) => {
+      const hostname = sourceHostname(source);
+      return hostname.endsWith(".edu") || hostname.endsWith(".gov") ||
+        trustedAgeDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    };
+    type OrganicAgeCandidate = {
+      age: number;
+      birthYear: number;
+      isMinor: boolean;
+      source: string;
+      hostname: string;
+    };
+    const organicCandidates: OrganicAgeCandidate[] = [];
+
+    // Check matching organic results, but do not trust a single low-authority
+    // people-search or adult-content page as proof of age.
     const results = data.organic_results || [];
     for (const result of results) {
       const text = `${result.title || ""} ${result.snippet || ""}`;
       if (!matchesAthleteName(text)) continue;
+      const source = result.link || "";
+      let candidate: OrganicAgeCandidate | null = null;
 
       // Look for "X years old" pattern
       const ageMatch = text.match(/(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
       if (ageMatch) {
         const age = parseInt(ageMatch[1]);
         if (age >= 10 && age <= 50) { // Reasonable athlete age range
-          return {
+          candidate = {
             age,
             birthYear: new Date().getFullYear() - age,
             isMinor: age < 18,
-            source: result.link || "Google Search"
+            source,
+            hostname: sourceHostname(source),
           };
         }
       }
 
       // Look for birth year pattern (born 2005, b. 2003, etc.)
       const birthMatch = text.match(/(?:born|b\.|birth(?:day)?)[:\s]*(?:\w+\s+\d{1,2},?\s+)?(\d{4})/i);
-      if (birthMatch) {
+      if (!candidate && birthMatch) {
         const birthYear = parseInt(birthMatch[1]);
         if (birthYear >= 1970 && birthYear <= 2010) {
           const age = new Date().getFullYear() - birthYear;
-          return {
+          candidate = {
             age,
             birthYear,
             isMinor: age < 18,
-            source: result.link || "Google Search (birth year)"
+            source,
+            hostname: sourceHostname(source),
           };
         }
       }
 
       // Look for "(age XX)" pattern common in Wikipedia snippets
       const parenAgeMatch = text.match(/\(age\s*(\d{1,2})\)/i);
-      if (parenAgeMatch) {
+      if (!candidate && parenAgeMatch) {
         const age = parseInt(parenAgeMatch[1]);
         if (age >= 10 && age <= 50) {
-          return {
+          candidate = {
             age,
             birthYear: new Date().getFullYear() - age,
             isMinor: age < 18,
-            source: result.link || "Google Search"
+            source,
+            hostname: sourceHostname(source),
           };
         }
+      }
+
+      if (!candidate) continue;
+      if (isTrustedAgeSource(candidate.source)) return candidate;
+      organicCandidates.push(candidate);
+    }
+
+    // Two independent domains agreeing on the same birth year are acceptable
+    // corroboration when no official/reputable result exposes the age.
+    const candidatesByBirthYear = new Map<number, OrganicAgeCandidate[]>();
+    for (const candidate of organicCandidates) {
+      const matches = candidatesByBirthYear.get(candidate.birthYear) || [];
+      matches.push(candidate);
+      candidatesByBirthYear.set(candidate.birthYear, matches);
+    }
+    for (const matches of candidatesByBirthYear.values()) {
+      const distinctDomains = new Set(matches.map((candidate) => candidate.hostname).filter(Boolean));
+      if (distinctDomains.size >= 2) {
+        return {
+          age: matches[0].age,
+          birthYear: matches[0].birthYear,
+          isMinor: matches[0].isMinor,
+          source: `Corroborated by ${Array.from(distinctDomains).slice(0, 2).join(" and ")}`,
+        };
       }
     }
 
