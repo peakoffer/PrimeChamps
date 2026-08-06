@@ -1,33 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-const STALE_RUN_MINUTES = 15;
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET - Fetch research sessions (logs)
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const searchParams = request.nextUrl.searchParams;
     const limit = parseInt(searchParams.get("limit") || "20");
 
-    await supabase
-      .from("research_logs")
-      .update({
-        status: "error",
-        error_message: `Research stopped reporting progress for ${STALE_RUN_MINUTES} minutes and was closed automatically.`,
-        completed_at: new Date().toISOString(),
-      })
-      .eq("status", "running")
-      .lt(
-        "heartbeat_at",
-        new Date(Date.now() - STALE_RUN_MINUTES * 60 * 1000).toISOString()
-      );
-
     const { data, error } = await supabase
       .from("research_logs")
-      .select("id, status, config_used, stats, final_results, created_at, completed_at, heartbeat_at, error_message")
+      .select("id, status, phase, workflow_run_id, prompt_version, scoring_model, is_evaluation, config_used, stats, final_results, created_at, completed_at, heartbeat_at, error_message")
+      .eq("organization_id", user.organizationId)
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -47,6 +33,7 @@ export async function GET(request: NextRequest) {
       const { data: currentAthletes } = await supabase
         .from("athletes")
         .select("instagram_handle, pipeline_stage")
+        .eq("organization_id", user.organizationId)
         .in("instagram_handle", allHandles);
       for (const athlete of currentAthletes || []) {
         if (athlete.instagram_handle && athlete.pipeline_stage) {
@@ -76,7 +63,7 @@ export async function GET(request: NextRequest) {
             counts.held++;
           } else if (candidate.disposition === "blocked" || candidate.is_minor === true || candidate.score === 0) {
             counts.blocked++;
-          } else if (candidate.disposition === "held" || candidate.age_verified !== true) {
+          } else if (candidate.disposition === "held" || candidate.age_verified !== true || (candidate.score || 0) < 60) {
             counts.held++;
           }
           return counts;
@@ -99,6 +86,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ sessions });
   } catch (error) {
     console.error("Error fetching research sessions:", error);
-    return NextResponse.json({ sessions: [] });
+    return NextResponse.json(
+      { sessions: [], error: error instanceof Error ? error.message : "Failed to fetch sessions" },
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
+    );
   }
 }

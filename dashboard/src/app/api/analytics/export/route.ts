@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   analyticsPeriodStart,
   buildFunnelStages,
 } from "@/lib/analytics/funnel";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
-
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "athletes";
     const sport = searchParams.get("sport");
@@ -37,6 +35,8 @@ export async function GET(request: NextRequest) {
           created_at,
           updated_at
         `)
+        .eq("organization_id", user.organizationId)
+        .eq("is_test_data", false)
         .not("pipeline_stage", "is", null)
         .or("is_historical.eq.false,is_historical.is.null");
 
@@ -96,12 +96,16 @@ export async function GET(request: NextRequest) {
           sent_at,
           response_received_at,
           created_at,
-          athletes (
+          athletes!inner (
             name,
             sport,
-            instagram_handle
+            instagram_handle,
+            organization_id,
+            is_test_data
           )
-        `);
+        `)
+        .eq("athletes.organization_id", user.organizationId)
+        .eq("athletes.is_test_data", false);
 
       if (startDate) {
         query = query.gte("created_at", startDate);
@@ -150,6 +154,8 @@ export async function GET(request: NextRequest) {
       let athleteQuery = supabase
         .from("athletes")
         .select("id,pipeline_stage")
+        .eq("organization_id", user.organizationId)
+        .eq("is_test_data", false)
         .not("pipeline_stage", "is", null)
         .or("is_historical.eq.false,is_historical.is.null");
       if (sport) athleteQuery = athleteQuery.eq("sport", sport);
@@ -169,6 +175,8 @@ export async function GET(request: NextRequest) {
             supabase
               .from("contracts")
               .select("athlete_id")
+              .eq("organization_id", user.organizationId)
+              .eq("is_test_data", false)
               .in("athlete_id", athleteIds)
               .not("signed_at", "is", null),
           ])
@@ -201,7 +209,7 @@ export async function GET(request: NextRequest) {
     console.error("Analytics export error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

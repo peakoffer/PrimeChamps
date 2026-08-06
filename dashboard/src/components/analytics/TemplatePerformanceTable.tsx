@@ -72,10 +72,10 @@ export default function TemplatePerformanceTable({
   };
 
   const getReplyRateColor = (rate: number, sent: number) => {
-    if (sent === 0) return "text-gray-600 bg-gray-100";
-    if (rate >= 0.3) return "text-green-600 bg-green-50";
-    if (rate >= 0.2) return "text-yellow-600 bg-yellow-50";
-    return "text-red-600 bg-red-50";
+    if (sent === 0) return "text-gray-700 bg-gray-100";
+    if (rate >= 0.3) return "text-green-800 bg-green-50";
+    if (rate >= 0.2) return "text-yellow-800 bg-yellow-50";
+    return "text-red-800 bg-red-50";
   };
 
   return (
@@ -95,7 +95,7 @@ export default function TemplatePerformanceTable({
           </p>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Scrollable template performance table">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>

@@ -6,7 +6,6 @@ import {
   Cell,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 
 interface SportData {
@@ -58,9 +57,12 @@ export default function SportPieChart({ data }: SportPieChartProps) {
       <h3 className="text-lg font-semibold text-gray-900 mb-4">
         Athletes by Sport
       </h3>
+      <p className="sr-only">
+        Athletes by sport: {chartData.map((entry) => `${entry.sport}, ${entry.count}`).join("; ")}.
+      </p>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
+          <PieChart accessibilityLayer={false}>
             <Pie
               data={chartData}
               dataKey="count"
@@ -68,21 +70,17 @@ export default function SportPieChart({ data }: SportPieChartProps) {
               cx="50%"
               cy="50%"
               outerRadius={100}
-              label={({ sport, percent }) =>
-                `${sport} (${(percent * 100).toFixed(0)}%)`
-              }
-              labelLine={{ stroke: "#9CA3AF" }}
             >
               {chartData.map((entry, index) => (
                 <Cell
                   key={`cell-${index}`}
                   fill={COLORS[index % COLORS.length]}
+                  aria-label={`${entry.sport}: ${entry.count} athletes`}
                 />
               ))}
             </Pie>
             <Tooltip
               formatter={(value: number, name: string) => {
-                const item = chartData.find((d) => d.sport === name);
                 return [
                   `${value} athletes (${((value / total) * 100).toFixed(1)}%)`,
                   name,
@@ -96,6 +94,14 @@ export default function SportPieChart({ data }: SportPieChartProps) {
             />
           </PieChart>
         </ResponsiveContainer>
+      </div>
+      <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-2" role="list" aria-label="Sport distribution legend">
+        {chartData.map((entry, index) => (
+          <div key={entry.sport} role="listitem" className="flex items-center gap-2 text-xs text-gray-700">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+            <span>{entry.sport}: {entry.count} ({total ? Math.round((entry.count / total) * 100) : 0}%)</span>
+          </div>
+        ))}
       </div>
       <div className="mt-4 text-center text-sm text-gray-500">
         Total: {total} athletes across {data.length} sports

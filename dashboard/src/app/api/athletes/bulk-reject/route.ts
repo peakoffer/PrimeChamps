@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST /api/athletes/bulk-reject - Reject multiple athletes at once
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const body = await request.json();
-    const { athlete_ids, reason, notes, rejected_by, avoid_similar } = body;
+    const { athlete_ids, reason, notes, avoid_similar } = body;
 
     if (!athlete_ids || !Array.isArray(athlete_ids) || athlete_ids.length === 0) {
       return NextResponse.json(
@@ -26,22 +24,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rejectedByUser = rejected_by || "dashboard_user";
+    const rejectedByUser = user.id;
 
     // Get current athletes info
     const { data: athletes, error: fetchError } = await supabase
       .from("athletes")
       .select("id, name, instagram_handle, sport, follower_count, pipeline_stage")
+      .eq("organization_id", user.organizationId)
       .in("id", athlete_ids);
 
     if (fetchError) {
       throw fetchError;
+    }
+    if ((athletes || []).length !== athlete_ids.length) {
+      return NextResponse.json({ error: "One or more athletes were not found" }, { status: 404 });
     }
 
     // Update all athletes to rejected stage
     const { error: updateError } = await supabase
       .from("athletes")
       .update({ pipeline_stage: "rejected" })
+      .eq("organization_id", user.organizationId)
       .in("id", athlete_ids);
 
     if (updateError) {
@@ -61,6 +64,8 @@ export async function POST(request: NextRequest) {
 
     // Log research feedback for AI learning
     const feedbackEntries = (athletes || []).map((athlete) => ({
+      organization_id: user.organizationId,
+      created_by_user_id: user.id,
       athlete_id: athlete.id,
       candidate_data: {
         name: athlete.name,
@@ -94,17 +99,15 @@ export async function POST(request: NextRequest) {
       await supabase.from("pipeline_history").insert(historyEntries);
     }
 
-    // Log notification
-    await fetch(`${request.nextUrl.origin}/api/notifications`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await supabase.from("activity_notifications").insert({
+        organization_id: user.organizationId,
+        user_id: user.id,
         type: "bulk_reject",
         title: "Athletes Rejected",
         message: `${athlete_ids.length} athletes rejected`,
         metadata: { athleteIds: athlete_ids, reason, count: athlete_ids.length },
-      }),
-    }).catch(() => {});
+        read: false,
+      });
 
     return NextResponse.json({
       success: true,
@@ -114,7 +117,7 @@ export async function POST(request: NextRequest) {
     console.error("Error in POST /api/athletes/bulk-reject:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

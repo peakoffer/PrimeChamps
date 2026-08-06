@@ -28,6 +28,12 @@ interface Contract {
   start_date?: string | null;
   signed_at?: string | null;
   notes?: string | null;
+  guaranteed_value?: number | null;
+  projected_revenue_share_value?: number | null;
+  total_contract_value?: number | null;
+  actual_revenue?: number | null;
+  currency?: string | null;
+  renewal_date?: string | null;
   athletes?: Athlete;
 }
 
@@ -58,7 +64,8 @@ export default function ContractStagePage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    const timeoutId = window.setTimeout(() => void fetchData(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchData]);
 
   const handleContractCreated = () => {
@@ -86,18 +93,17 @@ export default function ContractStagePage() {
   const signedContracts = contracts.filter((c) => c.status === "signed");
 
   // Calculate stats
-  const totalFollowers = athletes.reduce(
-    (sum, a) => sum + (a.follower_count || 0),
-    0
-  );
-
-  const totalContractValue = contracts
+  const signedContractValue = contracts
     .filter((c) => c.status === "signed")
     .reduce((sum, c) => {
-      const monthly = c.monthly_guarantee || 0;
-      const duration = c.contract_duration_months || 12;
-      return sum + monthly * duration;
+      return sum + (c.total_contract_value ?? (c.monthly_guarantee || 0) * (c.contract_duration_months || 0));
     }, 0);
+  const guaranteedValue = contracts
+    .filter((c) => c.status === "signed")
+    .reduce((sum, c) => sum + (c.guaranteed_value ?? (c.monthly_guarantee || 0) * (c.contract_duration_months || 0)), 0);
+  const actualRevenue = contracts
+    .filter((c) => c.status === "signed")
+    .reduce((sum, c) => sum + (c.actual_revenue || 0), 0);
 
   const draftCount = contracts.filter((c) => c.status === "draft").length;
   const sentCount = contracts.filter((c) => c.status === "sent").length;
@@ -131,7 +137,7 @@ export default function ContractStagePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <div className="text-3xl font-bold text-green-700">
             {athletes.length}
@@ -140,21 +146,27 @@ export default function ContractStagePage() {
         </div>
         <div className="bg-white border rounded-lg p-4">
           <div className="text-3xl font-bold text-gray-800">
-            {(totalFollowers / 1000000).toFixed(1)}M
-          </div>
-          <div className="text-sm text-gray-800">Total Reach</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
             {signedContracts.length}
           </div>
-          <div className="text-sm text-gray-800">Signed</div>
+          <div className="text-sm text-gray-800">Signed Contracts</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
           <div className="text-3xl font-bold text-gray-800">
-            ${(totalContractValue / 1000).toFixed(0)}K
+            ${(guaranteedValue / 1000).toFixed(1)}K
           </div>
-          <div className="text-sm text-gray-800">Contract Value</div>
+          <div className="text-sm text-gray-800">Guaranteed Value</div>
+        </div>
+        <div className="bg-white border rounded-lg p-4">
+          <div className="text-3xl font-bold text-gray-800">
+            ${(signedContractValue / 1000).toFixed(1)}K
+          </div>
+          <div className="text-sm text-gray-800">Projected Value</div>
+        </div>
+        <div className="bg-white border rounded-lg p-4">
+          <div className="text-3xl font-bold text-gray-800">
+            ${(actualRevenue / 1000).toFixed(1)}K
+          </div>
+          <div className="text-sm text-gray-800">Actual Revenue</div>
         </div>
       </div>
 

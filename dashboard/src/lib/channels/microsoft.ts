@@ -185,12 +185,13 @@ function extractAddresses(recipients?: GraphEmailAddress[]) {
     .filter((value): value is string => Boolean(value));
 }
 
-async function findAthleteByEmail(email: string | null) {
+async function findAthleteByEmail(email: string | null, organizationId: string) {
   if (!email) return null;
   const admin = createAdminClient();
   const { data } = await admin
     .from("athletes")
     .select("id,name")
+    .eq("organization_id", organizationId)
     .ilike("email", email)
     .limit(1)
     .maybeSingle();
@@ -236,7 +237,7 @@ async function upsertMicrosoftMessage(
         (recipient) => normalizedAddress(recipient.emailAddress?.address) === participantAddress
       )?.emailAddress?.name || participantAddress
     : message.from?.emailAddress?.name || participantAddress;
-  const athlete = await findAthleteByEmail(participantAddress);
+  const athlete = await findAthleteByEmail(participantAddress, account.organization_id);
   const providerConversationId = message.conversationId || message.internetMessageId || message.id;
 
   const { data: conversation, error: conversationError } = await admin

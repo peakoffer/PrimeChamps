@@ -1,14 +1,12 @@
 """Autonomous pipeline scheduler.
 
-Runs the outreach pipeline end-to-end on an interval:
-    enrich (pending) -> score (enriched) -> generate outreach -> send approved
+Runs the legacy draft-preparation pipeline on an interval:
+    enrich (pending) -> score (enriched) -> generate drafts
 
-Sending only ever touches APPROVED messages, so the human approval gate still
-applies in manual approval mode. Every tick is guarded by:
+This scheduler never sends messages. Sending is intentionally absent so test,
+evaluation, and scheduled runs cannot contact real people. Every tick is guarded by:
   - PIPELINE_AUTORUN_ENABLED env (must be "true" to auto-start)
   - outreach_settings.pause_all_outreach (hard stop)
-  - INSTAGRAM_DM_SENDING_ENABLED env (must be "true" to send)
-  - the Instagram kill switch (for the send step, inside the outreach agent)
 
 Note: the research/discovery step is intentionally NOT scheduled here — the
 working research pipeline lives in the dashboard (/api/research/run), and the
@@ -17,7 +15,7 @@ backend ResearchAgent is still a stub. Enrich/score/generate/send are wired.
 
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from pathlib import Path
 
@@ -27,7 +25,6 @@ from dotenv import load_dotenv
 
 from backend.database import db
 from backend.agents import EnrichmentAgent, ScoringAgent, OutreachAgent
-from backend.services.instagram_auth import instagram_auth
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -67,7 +64,7 @@ class PipelineScheduler:
         if self._running_tick:
             return {"skipped": "previous tick still running"}
         self._running_tick = True
-        result: Dict[str, Any] = {"started_at": datetime.utcnow().isoformat()}
+        result: Dict[str, Any] = {"started_at": datetime.now(timezone.utc).isoformat()}
 
         try:
             if self._is_paused():
@@ -93,16 +90,18 @@ class PipelineScheduler:
             except Exception as e:
                 result["generate_error"] = str(e)
 
-            # 4. Send approved messages (respects approval gate + guardrails)
-            try:
-                result["send"] = await outreach.send_approved_messages()
-            except Exception as e:
-                result["send_error"] = str(e)
+            # Sending is deliberately not part of scheduled automation. A user
+            # can save a draft or record a message they sent manually in the CRM.
+            result["send"] = {
+                "sent": 0,
+                "disabled": True,
+                "reason": "scheduled sending is permanently disabled",
+            }
 
             return result
         finally:
             self._running_tick = False
-            self._last_run = datetime.utcnow()
+            self._last_run = datetime.now(timezone.utc)
             result["finished_at"] = self._last_run.isoformat()
             self._last_result = result
             try:
@@ -151,14 +150,12 @@ class PipelineScheduler:
         return {
             "is_running": self._is_running,
             "autorun_enabled": self.autorun_enabled(),
-            "instagram_dm_sending_enabled": (
-                os.getenv("INSTAGRAM_DM_SENDING_ENABLED", "false").strip().lower() == "true"
-            ),
+            "instagram_dm_sending_enabled": False,
             "interval_minutes": self.interval_minutes(),
             "paused": self._is_paused(),
             "last_run": self._last_run.isoformat() if self._last_run else None,
             "last_result": self._last_result,
-            "kill_switch_active": await instagram_auth.is_kill_switch_active(),
+            "kill_switch_active": True,
         }
 
 

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET - Fetch outreach queue items
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "dms"; // 'dms', 'comments', 'sent'
 
@@ -48,7 +47,7 @@ export async function GET(request: NextRequest) {
           auto_approved,
           status,
           created_at,
-          athletes (
+          athletes!inner (
             id,
             name,
             sport,
@@ -57,6 +56,7 @@ export async function GET(request: NextRequest) {
             follower_count
           )
         `)
+        .eq("athletes.organization_id", user.organizationId)
         .in("approval_status", statusFilter)
         .order("created_at", { ascending: false })
         .limit(50);
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
           approval_status,
           status,
           created_at,
-          athletes (
+          athletes!inner (
             id,
             name,
             sport,
@@ -111,6 +111,7 @@ export async function GET(request: NextRequest) {
             follower_count
           )
         `)
+        .eq("athletes.organization_id", user.organizationId)
         .eq("engagement_type", "comment")
         .in("approval_status", ["pending", "approved"])
         .order("created_at", { ascending: false })
@@ -148,12 +149,14 @@ export async function GET(request: NextRequest) {
     // Calculate stats
     const { count: pendingDmsCount } = await supabase
       .from("outreach_messages")
-      .select("*", { count: "exact", head: true })
+      .select("id,athletes!inner(organization_id)", { count: "exact", head: true })
+      .eq("athletes.organization_id", user.organizationId)
       .eq("approval_status", "pending");
 
     const { count: pendingCommentsCount } = await supabase
       .from("content_engagements")
-      .select("*", { count: "exact", head: true })
+      .select("id,athletes!inner(organization_id)", { count: "exact", head: true })
+      .eq("athletes.organization_id", user.organizationId)
       .eq("approval_status", "pending")
       .eq("engagement_type", "comment");
 
@@ -162,7 +165,8 @@ export async function GET(request: NextRequest) {
 
     const { count: sentTodayCount } = await supabase
       .from("touchpoints")
-      .select("*", { count: "exact", head: true })
+      .select("id,athletes!inner(organization_id)", { count: "exact", head: true })
+      .eq("athletes.organization_id", user.organizationId)
       .gte("created_at", today.toISOString())
       .eq("direction", "outbound");
 
@@ -179,7 +183,7 @@ export async function GET(request: NextRequest) {
     console.error("Error in outreach queue:", error);
     return NextResponse.json(
       { error: "Failed to fetch queue" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 function periodStart(period: string) {
   const match = period.match(/^(\d+)d$/);
@@ -30,6 +26,8 @@ function relationshipAthleteId(value: unknown) {
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const startDate = periodStart(searchParams.get("period") || "365d");
     const sport = searchParams.get("sport");
@@ -40,6 +38,8 @@ export async function GET(request: NextRequest) {
     let athleteQuery = supabase
       .from("athletes")
       .select("id,pipeline_stage,created_at")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .not("pipeline_stage", "is", null)
       .or("is_historical.eq.false,is_historical.is.null");
     if (startDate) athleteQuery = athleteQuery.gte("created_at", startDate);
@@ -48,11 +48,15 @@ export async function GET(request: NextRequest) {
     let thisWeekQuery = supabase
       .from("athletes")
       .select("id")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .or("is_historical.eq.false,is_historical.is.null")
       .gte("created_at", oneWeekAgo.toISOString());
     let lastWeekQuery = supabase
       .from("athletes")
       .select("id")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .or("is_historical.eq.false,is_historical.is.null")
       .gte("created_at", twoWeeksAgo.toISOString())
       .lt("created_at", oneWeekAgo.toISOString());
@@ -84,7 +88,9 @@ export async function GET(request: NextRequest) {
       supabase
         .from("channel_messages")
         .select("athlete_id,direction,sent_at,received_at,created_at"),
-      supabase.from("contracts").select("athlete_id,status,signed_at"),
+      supabase.from("contracts").select("athlete_id,status,signed_at")
+        .eq("organization_id", user.organizationId)
+        .eq("is_test_data", false),
     ]);
 
     const firstError = [
@@ -222,7 +228,7 @@ export async function GET(request: NextRequest) {
         firstAddedAt: cohortDates[0] || null,
         lastAddedAt: cohortDates.at(-1) || null,
         definition:
-          "Non-historical athletes added during the selected period, including rejections",
+          "Non-historical, non-test athletes added during the selected period, including rejections",
       },
       data_quality: {
         contract_stage_without_signature: contractStageWithoutSignature,
@@ -238,7 +244,7 @@ export async function GET(request: NextRequest) {
     console.error("Analytics overview error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

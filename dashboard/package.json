@@ -8,8 +8,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.ts",
     "test:e2e": "playwright test",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run test:unit && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -24,7 +25,8 @@
     "react-dom": "19.2.8",
     "recharts": "^2.15.0",
     "resend": "6.18.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "workflow": "^4.8.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
@@ -45,6 +47,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "form-data": "4.0.6",
-    "lodash": "4.18.1"
+    "lodash": "4.18.1",
+    "undici": "7.29.0"
   }
 }

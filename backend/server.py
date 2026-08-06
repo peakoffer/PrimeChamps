@@ -405,6 +405,8 @@ class BulkEnrichRequest(BaseModel):
     source: str = "instagram"
     limit: int = 50
     historical: bool = True
+    organization_id: str
+    requested_by_user_id: Optional[str] = None
 
 
 @app.post("/bulk-enrich")
@@ -430,13 +432,20 @@ async def bulk_enrich(request: BulkEnrichRequest, background_tasks: BackgroundTa
         job_id,
         request.source,
         request.limit,
-        request.historical
+        request.historical,
+        request.organization_id,
     )
 
     return {"job_id": job_id, "status": "queued", "message": f"Bulk enriching from {request.source}"}
 
 
-async def run_bulk_enrich_job(job_id: str, source: str, limit: int, historical: bool):
+async def run_bulk_enrich_job(
+    job_id: str,
+    source: str,
+    limit: int,
+    historical: bool,
+    organization_id: str,
+):
     """Run bulk enrichment in the background."""
     from backend.sources.instagram import InstagramScraper
     from backend.sources.onlyfans import OnlyFansScraper
@@ -447,7 +456,7 @@ async def run_bulk_enrich_job(job_id: str, source: str, limit: int, historical: 
         # Get athletes that need enrichment
         query = db.client.table("athletes").select(
             "id, name, instagram_handle, profile_pic_url, notes"
-        )
+        ).eq("organization_id", organization_id)
 
         if historical:
             query = query.eq("is_historical", True)

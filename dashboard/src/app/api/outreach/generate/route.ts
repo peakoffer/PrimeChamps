@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 const AGENT_SERVER_URL = process.env.AGENT_SERVER_URL || "http://localhost:8000";
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Generate a personalized outreach message for an athlete
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const body = await request.json();
     const { athleteId } = body;
 
@@ -22,6 +20,7 @@ export async function POST(request: NextRequest) {
       .from("athletes")
       .select("*")
       .eq("id", athleteId)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (athleteError || !athlete) {
@@ -55,7 +54,7 @@ export async function POST(request: NextRequest) {
     console.error("Error generating message:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Generate AI comment for a specific post
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { athleteId, postId, postUrl, postCaption, postImage } = await request.json();
 
     if (!athleteId || !postId) {
@@ -22,6 +21,7 @@ export async function POST(request: NextRequest) {
       .from("athletes")
       .select("*")
       .eq("id", athleteId)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (athleteError || !athlete) {
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
           source = "ai";
         }
       }
-    } catch (error) {
+    } catch {
       console.log("Backend AI comment generation unavailable, using template fallback");
     }
 
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
     console.error("Error generating comment:", error);
     return NextResponse.json(
       { error: "Failed to generate comment" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
@@ -181,6 +181,8 @@ export async function POST(request: NextRequest) {
 // POST batch - Generate comments for multiple posts
 export async function PUT(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { athleteId, posts } = await request.json();
 
     if (!athleteId || !posts || !Array.isArray(posts)) {
@@ -195,6 +197,7 @@ export async function PUT(request: NextRequest) {
       .from("athletes")
       .select("*")
       .eq("id", athleteId)
+      .eq("organization_id", user.organizationId)
       .single();
 
     if (athleteError || !athlete) {
@@ -278,7 +281,7 @@ export async function PUT(request: NextRequest) {
     console.error("Error generating batch comments:", error);
     return NextResponse.json(
       { error: "Failed to generate comments" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

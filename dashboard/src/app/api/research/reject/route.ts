@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface Candidate {
   name: string;
@@ -40,6 +36,8 @@ function extractBioPattern(bio?: string): string {
 // POST - Reject a research candidate and store feedback for learning
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { candidate, researchRunId, reason, notes } = await request.json();
 
     if (!candidate || !candidate.instagram_handle) {
@@ -50,10 +48,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Rejection reason is required" }, { status: 400 });
     }
 
+    const candidateId = typeof candidate.id === "string" ? candidate.id : null;
+    if (candidateId) {
+      const { data: candidateRecord, error: candidateError } = await supabase
+        .from("research_candidates")
+        .select("id,research_log_id")
+        .eq("id", candidateId)
+        .eq("organization_id", user.organizationId)
+        .maybeSingle();
+      if (candidateError) throw candidateError;
+      if (!candidateRecord || (researchRunId && candidateRecord.research_log_id !== researchRunId)) {
+        return NextResponse.json({ error: "Research candidate not found" }, { status: 404 });
+      }
+    } else if (researchRunId) {
+      const { data: run } = await supabase
+        .from("research_logs")
+        .select("id")
+        .eq("id", researchRunId)
+        .eq("organization_id", user.organizationId)
+        .maybeSingle();
+      if (!run) return NextResponse.json({ error: "Research run not found" }, { status: 404 });
+    }
+
     // Log the rejection in research_feedback
     const { data: feedback, error: feedbackError } = await supabase
       .from("research_feedback")
       .insert({
+        organization_id: user.organizationId,
+        created_by_user_id: user.id,
+        research_candidate_id: candidateId,
         research_log_id: researchRunId,
         candidate_data: candidate,
         decision: "rejected",
@@ -71,11 +94,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Update or create avoidance pattern based on rejection reason
-    await updateAvoidancePatterns(candidate, reason);
+    if (candidateId) {
+      await supabase.from("research_candidates").update({
+        disposition: "rejected",
+        disposition_reason: notes || reason,
+      }).eq("id", candidateId).eq("organization_id", user.organizationId);
+    }
+
+    await updateAvoidancePatterns(candidate, reason, user.organizationId);
 
     // Log activity notification
     try {
       await supabase.from("activity_notifications").insert({
+        organization_id: user.organizationId,
+        user_id: user.id,
         type: "candidate_rejected",
         title: "Candidate Rejected",
         message: `${candidate.name} (@${candidate.instagram_handle}) rejected: ${reason}`,
@@ -95,14 +127,15 @@ export async function POST(request: NextRequest) {
     console.error("Reject error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to reject" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
 
 // Update avoidance patterns for learning
-async function updateAvoidancePatterns(candidate: Candidate, reason: string) {
+async function updateAvoidancePatterns(candidate: Candidate, reason: string, organizationId: string) {
   try {
+    const supabase = createAdminClient();
     // Map rejection reasons to pattern categories and values
     const patternMappings: Record<string, { category: string; value: string }[]> = {
       not_athlete: [
@@ -150,6 +183,7 @@ async function updateAvoidancePatterns(candidate: Candidate, reason: string) {
         .from("research_patterns")
         .select("id, occurrence_count")
         .eq("pattern_type", "avoid_pattern")
+        .eq("organization_id", organizationId)
         .eq("category", pattern.category)
         .eq("pattern_value", pattern.value)
         .single();
@@ -168,6 +202,7 @@ async function updateAvoidancePatterns(candidate: Candidate, reason: string) {
         await supabase
           .from("research_patterns")
           .insert({
+            organization_id: organizationId,
             pattern_type: "avoid_pattern",
             category: pattern.category,
             pattern_value: pattern.value,

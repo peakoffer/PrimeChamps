@@ -40,10 +40,10 @@ export default function MetricCard({
 }: MetricCardProps) {
   const TrendIcon = trend === undefined || trend === 0 ? Minus : trend > 0 ? ArrowUp : ArrowDown;
   const trendColor = trend === undefined || trend === 0
-    ? "text-gray-500"
+    ? "text-gray-700"
     : trend > 0
-      ? "text-green-600"
-      : "text-red-600";
+      ? "text-green-700"
+      : "text-red-700";
 
   return (
     <div
@@ -57,7 +57,7 @@ export default function MetricCard({
         {value}
       </p>
       {subtitle && (
-        <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
+        <p className="text-sm text-gray-700 mt-1">{subtitle}</p>
       )}
       {trend !== undefined && (
         <div className={cn("flex items-center gap-1 mt-2 text-sm", trendColor)}>
@@ -67,7 +67,7 @@ export default function MetricCard({
             {trend}%
           </span>
           {trendLabel && (
-            <span className="text-gray-500 ml-1">{trendLabel}</span>
+            <span className="text-gray-700 ml-1">{trendLabel}</span>
           )}
         </div>
       )}

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth, requireOrganizationRole } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET - Fetch all outreach settings
 export async function GET() {
   try {
+    await requireAuth();
+    const supabase = createAdminClient();
     const { data: settings, error } = await supabase
       .from("outreach_settings")
       .select("key, value, description");
@@ -44,7 +43,7 @@ export async function GET() {
     console.error("Error in settings GET:", error);
     return NextResponse.json(
       { error: "Failed to fetch settings" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
@@ -52,6 +51,8 @@ export async function GET() {
 // PUT - Update outreach settings
 export async function PUT(request: NextRequest) {
   try {
+    await requireOrganizationRole(["owner", "admin"]);
+    const supabase = createAdminClient();
     const body = await request.json();
     const { settings } = body;
 
@@ -85,7 +86,7 @@ export async function PUT(request: NextRequest) {
     console.error("Error in settings PUT:", error);
     return NextResponse.json(
       { error: "Failed to update settings" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : error instanceof Error && error.message === "Forbidden" ? 403 : 500 }
     );
   }
 }

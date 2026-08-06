@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
-const STALE_RUN_MINUTES = 15;
-
 type JsonRecord = Record<string, unknown>;
 
 function parseNotes(notes: unknown): JsonRecord {
@@ -33,39 +32,16 @@ function getLimit(request: NextRequest): number {
 
 // GET - Fetch the complete research log records used by the Research UI.
 export async function GET(request: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
-
-  if (!supabaseUrl || !supabaseServiceKey) {
-    return NextResponse.json(
-      { logs: [], error: "Supabase server configuration is missing" },
-      { status: 500 }
-    );
-  }
-
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const staleCutoff = new Date(
-      Date.now() - STALE_RUN_MINUTES * 60 * 1000
-    ).toISOString();
-
-    // Serverless invocations can end before their catch block runs. Reconcile any
-    // run that has stopped reporting progress so the UI never polls forever.
-    await supabase
-      .from("research_logs")
-      .update({
-        status: "error",
-        error_message: `Research stopped reporting progress for ${STALE_RUN_MINUTES} minutes and was closed automatically.`,
-        completed_at: new Date().toISOString(),
-      })
-      .eq("status", "running")
-      .lt("heartbeat_at", staleCutoff);
+    const user = await requireAuth();
+    const supabase = createAdminClient();
 
     const { data, error } = await supabase
       .from("research_logs")
       .select(
-        "id, created_at, completed_at, heartbeat_at, status, config_used, context_summary, raw_results, scoring_details, final_results, stats, error_message"
+        "id, created_at, completed_at, heartbeat_at, status, phase, workflow_run_id, prompt_version, scoring_model, is_evaluation, cancel_requested_at, config_used, context_summary, raw_results, scoring_details, final_results, stats, provider_costs, error_message"
       )
+      .eq("organization_id", user.organizationId)
       .order("created_at", { ascending: false })
       .limit(getLimit(request));
 
@@ -74,7 +50,57 @@ export async function GET(request: NextRequest) {
     }
 
     const logs = data || [];
-    const handles = Array.from(new Set(logs.flatMap((log) => {
+    const logIds = logs.map((log) => log.id);
+    const candidatesByRun = new Map<string, JsonRecord[]>();
+    if (logIds.length > 0) {
+      const { data: candidateRows, error: candidateError } = await supabase
+        .from("research_candidates")
+        .select("id,research_log_id,athlete_id,candidate_key,name,sport,discovered_rank,raw_candidate,source_evidence,identity_status,identity_confidence,instagram_handle,follower_count,engagement_rate,age,age_verified,age_source,score,score_breakdown,scoring_reasoning,scoring_model,prompt_version,disposition,disposition_reason,is_minor")
+        .in("research_log_id", logIds)
+        .eq("organization_id", user.organizationId)
+        .order("discovered_rank", { ascending: true });
+      if (candidateError) throw candidateError;
+      for (const row of candidateRows || []) {
+        const raw = row.raw_candidate && typeof row.raw_candidate === "object"
+          ? row.raw_candidate as JsonRecord
+          : {};
+        const candidate = {
+          ...raw,
+          id: row.id,
+          athlete_id: row.athlete_id,
+          candidate_key: row.candidate_key,
+          name: row.name,
+          sport: row.sport,
+          instagram_handle: row.instagram_handle,
+          follower_count: row.follower_count,
+          engagement_rate: row.engagement_rate,
+          age: row.age,
+          age_verified: row.age_verified,
+          age_source: row.age_source,
+          score: row.score,
+          score_breakdown: row.score_breakdown,
+          reasoning: row.scoring_reasoning,
+          scoring_model: row.scoring_model,
+          prompt_version: row.prompt_version,
+          source_evidence: row.source_evidence,
+          identity_status: row.identity_status,
+          identity_confidence: row.identity_confidence,
+          disposition: row.disposition,
+          disposition_reason: row.disposition_reason,
+          is_minor: row.is_minor,
+        };
+        const runCandidates = candidatesByRun.get(row.research_log_id) || [];
+        runCandidates.push(candidate);
+        candidatesByRun.set(row.research_log_id, runCandidates);
+      }
+    }
+    const logsWithCandidates = logs.map((log) => ({
+      ...log,
+      final_results: candidatesByRun.get(log.id)?.length
+        ? candidatesByRun.get(log.id)
+        : log.final_results,
+    }));
+    const handles = Array.from(new Set(logsWithCandidates.flatMap((log) => {
       if (!Array.isArray(log.final_results)) return [];
       return log.final_results.flatMap((candidate) => {
         if (!candidate || typeof candidate !== "object") return [];
@@ -93,6 +119,7 @@ export async function GET(request: NextRequest) {
       const { data: profiles } = await supabase
         .from("athletes")
         .select("id, instagram_handle, pipeline_stage, notes")
+        .eq("organization_id", user.organizationId)
         .in("instagram_handle", handles);
 
       for (const profile of profiles || []) {
@@ -105,7 +132,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const enrichedLogs = logs.map((log) => ({
+    const enrichedLogs = logsWithCandidates.map((log) => ({
       ...log,
       final_results: Array.isArray(log.final_results)
         ? log.final_results.map((candidate) => {
@@ -138,8 +165,8 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error fetching research logs:", error);
     return NextResponse.json(
-      { logs: [], error: "Failed to fetch research logs" },
-      { status: 500 }
+      { logs: [], error: error instanceof Error ? error.message : "Failed to fetch research logs" },
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

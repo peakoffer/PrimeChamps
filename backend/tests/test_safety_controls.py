@@ -26,7 +26,7 @@ def test_instagram_sending_defaults_to_disabled(monkeypatch):
     }
 
 
-def test_pipeline_orders_enrichment_scoring_generation_and_approved_send(monkeypatch):
+def test_pipeline_orders_enrichment_scoring_and_draft_generation_without_sending(monkeypatch):
     events = []
 
     class FakeEnrichmentAgent:
@@ -45,8 +45,7 @@ def test_pipeline_orders_enrichment_scoring_generation_and_approved_send(monkeyp
             return {"generated": 1}
 
         async def send_approved_messages(self):
-            events.append("send-approved")
-            return {"sent": 1}
+            raise AssertionError("scheduled automation must never send")
 
     monkeypatch.setattr(scheduler_module, "EnrichmentAgent", FakeEnrichmentAgent)
     monkeypatch.setattr(scheduler_module, "ScoringAgent", FakeScoringAgent)
@@ -57,5 +56,9 @@ def test_pipeline_orders_enrichment_scoring_generation_and_approved_send(monkeyp
     monkeypatch.setattr(scheduler, "_is_paused", lambda: False)
     result = asyncio.run(scheduler.trigger_once())
 
-    assert events == ["enrich", "score", "generate", "send-approved"]
-    assert result["send"] == {"sent": 1}
+    assert events == ["enrich", "score", "generate"]
+    assert result["send"] == {
+        "sent": 0,
+        "disabled": True,
+        "reason": "scheduled sending is permanently disabled",
+    }

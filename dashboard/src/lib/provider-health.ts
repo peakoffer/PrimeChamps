@@ -248,7 +248,7 @@ async function getConnectedAccountCounts(user: User) {
   return { databaseAvailable: true, counts };
 }
 
-async function getActivityEvidence(): Promise<ActivityEvidence> {
+async function getActivityEvidence(user: User): Promise<ActivityEvidence> {
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     (!process.env.SUPABASE_SECRET_KEY && !process.env.SUPABASE_SERVICE_KEY)
@@ -260,21 +260,31 @@ async function getActivityEvidence(): Promise<ActivityEvidence> {
     const admin = createAdminClient();
     const [athletes, research, posts, email, microsoftSubscriptions] =
       await Promise.all([
-        admin.from("athletes").select("id", { count: "exact", head: true }),
+        admin
+          .from("athletes")
+          .select("id", { count: "exact", head: true })
+          .eq("organization_id", user.organizationId),
         admin
           .from("research_logs")
           .select("created_at", { count: "exact" })
+          .eq("organization_id", user.organizationId)
           .order("created_at", { ascending: false })
           .limit(1),
         admin
           .from("athlete_posts")
-          .select("created_at", { count: "exact" })
+          .select("created_at,athletes!inner(organization_id)", { count: "exact" })
+          .eq("athletes.organization_id", user.organizationId)
           .order("created_at", { ascending: false })
           .limit(1),
-        admin.from("email_messages").select("id", { count: "exact", head: true }),
+        admin
+          .from("channel_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("organization_id", user.organizationId)
+          .eq("status", "sent"),
         admin
           .from("channel_webhook_subscriptions")
-          .select("id", { count: "exact", head: true })
+          .select("id,channel_accounts!inner(organization_id)", { count: "exact", head: true })
+          .eq("channel_accounts.organization_id", user.organizationId)
           .eq("provider", "outlook")
           .eq("status", "active"),
       ]);
@@ -362,10 +372,10 @@ function evidenceForProvider(
   return evidence;
 }
 
-export async function getProviderHealth(user: User): Promise<Omit<ProviderHealthResponse, "accounts">> {
+export async function getProviderHealth(user: User): Promise<Omit<ProviderHealthResponse, "accounts" | "currentUserName">> {
   const [{ databaseAvailable, counts }, activity, agentProbe] = await Promise.all([
     getConnectedAccountCounts(user),
-    getActivityEvidence(),
+    getActivityEvidence(user),
     probeAgentServer(),
   ]);
 

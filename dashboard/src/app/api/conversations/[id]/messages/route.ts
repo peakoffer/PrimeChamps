@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // Force dynamic rendering - prevents static path generation error
 export const dynamic = "force-dynamic";
 export const dynamicParams = true;
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // GET - Get all messages in a conversation
 export async function GET(
@@ -16,7 +12,18 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { id: conversationId } = await params;
+    const { data: scopedConversation } = await supabase
+      .from("conversations")
+      .select("id,athletes!inner(organization_id)")
+      .eq("id", conversationId)
+      .eq("athletes.organization_id", user.organizationId)
+      .maybeSingle();
+    if (!scopedConversation) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
 
     const { data, error } = await supabase
       .from("conversation_messages")
@@ -40,7 +47,7 @@ export async function GET(
     console.error("Messages error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
@@ -51,14 +58,24 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { id: conversationId } = await params;
+    const { data: scopedConversation } = await supabase
+      .from("conversations")
+      .select("id,unread_count,athlete_id,athletes!inner(id,name,organization_id)")
+      .eq("id", conversationId)
+      .eq("athletes.organization_id", user.organizationId)
+      .maybeSingle();
+    if (!scopedConversation) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
     const {
       content,
       direction = "outbound",
       source = "manual",
       templateId,
       personalizationData,
-      sentBy,
     } = await request.json();
 
     if (!content) {
@@ -106,6 +123,8 @@ export async function POST(
         const athlete = conv.athletes as unknown as { id: string; name: string };
         try {
           await supabase.from("activity_notifications").insert({
+            organization_id: user.organizationId,
+            user_id: user.id,
             type: "response",
             title: "New Reply",
             message: `${athlete.name} replied to your message`,
@@ -128,7 +147,7 @@ export async function POST(
     console.error("Send message error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

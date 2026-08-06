@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "365d";
     const sport = searchParams.get("sport");
@@ -23,10 +21,14 @@ export async function GET(request: NextRequest) {
     let eligibleAthletesQuery = supabase
       .from("athletes")
       .select("id")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .or("is_historical.eq.false,is_historical.is.null");
     let athletesQuery = supabase
         .from("athletes")
         .select("id, created_at")
+        .eq("organization_id", user.organizationId)
+        .eq("is_test_data", false)
         .or("is_historical.eq.false,is_historical.is.null")
         .gte("created_at", startDate.toISOString())
         .order("created_at", { ascending: true });
@@ -113,7 +115,7 @@ export async function GET(request: NextRequest) {
     console.error("Analytics timeline error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

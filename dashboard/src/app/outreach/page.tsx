@@ -32,16 +32,6 @@ interface QueueItem {
   post_caption_preview?: string;
 }
 
-interface OutreachMessage {
-  id: string;
-  athlete_id: string;
-  message_content: string;
-  personalization_data?: Record<string, unknown>;
-  ai_personalization_context?: Record<string, unknown>;
-  approval_status: string;
-  status: string;
-}
-
 interface Touchpoint {
   id: string;
   touchpoint_type: string;
@@ -63,12 +53,9 @@ interface InstagramPost {
 }
 
 type TabType = "dms" | "comments" | "sent";
-type ApprovalMode = "manual" | "spot_check" | "auto";
-
 export default function OutreachHubPage() {
   // State
   const [activeTab, setActiveTab] = useState<TabType>("dms");
-  const [approvalMode, setApprovalMode] = useState<ApprovalMode>("manual");
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<QueueItem | null>(null);
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
@@ -94,7 +81,7 @@ export default function OutreachHubPage() {
       const response = await fetch(`/api/outreach/queue?type=${activeTab}`);
       const data = await response.json();
       setQueueItems(data.items || []);
-      setStats(data.stats || stats);
+      setStats((current) => data.stats || current);
     } catch (error) {
       console.error("Error fetching queue:", error);
     } finally {
@@ -124,24 +111,9 @@ export default function OutreachHubPage() {
     }
   }, []);
 
-  // Fetch settings on load
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const res = await fetch("/api/outreach/settings");
-        const data = await res.json();
-        if (data.settings?.approval_mode) {
-          setApprovalMode(data.settings.approval_mode);
-        }
-      } catch (error) {
-        console.error("Error fetching settings:", error);
-      }
-    };
-    fetchSettings();
-  }, []);
-
-  useEffect(() => {
-    fetchQueue();
+    const timeoutId = window.setTimeout(() => void fetchQueue(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchQueue]);
 
   // Handle item selection
@@ -318,24 +290,15 @@ export default function OutreachHubPage() {
       <div className="flex-shrink-0 mb-4">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Outreach Hub</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Draft Outreach Studio</h1>
             <p className="text-sm text-gray-600">
-              Manage DMs and content engagement in one place
+              Prepare evidence-backed messages and comments; every send remains manual
             </p>
           </div>
           <div className="flex items-center gap-4">
-            {/* Approval Mode Toggle */}
-            <div className="flex items-center gap-2 bg-white rounded-lg border px-3 py-1.5">
-              <span className="text-sm text-gray-600">Mode:</span>
-              <select
-                value={approvalMode}
-                onChange={(e) => setApprovalMode(e.target.value as ApprovalMode)}
-                className="text-sm font-medium text-gray-900 bg-transparent border-none focus:ring-0 cursor-pointer"
-              >
-                <option value="manual">Manual Review</option>
-                <option value="spot_check">Spot Check (20%)</option>
-                <option value="auto">Full Auto</option>
-              </select>
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="text-sm font-semibold text-emerald-800">Draft-only safety lock</span>
             </div>
             <Link
               href="/outreach/settings"
@@ -364,7 +327,7 @@ export default function OutreachHubPage() {
           </div>
           <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
             <div className="text-xl font-bold text-green-700">{stats.sentToday}</div>
-            <div className="text-xs text-green-600">Sent Today</div>
+            <div className="text-xs text-green-600">Manually logged today</div>
           </div>
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
             <div className="text-xl font-bold text-amber-700">{stats.responseRate}%</div>
@@ -546,6 +509,9 @@ export default function OutreachHubPage() {
 
               {/* Action Buttons */}
               <div className="p-4 border-t bg-gray-50">
+                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  Prime Champs will not send this automatically. Approval saves the draft only.
+                </p>
                 <div className="flex gap-2">
                   <button
                     onClick={handleCopy}
@@ -567,7 +533,7 @@ export default function OutreachHubPage() {
                       disabled={actionLoading}
                       className="px-6 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                     >
-                      {actionLoading ? "..." : "Approve"}
+                      {actionLoading ? "..." : "Save approved draft"}
                     </button>
                   ) : (
                     <>
@@ -584,7 +550,7 @@ export default function OutreachHubPage() {
                         disabled={actionLoading}
                         className="px-6 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                       >
-                        {actionLoading ? "..." : "Mark Sent"}
+                        {actionLoading ? "..." : "I sent this manually"}
                       </button>
                     </>
                   )}

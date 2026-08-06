@@ -361,21 +361,25 @@ function ApprovalPageContent() {
         // Log research feedback for AI learning
         const athlete = athletes.find((a) => a.id === athleteId);
         if (athlete) {
-          await supabase.from("research_feedback").insert({
-            athlete_id: athleteId,
-            candidate_data: {
+          await fetch("/api/research/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              athlete_id: athleteId,
+              candidate_data: {
               name: athlete.name,
               instagram_handle: athlete.instagram_handle,
               sport: athlete.sport,
               follower_count: athlete.follower_count,
-            },
-            decision: "rejected",
-            rejection_reason: bulkRejectReason,
-            rejection_notes: "Bulk rejected",
-            feedback_data: {
-              avoid_similar: bulkAvoidSimilar,
-              bulk_rejection: true,
-            },
+              },
+              decision: "rejected",
+              rejection_reason: bulkRejectReason,
+              rejection_notes: "Bulk rejected",
+              feedback_data: {
+                avoid_similar: bulkAvoidSimilar,
+                bulk_rejection: true,
+              },
+            }),
           });
         }
 

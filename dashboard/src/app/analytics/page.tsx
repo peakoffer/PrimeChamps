@@ -67,12 +67,24 @@ interface TimelineData {
   responses: number[];
 }
 
+interface EconomicsData {
+  signed_contracts: number;
+  guaranteed_value: number;
+  projected_revenue_share_value: number;
+  projected_contract_value: number;
+  actual_revenue: number;
+  average_contract_value: number;
+  realization_rate: number;
+  definition: string;
+}
+
 export default function AnalyticsPage() {
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [funnel, setFunnel] = useState<FunnelStage[]>([]);
   const [templates, setTemplates] = useState<TemplateData[]>([]);
   const [sports, setSports] = useState<SportData[]>([]);
   const [timeline, setTimeline] = useState<TimelineData | null>(null);
+  const [economics, setEconomics] = useState<EconomicsData | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,13 +101,14 @@ export default function AnalyticsPage() {
       if (sportFilter) filteredParams.set("sport", sportFilter);
       const filteredQuery = filteredParams.toString();
 
-      const [overviewRes, funnelRes, templatesRes, sportsRes, timelineRes] =
+      const [overviewRes, funnelRes, templatesRes, sportsRes, timelineRes, economicsRes] =
         await Promise.all([
           fetch(`/api/analytics/overview?${filteredQuery}`),
           fetch(`/api/analytics/funnel?${filteredQuery}`),
           fetch(`/api/analytics/templates?${filteredQuery}`),
           fetch(`/api/analytics/by-sport?period=${period}`),
           fetch(`/api/analytics/timeline?${filteredQuery}`),
+          fetch(`/api/analytics/economics?${filteredQuery}`),
         ]);
 
       if (!overviewRes.ok) throw new Error("Failed to fetch overview");
@@ -103,14 +116,16 @@ export default function AnalyticsPage() {
       if (!templatesRes.ok) throw new Error("Failed to fetch templates");
       if (!sportsRes.ok) throw new Error("Failed to fetch sports");
       if (!timelineRes.ok) throw new Error("Failed to fetch timeline");
+      if (!economicsRes.ok) throw new Error("Failed to fetch contract economics");
 
-      const [overviewData, funnelData, templatesData, sportsData, timelineData] =
+      const [overviewData, funnelData, templatesData, sportsData, timelineData, economicsData] =
         await Promise.all([
           overviewRes.json(),
           funnelRes.json(),
           templatesRes.json(),
           sportsRes.json(),
           timelineRes.json(),
+          economicsRes.json(),
         ]);
 
       setOverview(overviewData);
@@ -118,6 +133,7 @@ export default function AnalyticsPage() {
       setTemplates(templatesData.templates || []);
       setSports(sportsData.sports || []);
       setTimeline(timelineData);
+      setEconomics(economicsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load analytics");
     } finally {
@@ -126,7 +142,8 @@ export default function AnalyticsPage() {
   }, [period, sportFilter]);
 
   useEffect(() => {
-    fetchData();
+    const timeoutId = window.setTimeout(() => void fetchData(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchData]);
 
   const handleExport = async (type: "athletes" | "messages" | "funnel") => {
@@ -201,6 +218,7 @@ export default function AnalyticsPage() {
           {/* Sport Filter */}
           <div className="relative">
             <select
+              aria-label="Filter analytics by sport"
               value={sportFilter}
               onChange={(e) => setSportFilter(e.target.value)}
               className="appearance-none pl-9 pr-8 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -261,6 +279,37 @@ export default function AnalyticsPage() {
           </button>
         </div>
       </div>
+
+      {economics && (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-5">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-emerald-950">Contract economics</h2>
+              <p className="text-sm text-emerald-800">{economics.definition}</p>
+            </div>
+            <p className="text-xs font-medium text-emerald-800">{economics.signed_contracts} signed contracts</p>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+            {[
+              ["Guaranteed", economics.guaranteed_value],
+              ["Projected revenue share", economics.projected_revenue_share_value],
+              ["Projected total", economics.projected_contract_value],
+              ["Actual revenue", economics.actual_revenue],
+              ["Average contract", economics.average_contract_value],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="rounded-lg border border-emerald-100 bg-white px-4 py-3">
+                <div className="text-xs text-slate-500">{label}</div>
+                <div className="mt-1 text-xl font-semibold text-slate-950">
+                  {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-emerald-900">
+            Revenue realization: {(economics.realization_rate * 100).toFixed(1)}% of projected value recorded so far.
+          </p>
+        </section>
+      )}
 
       {overview?.cohort && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">

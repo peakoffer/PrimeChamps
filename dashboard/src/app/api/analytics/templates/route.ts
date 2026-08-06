@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type TemplateStat = {
   id: string;
@@ -34,6 +30,8 @@ function relationshipAthleteId(value: unknown) {
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
     const startDate = periodStart(searchParams.get("period") || "365d");
     const sport = searchParams.get("sport");
@@ -41,6 +39,8 @@ export async function GET(request: NextRequest) {
     let athleteQuery = supabase
       .from("athletes")
       .select("id")
+      .eq("organization_id", user.organizationId)
+      .eq("is_test_data", false)
       .or("is_historical.eq.false,is_historical.is.null");
     if (sport) athleteQuery = athleteQuery.eq("sport", sport);
 
@@ -49,7 +49,9 @@ export async function GET(request: NextRequest) {
         athleteQuery,
         supabase.from("outreach_templates").select("id,name"),
         supabase.from("email_templates").select("id,name"),
-        supabase.from("contracts").select("athlete_id,signed_at"),
+        supabase.from("contracts").select("athlete_id,signed_at")
+          .eq("organization_id", user.organizationId)
+          .eq("is_test_data", false),
       ]);
 
     const firstSetupError = [
@@ -191,7 +193,7 @@ export async function GET(request: NextRequest) {
     console.error("Analytics templates error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }

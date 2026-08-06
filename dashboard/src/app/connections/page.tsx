@@ -367,7 +367,7 @@ function ConnectionsPageContent() {
 
           <section id="connected-accounts" className="scroll-mt-6 space-y-3">
             <div>
-              <h2 className="text-lg font-semibold text-gray-950">Zac’s connected accounts</h2>
+              <h2 className="text-lg font-semibold text-gray-950">{health.currentUserName}&apos;s connected accounts</h2>
               <p className="mt-1 text-sm text-gray-500">
                 These identities belong to your user. Teammates connect their own accounts
                 after accepting an invitation.
@@ -440,7 +440,7 @@ function ConnectionsPageContent() {
             ) : (
               <div className="rounded-xl border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-600">
                 No personal messaging accounts are connected yet. Configure the provider
-                variables below, then connect Zac’s Microsoft mailbox first.
+                variables below, then connect your Microsoft mailbox first.
               </div>
             )}
           </section>

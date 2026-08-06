@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { requireAuth } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST - Mark outreach item as sent and record touchpoint
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireAuth();
+    const supabase = createAdminClient();
     const { itemId, type } = await request.json();
 
     if (!itemId || !type) {
@@ -24,14 +23,14 @@ export async function POST(request: NextRequest) {
       // Get the message first
       const { data: message } = await supabase
         .from("outreach_messages")
-        .select("athlete_id, message_content")
+        .select("athlete_id,message_content,athletes!inner(organization_id)")
         .eq("id", itemId)
-        .single();
+        .eq("athletes.organization_id", user.organizationId)
+        .maybeSingle();
 
-      if (message) {
-        athleteId = message.athlete_id;
-        contentPreview = message.message_content?.slice(0, 100);
-      }
+      if (!message) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+      athleteId = message.athlete_id;
+      contentPreview = message.message_content?.slice(0, 100);
 
       // Update outreach_messages status
       const { error } = await supabase
@@ -53,14 +52,14 @@ export async function POST(request: NextRequest) {
       // Get the engagement first
       const { data: engagement } = await supabase
         .from("content_engagements")
-        .select("athlete_id, content")
+        .select("athlete_id,content,athletes!inner(organization_id)")
         .eq("id", itemId)
-        .single();
+        .eq("athletes.organization_id", user.organizationId)
+        .maybeSingle();
 
-      if (engagement) {
-        athleteId = engagement.athlete_id;
-        contentPreview = engagement.content?.slice(0, 100);
-      }
+      if (!engagement) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+      athleteId = engagement.athlete_id;
+      contentPreview = engagement.content?.slice(0, 100);
 
       // Update content_engagements status
       const { error } = await supabase
@@ -117,12 +116,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, recordedOnly: true });
   } catch (error) {
     console.error("Error in send endpoint:", error);
     return NextResponse.json(
       { error: "Failed to mark item as sent" },
-      { status: 500 }
+      { status: error instanceof Error && error.message === "Not authenticated" ? 401 : 500 }
     );
   }
 }
