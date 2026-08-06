@@ -89,6 +89,8 @@ export function resolveResearchDisposition(input: {
   isMinor?: boolean | null;
   ageVerified?: boolean | null;
   reasoning?: string | null;
+  careerStage?: ResearchCareerStage | null;
+  objectiveFit?: ResearchObjectiveFit | null;
 }): ResearchDisposition {
   const reasoning = input.reasoning?.toLowerCase() || "";
   const likelyMinor = input.isMinor === true
@@ -101,6 +103,9 @@ export function resolveResearchDisposition(input: {
 
   if (likelyMinor) return "blocked";
   if (input.ageVerified !== true) return "held";
+  if (input.objectiveFit === "weak") return "held";
+  if (input.careerStage === "veteran") return "held";
+  if (input.careerStage === "established" && input.objectiveFit !== "strong") return "held";
   if (input.score < 60) return "held";
   return "approval";
 }

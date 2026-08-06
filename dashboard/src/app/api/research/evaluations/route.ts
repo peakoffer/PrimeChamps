@@ -24,6 +24,12 @@ function benchmarkResult(snapshot: EvaluationSnapshot) {
     isMinor: snapshot.is_minor === true,
     ageVerified: snapshot.age_verified === true,
     reasoning: typeof snapshot.reasoning === "string" ? snapshot.reasoning : null,
+    careerStage: ["emerging", "established", "veteran", "unknown"].includes(String(snapshot.career_stage))
+      ? snapshot.career_stage as "emerging" | "established" | "veteran" | "unknown"
+      : null,
+    objectiveFit: ["strong", "possible", "weak"].includes(String(snapshot.objective_fit))
+      ? snapshot.objective_fit as "strong" | "possible" | "weak"
+      : null,
   });
   return { score, disposition, breakdown };
 }

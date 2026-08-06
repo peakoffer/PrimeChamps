@@ -86,6 +86,20 @@ test("minor, age, and quality gates keep unsafe or weak candidates out of Approv
   assert.equal(resolveResearchDisposition({ score: 95, isMinor: false, ageVerified: false }), "held");
   assert.equal(resolveResearchDisposition({ score: 59, isMinor: false, ageVerified: true }), "held");
   assert.equal(resolveResearchDisposition({ score: 60, isMinor: false, ageVerified: true }), "approval");
+  assert.equal(resolveResearchDisposition({
+    score: 85,
+    isMinor: false,
+    ageVerified: true,
+    careerStage: "established",
+    objectiveFit: "weak",
+  }), "held");
+  assert.equal(resolveResearchDisposition({
+    score: 82,
+    isMinor: false,
+    ageVerified: true,
+    careerStage: "established",
+    objectiveFit: "strong",
+  }), "approval");
   assert.equal(resolveResearchDisposition({ score: 20, ageVerified: false, reasoning: "Athlete is 17 years old" }), "blocked");
 });
 
