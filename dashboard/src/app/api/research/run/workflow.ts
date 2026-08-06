@@ -1410,6 +1410,7 @@ async function scoreAthletes(
               objective: config.partnershipGoal,
               age: ageInfo.age,
               careerStage: score.career_stage,
+              objectiveFit: score.objective_fit,
             });
             const objectiveHold = objectiveScore < score.score
               ? ageInfo.age < ONLYFANS_CREATOR_PROFILE.targetAgeMin
@@ -1623,6 +1624,9 @@ Respond with ONLY valid JSON:
           const careerStage = ["emerging", "established", "veteran", "unknown"].includes(String(parsed.career_stage))
             ? parsed.career_stage as ResearchCareerStage
             : "unknown";
+          const objectiveFit = ["strong", "possible", "weak"].includes(String(parsed.objective_fit))
+            ? parsed.objective_fit as "strong" | "possible" | "weak"
+            : "weak";
           const weightedScore = calculateResearchScore(dimensions);
           return {
             ...athlete,
@@ -1630,6 +1634,7 @@ Respond with ONLY valid JSON:
               score: weightedScore,
               objective: config.partnershipGoal,
               careerStage,
+              objectiveFit,
             }),
             score_breakdown: dimensions,
             reasoning: parsed.reasoning,
@@ -1638,9 +1643,7 @@ Respond with ONLY valid JSON:
               : [],
             is_minor: parsed.is_minor === true,
             career_stage: careerStage,
-            objective_fit: ["strong", "possible", "weak"].includes(String(parsed.objective_fit))
-              ? parsed.objective_fit as "strong" | "possible" | "weak"
-              : "weak",
+            objective_fit: objectiveFit,
             creator_signals: Array.isArray(parsed.creator_signals)
               ? parsed.creator_signals.filter((signal): signal is string => typeof signal === "string")
               : [],

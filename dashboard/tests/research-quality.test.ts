@@ -95,25 +95,43 @@ test("OnlyFans objective favors verified emerging adults over risky or veteran p
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 25,
     careerStage: "emerging",
+    objectiveFit: "strong",
   }), 85);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 85,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 20,
     careerStage: "emerging",
+    objectiveFit: "strong",
   }), 59);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 85,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 39,
     careerStage: "established",
+    objectiveFit: "strong",
   }), 55);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 85,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 27,
     careerStage: "veteran",
+    objectiveFit: "strong",
   }), 55);
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 67,
+    objective: DEFAULT_RESEARCH_OBJECTIVE,
+    age: 29,
+    careerStage: "established",
+    objectiveFit: "weak",
+  }), 59);
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 82,
+    objective: DEFAULT_RESEARCH_OBJECTIVE,
+    age: 29,
+    careerStage: "established",
+    objectiveFit: "strong",
+  }), 82);
 });
 
 test("browser pages use authenticated app APIs instead of a Supabase client", () => {
