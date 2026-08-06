@@ -29,6 +29,7 @@ interface Athlete {
   age_verified?: boolean;
   age?: number;
   age_source?: string;
+  research_session_id?: string;
 }
 
 interface ResearchSession {
@@ -277,17 +278,44 @@ export default function PipelinePage() {
 
     // Update on server
     try {
-      const response = await fetch("/api/pipeline/athletes", {
+      const isLegacyCandidate = draggedAthlete.pipeline_stage === "research" && draggedAthlete.persisted === false;
+      const response = await fetch(
+        isLegacyCandidate && draggedAthlete.research_session_id
+          ? `/api/research/sessions/${draggedAthlete.research_session_id}/athletes`
+          : "/api/pipeline/athletes",
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          athleteId: draggedAthlete.id,
-          toStage: targetColumnId,
-        }),
-      });
+        body: JSON.stringify(isLegacyCandidate
+          ? {
+              instagramHandle: draggedAthlete.instagram_handle,
+              toStage: targetColumnId,
+            }
+          : {
+              athleteId: draggedAthlete.id,
+              toStage: targetColumnId,
+            }),
+        }
+      );
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || "Could not move candidate");
+      }
+
+      // Reconcile temporary legacy IDs and all current-stage counts with the
+      // server after any Research → Approval movement.
+      if (draggedAthlete.pipeline_stage === "research") {
+        if (draggedAthlete.research_session_id) {
+          const sessionResponse = await fetch(
+            `/api/research/sessions/${draggedAthlete.research_session_id}/athletes`
+          );
+          const sessionData = await sessionResponse.json();
+          setSessionAthletes((prev) => ({
+            ...prev,
+            [draggedAthlete.research_session_id!]: sessionData.athletes || [],
+          }));
+        }
+        await fetchPipeline();
       }
     } catch (error) {
       console.error("Error moving athlete:", error);
@@ -692,6 +720,7 @@ export default function PipelinePage() {
                               athletes.map((athlete) => (
                                 <div
                                   key={athlete.candidate_key || athlete.id}
+                                  data-testid={`research-candidate-${athlete.candidate_key || athlete.id}`}
                                   draggable={!selectionMode && athlete.can_move === true}
                                   onDragStart={(event) => athlete.can_move && handleDragStart(event, athlete)}
                                   onClick={() => athlete.persisted && router.push(`/athletes/${athlete.id}`)}
@@ -747,6 +776,8 @@ export default function PipelinePage() {
                                         ? "In Approval"
                                         : athlete.disposition === "blocked"
                                           ? "Safety blocked"
+                                          : athlete.disposition === "held" && athlete.persisted === false
+                                            ? "Legacy hold"
                                           : athlete.disposition === "held"
                                             ? "Held in Research"
                                             : athlete.pipeline_stage.replaceAll("_", " ")}

@@ -239,3 +239,79 @@ test("completed research notifications open the exact run audit", async ({ page 
   await expect(page).toHaveURL("/pipeline/research?session=run-e2e-1");
   await expect(page.getByRole("heading", { name: "🔍 Research" })).toBeVisible();
 });
+
+test("research run expansion only makes safe candidates movable", async ({ page }) => {
+  await signIn(page);
+
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path === "/api/research/sessions") {
+      return route.fulfill({
+        json: {
+          sessions: [
+            {
+              id: "run-e2e-1",
+              status: "completed",
+              created_at: "2026-08-05T12:00:00Z",
+              config_used: { sportFocus: "gymnastics" },
+              stats: { discovered: 5, returned: 2, added: 0, held: 1, blocked: 1 },
+            },
+          ],
+        },
+      });
+    }
+
+    if (path === "/api/research/sessions/run-e2e-1/athletes") {
+      return route.fulfill({
+        json: {
+          athletes: [
+            {
+              id: "legacy_candidate",
+              candidate_key: "legacy_candidate",
+              research_session_id: "run-e2e-1",
+              persisted: false,
+              can_move: true,
+              name: "Legacy Candidate",
+              sport: "gymnastics",
+              instagram_handle: "legacy_candidate",
+              pipeline_stage: "research",
+              disposition: "held",
+              research_score: 58,
+            },
+            {
+              id: "blocked_candidate",
+              candidate_key: "blocked_candidate",
+              research_session_id: "run-e2e-1",
+              persisted: false,
+              can_move: false,
+              name: "Blocked Candidate",
+              sport: "gymnastics",
+              instagram_handle: "blocked_candidate",
+              pipeline_stage: "research",
+              disposition: "blocked",
+              research_score: 0,
+            },
+          ],
+        },
+      });
+    }
+
+    if (path === "/api/pipeline/athletes") {
+      return route.fulfill({ json: { athletes: [] } });
+    }
+
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/pipeline");
+  await page.getByRole("button", { name: /gymnastics 2 finalists/ }).click();
+
+  const legacyCandidate = page.getByTestId("research-candidate-legacy_candidate");
+  const blockedCandidate = page.getByTestId("research-candidate-blocked_candidate");
+  await expect(legacyCandidate).toHaveAttribute("draggable", "true");
+  await expect(legacyCandidate).toContainText("Legacy hold");
+  await expect(legacyCandidate).toContainText("Drag → Approval");
+  await expect(blockedCandidate).toHaveAttribute("draggable", "false");
+  await expect(blockedCandidate).toContainText("Safety blocked");
+});

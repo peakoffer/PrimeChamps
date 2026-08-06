@@ -108,7 +108,12 @@ export async function GET(
         id: existingProfile?.id || candidate.id || candidate.instagram_handle,
         candidate_key: candidate.instagram_handle || candidate.name,
         persisted: Boolean(existingProfile?.id),
-        can_move: Boolean(existingProfile?.id && actualStage === "research" && inferredDisposition !== "blocked"),
+        can_move: Boolean(
+          inferredDisposition !== "blocked" &&
+          inferredDisposition !== "skipped" &&
+          (actualStage === "research" || (!existingProfile?.id && inferredDisposition === "held"))
+        ),
+        research_session_id: id,
         name: candidate.name,
         sport: candidate.sport,
         instagram_handle: candidate.instagram_handle,
@@ -139,5 +144,146 @@ export async function GET(
   } catch (error) {
     console.error("Error fetching session athletes:", error);
     return NextResponse.json({ athletes: [], error: "Failed to fetch athletes" }, { status: 500 });
+  }
+}
+
+// POST - Materialize a safe legacy finalist when a user explicitly drags it
+// from a research run into Approval. Automatic research remains stricter:
+// unknown-age candidates are held, and confirmed/likely minors stay blocked.
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    const instagramHandle = typeof body.instagramHandle === "string"
+      ? body.instagramHandle.trim().replace(/^@/, "")
+      : "";
+
+    if (!instagramHandle || body.toStage !== "approval") {
+      return NextResponse.json({ error: "A candidate handle and Approval destination are required" }, { status: 400 });
+    }
+
+    const { data: log, error: logError } = await supabase
+      .from("research_logs")
+      .select("id, final_results")
+      .eq("id", id)
+      .single();
+
+    if (logError || !log || !Array.isArray(log.final_results)) {
+      return NextResponse.json({ error: "Research run not found" }, { status: 404 });
+    }
+
+    const candidate = log.final_results.find((result) => {
+      if (!result || typeof result !== "object") return false;
+      const handle = (result as { instagram_handle?: unknown }).instagram_handle;
+      return typeof handle === "string" && handle.toLowerCase() === instagramHandle.toLowerCase();
+    }) as Record<string, unknown> | undefined;
+
+    if (!candidate) {
+      return NextResponse.json({ error: "Candidate is not part of this research run" }, { status: 404 });
+    }
+
+    const reasoning = typeof candidate.reasoning === "string" ? candidate.reasoning : "";
+    const score = typeof candidate.score === "number" ? candidate.score : 0;
+    const isBlocked = candidate.is_minor === true || score === 0 ||
+      reasoning.toLowerCase().includes("blocked: web research confirmed");
+
+    if (isBlocked) {
+      return NextResponse.json({ error: "This candidate is safety-blocked and cannot enter Approval" }, { status: 403 });
+    }
+
+    const { data: existingList } = await supabase
+      .from("athletes")
+      .select("id, pipeline_stage")
+      .eq("instagram_handle", instagramHandle)
+      .limit(1);
+    const existing = existingList?.[0];
+
+    if (existing) {
+      if (existing.pipeline_stage !== "approval") {
+        const { error: updateError } = await supabase
+          .from("athletes")
+          .update({ pipeline_stage: "approval" })
+          .eq("id", existing.id);
+        if (updateError) throw updateError;
+
+        await supabase.from("pipeline_history").insert({
+          athlete_id: existing.id,
+          from_stage: existing.pipeline_stage,
+          to_stage: "approval",
+          reason: `Manually advanced from research run ${id}`,
+        });
+      }
+
+      return NextResponse.json({ success: true, athleteId: existing.id, pipelineStage: "approval" });
+    }
+
+    const name = typeof candidate.name === "string" ? candidate.name : instagramHandle;
+    const sport = typeof candidate.sport === "string" ? candidate.sport : "Unknown";
+    const { data: athlete, error: createError } = await supabase
+      .from("athletes")
+      .insert({
+        name,
+        sport,
+        instagram_handle: instagramHandle,
+        instagram_url: typeof candidate.instagram_url === "string"
+          ? candidate.instagram_url
+          : `https://instagram.com/${instagramHandle}`,
+        profile_pic_url: typeof candidate.profile_pic_url === "string" ? candidate.profile_pic_url : null,
+        follower_count: typeof candidate.follower_count === "number" ? candidate.follower_count : null,
+        notes: JSON.stringify({
+          bio: typeof candidate.bio === "string" ? candidate.bio : undefined,
+          context: typeof candidate.context === "string" ? candidate.context : undefined,
+          discovery_source: candidate.source,
+          research_run_id: id,
+          research_score: score,
+          research_reasoning: reasoning,
+          concerns: Array.isArray(candidate.concerns) ? candidate.concerns : [],
+          age_verified: candidate.age_verified === true,
+          age: candidate.age,
+          age_source: candidate.age_source,
+          review_status: "manual_approval",
+          manual_age_review_required: candidate.age_verified !== true,
+          disposition_reason: "Manually advanced from a legacy research run",
+          discovered_at: new Date().toISOString(),
+        }),
+        source: "research_agent",
+        pipeline_stage: "approval",
+        enrichment_status: "enriched",
+        is_historical: false,
+      })
+      .select("id")
+      .single();
+
+    if (createError || !athlete) {
+      throw createError || new Error("Could not create athlete");
+    }
+
+    await supabase.from("pipeline_history").insert({
+      athlete_id: athlete.id,
+      from_stage: "research",
+      to_stage: "approval",
+      reason: `Manually advanced from legacy research run ${id}`,
+    });
+
+    await supabase.from("activity_notifications").insert({
+      type: "candidate_approved",
+      title: "Candidate Added",
+      message: `${name} (@${instagramHandle}) manually added to Approval`,
+      athlete_id: athlete.id,
+      link: "/pipeline/approval",
+      metadata: { athleteId: athlete.id, researchRunId: id, manualReview: true },
+      read: false,
+    });
+
+    return NextResponse.json({ success: true, athleteId: athlete.id, pipelineStage: "approval" });
+  } catch (error) {
+    console.error("Error materializing research candidate:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Could not move candidate" },
+      { status: 500 }
+    );
   }
 }
