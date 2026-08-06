@@ -79,9 +79,10 @@ export async function POST(request: NextRequest) {
         type: "candidate_rejected",
         title: "Candidate Rejected",
         message: `${candidate.name} (@${candidate.instagram_handle}) rejected: ${reason}`,
+        link: "/pipeline/approval?tab=rejected",
         metadata: { reason, sport: candidate.sport },
       });
-    } catch (e) {
+    } catch {
       // Non-critical
     }
 

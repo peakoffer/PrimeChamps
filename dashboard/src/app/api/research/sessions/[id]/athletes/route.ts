@@ -35,11 +35,16 @@ export async function GET(
       .filter(Boolean);
 
     // Fetch profile pics from athletes table
-    let athleteProfiles: Record<string, { profile_pic_url?: string; id?: string }> = {};
+    let athleteProfiles: Record<string, {
+      profile_pic_url?: string;
+      id?: string;
+      pipeline_stage?: string;
+      notes?: string | Record<string, unknown> | null;
+    }> = {};
     if (instagramHandles.length > 0) {
       const { data: existingAthletes } = await supabase
         .from("athletes")
-        .select("id, instagram_handle, profile_pic_url")
+        .select("id, instagram_handle, profile_pic_url, pipeline_stage, notes")
         .in("instagram_handle", instagramHandles);
 
       if (existingAthletes) {
@@ -48,10 +53,17 @@ export async function GET(
             acc[athlete.instagram_handle.toLowerCase()] = {
               profile_pic_url: athlete.profile_pic_url,
               id: athlete.id,
+              pipeline_stage: athlete.pipeline_stage,
+              notes: athlete.notes,
             };
           }
           return acc;
-        }, {} as Record<string, { profile_pic_url?: string; id?: string }>);
+        }, {} as Record<string, {
+          profile_pic_url?: string;
+          id?: string;
+          pipeline_stage?: string;
+          notes?: string | Record<string, unknown> | null;
+        }>);
       }
     }
 
@@ -64,21 +76,55 @@ export async function GET(
       engagement_rate?: number;
       sport: string;
       score?: number;
+      reasoning?: string;
+      concerns?: string[];
+      age_verified?: boolean;
+      age?: number;
+      age_source?: string;
+      is_minor?: boolean;
+      source?: string;
+      disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
+      disposition_reason?: string;
+      pipeline_stage?: string;
     }) => {
       // Look up profile pic from athletes table if available
       const handleKey = candidate.instagram_handle?.toLowerCase();
       const existingProfile = handleKey ? athleteProfiles[handleKey] : null;
+      const inferredDisposition = candidate.disposition || (
+        candidate.is_minor === true || candidate.score === 0
+          ? "blocked"
+          : candidate.age_verified === true
+            ? "approval"
+            : "held"
+      );
+      const actualStage = existingProfile?.pipeline_stage || candidate.pipeline_stage || null;
+      const currentDisposition = actualStage === "research"
+        ? "held"
+        : actualStage === "approval"
+          ? "approval"
+          : inferredDisposition;
 
       return {
         id: existingProfile?.id || candidate.id || candidate.instagram_handle,
+        candidate_key: candidate.instagram_handle || candidate.name,
+        persisted: Boolean(existingProfile?.id),
+        can_move: Boolean(existingProfile?.id && actualStage === "research" && inferredDisposition !== "blocked"),
         name: candidate.name,
         sport: candidate.sport,
         instagram_handle: candidate.instagram_handle,
         profile_pic_url: existingProfile?.profile_pic_url || candidate.profile_pic_url,
         follower_count: candidate.follower_count,
         engagement_rate: candidate.engagement_rate,
-        pipeline_stage: "research",
+        pipeline_stage: actualStage || "research",
         research_score: candidate.score,
+        research_reasoning: candidate.reasoning,
+        concerns: candidate.concerns || [],
+        age_verified: candidate.age_verified === true,
+        age: candidate.age,
+        age_source: candidate.age_source,
+        discovery_source: candidate.source,
+        disposition: currentDisposition,
+        disposition_reason: candidate.disposition_reason,
       };
     });
 

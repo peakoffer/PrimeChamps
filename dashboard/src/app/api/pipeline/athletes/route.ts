@@ -8,6 +8,19 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const VALID_STAGES = ["research", "approval", "reach_out", "response", "appointment", "contract"];
 
+function parseResearchNotes(notes: unknown): Record<string, unknown> {
+  if (!notes) return {};
+  if (typeof notes === "object") return notes as Record<string, unknown>;
+  if (typeof notes !== "string") return {};
+
+  try {
+    const parsed = JSON.parse(notes);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -22,7 +35,7 @@ export async function GET(request: NextRequest) {
     // Query athletes directly by pipeline_stage
     let query = supabase
       .from("athletes")
-      .select("id, name, sport, instagram_handle, email, profile_pic_url, follower_count, created_at, pipeline_stage, is_historical")
+      .select("id, name, sport, instagram_handle, email, profile_pic_url, follower_count, created_at, pipeline_stage, is_historical, source, notes")
       .eq("pipeline_stage", stage)
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -37,7 +50,23 @@ export async function GET(request: NextRequest) {
       throw error;
     }
 
-    return NextResponse.json({ athletes: data || [], stage });
+    const athletes = (data || []).map((athlete) => {
+      const researchNotes = parseResearchNotes(athlete.notes);
+      return {
+        ...athlete,
+        research_score: typeof researchNotes.research_score === "number"
+          ? researchNotes.research_score
+          : undefined,
+        research_reasoning: typeof researchNotes.research_reasoning === "string"
+          ? researchNotes.research_reasoning
+          : undefined,
+        age_verified: researchNotes.age_verified === true,
+        age: typeof researchNotes.age === "number" ? researchNotes.age : undefined,
+        age_source: typeof researchNotes.age_source === "string" ? researchNotes.age_source : undefined,
+      };
+    });
+
+    return NextResponse.json({ athletes, stage });
   } catch (error) {
     console.error("Error fetching pipeline athletes:", error);
     return NextResponse.json(

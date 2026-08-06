@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { getNotificationDestination } from "@/lib/notification-destination";
 
 interface Notification {
   id: string;
@@ -149,9 +150,7 @@ export default function NotificationsPage() {
     if (!notification.read) {
       handleMarkRead(notification.id);
     }
-    if (notification.link) {
-      router.push(notification.link);
-    }
+    router.push(getNotificationDestination(notification));
   };
 
   const filteredNotifications = notifications.filter((n) => {
@@ -245,7 +244,7 @@ export default function NotificationsPage() {
                 onClick={() => handleNotificationClick(notification)}
                 className={`w-full text-left p-4 hover:bg-gray-50 transition-colors ${
                   !notification.read ? "bg-blue-50/50" : ""
-                } ${notification.link ? "cursor-pointer" : "cursor-default"}`}
+                } cursor-pointer`}
               >
                 <div className="flex items-start gap-4">
                   {/* Icon */}

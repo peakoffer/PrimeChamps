@@ -6,19 +6,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-interface Candidate {
-  name: string;
-  instagram_handle: string;
-  instagram_url?: string;
-  profile_pic_url?: string;
-  follower_count?: number;
-  bio?: string;
-  sport: string;
-  source: string;
-  score: number;
-  reasoning: string;
-}
-
 // POST - Approve a research candidate and add to athletes
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +13,17 @@ export async function POST(request: NextRequest) {
 
     if (!candidate || !candidate.instagram_handle) {
       return NextResponse.json({ error: "Missing candidate data" }, { status: 400 });
+    }
+
+    if (candidate.is_minor === true || candidate.score === 0) {
+      return NextResponse.json({ error: "This candidate is safety-blocked and cannot enter Approval" }, { status: 403 });
+    }
+
+    if (candidate.age_verified !== true) {
+      return NextResponse.json(
+        { error: "Age is not source-verified. Review the held candidate in the Research pipeline first." },
+        { status: 422 }
+      );
     }
 
     // Check if already exists
@@ -54,10 +52,14 @@ export async function POST(request: NextRequest) {
           source: candidate.source,
           discovered_at: new Date().toISOString(),
           research_run_id: researchRunId,
+          research_score: candidate.score,
+          research_reasoning: candidate.reasoning,
+          concerns: candidate.concerns || [],
+          age_verified: candidate.age_verified,
+          age: candidate.age,
+          age_source: candidate.age_source,
         }),
         pipeline_stage: "approval", // Goes to Approval stage for human review
-        research_score: candidate.score,
-        research_reasoning: candidate.reasoning,
         source: "research_agent",
         is_historical: false,
       })
@@ -79,9 +81,9 @@ export async function POST(request: NextRequest) {
         score: candidate.score,
         reasoning: candidate.reasoning,
       });
-    } catch (e) {
+    } catch {
       // Non-critical, continue even if feedback logging fails
-      console.error("Failed to log approval feedback:", e);
+      console.error("Failed to log approval feedback");
     }
 
     // Log activity notification
@@ -90,9 +92,10 @@ export async function POST(request: NextRequest) {
         type: "candidate_approved",
         title: "Candidate Added",
         message: `${candidate.name} (@${candidate.instagram_handle}) added to Approval queue`,
+        link: "/pipeline/approval",
         metadata: { athleteId: newAthlete.id, sport: candidate.sport },
       });
-    } catch (e) {
+    } catch {
       // Non-critical
     }
 

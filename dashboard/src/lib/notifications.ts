@@ -149,7 +149,8 @@ export async function notifySystem(title: string, message: string, link?: string
 export async function notifyResearch(
   type: "research_started" | "research_completed",
   sport: string,
-  count?: number
+  count?: number,
+  runId?: string
 ): Promise<void> {
   if (type === "research_started") {
     await createNotification({
@@ -163,7 +164,10 @@ export async function notifyResearch(
       type: "research_completed",
       title: "Research Complete",
       message: `Found ${count || 0} new ${sport} athletes`,
-      link: "/approve",
+      link: runId
+        ? `/pipeline/research?session=${encodeURIComponent(runId)}`
+        : "/pipeline/research",
+      metadata: runId ? { runId } : undefined,
     });
   }
 }

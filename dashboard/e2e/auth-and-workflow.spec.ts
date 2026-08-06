@@ -69,14 +69,9 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
               similar_to: [],
             },
           ],
-          stats: { added: 1 },
+          stats: { returned: 1, added: 1, held: 0, blocked: 0 },
         },
       });
-    }
-
-    if (path === "/api/research/approve") {
-      calls.push("research-approval");
-      return route.fulfill({ json: { athlete } });
     }
 
     if (path === `/api/athletes/${athlete.id}/enrich`) {
@@ -153,9 +148,7 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
   await page.goto("/pipeline/research");
   await page.getByRole("button", { name: /Run Research Agent/ }).click();
   await page.getByRole("button", { name: "🔬 Start Research" }).click();
-  await expect(page.getByRole("heading", { name: /Research Results/ })).toBeVisible();
-  await expect(page.getByText(athlete.name)).toBeVisible();
-  await page.getByRole("button", { name: /Approve/ }).click();
+  await expect(page.getByText("1 finalists: 1 approval, 0 held, 0 blocked.")).toBeVisible();
 
   const enrichment = await page.evaluate(async (athleteId) => {
     const response = await fetch(`/api/athletes/${athleteId}/enrich`, {
@@ -176,9 +169,73 @@ test("research, enrichment, approval, and outreach stay connected", async ({ pag
 
   expect(calls).toEqual([
     "research",
-    "research-approval",
     "enrichment",
     "outreach-approval",
     "outreach-send",
   ]);
+});
+
+test("completed research notifications open the exact run audit", async ({ page }) => {
+  await signIn(page);
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+
+    if (path === "/api/notifications" && request.method() === "GET") {
+      return route.fulfill({
+        json: {
+          unreadCount: 1,
+          notifications: [
+            {
+              id: "notification-e2e-1",
+              created_at: "2026-08-05T12:00:00Z",
+              type: "research_completed",
+              title: "Research Complete",
+              message: "Gymnastics research finished",
+              metadata: { runId: "run-e2e-1" },
+              link: null,
+              read: false,
+            },
+          ],
+        },
+      });
+    }
+
+    if (path === "/api/notifications/mark-read") {
+      return route.fulfill({ json: { success: true } });
+    }
+
+    if (path === "/api/pipeline/athletes") {
+      return route.fulfill({ json: { athletes: [] } });
+    }
+
+    if (path === "/api/research/logs") {
+      return route.fulfill({
+        json: {
+          logs: [
+            {
+              id: "run-e2e-1",
+              created_at: "2026-08-05T12:00:00Z",
+              completed_at: "2026-08-05T12:01:00Z",
+              status: "completed",
+              config_used: { sportFocus: "gymnastics", followerMin: 0, followerMax: 500000, resultCount: 5 },
+              context_summary: {},
+              raw_results: [],
+              scoring_details: [],
+              final_results: [],
+              stats: { discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0 },
+            },
+          ],
+        },
+      });
+    }
+
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/notifications");
+  await page.getByRole("button", { name: /Research Complete.*Gymnastics research finished/ }).click();
+  await expect(page).toHaveURL("/pipeline/research?session=run-e2e-1");
+  await expect(page.getByRole("heading", { name: "🔍 Research" })).toBeVisible();
 });

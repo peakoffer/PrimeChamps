@@ -44,6 +44,9 @@ async function updateResearchProgress(
     scored: number;
     returned: number;
     added: number;
+    held?: number;
+    blocked?: number;
+    duplicates?: number;
   }
 ) {
   if (!researchLogId) return;
@@ -99,6 +102,10 @@ interface ScoredAthlete extends EnrichedAthlete {
   age_verified?: boolean;
   age?: number;
   age_source?: string;
+  athlete_id?: string;
+  pipeline_stage?: string;
+  disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
+  disposition_reason?: string;
 }
 
 interface SuccessProfile {
@@ -1529,6 +1536,15 @@ export async function POST(request: NextRequest) {
           context_summary: {
             sport: config.sportFocus,
             customContext: config.customContext,
+            historical_count: successProfile.totalConversions,
+            exclusion_count: successProfile.exclusionHandles.size,
+            toolchain: [
+              { step: "Discovery", provider: "Perplexity", purpose: "Find source-linked athlete candidates" },
+              { step: "Identity lookup", provider: "Apify Google Search", purpose: "Resolve public profiles and age sources" },
+              { step: "Instagram enrichment", provider: "Apify Instagram Profile Scraper", purpose: "Load profile and audience data" },
+              { step: "Fit scoring", provider: scoringModel, purpose: "Score partnership fit and explain the result" },
+              { step: "Persistence", provider: "Supabase", purpose: "Store the run, evidence, and pipeline disposition" },
+            ],
           },
           raw_results: [],
           scoring_details: [],
@@ -1682,25 +1698,40 @@ export async function POST(request: NextRequest) {
       score: a.score,
     })));
 
-    // Save to database
+    // Persist every safe finalist with an explicit disposition. Source-verified
+    // adults enter Approval, unknown-age adults remain held in Research, and
+    // likely minors are recorded only in the run audit (never in the pipeline).
     let addedCount = 0;
+    let heldCount = 0;
+    let blockedCount = 0;
+    let duplicateCount = 0;
+    let skippedCount = 0;
     for (const athlete of finalResults) {
       try {
         // Check if already exists (use maybeSingle to avoid error when no match)
         const { data: existingList } = await supabase
           .from("athletes")
-          .select("id")
+          .select("id, pipeline_stage")
           .eq("instagram_handle", athlete.instagram_handle)
           .limit(1);
 
         const existing = existingList && existingList.length > 0 ? existingList[0] : null;
 
         if (existing) {
+          const existingStage = existing.pipeline_stage || "research";
+          athlete.athlete_id = existing.id;
+          athlete.pipeline_stage = existingStage;
+          athlete.disposition = "existing";
+          athlete.disposition_reason = `Already exists in ${existingStage.replaceAll("_", " ")}`;
+          duplicateCount++;
           log(`  Skipping ${athlete.name} (@${athlete.instagram_handle}) - already in database`);
           continue;
         }
 
         if (!athlete.instagram_handle) {
+          athlete.disposition = "skipped";
+          athlete.disposition_reason = "No Instagram handle was resolved";
+          skippedCount++;
           log(`  Skipping ${athlete.name} - no Instagram handle`);
           continue;
         }
@@ -1708,6 +1739,9 @@ export async function POST(request: NextRequest) {
         // CHECK HISTORICAL EXCLUSIONS - don't contact athletes we've already worked with
         const exclusionCheck = isExcludedAthlete(athlete.instagram_handle, successProfile);
         if (exclusionCheck.excluded) {
+          athlete.disposition = "skipped";
+          athlete.disposition_reason = exclusionCheck.reason || "Matched a historical exclusion";
+          skippedCount++;
           log(`  ⏭️ EXCLUDED ${athlete.name} (@${athlete.instagram_handle}) - ${exclusionCheck.reason}`);
           continue;
         }
@@ -1728,16 +1762,28 @@ export async function POST(request: NextRequest) {
           ));
 
         if (isLikelyMinor) {
+          athlete.disposition = "blocked";
+          athlete.disposition_reason = athlete.age_verified && athlete.age
+            ? `Blocked: source-verified age ${athlete.age}`
+            : "Blocked by the minor-safety screen";
+          blockedCount++;
           log(`  ⛔ BLOCKED ${athlete.name} (@${athlete.instagram_handle}) - flagged as minor (score: ${athlete.score}, is_minor: ${athlete.is_minor})`);
           continue;
         }
 
-        if (athlete.age_verified !== true) {
+        const destinationStage = athlete.age_verified === true ? "approval" : "research";
+        if (destinationStage === "research") {
+          athlete.disposition = "held";
+          athlete.disposition_reason = "Held for manual review because age lacks a trustworthy public source";
           log(`  ⏸️ HELD ${athlete.name} (@${athlete.instagram_handle}) - age was not verified by a matching public source`);
-          continue;
+        } else {
+          athlete.disposition = "approval";
+          athlete.disposition_reason = athlete.age
+            ? `Added to Approval after source-linked adult age verification (${athlete.age})`
+            : "Added to Approval after adult age verification";
+          log(`  Adding ${athlete.name} (@${athlete.instagram_handle}) to approval queue`);
         }
 
-        log(`  Adding ${athlete.name} (@${athlete.instagram_handle}) to approval queue`);
         const { data: newAthlete, error: createError } = await supabase
             .from("athletes")
             .insert({
@@ -1759,9 +1805,12 @@ export async function POST(request: NextRequest) {
                 age_verified: athlete.age_verified,
                 age: athlete.age,
                 age_source: athlete.age_source,
+                research_run_id: researchLogId,
+                review_status: athlete.disposition,
+                disposition_reason: athlete.disposition_reason,
               }),
               source: "research_agent",
-              pipeline_stage: "approval",
+              pipeline_stage: destinationStage,
               enrichment_status: "enriched",
               is_historical: false,
             })
@@ -1769,7 +1818,10 @@ export async function POST(request: NextRequest) {
             .single();
 
         if (!createError && newAthlete) {
-          addedCount++;
+          athlete.athlete_id = newAthlete.id;
+          athlete.pipeline_stage = destinationStage;
+          if (destinationStage === "approval") addedCount++;
+          else heldCount++;
 
           // Store profile pic in Supabase
           if (athlete.profile_pic_url) {
@@ -1795,14 +1847,20 @@ export async function POST(request: NextRequest) {
             );
           }
         } else if (createError) {
+          athlete.disposition = "skipped";
+          athlete.disposition_reason = `Database insert failed: ${createError.message}`;
+          skippedCount++;
           log(`  Error adding ${athlete.name}: ${createError.message}`);
         }
       } catch (e) {
+        athlete.disposition = "skipped";
+        athlete.disposition_reason = e instanceof Error ? e.message : "Unexpected persistence error";
+        skippedCount++;
         log(`Error saving athlete ${athlete.name}: ${e}`);
       }
     }
 
-    log(`Added ${addedCount} new athletes to approval queue`);
+    log(`Disposition summary: ${addedCount} approval, ${heldCount} held, ${blockedCount} blocked, ${duplicateCount} existing, ${skippedCount} skipped`);
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     log(`Total time: ${totalTime}s`);
@@ -1816,6 +1874,15 @@ export async function POST(request: NextRequest) {
             sport: config.sportFocus,
             customContext: config.customContext,
             sportContext,
+            historical_count: successProfile.totalConversions,
+            exclusion_count: successProfile.exclusionHandles.size,
+            toolchain: [
+              { step: "Discovery", provider: "Perplexity", purpose: "Find source-linked athlete candidates" },
+              { step: "Identity lookup", provider: "Apify Google Search", purpose: "Resolve public profiles and age sources" },
+              { step: "Instagram enrichment", provider: "Apify Instagram Profile Scraper", purpose: "Load profile and audience data" },
+              { step: "Fit scoring", provider: scoringModel, purpose: "Score partnership fit and explain the result" },
+              { step: "Persistence", provider: "Supabase", purpose: "Store the run, evidence, and pipeline disposition" },
+            ],
           },
           raw_results: discoveredAthletes,
           scoring_details: scoredAthletes.map(a => ({
@@ -1831,6 +1898,10 @@ export async function POST(request: NextRequest) {
             scored: scoredAthletes.length,
             returned: finalResults.length,
             added: addedCount,
+            held: heldCount,
+            blocked: blockedCount,
+            duplicates: duplicateCount,
+            skipped: skippedCount,
             phase: "completed",
           },
           heartbeat_at: new Date().toISOString(),
@@ -1843,16 +1914,19 @@ export async function POST(request: NextRequest) {
 
     // ALWAYS create a notification on completion (so it appears in notification center)
     try {
-      const notificationMessage = addedCount > 0
-        ? `Found ${addedCount} new ${config.sportFocus} athletes. Check the Approval tab to review.`
-        : `Research complete for ${config.sportFocus}. No new athletes matched criteria.`;
+      const notificationMessage = `Research complete for ${config.sportFocus}: ${finalResults.length} finalists, ${addedCount} added to Approval, ${heldCount} held, ${blockedCount} blocked.`;
 
       await supabase.from("activity_notifications").insert({
         type: "research_completed",
         title: "Research Complete",
         message: notificationMessage,
+        link: researchLogId
+          ? `/pipeline/research?session=${encodeURIComponent(researchLogId)}`
+          : "/pipeline/research",
         metadata: {
           addedCount,
+          heldCount,
+          blockedCount,
           sport: config.sportFocus,
           runId: researchLogId,
           discovered: discoveredAthletes.length,
@@ -1875,6 +1949,10 @@ export async function POST(request: NextRequest) {
         scored: scoredAthletes.length,
         returned: finalResults.length,
         added: addedCount,
+        held: heldCount,
+        blocked: blockedCount,
+        duplicates: duplicateCount,
+        skipped: skippedCount,
         timeSeconds: parseFloat(totalTime),
       },
       logs: logBuffer,

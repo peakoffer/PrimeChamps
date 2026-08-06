@@ -21,6 +21,9 @@ interface Athlete {
   source?: string;
   research_score?: number;
   research_reasoning?: string;
+  age_verified?: boolean;
+  age?: number;
+  age_source?: string;
 }
 
 interface ResearchCandidate {
@@ -38,6 +41,14 @@ interface ResearchCandidate {
   reasoning: string;
   concerns?: string[];
   similar_to?: string[];
+  age_verified?: boolean;
+  age?: number;
+  age_source?: string;
+  is_minor?: boolean;
+  athlete_id?: string;
+  pipeline_stage?: string;
+  disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
+  disposition_reason?: string;
 }
 
 interface ResearchConfig {
@@ -61,9 +72,14 @@ interface ResearchLog {
   error_message?: string | null;
   config_used: ResearchConfig;
   context_summary: {
-    historical_count: number;
-    rejection_count: number;
-    top_sports: string[];
+    sport?: string;
+    customContext?: string;
+    historical_count?: number;
+    exclusion_count?: number;
+    rejection_count?: number;
+    top_sports?: string[];
+    sportContext?: string;
+    toolchain?: Array<{ step: string; provider: string; purpose: string }>;
   };
   raw_results: Array<{
     name: string;
@@ -78,9 +94,17 @@ interface ResearchLog {
   }>;
   final_results: ResearchCandidate[];
   stats: {
-    searched: number;
-    scored: number;
-    returned: number;
+    searched?: number;
+    discovered?: number;
+    enriched?: number;
+    scored?: number;
+    returned?: number;
+    added?: number;
+    held?: number;
+    blocked?: number;
+    duplicates?: number;
+    skipped?: number;
+    phase?: string;
   };
 }
 
@@ -236,8 +260,6 @@ function ResearchStageContent() {
   const [followerMinInput, setFollowerMinInput] = useState("30000");
   const [followerMaxInput, setFollowerMaxInput] = useState("500000");
 
-  // Historical athletes for "Find more like" dropdown
-  const [historicalAthletes, setHistoricalAthletes] = useState<Athlete[]>([]);
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
 
   // Audio recording state
@@ -252,7 +274,6 @@ function ResearchStageContent() {
 
   useEffect(() => {
     fetchAthletes();
-    fetchHistoricalAthletes();
     fetchResearchLogs();
 
     // Check for any RUNNING research in the database (persists across page navigations)
@@ -328,7 +349,7 @@ function ResearchStageContent() {
             localStorage.removeItem("research_background_run_id");
             // Might have missed the completion - show notification
             setToast({
-              message: `Research complete! Found ${savedLog.stats?.returned || 0} candidates.`,
+              message: `Research complete: ${savedLog.stats?.returned || 0} finalists, ${savedLog.stats?.added || 0} added to Approval.`,
               type: "success",
             });
           } else if (!savedLog) {
@@ -370,16 +391,17 @@ function ResearchStageContent() {
 
           // Show completion notification
           if (targetLog.status === "completed") {
-            const candidateCount = targetLog.stats?.added || targetLog.stats?.returned || 0;
+            const finalistCount = targetLog.stats?.returned || 0;
+            const approvalCount = targetLog.stats?.added || 0;
             setToast({
-              message: `Research complete! Found ${candidateCount} candidates.`,
+              message: `Research complete: ${finalistCount} finalists, ${approvalCount} added to Approval.`,
               type: "success",
             });
 
             // Browser notification
             if ("Notification" in window && Notification.permission === "granted") {
               new Notification("Research Complete!", {
-                body: `Found ${candidateCount} new athlete candidates. Review them in the Approval tab.`,
+                body: `${finalistCount} finalists; ${approvalCount} added to Approval. Open the run for the evidence and decisions.`,
                 icon: "/favicon.ico",
               });
             }
@@ -413,16 +435,6 @@ function ResearchStageContent() {
       console.error("Error fetching athletes:", error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchHistoricalAthletes = async () => {
-    try {
-      const response = await fetch("/api/historical?limit=50");
-      const data = await response.json();
-      setHistoricalAthletes(data.athletes || []);
-    } catch (error) {
-      console.error("Error fetching historical athletes:", error);
     }
   };
 
@@ -596,7 +608,8 @@ function ResearchStageContent() {
       const results = data.results || [];
       setCurrentResearchRun(data.run);
       setResearchResults(results);
-      setShowResultsModal(results.length > 0);
+      setShowResultsModal(false);
+      if (runId) setExpandedLogId(runId);
 
       // Research is now complete (the API is synchronous)
       // Clear background tracking
@@ -606,20 +619,22 @@ function ResearchStageContent() {
       // Refresh logs to get the real data
       fetchResearchLogs();
 
-      // Backend now auto-adds candidates to approval stage
-      const addedCount = data.stats?.added || results.length;
+      const finalistCount = data.stats?.returned ?? results.length;
+      const addedCount = data.stats?.added || 0;
+      const heldCount = data.stats?.held || 0;
+      const blockedCount = data.stats?.blocked || 0;
 
       // Show toast notification
-      if (addedCount > 0) {
+      if (finalistCount > 0) {
         setToast({
-          message: `Found ${addedCount} candidates! Check the Approval tab to review.`,
+          message: `${finalistCount} finalists: ${addedCount} approval, ${heldCount} held, ${blockedCount} blocked.`,
           type: "success",
         });
 
         // Browser notification
         if ("Notification" in window && Notification.permission === "granted") {
           new Notification("Research Complete!", {
-            body: `Found ${addedCount} new athlete candidates. Review them in the Approval tab.`,
+            body: `${finalistCount} finalists: ${addedCount} approval, ${heldCount} held, ${blockedCount} blocked.`,
             icon: "/favicon.ico",
           });
         }
@@ -757,6 +772,44 @@ function ResearchStageContent() {
     return count.toString();
   };
 
+  const latestCompletedLog = researchLogs.find((log) => log.status === "completed");
+  const latestStats = latestCompletedLog?.stats;
+
+  const getCandidateDisposition = (candidate: ResearchCandidate) => {
+    if (candidate.pipeline_stage === "approval") return "approval";
+    if (candidate.pipeline_stage === "research") return "held";
+    if (candidate.disposition === "approval") return "approval";
+    if (candidate.is_minor === true || candidate.score === 0 || candidate.disposition === "blocked") return "blocked";
+    if (candidate.disposition === "existing") return "existing";
+    if (candidate.disposition === "skipped") return "skipped";
+    if (candidate.age_verified !== true || candidate.disposition === "held") return "held";
+    return "approval";
+  };
+
+  const dispositionPresentation = {
+    approval: { label: "Added to Approval", className: "bg-blue-100 text-blue-800" },
+    held: { label: "Held in Research", className: "bg-amber-100 text-amber-800" },
+    blocked: { label: "Safety blocked", className: "bg-red-100 text-red-800" },
+    existing: { label: "Already in CRM", className: "bg-gray-100 text-gray-800" },
+    skipped: { label: "Not saved", className: "bg-gray-100 text-gray-700" },
+  } as const;
+
+  const latestOutcomeCounts = (latestCompletedLog?.final_results || []).reduce(
+    (counts, candidate) => {
+      counts[getCandidateDisposition(candidate)] += 1;
+      return counts;
+    },
+    { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0 }
+  );
+
+  const fallbackToolchain = (log: ResearchLog) => [
+    { step: "Discovery", provider: "Perplexity", purpose: "Find source-linked athlete candidates" },
+    { step: "Identity & age", provider: "Apify Google Search", purpose: "Resolve profiles and trustworthy age sources" },
+    { step: "Instagram", provider: "Apify Instagram Profile Scraper", purpose: "Load profile and audience data" },
+    { step: "Scoring", provider: log.config_used?.scoringModel || RESEARCH_SCORING_MODEL, purpose: "Score fit and explain why" },
+    { step: "Pipeline", provider: "Supabase", purpose: "Store evidence and candidate disposition" },
+  ];
+
   // Copy settings from a past research run to pre-fill the form
   const copySettingsFromLog = (log: ResearchLog) => {
     const logConfig = log.config_used;
@@ -888,29 +941,27 @@ function ResearchStageContent() {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      {/* Latest run funnel */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-purple-700">{athletes.length}</div>
-          <div className="text-sm text-purple-600">Discovered Prospects</div>
+          <div className="text-3xl font-bold text-purple-700">{latestStats?.discovered || 0}</div>
+          <div className="text-sm text-purple-700">Latest discoveries</div>
         </div>
         <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {athletes.filter((a) => a.follower_count && a.follower_count >= 100000).length}
-          </div>
-          <div className="text-sm text-gray-800">100K+ Followers</div>
+          <div className="text-3xl font-bold text-gray-800">{latestStats?.returned || 0}</div>
+          <div className="text-sm text-gray-700">Scored finalists</div>
         </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {athletes.filter((a) => a.research_score && a.research_score >= 80).length}
-          </div>
-          <div className="text-sm text-gray-800">High Score (80+)</div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="text-3xl font-bold text-blue-800">{latestOutcomeCounts.approval}</div>
+          <div className="text-sm text-blue-700">Currently in Approval</div>
         </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {historicalAthletes.length}
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="text-3xl font-bold text-amber-800">
+            {latestOutcomeCounts.held + latestOutcomeCounts.blocked}
           </div>
-          <div className="text-sm text-gray-800">Historical Context</div>
+          <div className="text-sm text-amber-800">
+            {latestOutcomeCounts.held} held · {latestOutcomeCounts.blocked} blocked
+          </div>
         </div>
       </div>
 
@@ -937,10 +988,10 @@ function ResearchStageContent() {
           </button>
           {toast.type === "success" && (
             <Link
-              href="/pipeline"
+              href={expandedLogId ? `/pipeline/research?session=${expandedLogId}` : "/pipeline/research"}
               className="ml-2 underline hover:no-underline"
             >
-              Go to Approval →
+              Review run →
             </Link>
           )}
         </div>
@@ -971,6 +1022,16 @@ function ResearchStageContent() {
           <div className="divide-y">
             {researchLogs.map((log) => {
               const isRunning = log.status === "running" || log.status === "pending";
+              const outcomeCounts = (log.final_results || []).reduce(
+                (counts, candidate) => {
+                  counts[getCandidateDisposition(candidate)] += 1;
+                  return counts;
+                },
+                { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0 }
+              );
+              const toolchain = log.context_summary?.toolchain?.length
+                ? log.context_summary.toolchain
+                : fallbackToolchain(log);
               return (
               <div key={log.id} id={`research-log-${log.id}`} className={`hover:bg-gray-50 ${isRunning ? "bg-yellow-50/50" : ""} ${expandedLogId === log.id ? "ring-2 ring-purple-300 rounded-lg" : ""}`}>
                 {/* Log Header - Clickable */}
@@ -1015,10 +1076,10 @@ function ResearchStageContent() {
                     ) : (
                       <div className="text-right">
                         <div className="text-sm font-medium text-gray-900">
-                          {log.stats?.returned || 0} candidates
+                          {log.stats?.returned || log.final_results?.length || 0} finalists
                         </div>
                         <div className="text-xs text-gray-800">
-                          from {log.stats?.searched || 0} searched
+                          from {log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0} discoveries
                         </div>
                       </div>
                     )}
@@ -1048,6 +1109,21 @@ function ResearchStageContent() {
                       <span>📋</span> Copy & Tweak Settings
                     </button>
 
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {[
+                        ["Discovered", log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0],
+                        ["Enriched", log.stats?.enriched || 0],
+                        ["Scored", log.stats?.scored || log.scoring_details?.length || 0],
+                        ["Finalists", log.stats?.returned || log.final_results?.length || 0],
+                        ["Auto-approved", log.stats?.added ?? outcomeCounts.approval],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="rounded-lg border bg-white px-3 py-2 text-center">
+                          <div className="text-xl font-bold text-gray-900">{value}</div>
+                          <div className="text-xs text-gray-600">{label}</div>
+                        </div>
+                      ))}
+                    </div>
+
                     {/* Inputs */}
                     <div className="bg-gray-50 rounded-lg p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
@@ -1070,6 +1146,20 @@ function ResearchStageContent() {
                           <span className="text-gray-800">Scoring Model:</span>{" "}
                           <span className="text-gray-900">{log.config_used?.scoringModel || RESEARCH_SCORING_MODEL}</span>
                         </div>
+                        <div>
+                          <span className="text-gray-800">Requested finalists:</span>{" "}
+                          <span className="text-gray-900">{log.config_used?.resultCount || "—"}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-800">Started:</span>{" "}
+                          <span className="text-gray-900">{new Date(log.created_at).toLocaleString()}</span>
+                        </div>
+                        {log.config_used?.customContext && (
+                          <div className="col-span-2">
+                            <span className="text-gray-800">Search brief:</span>{" "}
+                            <span className="text-gray-900">{log.config_used.customContext}</span>
+                          </div>
+                        )}
                         {log.config_used?.keywords && (
                           <div className="col-span-2">
                             <span className="text-gray-800">Keywords:</span>{" "}
@@ -1079,69 +1169,135 @@ function ResearchStageContent() {
                       </div>
                     </div>
 
-                    {/* Actions/Context */}
+                    {/* Evidence and toolchain */}
                     <div className="bg-blue-50 rounded-lg p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <span>🧠</span> Context Used
+                        <span>🧠</span> Research inputs and tools
                       </h4>
-                      <div className="text-sm space-y-1">
-                        <div>
-                          <span className="text-gray-800">Historical athletes referenced:</span>{" "}
-                          <span className="text-gray-900">{log.context_summary?.historical_count || 0}</span>
+                      <div className="mb-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <div className="rounded-md bg-white/80 px-3 py-2">
+                          <span className="text-gray-600">Historical conversions supplied to scoring:</span>{" "}
+                          <strong className="text-gray-900">{log.context_summary?.historical_count ?? "Not recorded"}</strong>
                         </div>
-                        <div>
-                          <span className="text-gray-800">Rejection patterns applied:</span>{" "}
-                          <span className="text-gray-900">{log.context_summary?.rejection_count || 0}</span>
+                        <div className="rounded-md bg-white/80 px-3 py-2">
+                          <span className="text-gray-600">Existing/historical handles excluded:</span>{" "}
+                          <strong className="text-gray-900">{log.context_summary?.exclusion_count ?? "Not recorded"}</strong>
                         </div>
-                        <div>
-                          <span className="text-gray-800">Top sports focus:</span>{" "}
-                          <span className="text-gray-900">{log.context_summary?.top_sports?.join(", ") || "None"}</span>
-                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {toolchain.map((tool) => (
+                          <div key={`${tool.step}-${tool.provider}`} className="grid gap-1 rounded-md border border-blue-100 bg-white px-3 py-2 text-sm sm:grid-cols-[130px_190px_1fr]">
+                            <span className="font-medium text-gray-900">{tool.step}</span>
+                            <span className="text-blue-800">{tool.provider}</span>
+                            <span className="text-gray-600">{tool.purpose}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
                     {/* Outputs */}
                     <div className="bg-green-50 rounded-lg p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <span>📤</span> Outputs
+                        <span>📤</span> Finalists and decisions
                       </h4>
-                      <div className="text-sm text-gray-900 mb-2">
-                        Found <strong>{log.final_results?.length || 0}</strong> candidates
+                      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                        <span className="rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-800">
+                          {outcomeCounts.approval} now in approval
+                        </span>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800">
+                          {outcomeCounts.held} held
+                        </span>
+                        <span className="rounded-full bg-red-100 px-2.5 py-1 font-medium text-red-800">
+                          {outcomeCounts.blocked} blocked
+                        </span>
+                        {(log.stats?.duplicates ?? outcomeCounts.existing) > 0 && (
+                          <span className="rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-700">
+                            {log.stats?.duplicates ?? outcomeCounts.existing} already in CRM
+                          </span>
+                        )}
                       </div>
                       {log.final_results && log.final_results.length > 0 && (
-                        <div className="space-y-2 max-h-40 overflow-y-auto">
-                          {log.final_results.slice(0, 5).map((result, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between bg-white rounded px-3 py-2"
-                            >
-                              <div>
-                                <span className="font-medium">{result.name}</span>
-                                <span className="text-gray-800 ml-2">
-                                  @{result.instagram_handle}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-800">
-                                  {result.follower_count?.toLocaleString()}
-                                </span>
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    result.score >= 80
-                                      ? "bg-green-100 text-green-700"
-                                      : "bg-yellow-100 text-yellow-700"
-                                  }`}
+                        <div className="space-y-2">
+                          {log.final_results.map((result, idx) => {
+                            const disposition = getCandidateDisposition(result);
+                            const presentation = dispositionPresentation[disposition];
+                            const reasoningKey = `${log.id}:${result.instagram_handle || idx}`;
+                            const isReasoningExpanded = expandedReasoning.has(reasoningKey);
+                            return (
+                              <div key={reasoningKey} className="rounded-lg border border-green-100 bg-white px-3 py-3">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleReasoning(reasoningKey)}
+                                  className="flex w-full items-start justify-between gap-3 text-left"
+                                  aria-expanded={isReasoningExpanded}
                                 >
-                                  {result.score}
-                                </span>
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-semibold text-gray-900">{result.name}</span>
+                                      <span className="text-sm text-gray-600">@{result.instagram_handle}</span>
+                                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${presentation.className}`}>
+                                        {presentation.label}
+                                      </span>
+                                    </div>
+                                    <div className="mt-1 text-xs text-gray-600">
+                                      {formatFollowers(result.follower_count)} followers · {result.sport}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-shrink-0 items-center gap-2">
+                                    <span className={`rounded px-2 py-1 text-xs font-bold ${
+                                      result.score >= 80
+                                        ? "bg-green-100 text-green-800"
+                                        : result.score >= 60
+                                          ? "bg-yellow-100 text-yellow-800"
+                                          : "bg-gray-100 text-gray-800"
+                                    }`}>
+                                      {result.score}/100
+                                    </span>
+                                    <span className="text-gray-500">{isReasoningExpanded ? "▼" : "▶"}</span>
+                                  </div>
+                                </button>
+
+                                {isReasoningExpanded && (
+                                  <div className="mt-3 space-y-3 border-t pt-3 text-sm">
+                                    <div>
+                                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Why this score</div>
+                                      <p className="mt-1 text-gray-800">{result.reasoning || "No scoring explanation was stored for this legacy run."}</p>
+                                    </div>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      <div className="rounded-md bg-gray-50 px-3 py-2">
+                                        <span className="text-gray-500">Discovery source:</span>{" "}
+                                        <span className="text-gray-900">{result.source || "Not recorded"}</span>
+                                      </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2">
+                                        <span className="text-gray-500">Age check:</span>{" "}
+                                        <span className="text-gray-900">
+                                          {result.age_verified
+                                            ? `Verified adult${result.age ? `, age ${result.age}` : ""}`
+                                            : disposition === "blocked"
+                                              ? `Blocked${result.age ? `, age ${result.age}` : " by safety screen"}`
+                                              : "Not source-verified"}
+                                        </span>
+                                      </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2 sm:col-span-2">
+                                        <span className="text-gray-500">Age source:</span>{" "}
+                                        <span className="break-all text-gray-900">{result.age_source || "No trustworthy source stored"}</span>
+                                      </div>
+                                    </div>
+                                    {(result.disposition_reason || result.concerns?.length) && (
+                                      <div className="rounded-md bg-amber-50 px-3 py-2 text-amber-950">
+                                        {result.disposition_reason && <p className="font-medium">{result.disposition_reason}</p>}
+                                        {result.concerns && result.concerns.length > 0 && (
+                                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                                            {result.concerns.map((concern) => <li key={concern}>{concern}</li>)}
+                                          </ul>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          ))}
-                          {log.final_results.length > 5 && (
-                            <div className="text-center text-sm text-gray-800">
-                              +{log.final_results.length - 5} more
-                            </div>
-                          )}
+                            );
+                          })}
                         </div>
                       )}
                     </div>

@@ -5,6 +5,19 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const STALE_RUN_MINUTES = 15;
 
+type JsonRecord = Record<string, unknown>;
+
+function parseNotes(notes: unknown): JsonRecord {
+  if (notes && typeof notes === "object") return notes as JsonRecord;
+  if (typeof notes !== "string") return {};
+  try {
+    const value = JSON.parse(notes);
+    return value && typeof value === "object" ? value as JsonRecord : {};
+  } catch {
+    return {};
+  }
+}
+
 function getLimit(request: NextRequest): number {
   const requested = Number.parseInt(
     request.nextUrl.searchParams.get("limit") || String(DEFAULT_LIMIT),
@@ -60,7 +73,68 @@ export async function GET(request: NextRequest) {
       throw error;
     }
 
-    return NextResponse.json({ logs: data || [] });
+    const logs = data || [];
+    const handles = Array.from(new Set(logs.flatMap((log) => {
+      if (!Array.isArray(log.final_results)) return [];
+      return log.final_results.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== "object") return [];
+        const handle = (candidate as JsonRecord).instagram_handle;
+        return typeof handle === "string" && handle ? [handle.toLowerCase()] : [];
+      });
+    })));
+
+    const profilesByHandle = new Map<string, {
+      id: string;
+      pipeline_stage: string | null;
+      notes: JsonRecord;
+    }>();
+
+    if (handles.length > 0) {
+      const { data: profiles } = await supabase
+        .from("athletes")
+        .select("id, instagram_handle, pipeline_stage, notes")
+        .in("instagram_handle", handles);
+
+      for (const profile of profiles || []) {
+        if (!profile.instagram_handle) continue;
+        profilesByHandle.set(profile.instagram_handle.toLowerCase(), {
+          id: profile.id,
+          pipeline_stage: profile.pipeline_stage,
+          notes: parseNotes(profile.notes),
+        });
+      }
+    }
+
+    const enrichedLogs = logs.map((log) => ({
+      ...log,
+      final_results: Array.isArray(log.final_results)
+        ? log.final_results.map((candidate) => {
+            if (!candidate || typeof candidate !== "object") return candidate;
+            const result = candidate as JsonRecord;
+            const handle = typeof result.instagram_handle === "string"
+              ? result.instagram_handle.toLowerCase()
+              : "";
+            const profile = profilesByHandle.get(handle);
+            if (!profile) return result;
+
+            const currentStage = profile.pipeline_stage || undefined;
+            const currentReason = typeof profile.notes.disposition_reason === "string"
+              ? profile.notes.disposition_reason
+              : currentStage === "research" && result.age_verified === true
+                ? "Currently held in Research because the original age source did not meet the stricter trusted-source policy."
+                : undefined;
+
+            return {
+              ...result,
+              athlete_id: profile.id,
+              pipeline_stage: currentStage,
+              disposition_reason: currentReason || result.disposition_reason,
+            };
+          })
+        : [],
+    }));
+
+    return NextResponse.json({ logs: enrichedLogs });
   } catch (error) {
     console.error("Error fetching research logs:", error);
     return NextResponse.json(

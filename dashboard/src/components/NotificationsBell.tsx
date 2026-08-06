@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { getNotificationDestination } from "@/lib/notification-destination";
 
 interface ActivityNotification {
   id: string;
@@ -48,23 +49,6 @@ const typeColors: Record<string, string> = {
   error: "bg-red-100 text-red-800",
 };
 
-// Default links for each notification type (used when notification has no custom link)
-const typeLinks: Record<string, string> = {
-  response: "/inbox",
-  appointment: "/pipeline/appointment",
-  appointment_reminder: "/pipeline/appointment",
-  milestone: "/pipeline/contract",
-  research_started: "/pipeline/research",
-  research_completed: "/approve",
-  candidate_approved: "/approve",
-  candidate_rejected: "/approve?tab=rejected",
-  enrichment_completed: "/athletes",
-  message_sent: "/inbox",
-  message_received: "/inbox",
-  system: "/",
-  error: "/",
-};
-
 function formatRelativeTime(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -91,8 +75,7 @@ export default function NotificationsBell() {
 
   // Handle notification click - navigate to relevant page
   const handleNotificationClick = (notification: ActivityNotification) => {
-    // Prefer custom link over default type link
-    const link = notification.link || typeLinks[notification.type] || "/";
+    const link = getNotificationDestination(notification);
     setIsOpen(false);
 
     // Mark as read

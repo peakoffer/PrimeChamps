@@ -19,6 +19,16 @@ interface Athlete {
   notes?: string | null;
   pipeline_stage: string;
   created_at: string;
+  persisted?: boolean;
+  can_move?: boolean;
+  candidate_key?: string;
+  research_score?: number;
+  research_reasoning?: string;
+  disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
+  disposition_reason?: string;
+  age_verified?: boolean;
+  age?: number;
+  age_source?: string;
 }
 
 interface ResearchSession {
@@ -30,7 +40,11 @@ interface ResearchSession {
     followerMax?: number;
   };
   stats?: {
+    discovered?: number;
     returned?: number;
+    added?: number;
+    held?: number;
+    blocked?: number;
   };
   created_at: string;
   completed_at?: string;
@@ -49,7 +63,7 @@ interface PipelineColumn {
 }
 
 const STAGES = [
-  { id: "research", name: "Research", description: "Discovered prospects", color: "border-purple-500", bgColor: "bg-purple-50", icon: "🔍", href: "/pipeline/research" },
+  { id: "research", name: "Research", description: "Run audits and held candidates", color: "border-purple-500", bgColor: "bg-purple-50", icon: "🔍", href: "/pipeline/research" },
   { id: "approval", name: "Approval", description: "Pending review", color: "border-blue-500", bgColor: "bg-blue-50", icon: "✅", href: "/pipeline/approval" },
   { id: "reach_out", name: "Reach Out", description: "Ready to contact", color: "border-cyan-500", bgColor: "bg-cyan-50", icon: "📤", href: "/pipeline/reach-out" },
   { id: "response", name: "Response", description: "Awaiting reply", color: "border-yellow-500", bgColor: "bg-yellow-50", icon: "💬", href: "/pipeline/response" },
@@ -106,13 +120,20 @@ export default function PipelinePage() {
       const columnsData: PipelineColumn[] = await Promise.all(
         STAGES.map(async (stage) => {
           if (stage.id === "research") {
-            // For research column, fetch research sessions instead of athletes
-            const response = await fetch("/api/research/sessions?limit=10");
-            const data = await response.json();
+            // Research keeps both the run audit and the currently held athlete
+            // count. The board renders runs; the funnel counts people.
+            const [sessionsResponse, athletesResponse] = await Promise.all([
+              fetch("/api/research/sessions?limit=10"),
+              fetch("/api/pipeline/athletes?stage=research"),
+            ]);
+            const [sessionsData, athletesData] = await Promise.all([
+              sessionsResponse.json(),
+              athletesResponse.json(),
+            ]);
             return {
               ...stage,
-              athletes: [],
-              researchSessions: data.sessions || [],
+              athletes: athletesData.athletes || [],
+              researchSessions: sessionsData.sessions || [],
             };
           } else {
             const response = await fetch(`/api/pipeline/athletes?stage=${stage.id}`);
@@ -225,7 +246,18 @@ export default function PipelinePage() {
     }
 
     // For other valid moves, proceed normally
-    // Optimistic update
+    // Optimistic update. Research sessions remain as an audit trail, so a
+    // moved candidate stays nested under the run with its current stage shown.
+    if (draggedAthlete.pipeline_stage === "research") {
+      setSessionAthletes((prev) => Object.fromEntries(
+        Object.entries(prev).map(([sessionId, athletes]) => [
+          sessionId,
+          athletes.map((athlete) => athlete.id === draggedAthlete.id
+            ? { ...athlete, pipeline_stage: targetColumnId, can_move: false, disposition: "approval" }
+            : athlete),
+        ])
+      ));
+    }
     setColumns((prev) =>
       prev.map((col) => {
         if (col.id === draggedAthlete.pipeline_stage) {
@@ -234,7 +266,9 @@ export default function PipelinePage() {
         if (col.id === targetColumnId) {
           return {
             ...col,
-            athletes: [...col.athletes, { ...draggedAthlete, pipeline_stage: targetColumnId }],
+            athletes: col.athletes.some((athlete) => athlete.id === draggedAthlete.id)
+              ? col.athletes
+              : [...col.athletes, { ...draggedAthlete, pipeline_stage: targetColumnId }],
           };
         }
         return col;
@@ -243,7 +277,7 @@ export default function PipelinePage() {
 
     // Update on server
     try {
-      await fetch("/api/pipeline/athletes", {
+      const response = await fetch("/api/pipeline/athletes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -251,9 +285,14 @@ export default function PipelinePage() {
           toStage: targetColumnId,
         }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Could not move candidate");
+      }
     } catch (error) {
       console.error("Error moving athlete:", error);
       // Revert on error
+      setSessionAthletes({});
       fetchPipeline();
     }
 
@@ -381,8 +420,6 @@ export default function PipelinePage() {
   }));
 
   const totalProspects = columns.reduce((sum, col) => sum + col.athletes.length, 0);
-  const totalResearchSessions = columns.find(c => c.id === "research")?.researchSessions?.length || 0;
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -461,9 +498,7 @@ export default function PipelinePage() {
       <div className="bg-white shadow rounded-lg p-4">
         <div className="flex items-center justify-between">
           {columns.map((col, index) => {
-            const count = col.id === "research"
-              ? (col.researchSessions?.length || 0)
-              : col.athletes.length;
+            const count = col.athletes.length;
             return (
               <div key={col.id} className="flex items-center">
                 <Link href={col.href} className="text-center group">
@@ -487,14 +522,10 @@ export default function PipelinePage() {
       {totalProspects > 0 && (
         <div className="bg-white shadow rounded-lg p-4">
           <div className="flex items-center justify-between">
-            {columns.slice(0, -1).map((col, index) => {
-              const nextCol = columns[index + 1];
-              const currentCount = col.id === "research"
-                ? (col.researchSessions?.length || 0)
-                : col.athletes.length;
-              const nextCount = nextCol.id === "research"
-                ? (nextCol.researchSessions?.length || 0)
-                : nextCol.athletes.length;
+            {columns.slice(1, -1).map((col, index) => {
+              const nextCol = columns[index + 2];
+              const currentCount = col.athletes.length;
+              const nextCount = nextCol.athletes.length;
               const rate = currentCount > 0
                 ? Math.round((nextCount / currentCount) * 100)
                 : 0;
@@ -510,7 +541,7 @@ export default function PipelinePage() {
                       {col.name} → {nextCol.name}
                     </div>
                   </div>
-                  {index < columns.length - 2 && (
+                  {index < columns.length - 3 && (
                     <div className="mx-2 text-gray-300">|</div>
                   )}
                 </div>
@@ -583,6 +614,11 @@ export default function PipelinePage() {
                 </span>
               </div>
               <p className="text-xs text-gray-800 mt-1">{column.description}</p>
+              {isResearchColumn && (
+                <p className="mt-1 text-[11px] text-purple-800">
+                  {column.athletes.length} held · {column.researchSessions?.length || 0} recent runs
+                </p>
+              )}
             </Link>
 
             {/* Cards */}
@@ -602,10 +638,11 @@ export default function PipelinePage() {
                     return (
                       <div key={session.id} className="space-y-1">
                         {/* Session Header - Click to expand, Double-click to navigate */}
-                        <div
+                        <button
+                          type="button"
                           onClick={() => toggleSessionExpand(session.id)}
                           onDoubleClick={() => handleSessionDoubleClick(session.id)}
-                          className={`bg-white rounded-lg shadow-sm border p-3 cursor-pointer transition-all ${
+                          className={`w-full bg-white rounded-lg shadow-sm border p-3 text-left cursor-pointer transition-all ${
                             isExpanded
                               ? "border-purple-400 bg-purple-50 ring-1 ring-purple-200"
                               : "hover:shadow-md hover:border-purple-300"
@@ -632,13 +669,19 @@ export default function PipelinePage() {
                           </div>
                           <div className="mt-2 text-xs text-gray-800 pl-6">
                             <div className="flex justify-between">
-                              <span>{session.stats?.returned || 0} candidates</span>
+                              <span>{session.stats?.returned || 0} finalists</span>
                               <span>{new Date(session.created_at).toLocaleDateString()}</span>
                             </div>
+                            {session.status === "completed" && (
+                              <div className="mt-1 text-[11px] text-gray-600">
+                                {session.stats?.discovered || 0} discovered · {session.stats?.added || 0} approval · {session.stats?.held || 0} held · {session.stats?.blocked || 0} blocked
+                              </div>
+                            )}
                           </div>
-                        </div>
+                        </button>
 
-                        {/* Expanded Athletes List - View Only (no drag) */}
+                        {/* Expanded candidate audit. Held Research candidates can
+                            be dragged one lane forward into Approval. */}
                         {isExpanded && (
                           <div className="ml-4 space-y-1 border-l-2 border-purple-200 pl-2">
                             {isLoading ? (
@@ -648,9 +691,15 @@ export default function PipelinePage() {
                             ) : (
                               athletes.map((athlete) => (
                                 <div
-                                  key={athlete.id}
-                                  onClick={() => router.push(`/athletes/${athlete.id}`)}
-                                  className="bg-white rounded-lg shadow-sm border p-2 cursor-pointer transition-all hover:shadow-md hover:border-purple-300"
+                                  key={athlete.candidate_key || athlete.id}
+                                  draggable={!selectionMode && athlete.can_move === true}
+                                  onDragStart={(event) => athlete.can_move && handleDragStart(event, athlete)}
+                                  onClick={() => athlete.persisted && router.push(`/athletes/${athlete.id}`)}
+                                  className={`bg-white rounded-lg shadow-sm border p-2 transition-all hover:shadow-md hover:border-purple-300 ${
+                                    athlete.persisted ? "cursor-pointer" : "cursor-default"
+                                  } ${athlete.can_move ? "cursor-grab active:cursor-grabbing" : ""} ${
+                                    draggedAthlete?.id === athlete.id ? "opacity-50" : ""
+                                  }`}
                                 >
                                   <div className="flex items-center gap-2">
                                     <AthleteAvatar
@@ -665,6 +714,11 @@ export default function PipelinePage() {
                                     </div>
                                     {/* Key Metrics */}
                                     <div className="flex items-center gap-2 text-xs flex-shrink-0">
+                                      {typeof athlete.research_score === "number" && (
+                                        <span className="rounded bg-purple-100 px-1.5 py-0.5 font-semibold text-purple-700">
+                                          {athlete.research_score}
+                                        </span>
+                                      )}
                                       {athlete.follower_count && (
                                         <span className="text-gray-700 font-medium">
                                           {athlete.follower_count >= 1000000
@@ -678,6 +732,26 @@ export default function PipelinePage() {
                                         </span>
                                       )}
                                     </div>
+                                  </div>
+                                  <div className="mt-2 flex items-center justify-between gap-2 border-t pt-1.5 text-[11px]">
+                                    <span className={`rounded-full px-2 py-0.5 font-medium ${
+                                      athlete.pipeline_stage === "approval"
+                                        ? "bg-blue-100 text-blue-700"
+                                        : athlete.disposition === "blocked"
+                                          ? "bg-red-100 text-red-700"
+                                          : athlete.disposition === "held"
+                                            ? "bg-amber-100 text-amber-800"
+                                            : "bg-gray-100 text-gray-700"
+                                    }`}>
+                                      {athlete.pipeline_stage === "approval"
+                                        ? "In Approval"
+                                        : athlete.disposition === "blocked"
+                                          ? "Safety blocked"
+                                          : athlete.disposition === "held"
+                                            ? "Held in Research"
+                                            : athlete.pipeline_stage.replaceAll("_", " ")}
+                                    </span>
+                                    {athlete.can_move && <span className="text-purple-700">Drag → Approval</span>}
                                   </div>
                                 </div>
                               ))
