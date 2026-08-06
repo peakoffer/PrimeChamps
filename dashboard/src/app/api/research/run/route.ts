@@ -1184,7 +1184,6 @@ Respond with ONLY valid JSON:
       body: JSON.stringify({
         model: scoringModel,
         max_tokens: 600,
-        temperature: 0,
         messages: [{
           role: "user",
           content: attempt === 1
