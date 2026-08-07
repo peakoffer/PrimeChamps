@@ -646,7 +646,7 @@ Deno.serve(async (request) => {
       const deliveryResponse = await fetch(crmEmailUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${crmEmailSecret}`,
+          "x-prime-champs-intake-secret": crmEmailSecret,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

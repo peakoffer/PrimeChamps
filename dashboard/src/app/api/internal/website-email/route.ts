@@ -5,7 +5,9 @@ type LeadType = "athlete" | "brand";
 
 function authorized(request: NextRequest) {
   const expected = process.env.WEBSITE_INTAKE_SHARED_SECRET?.trim() || "";
-  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  const provided = request.headers.get("x-prime-champs-intake-secret")?.trim()
+    || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
+    || "";
   const left = Buffer.from(expected);
   const right = Buffer.from(provided);
   return Boolean(expected && provided && left.length === right.length && timingSafeEqual(left, right));
