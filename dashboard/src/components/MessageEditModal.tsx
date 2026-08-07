@@ -193,7 +193,7 @@ export default function MessageEditModal({
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold ${
                       athleteNotes.research_score >= 80
                         ? "bg-green-100 text-green-700"
-                        : athleteNotes.research_score >= 60
+                        : athleteNotes.research_score >= 75
                         ? "bg-yellow-100 text-yellow-700"
                         : "bg-gray-100 text-gray-600"
                     }`}

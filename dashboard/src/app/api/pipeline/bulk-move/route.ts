@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       });
       if (ineligible.length) {
         return NextResponse.json(
-          { error: `${ineligible.length} candidate(s) need verified adult age and a research score of at least 60 before Approval` },
+          { error: `${ineligible.length} candidate(s) need verified adult age and a research score of at least 75 before Approval` },
           { status: 409 }
         );
       }

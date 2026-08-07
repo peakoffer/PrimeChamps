@@ -64,19 +64,26 @@ interface ResearchCandidate {
   career_stage?: "emerging" | "established" | "veteran" | "unknown";
   objective_fit?: "strong" | "possible" | "weak";
   creator_signals?: string[];
+  momentum_metrics?: {
+    status?: "baseline" | "measured";
+    follower_growth_absolute?: number;
+    follower_growth_percent?: number;
+    days_between_snapshots?: number;
+  };
+  gate_results?: Record<string, boolean>;
 }
 
 interface ResearchConfig {
   sportFocus: string;
   partnershipGoal?: ResearchObjective;
+  depth?: "standard" | "extended";
+  marketOverride?: string;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls", "rising stars under 25"
   followerMin: number;
   followerMax: number;
   resultCount: number;
   scoringModel: string; // LLM for scoring candidates
   targetRegions?: string[];
-  voiceContext?: string; // Voice transcription context
-  keywords?: string; // Search keywords
   evaluationMode?: boolean;
 }
 
@@ -100,11 +107,14 @@ interface ResearchLog {
     objectiveProfile?: typeof ONLYFANS_CREATOR_PROFILE;
     customContext?: string;
     historical_count?: number;
+    signed_conversion_count?: number;
+    historical_record_count?: number;
     exclusion_count?: number;
     rejection_count?: number;
     top_sports?: string[];
     sportContext?: string;
     toolchain?: Array<{ step: string; provider: string; purpose: string }>;
+    recruitingThesis?: { id?: string; version?: number; name?: string };
   };
   raw_results: Array<{
     name: string;
@@ -146,11 +156,6 @@ interface ResearchRun {
     filtered: number;
     duplicates: number;
   };
-}
-
-interface ScoringModelOption {
-  id: string;
-  displayName: string;
 }
 
 interface ResearchBenchmarkSummary {
@@ -225,27 +230,6 @@ const REJECTION_REASONS = [
   { value: "other", label: "Other (specify in notes)" },
 ];
 
-const REGION_OPTIONS = [
-  { value: "usa", label: "USA (Primary Focus)" },
-  { value: "canada", label: "Canada" },
-  { value: "uk", label: "United Kingdom" },
-  { value: "australia", label: "Australia" },
-  { value: "brazil", label: "Brazil" },
-  { value: "ireland", label: "Ireland" },
-  { value: "global", label: "Global (No Filter)" },
-];
-
-// Sport-specific region presets
-const SPORT_REGION_PRESETS: Record<string, string[]> = {
-  "combat": ["usa", "brazil", "uk", "ireland"],
-  "golf": ["usa", "uk", "australia", "ireland"],
-  "surfing": ["usa", "australia", "brazil"],
-  "hockey": ["usa", "canada"],
-  "soccer": ["usa", "uk"],
-  "fitness": ["usa", "uk", "australia"],
-  "historical": ["usa"],
-};
-
 function ResearchStageContent() {
   const searchParams = useSearchParams();
   const sessionIdFromUrl = searchParams.get("session");
@@ -260,10 +244,10 @@ function ResearchStageContent() {
   const [showRejectModal, setShowRejectModal] = useState(false);
 
   // Research states
-  const [isResearching, setIsResearching] = useState(false);
-  const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0, message: "" });
+  const [isResearching] = useState(false);
+  const [researchProgress] = useState({ current: 0, total: 0, message: "" });
   const [researchResults, setResearchResults] = useState<ResearchCandidate[]>([]);
-  const [currentResearchRun, setCurrentResearchRun] = useState<ResearchRun | null>(null);
+  const [currentResearchRun] = useState<ResearchRun | null>(null);
 
   // Research history
   const [researchLogs, setResearchLogs] = useState<ResearchLog[]>([]);
@@ -282,6 +266,8 @@ function ResearchStageContent() {
   const [config, setConfig] = useState<ResearchConfig>({
     sportFocus: "mma",
     partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
+    depth: "standard",
+    marketOverride: "",
     customContext: "",
     followerMin: 30000,
     followerMax: 500000,
@@ -289,23 +275,11 @@ function ResearchStageContent() {
     scoringModel: RESEARCH_SCORING_MODEL,
     targetRegions: ["usa"],
   });
-  const [scoringModels, setScoringModels] = useState<ScoringModelOption[]>([]);
-  const [loadingScoringModels, setLoadingScoringModels] = useState(true);
-
-  // Separate state for follower inputs to allow empty values while typing
-  const [followerMinInput, setFollowerMinInput] = useState("30000");
-  const [followerMaxInput, setFollowerMaxInput] = useState("500000");
 
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
   const [benchmarkSummary, setBenchmarkSummary] = useState<ResearchBenchmarkSummary | null>(null);
   const [benchmarkBusy, setBenchmarkBusy] = useState(false);
   const [benchmarkUnavailable, setBenchmarkUnavailable] = useState(false);
-
-  // Audio recording state
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   // Background research state
   const [backgroundRunId, setBackgroundRunId] = useState<string | null>(null);
@@ -466,21 +440,6 @@ function ResearchStageContent() {
         checkForRunningResearch(),
       ]).catch((error) => console.error("Could not initialize research:", error));
 
-      void fetch("/api/ai/models", { cache: "no-store" })
-        .then((response) => response.json())
-        .then((data: { models?: ScoringModelOption[]; defaultModel?: string }) => {
-          if (data.models?.length) {
-            setScoringModels(data.models);
-            setConfig((current) => ({
-              ...current,
-              scoringModel: data.models!.some((model) => model.id === current.scoringModel)
-                ? current.scoringModel
-                : data.defaultModel || data.models![0].id,
-            }));
-          }
-        })
-        .catch((error) => console.error("Could not load Anthropic models:", error))
-        .finally(() => setLoadingScoringModels(false));
     }, 0);
 
     return () => {
@@ -497,117 +456,6 @@ function ResearchStageContent() {
     }
   }, [toast]);
 
-  // Audio recording state refs
-  const streamRef = useRef<MediaStream | null>(null);
-
-  // Audio recording functions
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      // Try different audio formats in order of preference for OpenAI Whisper
-      let mimeType = 'audio/webm';
-      const formats = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/mp4',
-        'audio/ogg;codecs=opus',
-        'audio/wav'
-      ];
-
-      for (const format of formats) {
-        if (MediaRecorder.isTypeSupported(format)) {
-          mimeType = format;
-          break;
-        }
-      }
-
-      console.log('Using audio format:', mimeType);
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        // Handle transcription in a separate function to avoid async issues
-        const mimeType = mediaRecorder.mimeType || 'audio/webm';
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        handleTranscription(audioBlob);
-      };
-
-      mediaRecorder.start(1000); // Collect data every second
-      setIsRecording(true);
-    } catch (error) {
-      console.error("Error starting recording:", error);
-      alert("Could not access microphone. Please grant permission.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-
-      // Stop all tracks
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-    }
-  };
-
-  const handleTranscription = (audioBlob: Blob) => {
-    // Check if we have valid audio data
-    if (!audioBlob || audioBlob.size < 1000) {
-      console.error("Audio blob too small:", audioBlob?.size);
-      alert("Recording too short. Please try again and speak for at least 1 second.");
-      return;
-    }
-
-    console.log("Transcribing audio:", audioBlob.type, audioBlob.size, "bytes");
-    setIsTranscribing(true);
-
-    const formData = new FormData();
-    // Determine extension from blob type
-    let extension = 'webm';
-    if (audioBlob.type.includes('mp4')) extension = 'm4a';
-    else if (audioBlob.type.includes('ogg')) extension = 'ogg';
-    else if (audioBlob.type.includes('wav')) extension = 'wav';
-
-    formData.append("audio", audioBlob, `recording.${extension}`);
-
-    fetch("/api/transcribe", {
-      method: "POST",
-      body: formData,
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.text) {
-          setConfig((prev) => ({
-            ...prev,
-            voiceContext: prev.voiceContext
-              ? `${prev.voiceContext}\n${data.text}`
-              : data.text,
-          }));
-        } else if (data.error) {
-          console.error("Transcription error:", data.error);
-        }
-      })
-      .catch((error) => {
-        console.error("Error transcribing audio:", error);
-      })
-      .finally(() => {
-        setIsTranscribing(false);
-      });
-  };
-
   const handleRunResearch = async () => {
     setShowConfigModal(false);
 
@@ -622,20 +470,16 @@ function ResearchStageContent() {
       type: "success",
     });
 
-    // Evaluation runs stay out of the live notification stream as well as the
-    // athlete pipeline and outreach queues.
-    if (!config.evaluationMode) {
-      fetch("/api/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "research_started",
-          title: "Research Started",
-          message: `Searching for ${config.sportFocus} athletes (${config.followerMin.toLocaleString()}-${config.followerMax.toLocaleString()} followers)`,
-          metadata: { config },
-        }),
-      }).catch(() => {});
-    }
+    fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "research_started",
+        title: "Research Started",
+        message: `Running ${config.depth === "extended" ? "extended" : "standard"} research for ${config.sportFocus}`,
+        metadata: { config },
+      }),
+    }).catch(() => {});
 
     // Set a temporary placeholder while waiting for real ID
     setBackgroundRunId("starting");
@@ -856,7 +700,7 @@ function ResearchStageContent() {
     if (candidate.is_minor === true || candidate.score === 0 || candidate.disposition === "blocked") return "blocked";
     if (candidate.disposition === "existing") return "existing";
     if (candidate.disposition === "skipped") return "skipped";
-    if (candidate.age_verified !== true || (candidate.score || 0) < 60 || candidate.disposition === "held") return "held";
+    if (candidate.age_verified !== true || (candidate.score || 0) < 75 || candidate.disposition === "held") return "held";
     return "approval";
   };
 
@@ -904,6 +748,8 @@ function ResearchStageContent() {
     setConfig({
       sportFocus: logConfig.sportFocus || "mma",
       partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
+      depth: logConfig.depth || ((logConfig.resultCount || 10) > 10 ? "extended" : "standard"),
+      marketOverride: logConfig.marketOverride || logConfig.customContext || "",
       customContext: logConfig.customContext || "",
       followerMin: logConfig.followerMin || 30000,
       followerMax: logConfig.followerMax || 500000,
@@ -912,10 +758,6 @@ function ResearchStageContent() {
       targetRegions: logConfig.targetRegions || ["usa"],
       evaluationMode: logConfig.evaluationMode === true,
     });
-
-    // Update the follower input fields to match
-    setFollowerMinInput(String(logConfig.followerMin || 30000));
-    setFollowerMaxInput(String(logConfig.followerMax || 500000));
 
     // Open the config modal
     setShowConfigModal(true);
@@ -948,25 +790,27 @@ function ResearchStageContent() {
           </h1>
           <p className="text-gray-600">Discover and evaluate new prospects</p>
         </div>
-        <button
-          onClick={() => setShowConfigModal(true)}
-          disabled={isResearching}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
-        >
-          {isResearching ? (
-            <>
-              <span className="animate-spin">⏳</span> Researching...
-            </>
-          ) : backgroundRunId ? (
-            <>
-              <span className="animate-pulse">🔄</span> Background Running
-            </>
-          ) : (
-            <>
-              <span>🚀</span> Run Research Agent
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/pipeline/research/intelligence"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:border-violet-300 hover:text-violet-800"
+          >
+            Recruiting thesis
+          </Link>
+          <button
+            onClick={() => setShowConfigModal(true)}
+            disabled={isResearching}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            {isResearching ? (
+              <><span className="animate-spin">⏳</span> Researching...</>
+            ) : backgroundRunId ? (
+              <><span className="animate-pulse">🔄</span> Background Running</>
+            ) : (
+              <><span>🚀</span> Run Research Agent</>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Research Progress */}
@@ -1281,16 +1125,16 @@ function ResearchStageContent() {
                           <span className="text-gray-900">{log.config_used?.followerMin?.toLocaleString()}-{log.config_used?.followerMax?.toLocaleString()}</span>
                         </div>
                         <div>
-                          <span className="text-gray-800">Regions:</span>{" "}
-                          <span className="text-gray-900">{log.config_used?.targetRegions?.join(", ") || "Global"}</span>
+                          <span className="text-gray-800">Market override:</span>{" "}
+                          <span className="text-gray-900">{log.config_used?.marketOverride || log.config_used?.customContext || "Active thesis default"}</span>
                         </div>
                         <div>
                           <span className="text-gray-800">Scoring Model:</span>{" "}
                           <span className="text-gray-900">{log.config_used?.scoringModel || RESEARCH_SCORING_MODEL}</span>
                         </div>
                         <div>
-                          <span className="text-gray-800">Requested finalists:</span>{" "}
-                          <span className="text-gray-900">{log.config_used?.resultCount || "—"}</span>
+                          <span className="text-gray-800">Depth:</span>{" "}
+                          <span className="capitalize text-gray-900">{log.config_used?.depth || ((log.config_used?.resultCount || 10) > 10 ? "extended" : "standard")}</span>
                         </div>
                         <div>
                           <span className="text-gray-800">Started:</span>{" "}
@@ -1300,12 +1144,6 @@ function ResearchStageContent() {
                           <div className="col-span-2">
                             <span className="text-gray-800">Search brief:</span>{" "}
                             <span className="text-gray-900">{log.config_used.customContext}</span>
-                          </div>
-                        )}
-                        {log.config_used?.keywords && (
-                          <div className="col-span-2">
-                            <span className="text-gray-800">Keywords:</span>{" "}
-                            <span className="text-gray-900">{log.config_used.keywords}</span>
                           </div>
                         )}
                       </div>
@@ -1318,14 +1156,19 @@ function ResearchStageContent() {
                       </h4>
                       <div className="mb-3 grid gap-2 text-sm sm:grid-cols-2">
                         <div className="rounded-md bg-white/80 px-3 py-2">
-                          <span className="text-gray-600">Historical conversions supplied to scoring:</span>{" "}
-                          <strong className="text-gray-900">{log.context_summary?.historical_count ?? "Not recorded"}</strong>
+                          <span className="text-gray-600">Signed/active contracts supplied to scoring:</span>{" "}
+                          <strong className="text-gray-900">{log.context_summary?.signed_conversion_count ?? log.context_summary?.historical_count ?? "Not recorded"}</strong>
                         </div>
                         <div className="rounded-md bg-white/80 px-3 py-2">
                           <span className="text-gray-600">Existing/historical handles excluded:</span>{" "}
                           <strong className="text-gray-900">{log.context_summary?.exclusion_count ?? "Not recorded"}</strong>
                         </div>
                       </div>
+                      {log.context_summary?.recruitingThesis && (
+                        <div className="mb-3 rounded-md border border-violet-100 bg-violet-50 px-3 py-2 text-sm text-violet-950">
+                          Recruiting thesis: <strong>{log.context_summary.recruitingThesis.name || "Active thesis"}</strong> · version {log.context_summary.recruitingThesis.version || "—"}
+                        </div>
+                      )}
                       <div className="space-y-2">
                         {toolchain.map((tool) => (
                           <div key={`${tool.step}-${tool.provider}`} className="grid gap-1 rounded-md border border-blue-100 bg-white px-3 py-2 text-sm sm:grid-cols-[130px_190px_1fr]">
@@ -1445,6 +1288,14 @@ function ResearchStageContent() {
                                         <span className="text-gray-500">Discovery source:</span>{" "}
                                         <span className="text-gray-900">{result.source || "Not recorded"}</span>
                                       </div>
+                                      <div className="rounded-md bg-gray-50 px-3 py-2 sm:col-span-2">
+                                        <span className="text-gray-500">Audience momentum:</span>{" "}
+                                        <span className="text-gray-900">
+                                          {result.momentum_metrics?.status === "measured"
+                                            ? `${(result.momentum_metrics.follower_growth_percent || 0).toFixed(2)}% follower change over ${result.momentum_metrics.days_between_snapshots || "—"} days`
+                                            : "Baseline snapshot captured; growth will appear after the next dated snapshot"}
+                                        </span>
+                                      </div>
                                       <div className="rounded-md bg-gray-50 px-3 py-2">
                                         <span className="text-gray-500">Identity confidence:</span>{" "}
                                         <span className="text-gray-900">
@@ -1557,12 +1408,12 @@ function ResearchStageContent() {
                 const approvalEligible = athlete.age_verified === true
                   && athlete.is_minor !== true
                   && typeof athlete.research_score === "number"
-                  && athlete.research_score >= 60;
+                  && athlete.research_score >= 75;
                 const approvalReason = athlete.is_minor
                   ? "Safety blocked"
                   : athlete.age_verified !== true
                     ? "Verify adult age"
-                    : typeof athlete.research_score !== "number" || athlete.research_score < 60
+                    : typeof athlete.research_score !== "number" || athlete.research_score < 75
                       ? "Score below 60"
                       : "Ready for Approval";
                 return (
@@ -1597,7 +1448,7 @@ function ResearchStageContent() {
                         className={`px-2 py-1 rounded text-sm font-medium ${
                           athlete.research_score >= 80
                             ? "bg-green-100 text-green-700"
-                            : athlete.research_score >= 60
+                            : athlete.research_score >= 75
                             ? "bg-yellow-100 text-yellow-700"
                             : "bg-gray-100 text-gray-800"
                         }`}
@@ -1618,7 +1469,7 @@ function ResearchStageContent() {
                           → Approval
                         </button>
                       ) : (
-                        <span className="rounded bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800" title="Verified adult age and a research score of at least 60 are required">
+                        <span className="rounded bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800" title="Verified adult age and a research score of at least 75 are required">
                           {approvalReason}
                         </span>
                       )}
@@ -1638,43 +1489,33 @@ function ResearchStageContent() {
         </div>
       )}
 
-      {/* Config Modal - Simplified v2 */}
+      {/* Focused research launcher */}
       {showConfigModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <span>🔬</span> Research Agent v4
+                <span>🔬</span> Start athlete research
               </h2>
               <p className="text-sm text-gray-800 mt-1">
-                Source-linked discovery, identity enrichment, and Sonnet scoring
+                Three choices. The active recruiting thesis handles the rest.
               </p>
             </div>
 
-            <div className="p-6 space-y-5">
-              {/* How it works */}
-              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-100">
-                <h3 className="font-medium text-gray-900 mb-2">How it works:</h3>
-                <ol className="text-sm text-gray-700 space-y-1 list-decimal list-inside">
-                  <li>Discovers leagues & competitions for your sport</li>
-                  <li>Finds real professional athletes from verified sources</li>
-                  <li>Looks up their Instagram handles</li>
-                  <li>Scores them on partnership fit</li>
-                </ol>
+            <div className="p-6 space-y-6">
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-violet-950">OnlyFans · emerging athlete creators</div>
+                    <p className="mt-1 text-xs leading-5 text-violet-900/80">Latest Sonnet scoring, evidence-linked identity and age checks, and no automatic outreach.</p>
+                  </div>
+                  <Link href="/pipeline/research/intelligence" onClick={() => setShowConfigModal(false)} className="shrink-0 text-xs font-semibold text-violet-800 underline underline-offset-2">View thesis</Link>
+                </div>
               </div>
 
-              <div className="rounded-lg border border-fuchsia-200 bg-fuchsia-50 p-4">
-                <div className="text-sm font-semibold text-fuchsia-950">Current recruitment objective</div>
-                <div className="mt-1 text-sm text-fuchsia-900">OnlyFans · emerging creator talent</div>
-                <p className="mt-2 text-xs leading-5 text-fuchsia-900/80">
-                  Prioritizes source-verified adults, ideally ages {ONLYFANS_CREATOR_PROFILE.targetAgeMin}-{ONLYFANS_CREATOR_PROFILE.targetAgeMax}, with recent career momentum, 30K-500K Instagram followers, a strong personal brand, and realistic partnership accessibility. Veterans and athletes over {ONLYFANS_CREATOR_PROFILE.maximumPriorityAge} are low priority unless the search brief explicitly asks for them.
-                </p>
-              </div>
-
-              {/* Sport Focus */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Sport/Niche *
+                  1. Sport *
                 </label>
                 <select
                   value={config.sportFocus}
@@ -1689,128 +1530,48 @@ function ResearchStageContent() {
                 </select>
               </div>
 
-              {/* Custom Context - NEW */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Custom Context (optional)
+                  2. Market override <span className="font-normal text-gray-500">(optional)</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Winter Olympics 2026 hopefuls, rising stars under 25, X Games competitors"
-                  value={config.customContext || ""}
-                  onChange={(e) => setConfig({ ...config, customContext: e.target.value })}
+                  placeholder="e.g., U.S. college athletes or 2028 Olympic hopefuls"
+                  value={config.marketOverride || ""}
+                  onChange={(e) => setConfig({ ...config, marketOverride: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
                 <p className="text-xs text-gray-800 mt-1">
-                  Add specific context to focus the search (events, age range, achievements)
+                  Leave blank to use the active thesis exactly as published.
                 </p>
               </div>
 
-              {/* Follower Range */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Follower Range
+                  3. Research depth
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-700">Minimum (leave empty for no min)</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={followerMinInput}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '');
-                        setFollowerMinInput(val);
-                        // Empty or 0 means no minimum (use 0)
-                        setConfig({ ...config, followerMin: parseInt(val) || 0 });
-                      }}
-                      placeholder="No minimum"
-                      className="w-full border rounded-lg px-3 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-700">Maximum (leave empty for no max)</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={followerMaxInput}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '');
-                        setFollowerMaxInput(val);
-                        // Empty or 0 means no maximum (use very high number)
-                        setConfig({ ...config, followerMax: val ? parseInt(val) : 999999999 });
-                      }}
-                      placeholder="No maximum"
-                      className="w-full border rounded-lg px-3 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                  </div>
+                  {([
+                    { value: "standard", title: "Standard", detail: "Up to 10 qualified athletes" },
+                    { value: "extended", title: "Extended", detail: "Two distinct 10-athlete waves" },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setConfig({ ...config, depth: option.value, resultCount: option.value === "extended" ? 20 : 10 })}
+                      className={`rounded-xl border p-4 text-left ${config.depth === option.value ? "border-purple-600 bg-purple-50 ring-2 ring-purple-100" : "border-gray-200 hover:border-purple-300"}`}
+                    >
+                      <span className="block text-sm font-semibold text-gray-950">{option.title}</span>
+                      <span className="mt-1 block text-xs leading-5 text-gray-600">{option.detail}</span>
+                    </button>
+                  ))}
                 </div>
-                <p className="text-xs text-gray-800 mt-1">
-                  {!followerMinInput && !followerMaxInput ? "No limits set" :
-                   !followerMinInput ? `Up to ${parseInt(followerMaxInput).toLocaleString()} followers` :
-                   !followerMaxInput ? `${parseInt(followerMinInput).toLocaleString()}+ followers` :
-                   `${parseInt(followerMinInput).toLocaleString()} - ${parseInt(followerMaxInput).toLocaleString()} followers`}
-                </p>
+                <p className="text-xs text-gray-800 mt-2">The agent will not pad the result. If only six candidates clear the evidence and fit gates, you get six.</p>
               </div>
 
-              {/* Result Count */}
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Number of Results
-                </label>
-                <select
-                  value={config.resultCount}
-                  onChange={(e) => setConfig({ ...config, resultCount: parseInt(e.target.value) })}
-                  className="w-full border rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value={5}>5 results (faster)</option>
-                  <option value={10}>10 results</option>
-                </select>
-                <p className="text-xs text-gray-800 mt-1">
-                  Runs are capped at 10 finalists. Durable background execution preserves progress across navigation, deploys, and provider retries.
-                </p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-700">
+                Source target: {config.depth === "extended" ? "up to 100" : "up to 50"} names → identity verification → Instagram enrichment → age and legitimacy gates → latest Sonnet scoring. Research never sends messages.
               </div>
-
-              {/* Scoring Model */}
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Scoring Model
-                </label>
-                <select
-                  value={config.scoringModel}
-                  onChange={(event) => setConfig({ ...config, scoringModel: event.target.value })}
-                  disabled={loadingScoringModels}
-                  className="w-full rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-950 disabled:opacity-60"
-                >
-                  {scoringModels.length > 0 ? (
-                    scoringModels.map((model) => (
-                      <option key={model.id} value={model.id}>{model.displayName}</option>
-                    ))
-                  ) : (
-                    <option value={config.scoringModel}>
-                      {loadingScoringModels ? "Loading current Anthropic models..." : config.scoringModel}
-                    </option>
-                  )}
-                </select>
-                <p className="text-xs text-gray-800 mt-1">
-                  Loaded from Anthropic at runtime. Sonnet is the default; choose another available Claude model for this run.
-                </p>
-              </div>
-
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-                <input
-                  type="checkbox"
-                  checked={config.evaluationMode === true}
-                  onChange={(event) => setConfig({ ...config, evaluationMode: event.target.checked })}
-                  className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
-                />
-                <span>
-                  <span className="block text-sm font-semibold text-amber-950">Evaluation-only run</span>
-                  <span className="mt-1 block text-xs text-amber-900">
-                    Use live research and scoring, but never create athletes, advance pipeline stages, or generate outreach work.
-                  </span>
-                </span>
-              </label>
             </div>
 
             <div className="p-6 border-t bg-gray-50 flex justify-between items-center">
@@ -1860,7 +1621,7 @@ function ResearchStageContent() {
                   <p>All candidates processed!</p>
                 </div>
               ) : (
-                researchResults.map((candidate, index) => (
+                researchResults.map((candidate) => (
                   <div
                     key={candidate.instagram_handle}
                     className="bg-white border rounded-lg p-4 shadow-sm"

@@ -25,6 +25,12 @@ import {
   type ResearchCareerStage,
   type ResearchObjective,
 } from "@/lib/research/scoring";
+import {
+  DEFAULT_RECRUITING_PROFILE,
+  formatRecruitingProfileForPrompt,
+  type RecruitingProfile,
+  type ResearchDepth,
+} from "@/lib/research/intelligence";
 
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
@@ -122,6 +128,8 @@ async function persistDiscoveredCandidates(
 export interface ResearchConfig {
   sportFocus: string;
   partnershipGoal?: ResearchObjective;
+  depth?: ResearchDepth;
+  marketOverride?: string;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls"
   followerMin: number;
   followerMax: number;
@@ -129,6 +137,10 @@ export interface ResearchConfig {
   targetRegions?: string[];
   scoringModel?: string;
   evaluationMode?: boolean;
+  profileVersionId?: string;
+  profileVersion?: number;
+  profileName?: string;
+  profileSnapshot?: RecruitingProfile;
 }
 
 export interface ResearchWorkflowInput {
@@ -136,6 +148,7 @@ export interface ResearchWorkflowInput {
   organizationId: string;
   requestedByUserId: string;
   config: ResearchConfig;
+  targetPhase?: "discovery" | "enrichment" | "scoring" | "persistence";
 }
 
 class ResearchCancelledError extends Error {
@@ -179,6 +192,16 @@ interface EnrichedAthlete extends DiscoveredAthlete {
   bio?: string;
   verified?: boolean;
   is_private?: boolean;
+  engagement_rate?: number;
+  average_likes?: number;
+  average_comments?: number;
+  signal_snapshot_id?: string;
+  momentum_metrics?: {
+    follower_growth_absolute?: number;
+    follower_growth_percent?: number;
+    days_between_snapshots?: number;
+    status: "baseline" | "measured";
+  };
 }
 
 interface ScoredAthlete extends EnrichedAthlete {
@@ -197,12 +220,11 @@ interface ScoredAthlete extends EnrichedAthlete {
   disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
   disposition_reason?: string;
   score_breakdown?: {
-    professional_legitimacy: number;
-    audience_fit: number;
-    brand_fit: number;
     momentum: number;
+    brand_fit: number;
+    audience_fit: number;
     accessibility: number;
-    evidence_quality: number;
+    thesis_fit: number;
   };
 }
 
@@ -219,14 +241,15 @@ function explainResearchHold(athlete: ScoredAthlete) {
   if (athlete.career_stage === "veteran") {
     return "the profile is categorized as veteran/late-career rather than emerging talent";
   }
-  if (athlete.score < 60) {
-    return `the evidence-backed objective score (${athlete.score}) is below the 60-point Approval threshold`;
+  if (athlete.score < 75) {
+    return `the evidence-backed objective score (${athlete.score}) is below the 75-point Approval threshold`;
   }
   return "the profile requires manual review before Approval";
 }
 
 interface SuccessProfile {
   totalConversions: number;
+  totalHistorical: number;
   sportBreakdown: Record<string, number>;
   successPatterns: string[];
   exclusionHandles: Set<string>; // IG handles to exclude (historical + rejected)
@@ -268,9 +291,8 @@ async function loadSuccessProfile(organizationId: string): Promise<SuccessProfil
 
   log("Loading historical success profile from database...");
 
-  // Successful context includes both imported historical wins and real signed
-  // or active contracts. This keeps the learning set current without counting
-  // drafts, test data, or ordinary prospects as conversions.
+  // A conversion means a real signed or active contract. Imported historical
+  // records remain useful exclusions, but they are never labeled as wins.
   const { data: convertedContracts, error: contractError } = await supabase
     .from("contracts")
     .select("athlete_id")
@@ -282,15 +304,22 @@ async function loadSuccessProfile(organizationId: string): Promise<SuccessProfil
     .map((contract) => contract.athlete_id)
     .filter((value): value is string => typeof value === "string");
 
-  let historicalQuery = supabase
+  const { data: convertedAthletes, error: convertedAthletesError } = convertedAthleteIds.length
+    ? await supabase
+        .from("athletes")
+        .select("id, name, sport, instagram_handle, follower_count, notes, source, pipeline_stage, created_at")
+        .eq("organization_id", organizationId)
+        .eq("is_test_data", false)
+        .in("id", convertedAthleteIds)
+    : { data: [], error: null };
+  if (convertedAthletesError) log(`Error loading signed athletes: ${convertedAthletesError.message}`);
+
+  const { data: historicalAthletes, error } = await supabase
     .from("athletes")
     .select("id, name, sport, instagram_handle, follower_count, notes, source, pipeline_stage, created_at")
     .eq("organization_id", organizationId)
-    .eq("is_test_data", false);
-  historicalQuery = convertedAthleteIds.length
-    ? historicalQuery.or(`is_historical.eq.true,id.in.(${convertedAthleteIds.join(",")})`)
-    : historicalQuery.eq("is_historical", true);
-  const { data: historicalAthletes, error } = await historicalQuery;
+    .eq("is_test_data", false)
+    .eq("is_historical", true);
 
   if (error) {
     log(`Error loading historical athletes: ${error.message}`);
@@ -304,7 +333,11 @@ async function loadSuccessProfile(organizationId: string): Promise<SuccessProfil
     .eq("pipeline_stage", "rejected");
 
   // Build the success profile from database
-  const profile = buildSuccessProfileFromDB(historicalAthletes || [], rejectedAthletes || []);
+  const profile = buildSuccessProfileFromDB(
+    convertedAthletes || [],
+    historicalAthletes || [],
+    rejectedAthletes || []
+  );
 
   // Cache it
   successProfileCache.set(organizationId, { profile, loadedAt: Date.now() });
@@ -327,6 +360,7 @@ interface DBHistoricalAthlete {
 }
 
 function buildSuccessProfileFromDB(
+  convertedAthletes: DBHistoricalAthlete[],
   historicalAthletes: DBHistoricalAthlete[],
   rejectedAthletes: Array<{ instagram_handle: string }>
 ): SuccessProfile {
@@ -334,8 +368,8 @@ function buildSuccessProfileFromDB(
   const exclusionHandles = new Set<string>();
   const followerRanges: number[] = [];
 
-  // Process historical athletes from database
-  for (const athlete of historicalAthletes) {
+  // Only signed/active contract athletes contribute conversion patterns.
+  for (const athlete of convertedAthletes) {
     // Track sport breakdown
     if (athlete.sport) {
       const sport = athlete.sport.toLowerCase();
@@ -353,15 +387,16 @@ function buildSuccessProfileFromDB(
       sportBreakdown[category] = (sportBreakdown[category] || 0) + 1;
     }
 
-    // Add to exclusion list
-    if (athlete.instagram_handle) {
-      exclusionHandles.add(athlete.instagram_handle.toLowerCase());
-    }
-
     // Track follower counts for analysis
     if (athlete.follower_count && athlete.follower_count > 0) {
       followerRanges.push(athlete.follower_count);
     }
+  }
+
+  // Historical records and signed athletes are exclusions, not equivalent
+  // evidence of what converts.
+  for (const athlete of [...historicalAthletes, ...convertedAthletes]) {
+    if (athlete.instagram_handle) exclusionHandles.add(athlete.instagram_handle.toLowerCase());
   }
 
   // Add rejected athletes to exclusion list
@@ -380,7 +415,7 @@ function buildSuccessProfileFromDB(
 
   // Build success patterns from database analysis
   const successPatterns = buildSuccessPatternsFromDB(
-    historicalAthletes.length,
+    convertedAthletes.length,
     sportBreakdown,
     avgFollowers,
     minFollowers,
@@ -388,10 +423,11 @@ function buildSuccessProfileFromDB(
   );
 
   // Get example conversions from database
-  const exampleConversions = getExampleConversionsFromDB(historicalAthletes);
+  const exampleConversions = getExampleConversionsFromDB(convertedAthletes);
 
   return {
-    totalConversions: historicalAthletes.length,
+    totalConversions: convertedAthletes.length,
+    totalHistorical: historicalAthletes.length,
     sportBreakdown,
     successPatterns,
     exclusionHandles,
@@ -409,13 +445,17 @@ function buildSuccessPatternsFromDB(
   const patterns: string[] = [];
 
   // Overall stats
-  patterns.push(`We have ${totalConversions} athletes in our historical database.`);
+  patterns.push(
+    totalConversions > 0
+      ? `We have ${totalConversions} signed or active athlete contract${totalConversions === 1 ? "" : "s"}.`
+      : "We do not yet have enough signed athlete outcomes to infer conversion patterns."
+  );
 
   // Sport breakdown insights
   const sortedSports = Object.entries(sportBreakdown).sort((a, b) => b[1] - a[1]);
   if (sortedSports.length > 0) {
     const topSport = sortedSports[0];
-    patterns.push(`Our strongest category is ${topSport[0]} with ${topSport[1]} athletes.`);
+    patterns.push(`Our strongest signed category is ${topSport[0]} with ${topSport[1]} contract${topSport[1] === 1 ? "" : "s"}.`);
 
     // List all categories
     const sportSummary = sortedSports.map(([sport, count]) => `${sport}: ${count}`).join(", ");
@@ -427,18 +467,9 @@ function buildSuccessPatternsFromDB(
     patterns.push(`Follower range of our athletes: ${minFollowers.toLocaleString()} - ${maxFollowers.toLocaleString()} (avg: ${avgFollowers.toLocaleString()})`);
   }
 
-  // Cross-sport applicability
-  patterns.push(`Combat sports athletes have been highly successful - similar traits (personal brand, fitness focus, competitive mindset) apply to action sports and individual athletes.`);
-
-  // Key success factors
-  patterns.push(`Key success factors from our data:`);
-  patterns.push(`- Individual athletes with personal brand presence`);
-  patterns.push(`- Active Instagram with fitness/lifestyle content`);
-  patterns.push(`- Follower sweet spot: 50K-500K (engaged and accessible)`);
-  patterns.push(`- Professional but not mega-famous`);
-
-  // What to avoid
-  patterns.push(`AVOID: Already on OnlyFans, team-only presence, inactive accounts, minors.`);
+  if (totalConversions < 5) {
+    patterns.push("Sample size is too small for an automatic scoring boost; treat signed records as examples only.");
+  }
 
   return patterns;
 }
@@ -467,7 +498,10 @@ function formatSuccessProfileForPrompt(profile: SuccessProfile, targetSport: str
   const lines: string[] = [];
 
   lines.push("=== HISTORICAL SUCCESS CONTEXT ===");
-  lines.push(`Our team has ${profile.totalConversions} athletes in our historical database.`);
+  lines.push(`Signed or active contracts: ${profile.totalConversions}. Historical records: ${profile.totalHistorical}.`);
+  if (profile.totalConversions < 5) {
+    lines.push("The signed sample is too small to support a statistical conversion pattern or scoring boost.");
+  }
   lines.push("");
 
   // Sport relevance
@@ -685,7 +719,8 @@ async function discoverAthletes(
   targetCount: number = 20,
   successProfile?: SuccessProfile,
   targetRegions?: string[],
-  extractionModel?: string
+  extractionModel?: string,
+  recruitingProfile?: RecruitingProfile
 ): Promise<DiscoveredAthlete[]> {
   log(`Step 2: Discovering athletes for "${sport}"`);
 
@@ -708,12 +743,31 @@ async function discoverAthletes(
   const historicalContext = successProfile
     ? formatSuccessProfileForPrompt(successProfile, sport)
     : "";
+  const thesisContext = formatRecruitingProfileForPrompt(recruitingProfile, customContext);
+  const thesisParams = recruitingProfile?.parameters || DEFAULT_RECRUITING_PROFILE.parameters;
+  const groundedAthletes = await discoverAthletesFromPerplexitySearch({
+    sport,
+    sportContext,
+    targetCount,
+    extractionModel,
+    customContext,
+    targetRegions,
+    recruitingProfile,
+  });
+  for (const athlete of groundedAthletes) {
+    if (!seenNames.has(athlete.name.toLowerCase())) {
+      seenNames.add(athlete.name.toLowerCase());
+      athletes.push(athlete);
+    }
+  }
 
   const prompt = `Find ${targetCount + 10} real professional ${sport} athletes who are active on Instagram and are realistic emerging creator-partnership prospects.
 
 ${contextInfo}
 
 ${historicalContext ? `\n${historicalContext}\n` : ""}
+
+${thesisContext}
 
 SPORT-SPECIFIC RESEARCH PLAN:
 - Archetype: ${strategy.archetype}
@@ -727,9 +781,9 @@ Requirements:
 - The current business objective is recruiting verified adults for potential OnlyFans creator partnerships
 - Treat the MANDATORY SEARCH BRIEF as hard ranking criteria, not optional flavor text
 - Prioritize upcoming or emerging talent: recent roster promotion, breakout season, new pro contract, award watchlist, fast audience growth, or early-career momentum
-- Target ages ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}; candidates 18-20 require manual review and candidates over ${ONLYFANS_CREATOR_PROFILE.maximumPriorityAge} are normally low priority
+- Target ages ${thesisParams.target_age_min}-${thesisParams.target_age_max}; candidates 18-20 require manual review and candidates over ${thesisParams.maximum_priority_age} are normally low priority
 - Prefer active competitors, ideally in the first several years of their professional career
-- Prefer 30K-500K Instagram followers, a strong personal brand, regular fitness/lifestyle content, direct fan engagement, and realistic accessibility
+- Prefer ${thesisParams.follower_min.toLocaleString()}-${thesisParams.follower_max.toLocaleString()} Instagram followers, a strong personal brand, regular fitness/lifestyle content, direct fan engagement, and realistic accessibility
 - Deprioritize retired athletes, late-career veterans, mega-celebrities, and multi-cycle icons unless the brief explicitly requests them
 - Do not infer willingness to create adult content from appearance, clothing, body type, gender expression, or sexuality; use only professional, audience, creator, and business evidence
 - AVOID: athletes already on OnlyFans, minors, inactive accounts, team-only pages, and identities without authoritative sport evidence
@@ -754,7 +808,9 @@ Respond ONLY with valid JSON array:
 
 Return at least ${targetCount} athletes. Only include athletes you are confident are real professional competitors.`;
 
-  try {
+  // Sonar is retained only as a resilience fallback. Normal discovery uses the
+  // raw Search API above so every extracted athlete must point to a returned URL.
+  if (athletes.length === 0) try {
     const response = await fetchWithTimeout("https://api.perplexity.ai/v1/sonar", {
       method: "POST",
       headers: {
@@ -847,7 +903,7 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
   }
 
   // If we didn't get enough, try additional queries
-  if (athletes.length < targetCount && sportContext.searchQueries.length > 0) {
+  if (athletes.length === 0 && sportContext.searchQueries.length > 0) {
     log("Running additional discovery queries...");
 
     for (const query of sportContext.searchQueries.slice(0, 2)) {
@@ -858,10 +914,12 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
 
 Find female professional ${sport} athletes matching this query. Return only athletes not already in this list: ${athletes.map(a => a.name).join(", ")}.
 
-CURRENT OBJECTIVE: verified-adult OnlyFans creator recruitment, prioritizing ages ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}, upcoming talent, 30K-500K Instagram followers, creator/audience fit, and realistic accessibility.
+CURRENT OBJECTIVE: verified-adult OnlyFans creator recruitment, prioritizing ages ${thesisParams.target_age_min}-${thesisParams.target_age_max}, upcoming talent, ${thesisParams.follower_min.toLocaleString()}-${thesisParams.follower_max.toLocaleString()} Instagram followers, creator/audience fit, and realistic accessibility.
 ${customContext ? `MANDATORY SEARCH BRIEF: ${customContext}` : ""}
 ${targetRegions?.length ? `TARGET MARKETS: ${targetRegions.join(", ")}` : "TARGET MARKETS: global"}
 Deprioritize veterans, retired athletes, mega-celebrities, and famous multi-cycle icons. Never infer adult-content interest from appearance or sexuality.
+
+${thesisContext}
 
 Respond with JSON array:
 [{"name": "Full Name", "context": "Achievement", "source": "Competition/League", "source_url": "https://direct-authoritative-source", "source_title": "Official source title"}]`;
@@ -921,7 +979,8 @@ Respond with JSON array:
       targetCount - athletes.length,
       extractionModel,
       customContext,
-      targetRegions
+      targetRegions,
+      recruitingProfile
     );
     for (const athlete of supplemental) {
       if (!seenNames.has(athlete.name.toLowerCase())) {
@@ -935,6 +994,145 @@ Respond with JSON array:
   return athletes;
 }
 
+interface PerplexitySearchResult {
+  title?: string;
+  url?: string;
+  snippet?: string;
+  date?: string;
+  last_updated?: string;
+}
+
+async function discoverAthletesFromPerplexitySearch({
+  sport,
+  sportContext,
+  targetCount,
+  extractionModel,
+  customContext,
+  targetRegions,
+  recruitingProfile,
+}: {
+  sport: string;
+  sportContext: SportContext;
+  targetCount: number;
+  extractionModel?: string;
+  customContext?: string;
+  targetRegions?: string[];
+  recruitingProfile?: RecruitingProfile;
+}): Promise<DiscoveredAthlete[]> {
+  if (!PERPLEXITY_API_KEY || !ANTHROPIC_API_KEY || !extractionModel) return [];
+
+  const currentYear = new Date().getUTCFullYear();
+  const market = targetRegions?.length ? targetRegions.join(" ") : "global";
+  const brief = customContext?.replace(/\s+/g, " ").trim().slice(0, 240) || "emerging talent";
+  const queries = Array.from(new Set([
+    `women's ${sport} breakout athletes ${currentYear} professional results roster ${market}`,
+    `rising female ${sport} athletes ${currentYear} ranking promotion signing ${market}`,
+    `new professional women's ${sport} contracts prospects ${currentYear} ${market}`,
+    ...sportContext.searchQueries,
+    `${sport} ${brief} ${currentYear}`,
+  ])).slice(0, 5);
+
+  try {
+    const response = await fetchWithTimeout("https://api.perplexity.ai/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: queries,
+        max_results: 20,
+        search_context_size: "low",
+        search_language_filter: ["en"],
+      }),
+    });
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 500);
+      throw new Error(`Perplexity Search failed (${response.status}): ${details}`);
+    }
+
+    const payload = await response.json() as { results?: PerplexitySearchResult[] };
+    const sources = Array.from(
+      new Map(
+        (payload.results || [])
+          .filter((result) => typeof result.url === "string" && result.url.startsWith("http"))
+          .map((result) => [result.url as string, result])
+      ).values()
+    ).slice(0, 50);
+    if (sources.length === 0) return [];
+
+    const allowedUrls = new Set(sources.map((source) => source.url as string));
+    const sourceText = sources.map((source, index) => [
+      `[${index + 1}] ${source.title || "Untitled result"}`,
+      `URL: ${source.url}`,
+      source.date ? `Published: ${source.date}` : "",
+      `Snippet: ${(source.snippet || "").slice(0, 1_200)}`,
+    ].filter(Boolean).join("\n")).join("\n\n");
+    const params = recruitingProfile?.parameters || DEFAULT_RECRUITING_PROFILE.parameters;
+    const prompt = `Extract up to ${Math.min(targetCount + 10, 60)} real active female professional ${sport} athletes from the supplied ranked search results.
+
+This is evidence extraction, not open-ended generation. Do not invent a person, claim, team, competition, age, Instagram account, or URL. Every output row must copy one exact URL from SOURCES and the source must actually support that the person is a current professional competitor. Prefer official rosters, rankings, results, federations, leagues, tours, teams, or reputable sports reporting.
+
+Rank for the active business thesis, but do not use the thesis as evidence:
+${formatRecruitingProfileForPrompt(recruitingProfile, customContext)}
+
+Operational targets: source-verified adult; ideal age ${params.target_age_min}-${params.target_age_max}; audience target ${params.follower_min.toLocaleString()}-${params.follower_max.toLocaleString()}; emerging or accelerating rather than retired, veteran, or already-famous. Never infer adult-content interest from appearance, identity, clothing, or sexuality.
+
+SOURCES:
+${sourceText}
+
+Return only a JSON array:
+[{"name":"Full Name","context":"Specific dated professional evidence from the source","source":"Organization or competition","source_url":"exact URL copied from SOURCES","source_title":"source title"}]`;
+
+    const extraction = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: extractionModel,
+        max_tokens: 4_000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!extraction.ok) {
+      throw new Error(`Anthropic source extraction failed (${extraction.status})`);
+    }
+    const extractionPayload = await extraction.json() as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    const content = (extractionPayload.content || []).map((block) => block.text || "").join("\n");
+    const match = content.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    const parsed = JSON.parse(match[0]) as Array<Record<string, unknown>>;
+    return parsed.flatMap((candidate) => {
+      const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+      const url = typeof candidate.source_url === "string" ? candidate.source_url : "";
+      if (!name || !allowedUrls.has(url)) return [];
+      const context = typeof candidate.context === "string"
+        ? candidate.context
+        : `Current professional ${sport} evidence`;
+      return [{
+        name,
+        sport,
+        context,
+        source: typeof candidate.source === "string" ? candidate.source : "Perplexity Search",
+        evidence: [{
+          url,
+          title: typeof candidate.source_title === "string" ? candidate.source_title : undefined,
+          claim: context,
+          provider: "Perplexity Search + Anthropic extraction",
+        }],
+      }];
+    });
+  } catch (error) {
+    log(`Grounded Perplexity discovery failed: ${error}`);
+    return [];
+  }
+}
+
 async function discoverAthletesFromApify(
   sport: string,
   queries: string[],
@@ -942,7 +1140,8 @@ async function discoverAthletesFromApify(
   needed: number,
   extractionModel: string,
   customContext?: string,
-  targetRegions?: string[]
+  targetRegions?: string[],
+  recruitingProfile?: RecruitingProfile
 ): Promise<DiscoveredAthlete[]> {
   if (!ANTHROPIC_API_KEY || needed <= 0) return [];
   log(`Supplementing discovery with Apify Google Search (${needed} candidates needed)`);
@@ -972,6 +1171,8 @@ Prioritize verified adults ages ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYF
 ${customContext ? `MANDATORY SEARCH BRIEF: ${customContext}` : ""}
 ${targetRegions?.length ? `TARGET MARKETS: ${targetRegions.join(", ")}` : "TARGET MARKETS: global"}
 Deprioritize late-career veterans, retired athletes, mega-celebrities, and multi-cycle icons. Never infer adult-content interest from appearance or sexuality.
+
+${formatRecruitingProfileForPrompt(recruitingProfile, customContext)}
 
 SOURCES:
 ${sourceText}
@@ -1051,7 +1252,7 @@ async function findInstagramHandle(athleteName: string, sport: string): Promise<
   return null;
 }
 
-async function scrapeInstagramProfile(username: string): Promise<{
+type ScrapedProfile = {
   followers: number;
   following: number;
   posts: number;
@@ -1060,39 +1261,138 @@ async function scrapeInstagramProfile(username: string): Promise<{
   profilePicUrl: string;
   verified: boolean;
   isPrivate: boolean;
-} | null> {
-  if (!APIFY_API_KEY) return null;
+  engagementRate: number | null;
+  averageLikes: number | null;
+  averageComments: number | null;
+  rawProfile: ApifyInstagramProfile;
+};
+
+function normalizeScrapedInstagramProfile(profile: ApifyInstagramProfile): ScrapedProfile {
+  const recentPosts = (profile.latestPosts || []).filter((post) =>
+    typeof post.likesCount === "number" || typeof post.commentsCount === "number"
+  );
+  const averageLikes = recentPosts.length > 0
+    ? recentPosts.reduce((total, post) => total + (post.likesCount || 0), 0) / recentPosts.length
+    : null;
+  const averageComments = recentPosts.length > 0
+    ? recentPosts.reduce((total, post) => total + (post.commentsCount || 0), 0) / recentPosts.length
+    : null;
+  const engagementRate = profile.followersCount && averageLikes !== null && averageComments !== null
+    ? ((averageLikes + averageComments) / profile.followersCount) * 100
+    : null;
+
+  return {
+    followers: profile.followersCount || 0,
+    following: profile.followsCount || 0,
+    posts: profile.postsCount || 0,
+    bio: profile.biography || "",
+    fullName: profile.fullName || "",
+    profilePicUrl: profile.profilePicUrlHD || profile.profilePicUrl || "",
+    verified: profile.verified || false,
+    isPrivate: profile.private || false,
+    engagementRate,
+    averageLikes,
+    averageComments,
+    rawProfile: profile,
+  };
+}
+
+async function scrapeInstagramProfiles(usernames: string[]): Promise<Map<string, ScrapedProfile>> {
+  if (!APIFY_API_KEY || usernames.length === 0) return new Map();
 
   try {
-    log(`Scraping Instagram profile: @${username}`);
+    log(`Scraping ${usernames.length} Instagram profiles in one Apify run`);
     const profiles = await runApifyActor<ApifyInstagramProfile>(
       "apify/instagram-profile-scraper",
-      { usernames: [username] },
-      { datasetLimit: 1, timeoutMs: 120_000 }
+      { usernames },
+      { datasetLimit: usernames.length, timeoutMs: 180_000 }
     );
-    const profile = profiles[0];
-
-    if (!profile) return null;
-
-    return {
-      followers: profile.followersCount || 0,
-      following: profile.followsCount || 0,
-      posts: profile.postsCount || 0,
-      bio: profile.biography || "",
-      fullName: profile.fullName || "",
-      profilePicUrl: profile.profilePicUrlHD || profile.profilePicUrl || "",
-      verified: profile.verified || false,
-      isPrivate: profile.private || false,
-    };
+    return new Map(profiles.flatMap((profile) => {
+      const username = profile.username?.toLowerCase();
+      return username ? [[username, normalizeScrapedInstagramProfile(profile)] as const] : [];
+    }));
   } catch (error) {
-    log(`Profile scrape error for @${username}: ${error}`);
-    return null;
+    log(`Profile batch scrape error: ${error}`);
+    return new Map();
   }
+}
+
+async function captureCandidateSignalSnapshot(
+  input: ResearchWorkflowInput,
+  athlete: EnrichedAthlete,
+  rawProfile: ApifyInstagramProfile
+) {
+  if (!athlete.instagram_handle) return athlete;
+  const snapshotDate = new Date().toISOString().slice(0, 10);
+  const normalizedHandle = athlete.instagram_handle.toLowerCase();
+
+  const { data: previous, error: previousError } = await supabase
+    .from("candidate_signal_snapshots")
+    .select("follower_count,captured_at,snapshot_date")
+    .eq("organization_id", input.organizationId)
+    .eq("instagram_handle", normalizedHandle)
+    .lt("snapshot_date", snapshotDate)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (previousError) throw previousError;
+
+  const currentFollowers = athlete.follower_count || 0;
+  const previousFollowers = Number(previous?.follower_count) || 0;
+  const daysBetween = previous?.captured_at
+    ? Math.max(1, Math.round((Date.now() - Date.parse(previous.captured_at)) / 86_400_000))
+    : undefined;
+  const followerGrowthAbsolute = previous ? currentFollowers - previousFollowers : undefined;
+  const followerGrowthPercent = previousFollowers > 0 && followerGrowthAbsolute !== undefined
+    ? (followerGrowthAbsolute / previousFollowers) * 100
+    : undefined;
+  const momentumMetrics: EnrichedAthlete["momentum_metrics"] = previous
+    ? {
+        status: "measured",
+        follower_growth_absolute: followerGrowthAbsolute,
+        follower_growth_percent: followerGrowthPercent,
+        days_between_snapshots: daysBetween,
+      }
+    : { status: "baseline" };
+
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from("candidate_signal_snapshots")
+    .upsert({
+      organization_id: input.organizationId,
+      research_log_id: input.researchLogId,
+      instagram_handle: normalizedHandle,
+      snapshot_date: snapshotDate,
+      captured_at: new Date().toISOString(),
+      follower_count: athlete.follower_count || null,
+      following_count: athlete.following_count || null,
+      posts_count: athlete.posts_count || null,
+      engagement_rate: athlete.engagement_rate ?? null,
+      average_likes: athlete.average_likes ?? null,
+      average_comments: athlete.average_comments ?? null,
+      provider: "apify/instagram-profile-scraper",
+      raw_profile: rawProfile,
+    }, { onConflict: "organization_id,instagram_handle,snapshot_date" })
+    .select("id")
+    .single();
+  if (snapshotError) throw snapshotError;
+
+  await supabase
+    .from("research_candidates")
+    .update({ signal_snapshot_id: snapshot.id, momentum_metrics: momentumMetrics })
+    .eq("research_log_id", input.researchLogId)
+    .eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
+
+  return {
+    ...athlete,
+    signal_snapshot_id: snapshot.id,
+    momentum_metrics: momentumMetrics,
+  };
 }
 
 async function enrichAthletesWithInstagram(
   athletes: DiscoveredAthlete[],
-  config: ResearchConfig
+  config: ResearchConfig,
+  input: ResearchWorkflowInput
 ): Promise<EnrichedAthlete[]> {
   log(`Step 3: Looking up Instagram for ${athletes.length} athletes`);
 
@@ -1103,20 +1403,23 @@ async function enrichAthletesWithInstagram(
     const batch = athletes.slice(i, i + batchSize);
     log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(athletes.length / batchSize)}`);
 
-    const batchResults = await Promise.all(
-      batch.map(async (athlete) => {
-        // Find Instagram handle
-        const handle = await findInstagramHandle(athlete.name, athlete.sport);
+    const resolved = await Promise.all(batch.map(async (athlete) => ({
+      athlete,
+      handle: await findInstagramHandle(athlete.name, athlete.sport),
+    })));
+    const profileByHandle = await scrapeInstagramProfiles(
+      resolved.flatMap(({ handle }) => handle ? [handle] : [])
+    );
 
+    const batchResults = await Promise.all(
+      resolved.map(async ({ athlete, handle }) => {
         if (!handle) {
           log(`  No Instagram found for ${athlete.name}`);
           return null;
         }
 
         log(`  Found @${handle} for ${athlete.name}`);
-
-        // Scrape profile
-        const profile = await scrapeInstagramProfile(handle);
+        const profile = profileByHandle.get(handle.toLowerCase());
 
         if (!profile) {
           log(`  Could not scrape profile @${handle}`);
@@ -1150,10 +1453,13 @@ async function enrichAthletesWithInstagram(
           bio: profile.bio,
           verified: profile.verified,
           is_private: profile.isPrivate,
+          engagement_rate: profile.engagementRate ?? undefined,
+          average_likes: profile.averageLikes ?? undefined,
+          average_comments: profile.averageComments ?? undefined,
         };
 
         log(`  ✓ ${athlete.name}: @${handle} (${profile.followers.toLocaleString()} followers)`);
-        return enrichedAthlete;
+        return captureCandidateSignalSnapshot(input, enrichedAthlete, profile.rawProfile);
       })
     );
 
@@ -1409,6 +1715,8 @@ async function scoreAthletes(
               score: score.score,
               objective: config.partnershipGoal,
               age: ageInfo.age,
+              targetAgeMin: config.profileSnapshot?.parameters.target_age_min,
+              maximumPriorityAge: config.profileSnapshot?.parameters.maximum_priority_age,
               careerStage: score.career_stage,
               objectiveFit: score.objective_fit,
             });
@@ -1434,7 +1742,7 @@ async function scoreAthletes(
         } else {
           score = {
             ...score,
-            score: Math.min(score.score, 59),
+            score: Math.min(score.score, 74),
             age_verified: false,
             reasoning: `${score.reasoning} [HOLD: age was not verified by a matching public source]`,
             concerns: [...(score.concerns || []), "Age not source-verified; blocked from Approval"],
@@ -1463,29 +1771,28 @@ async function scoreAthlete(
 ): Promise<ScoredAthlete> {
   // Build historical success context for scoring
   const historicalBoost = successProfile && successProfile.totalConversions > 0
-    ? `\nHISTORICAL SUCCESS CONTEXT:
-We have successfully converted ${successProfile.totalConversions} professional athletes to OnlyFans partnerships.
-Our most successful conversions share these traits:
-- Individual athletes with strong personal brands
-- Active Instagram with fitness/lifestyle content
-- Follower sweet spot: 50K-500K
-- Comfortable with fan engagement
-- Not already on OnlyFans
-
-Give a SCORING BOOST (+5-10 points) if this athlete matches these success patterns.`
+    ? `\nSIGNED OUTCOME CONTEXT:
+We have ${successProfile.totalConversions} signed or active athlete contract${successProfile.totalConversions === 1 ? "" : "s"} and ${successProfile.totalHistorical} historical records.
+${successProfile.totalConversions < 5
+  ? "This is too little outcome data for a statistical pattern. Do not add a scoring boost; treat signed profiles as examples only."
+  : "Use the evidence-backed patterns below as one secondary input, never as a substitute for current candidate evidence."}`
     : "";
+  const recruitingThesis = formatRecruitingProfileForPrompt(config.profileSnapshot, config.marketOverride);
+  const thesisParams = config.profileSnapshot?.parameters || DEFAULT_RECRUITING_PROFILE.parameters;
 
   const prompt = `You are evaluating an athlete for potential OnlyFans creator partnership recruitment.
 
 CURRENT OBJECTIVE:
 - Find verified adults who are upcoming or emerging talent, not merely the most famous names in the sport
-- Target age: ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}; ages 18-20 require manual review; over ${ONLYFANS_CREATOR_PROFILE.maximumPriorityAge} is normally low priority
-- Target Instagram audience: 30K-500K, ideally ${ONLYFANS_CREATOR_PROFILE.idealFollowerMin.toLocaleString()}-${ONLYFANS_CREATOR_PROFILE.idealFollowerMax.toLocaleString()}
+- Target age: ${thesisParams.target_age_min}-${thesisParams.target_age_max}; ages 18-20 require manual review; over ${thesisParams.maximum_priority_age} is normally low priority
+- Target Instagram audience: ${thesisParams.follower_min.toLocaleString()}-${thesisParams.follower_max.toLocaleString()}
 - Favor recent breakout, new professional contract, roster promotion, award/watchlist momentum, fast audience growth, a strong personal brand, direct fan engagement, and realistic accessibility
 - Deprioritize retired athletes, late-career veterans, mega-celebrities, and famous multi-cycle icons unless the mandatory brief explicitly requests them
 - Do not infer willingness to create adult content from appearance, clothing, body type, gender expression, or sexuality. Score only professional, audience, creator, and business evidence.
 ${config.customContext ? `- MANDATORY SEARCH BRIEF: ${config.customContext}` : "- MANDATORY SEARCH BRIEF: prioritize emerging talent with OnlyFans creator-business potential"}
 ${config.targetRegions?.length ? `- TARGET MARKETS: ${config.targetRegions.join(", ")}` : "- TARGET MARKETS: global"}
+
+${recruitingThesis}
 
 ATHLETE PROFILE:
 - Name: ${athlete.name}
@@ -1496,11 +1803,21 @@ ATHLETE PROFILE:
 - Followers: ${athlete.follower_count?.toLocaleString() || "unknown"}
 - Following: ${athlete.following_count?.toLocaleString() || "unknown"}
 - Posts: ${athlete.posts_count || "unknown"}
+- Engagement: ${typeof athlete.engagement_rate === "number" ? `${athlete.engagement_rate.toFixed(2)}%` : "not available"}
+- Average likes/comments: ${typeof athlete.average_likes === "number" ? Math.round(athlete.average_likes).toLocaleString() : "not available"} / ${typeof athlete.average_comments === "number" ? Math.round(athlete.average_comments).toLocaleString() : "not available"}
+- Audience history: ${athlete.momentum_metrics?.status === "measured" ? `${athlete.momentum_metrics.follower_growth_percent?.toFixed(2) || "0.00"}% follower change over ${athlete.momentum_metrics.days_between_snapshots || "unknown"} days` : "baseline snapshot only; do not claim measured growth"}
 - Bio: ${athlete.bio || "No bio"}
 - Verified: ${athlete.verified ? "Yes" : "No"}
 ${historicalBoost}
 
-EVALUATION CRITERIA:
+HARD GATES (not weighted points):
+- The person and Instagram identity must resolve to the same real professional athlete
+- Professional status must have a direct or reputable current source
+- Age must be source-verified as 18 or older before Approval
+- The account must be public and active
+- A failed gate must be described in concerns and cannot be recommended for Approval
+
+WEIGHTED EVALUATION CRITERIA:
 
 ⚠️ CRITICAL AGE REQUIREMENT ⚠️
 - Athletes MUST be 18 years or older
@@ -1508,56 +1825,48 @@ EVALUATION CRITERIA:
 - Look for age indicators in bio, context, or if they're described as "junior", "youth", "teen", etc.
 - When in doubt about age, note it as a concern
 
-1. PROFESSIONAL LEGITIMACY (20%)
-   - Verified account is strong signal
-   - Bio mentions sport/team/achievements
-   - Follower/following ratio reasonable for athlete
-
-2. AUDIENCE FIT (15%; 50K-300K is ideal)
-   - Too small (<30K): May not have enough reach
-   - Sweet spot (50K-300K): Engaged audience, responsive to outreach
-   - Large (300K-500K): Harder to reach but valuable
-   - Too large (>500K): Unlikely to respond
-
-3. CREATOR / PARTNERSHIP FIT (25%)
-   - Content style (fitness/lifestyle content works well)
-   - Engagement indicators (active posting)
-   - MUST be 18+ (this is non-negotiable)
-   - Ideal age range: ${ONLYFANS_CREATOR_PROFILE.targetAgeMin}-${ONLYFANS_CREATOR_PROFILE.targetAgeMax}
-   - Personal-brand ownership, creator consistency, direct audience relationship, and partnership accessibility
-   - Not already on OnlyFans
-
-4. MOMENTUM (15%)
-   - Recent competition, growth, awards, roster promotion, or media interest
+1. MOMENTUM (25%)
+   - Recent competition, growth, awards, roster promotion, ranking jump, or media interest
    - Emerging or breakout career stage scores higher than legacy fame without current momentum
+   - Prefer specific, dated signals over general fame
 
-5. ACCESSIBILITY (15%)
+2. CREATOR / BUSINESS FIT (25%)
+   - Personal-brand ownership, content consistency, and direct audience relationship
+   - Fitness, lifestyle, behind-the-scenes, or personality-led content is a useful signal
+   - Never infer willingness to create adult content from appearance or identity
+
+3. AUDIENCE QUALITY & GROWTH (20%; active thesis range is ${thesisParams.follower_min.toLocaleString()}-${thesisParams.follower_max.toLocaleString()})
+   - Below the active minimum: may not have enough proven reach yet
+   - Within the active range: score engagement, growth, and audience quality—not size alone
+   - Above the active maximum: likely less accessible unless other evidence is unusually strong
+
+4. ACCESSIBILITY (15%)
    - Active account (recent posts)
    - Accessible (not too famous)
-   - English-speaking market preferred
+   - Target market alignment from the active thesis
 
-6. EVIDENCE QUALITY (10%)
-   - Direct official roster/ranking/result/biography is strongest
-   - Identity, sport, and social profile must agree
-   - Penalize thin, old, circular, listicle, or ambiguous evidence
+5. ACTIVE THESIS MATCH (15%)
+   - Score the candidate against the active recruiting thesis above
+   - Cite the specific target or positive signal they match in the reasoning
+   - A run-specific market override is a hard ranking instruction
 
 Score 0-100 where:
 - 0: MUST be given if athlete is under 18 or likely a minor
-- 80-100: Excellent candidate, prioritize outreach
-- 60-79: Good candidate, worth pursuing
-- 40-59: Marginal, might be worth a try
+- 80-100: Priority candidate for human review
+- 75-79: Qualified candidate for human review
+- 60-74: Watchlist / hold
+- 40-59: Weak current fit
 - Below 40: Skip
 
 Respond with ONLY valid JSON:
 {
   "score": <number 0-100>,
   "score_breakdown": {
-    "professional_legitimacy": <0-100>,
-    "audience_fit": <0-100>,
-    "brand_fit": <0-100>,
     "momentum": <0-100>,
+    "brand_fit": <0-100>,
+    "audience_fit": <0-100>,
     "accessibility": <0-100>,
-    "evidence_quality": <0-100>
+    "thesis_fit": <0-100>
   },
   "reasoning": "<2-3 sentence explanation>",
   "concerns": ["<concern 1>", "<concern 2 if any>"],
@@ -1633,6 +1942,8 @@ Respond with ONLY valid JSON:
             score: applyResearchObjectiveScoreGuardrails({
               score: weightedScore,
               objective: config.partnershipGoal,
+              targetAgeMin: config.profileSnapshot?.parameters.target_age_min,
+              maximumPriorityAge: config.profileSnapshot?.parameters.maximum_priority_age,
               careerStage,
               objectiveFit,
             }),
@@ -1853,7 +2164,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     const config: ResearchConfig = {
       ...submittedConfig,
       partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
-      resultCount: Math.min(Math.max(submittedConfig.resultCount || 5, 1), 10),
+      resultCount: Math.min(Math.max(submittedConfig.resultCount || 10, 1), 20),
       scoringModel,
     };
 
@@ -1941,21 +2252,40 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       await updateResearchProgress(researchLogId, "discovering_candidates", {
         sourced: 0, discovered: 0, enriched: 0, scored: 0, returned: 0, added: 0,
       });
-      const discoveryTarget = Math.min(config.resultCount * 3, 20);
-      allDiscoveredAthletes = await discoverAthletes(
+      const firstWave = await discoverAthletes(
         config.sportFocus,
         sportContext,
-        config.customContext,
-        discoveryTarget,
+        [config.customContext, "Discovery wave 1: emphasize current competition evidence, breakout results, roster promotions, and early professional momentum."].filter(Boolean).join("\n"),
+        50,
         successProfile,
         config.targetRegions,
-        scoringModel
+        scoringModel,
+        config.profileSnapshot
+      );
+      const discoveryWaves = [firstWave];
+      if (config.depth === "extended") {
+        const secondWave = await discoverAthletes(
+          config.sportFocus,
+          sportContext,
+          [config.customContext, "Discovery wave 2: search a distinct angle emphasizing rising personal audiences, creator-led content, overlooked leagues, and recent media momentum. Do not repeat obvious established stars."].filter(Boolean).join("\n"),
+          50,
+          successProfile,
+          config.targetRegions,
+          scoringModel,
+          config.profileSnapshot
+        );
+        discoveryWaves.push(secondWave);
+      }
+      allDiscoveredAthletes = Array.from(
+        new Map(
+          discoveryWaves.flat().map((athlete) => [athlete.name.toLowerCase(), athlete])
+        ).values()
       );
     }
     // A wider identity pool gives emerging prospects a fair chance to survive
     // handle resolution and follower filters while the durable workflow keeps
     // the provider work bounded.
-    const enrichmentPoolLimit = Math.min(Math.max(config.resultCount * 3, 15), 20);
+    const enrichmentPoolLimit = config.depth === "extended" ? 60 : 30;
     const discoveredAthletes = allDiscoveredAthletes.slice(0, enrichmentPoolLimit);
     if (allDiscoveredAthletes.length > discoveredAthletes.length) {
       log(`Capped Instagram enrichment pool at ${discoveredAthletes.length} of ${allDiscoveredAthletes.length} discoveries`);
@@ -1971,7 +2301,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     });
     await supabase
       .from("research_logs")
-      .update({ raw_results: discoveredAthletes })
+      .update({ raw_results: allDiscoveredAthletes })
       .eq("id", researchLogId);
     await assertRunNotCancelled(researchLogId);
 
@@ -2008,13 +2338,22 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       };
     }
 
+    if (input.targetPhase === "discovery") {
+      return {
+        success: true,
+        runId: researchLogId,
+        phase: "discovery",
+        stats: { sourced: allDiscoveredAthletes.length, discovered: discoveredAthletes.length },
+      };
+    }
+
     // STEP 3: Enrich with Instagram
     let enrichedAthletes: EnrichedAthlete[];
     if (reachedPhase("scoring") && Array.isArray(checkpoint.scoring_details) && checkpoint.scoring_details.length > 0) {
       enrichedAthletes = checkpoint.scoring_details as unknown as EnrichedAthlete[];
       log(`Resuming from Instagram checkpoint with ${enrichedAthletes.length} enriched candidates`);
     } else {
-      enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config);
+      enrichedAthletes = await enrichAthletesWithInstagram(discoveredAthletes, config, input);
     }
     await updateResearchProgress(researchLogId, "scoring", {
       sourced: allDiscoveredAthletes.length,
@@ -2072,18 +2411,35 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       };
     }
 
+    if (input.targetPhase === "enrichment") {
+      return {
+        success: true,
+        runId: researchLogId,
+        phase: "enrichment",
+        stats: {
+          sourced: allDiscoveredAthletes.length,
+          discovered: discoveredAthletes.length,
+          enriched: enrichedAthletes.length,
+        },
+      };
+    }
+
     // STEP 4: Score athletes (with historical success context)
     const scoredAthletes = reachedPhase("saving_candidates")
-      && Array.isArray(checkpoint.final_results)
-      && checkpoint.final_results.length > 0
-      ? checkpoint.final_results as unknown as ScoredAthlete[]
+      && Array.isArray(checkpoint.scoring_details)
+      && checkpoint.scoring_details.length > 0
+      ? checkpoint.scoring_details as unknown as ScoredAthlete[]
       : await scoreAthletes(enrichedAthletes, scoringModel, config, successProfile);
     if (reachedPhase("saving_candidates") && scoredAthletes.length > 0) {
       log(`Resuming from scoring checkpoint with ${scoredAthletes.length} finalists`);
     }
 
-    // Take top N results
-    const finalResults = scoredAthletes.slice(0, config.resultCount);
+    // Never pad a run with weak candidates just to hit a requested count.
+    // Watchlist-quality candidates can remain held for manual age verification,
+    // while poor objective fits stay in the candidate ledger only.
+    const finalResults = scoredAthletes
+      .filter((athlete) => athlete.score >= 60 && athlete.objective_fit !== "weak" && athlete.career_stage !== "veteran")
+      .slice(0, config.resultCount);
     await updateResearchProgress(researchLogId, "saving_candidates", {
       sourced: allDiscoveredAthletes.length,
       discovered: discoveredAthletes.length,
@@ -2094,9 +2450,27 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     });
     await supabase
       .from("research_logs")
-      .update({ final_results: finalResults })
+      .update({
+        scoring_details: scoredAthletes,
+        final_results: finalResults,
+      })
       .eq("id", researchLogId);
     await assertRunNotCancelled(researchLogId);
+
+    if (input.targetPhase === "scoring") {
+      return {
+        success: true,
+        runId: researchLogId,
+        phase: "scoring",
+        stats: {
+          sourced: allDiscoveredAthletes.length,
+          discovered: discoveredAthletes.length,
+          enriched: enrichedAthletes.length,
+          scored: scoredAthletes.length,
+          returned: finalResults.length,
+        },
+      };
+    }
 
     log("═══════════════════════════════════════════════════════════════");
     log(`✅ RESEARCH COMPLETE`);
@@ -2168,6 +2542,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               : 25,
             instagram_handle: athlete.instagram_handle || null,
             follower_count: athlete.follower_count || null,
+            engagement_rate: athlete.engagement_rate ?? null,
             age: athlete.age || null,
             age_verified: athlete.age_verified === true,
             age_source: athlete.age_source || null,
@@ -2176,12 +2551,28 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             scoring_reasoning: athlete.reasoning,
             scoring_model: scoringModel,
             prompt_version: RESEARCH_PROMPT_VERSION,
+            signal_snapshot_id: athlete.signal_snapshot_id || null,
+            momentum_metrics: athlete.momentum_metrics || { status: "baseline" },
+            gate_results: {
+              identity_resolved: Boolean(athlete.instagram_handle),
+              professional_source_present: Boolean(athlete.evidence?.some((evidence) => evidence.url)),
+              public_account: athlete.is_private === false,
+              adult_age_verified: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 18,
+            },
             is_minor: athlete.is_minor ?? null,
             is_test_data: config.evaluationMode === true,
           }, { onConflict: "research_log_id,candidate_key" })
           .select("id,athlete_id,disposition")
           .single();
         if (candidateError) throw candidateError;
+
+        if (athlete.signal_snapshot_id) {
+          await supabase
+            .from("candidate_signal_snapshots")
+            .update({ research_candidate_id: candidateRecord.id })
+            .eq("id", athlete.signal_snapshot_id)
+            .eq("organization_id", input.organizationId);
+        }
 
         if (!config.evaluationMode && candidateRecord.athlete_id) {
           athlete.athlete_id = candidateRecord.athlete_id;
@@ -2323,6 +2714,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               instagram_url: athlete.instagram_url,
               profile_pic_url: athlete.profile_pic_url,
               follower_count: athlete.follower_count,
+              engagement_rate: athlete.engagement_rate,
               notes: JSON.stringify({
                 bio: athlete.bio,
                 context: athlete.context,
@@ -2363,6 +2755,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               disposition_reason: athlete.disposition_reason,
             })
             .eq("id", candidateRecord.id);
+
+          if (athlete.signal_snapshot_id) {
+            await supabase
+              .from("candidate_signal_snapshots")
+              .update({ athlete_id: newAthlete.id })
+              .eq("id", athlete.signal_snapshot_id)
+              .eq("organization_id", input.organizationId);
+          }
 
           // Store profile pic in Supabase
           if (athlete.profile_pic_url) {
@@ -2421,8 +2821,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             partnershipGoal: config.partnershipGoal,
             objectiveProfile: ONLYFANS_CREATOR_PROFILE,
             customContext: config.customContext,
+            recruitingThesis: {
+              id: config.profileVersionId,
+              version: config.profileVersion,
+              name: config.profileName,
+            },
             sportContext,
-            historical_count: successProfile.totalConversions,
+            signed_conversion_count: successProfile.totalConversions,
+            historical_record_count: successProfile.totalHistorical,
             exclusion_count: successProfile.exclusionHandles.size,
             toolchain: [
               { step: "Discovery", provider: "Perplexity", purpose: "Find source-linked athlete candidates" },
@@ -2439,6 +2845,16 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             score: a.score,
             reasoning: a.reasoning,
           })),
+          provider_costs: {
+            perplexity: { unit: "search requests", note: "Sport context, discovery, and supplemental discovery calls are visible in workflow traces." },
+            apify: {
+              google_identity_queries: discoveredAthletes.length,
+              instagram_profiles: enrichedAthletes.length,
+              note: "Counts are operational units; billed cost depends on the active Apify Actor pricing plan.",
+            },
+            anthropic: { scored_candidates: scoredAthletes.length, model: scoringModel },
+            openai: { transcription_requests: 0 },
+          },
           final_results: finalResults,
           stats: {
             sourced: allDiscoveredAthletes.length,
@@ -2546,7 +2962,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
   }
 }
 
-async function executeResearchStep(input: ResearchWorkflowInput) {
+async function executeResearchStage(input: ResearchWorkflowInput) {
   "use step";
 
   const result = await executeResearchRun(input);
@@ -2555,7 +2971,7 @@ async function executeResearchStep(input: ResearchWorkflowInput) {
   }
   return result;
 }
-executeResearchStep.maxRetries = 2;
+executeResearchStage.maxRetries = 2;
 
 async function markResearchWorkflowFailed(researchLogId: string, organizationId: string, message: string) {
   "use step";
@@ -2574,7 +2990,16 @@ export async function runResearchWorkflow(input: ResearchWorkflowInput) {
   "use workflow";
 
   try {
-    return await executeResearchStep(input);
+    const discovery = await executeResearchStage({ ...input, targetPhase: "discovery" });
+    if (!discovery.success) return discovery;
+
+    const enrichment = await executeResearchStage({ ...input, targetPhase: "enrichment" });
+    if (!enrichment.success) return enrichment;
+
+    const scoring = await executeResearchStage({ ...input, targetPhase: "scoring" });
+    if (!scoring.success) return scoring;
+
+    return await executeResearchStage({ ...input, targetPhase: "persistence" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Research workflow failed";
     await markResearchWorkflowFailed(input.researchLogId, input.organizationId, message);

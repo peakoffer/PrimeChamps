@@ -1,4 +1,4 @@
-export const RESEARCH_PROMPT_VERSION = "research-v4-onlyfans-emerging";
+export const RESEARCH_PROMPT_VERSION = "research-v5-thesis-momentum";
 export const DEFAULT_RESEARCH_OBJECTIVE = "onlyfans_creator" as const;
 
 export type ResearchObjective = typeof DEFAULT_RESEARCH_OBJECTIVE;
@@ -15,12 +15,11 @@ export const ONLYFANS_CREATOR_PROFILE = {
 } as const;
 
 export const RESEARCH_SCORE_WEIGHTS = {
-  professional_legitimacy: 0.2,
-  audience_fit: 0.15,
+  momentum: 0.25,
   brand_fit: 0.25,
-  momentum: 0.15,
+  audience_fit: 0.2,
   accessibility: 0.15,
-  evidence_quality: 0.1,
+  thesis_fit: 0.15,
 } as const;
 
 export type ResearchScoreDimension = keyof typeof RESEARCH_SCORE_WEIGHTS;
@@ -35,12 +34,11 @@ export function parseResearchScoreBreakdown(value: unknown): ResearchScoreBreakd
   if (!value || typeof value !== "object") return null;
   const source = value as Record<string, unknown>;
   const breakdown = {
-    professional_legitimacy: Number(source.professional_legitimacy),
-    audience_fit: Number(source.audience_fit),
-    brand_fit: Number(source.brand_fit),
     momentum: Number(source.momentum),
+    brand_fit: Number(source.brand_fit),
+    audience_fit: Number(source.audience_fit),
     accessibility: Number(source.accessibility),
-    evidence_quality: Number(source.evidence_quality),
+    thesis_fit: Number(source.thesis_fit),
   };
   return Object.values(breakdown).every(isScore) ? breakdown : null;
 }
@@ -57,6 +55,8 @@ export function applyResearchObjectiveScoreGuardrails(input: {
   score: number;
   objective?: ResearchObjective;
   age?: number | null;
+  targetAgeMin?: number;
+  maximumPriorityAge?: number;
   careerStage?: ResearchCareerStage | null;
   objectiveFit?: ResearchObjectiveFit | null;
 }) {
@@ -69,18 +69,18 @@ export function applyResearchObjectiveScoreGuardrails(input: {
     if (input.age < 18) return 0;
     // Legal adulthood is required, but the 18-20 cohort needs explicit human
     // review before this adult-content partnership channel is considered.
-    if (input.age < ONLYFANS_CREATOR_PROFILE.targetAgeMin) score = Math.min(score, 59);
-    if (input.age > ONLYFANS_CREATOR_PROFILE.maximumPriorityAge) score = Math.min(score, 55);
+    if (input.age < (input.targetAgeMin || ONLYFANS_CREATOR_PROFILE.targetAgeMin)) score = Math.min(score, 74);
+    if (input.age > (input.maximumPriorityAge || ONLYFANS_CREATOR_PROFILE.maximumPriorityAge)) score = Math.min(score, 69);
   }
 
   // A candidate cannot numerically qualify when the model's own structured
   // assessment says they conflict with the active objective. Established
   // athletes need a strong, evidence-backed exception; veterans remain out.
-  if (input.objectiveFit === "weak") score = Math.min(score, 59);
+  if (input.objectiveFit === "weak") score = Math.min(score, 74);
   if (input.careerStage === "established" && input.objectiveFit !== "strong") {
-    score = Math.min(score, 59);
+    score = Math.min(score, 74);
   }
-  if (input.careerStage === "veteran") score = Math.min(score, 55);
+  if (input.careerStage === "veteran") score = Math.min(score, 69);
   return score;
 }
 
@@ -106,6 +106,6 @@ export function resolveResearchDisposition(input: {
   if (input.objectiveFit === "weak") return "held";
   if (input.careerStage === "veteran") return "held";
   if (input.careerStage === "established" && input.objectiveFit !== "strong") return "held";
-  if (input.score < 60) return "held";
+  if (input.score < 75) return "held";
   return "approval";
 }

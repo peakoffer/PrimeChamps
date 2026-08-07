@@ -8,6 +8,11 @@ import {
   RESEARCH_PROMPT_VERSION,
 } from "@/lib/research/scoring";
 import {
+  DEFAULT_RECRUITING_PROFILE,
+  type RecruitingProfile,
+  type ResearchDepth,
+} from "@/lib/research/intelligence";
+import {
   runResearchWorkflow,
   type ResearchConfig,
 } from "./workflow";
@@ -47,20 +52,48 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Sport is required" }, { status: 400 });
     }
 
+    const { data: activeProfile, error: profileError } = await supabase
+      .from("research_profile_versions")
+      .select("id,version,name,compiled_profile")
+      .eq("organization_id", user.organizationId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (profileError) throw profileError;
+    if (!activeProfile) {
+      return NextResponse.json(
+        { error: "No active recruiting thesis is available. Open Recruiting Thesis and publish one first." },
+        { status: 409 }
+      );
+    }
+
+    const profile = {
+      ...DEFAULT_RECRUITING_PROFILE,
+      ...(activeProfile.compiled_profile as Partial<RecruitingProfile>),
+      parameters: {
+        ...DEFAULT_RECRUITING_PROFILE.parameters,
+        ...((activeProfile.compiled_profile as Partial<RecruitingProfile>)?.parameters || {}),
+      },
+    };
+    const depth: ResearchDepth = submitted.depth === "extended" ? "extended" : "standard";
+    const marketOverride = typeof submitted.marketOverride === "string"
+      ? submitted.marketOverride.trim().slice(0, 500)
+      : "";
+
     const config: ResearchConfig = {
       sportFocus,
       partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
-      customContext: typeof submitted.customContext === "string"
-        ? submitted.customContext.trim().slice(0, 500)
-        : undefined,
-      followerMin: Math.max(0, Number(submitted.followerMin) || 30_000),
-      followerMax: Math.max(1, Number(submitted.followerMax) || 500_000),
-      resultCount: Math.min(Math.max(Number(submitted.resultCount) || 5, 1), 10),
-      targetRegions: Array.isArray(submitted.targetRegions)
-        ? submitted.targetRegions.filter((region): region is string => typeof region === "string").slice(0, 10)
-        : undefined,
-      scoringModel: typeof submitted.scoringModel === "string" ? submitted.scoringModel : undefined,
-      evaluationMode: submitted.evaluationMode === true,
+      depth,
+      marketOverride: marketOverride || undefined,
+      customContext: marketOverride || undefined,
+      followerMin: Math.max(0, Number(profile.parameters.follower_min) || 30_000),
+      followerMax: Math.max(1, Number(profile.parameters.follower_max) || 500_000),
+      resultCount: depth === "extended" ? 20 : 10,
+      scoringModel: undefined,
+      evaluationMode: false,
+      profileVersionId: activeProfile.id,
+      profileVersion: activeProfile.version,
+      profileName: activeProfile.name,
+      profileSnapshot: profile,
     };
 
     if (config.followerMin > config.followerMax) {
@@ -75,6 +108,8 @@ export async function POST(request: NextRequest) {
       .insert({
         organization_id: user.organizationId,
         requested_by_user_id: user.id,
+        profile_version_id: activeProfile.id,
+        research_depth: depth,
         status: "queued",
         phase: "queued",
         heartbeat_at: new Date().toISOString(),
@@ -86,9 +121,14 @@ export async function POST(request: NextRequest) {
           partnershipGoal: config.partnershipGoal,
           objectiveProfile: ONLYFANS_CREATOR_PROFILE,
           customContext: config.customContext,
+          recruitingThesis: {
+            id: activeProfile.id,
+            version: activeProfile.version,
+            name: activeProfile.name,
+          },
           safety: "draft-only; no outreach is sent by research",
           toolchain: [
-            { step: "Discovery", provider: "Perplexity Sonar", purpose: "Source-linked candidate discovery" },
+            { step: "Discovery", provider: "Perplexity Search", purpose: "Raw ranked, source-linked candidate discovery" },
             { step: "Identity", provider: "Apify Google + Instagram", purpose: "Public identity and audience evidence" },
             { step: "Scoring", provider: "Latest Anthropic Sonnet", purpose: "Transparent partnership-fit scoring" },
             { step: "Storage", provider: "Supabase", purpose: "Evidence ledger and pipeline disposition" },

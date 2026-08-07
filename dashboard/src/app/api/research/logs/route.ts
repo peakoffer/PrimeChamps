@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("research_logs")
       .select(
-        "id, created_at, completed_at, heartbeat_at, status, phase, workflow_run_id, prompt_version, scoring_model, is_evaluation, cancel_requested_at, config_used, context_summary, raw_results, scoring_details, final_results, stats, provider_costs, error_message"
+        "id, created_at, completed_at, heartbeat_at, status, phase, workflow_run_id, profile_version_id, research_depth, prompt_version, scoring_model, is_evaluation, cancel_requested_at, config_used, context_summary, raw_results, scoring_details, final_results, stats, provider_costs, error_message"
       )
       .eq("organization_id", user.organizationId)
       .order("created_at", { ascending: false })
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     if (logIds.length > 0) {
       const { data: candidateRows, error: candidateError } = await supabase
         .from("research_candidates")
-        .select("id,research_log_id,athlete_id,candidate_key,name,sport,discovered_rank,raw_candidate,source_evidence,identity_status,identity_confidence,instagram_handle,follower_count,engagement_rate,age,age_verified,age_source,score,score_breakdown,scoring_reasoning,scoring_model,prompt_version,disposition,disposition_reason,is_minor")
+        .select("id,research_log_id,athlete_id,candidate_key,name,sport,discovered_rank,raw_candidate,source_evidence,identity_status,identity_confidence,instagram_handle,follower_count,engagement_rate,age,age_verified,age_source,score,score_breakdown,scoring_reasoning,scoring_model,prompt_version,disposition,disposition_reason,is_minor,signal_snapshot_id,momentum_metrics,gate_results")
         .in("research_log_id", logIds)
         .eq("organization_id", user.organizationId)
         .order("discovered_rank", { ascending: true });
@@ -85,6 +85,9 @@ export async function GET(request: NextRequest) {
           source_evidence: row.source_evidence,
           identity_status: row.identity_status,
           identity_confidence: row.identity_confidence,
+          signal_snapshot_id: row.signal_snapshot_id,
+          momentum_metrics: row.momentum_metrics,
+          gate_results: row.gate_results,
           disposition: row.disposition,
           disposition_reason: row.disposition_reason,
           is_minor: row.is_minor,

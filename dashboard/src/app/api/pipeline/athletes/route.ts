@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
       });
       if (disposition !== "approval") {
         return NextResponse.json(
-          { error: disposition === "blocked" ? "This candidate is safety-blocked" : "Verified adult age and a research score of at least 60 are required for Approval" },
+          { error: disposition === "blocked" ? "This candidate is safety-blocked" : "Verified adult age and a research score of at least 75 are required for Approval" },
           { status: 409 }
         );
       }

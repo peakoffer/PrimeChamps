@@ -135,7 +135,7 @@ export async function GET(
       const inferredDisposition = candidate.disposition || (
         candidate.is_minor === true || candidate.score === 0
           ? "blocked"
-          : candidate.age_verified === true && (candidate.score || 0) >= 60
+          : candidate.age_verified === true && (candidate.score || 0) >= 75
             ? "approval"
             : "held"
       );
@@ -251,9 +251,9 @@ export async function POST(
         { status: 422 }
       );
     }
-    if (score < 60) {
+    if (score < 75) {
       return NextResponse.json(
-        { error: "This candidate is below the 60-point Approval threshold and must remain in Research." },
+        { error: "This candidate is below the 75-point Approval threshold and must remain in Research." },
         { status: 422 }
       );
     }
