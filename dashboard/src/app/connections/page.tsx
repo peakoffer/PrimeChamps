@@ -6,7 +6,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock3,
-  Database,
   Link2,
   RefreshCw,
   ShieldCheck,
@@ -94,33 +93,11 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
         </span>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {provider.capabilities.map((capability) => (
-          <span
-            key={capability}
-            className="border border-brand-chrome bg-brand-paper px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-brand-muted"
-          >
-            {capability}
-          </span>
-        ))}
-      </div>
-
       {provider.connectedAccounts > 0 && (
         <p className="mt-4 text-sm font-semibold text-brand-blue">
           {provider.connectedAccounts} connected account
           {provider.connectedAccounts === 1 ? "" : "s"}
         </p>
-      )}
-
-      {provider.evidence.length > 0 && (
-        <div className="mt-4 space-y-1.5">
-          {provider.evidence.map((item) => (
-            <p key={item} className="flex items-start gap-2 text-xs leading-5 text-brand-muted">
-              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
-              {item}
-            </p>
-          ))}
-        </div>
       )}
 
       {provider.connectPath && provider.connectedAccounts === 0 && (
@@ -143,28 +120,41 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
         </a>
       )}
 
-      {provider.missingVariables.length > 0 && (
-        <div className="mt-4 border border-brand-chrome bg-brand-paper p-3">
-          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-muted">
-            Server variables needed
-          </p>
-          <p className="mt-1 break-words font-mono text-xs text-brand-ink">
-            {provider.missingVariables.join(" · ")}
-          </p>
-        </div>
-      )}
-
-      {provider.note && (
-        <p className="mt-4 border-l-2 border-amber-400 pl-3 text-xs leading-5 text-brand-muted">
-          {provider.note}
-        </p>
-      )}
-
-
       {provider.nextAction && (
         <div className="mt-4 border border-brand-blue/20 bg-brand-blue/5 p-3 text-xs leading-5 text-brand-ink">
           <span className="font-semibold">Next:</span> {provider.nextAction}
         </div>
+      )}
+
+      {(provider.capabilities.length > 0 || provider.evidence.length > 0 || provider.missingVariables.length > 0 || provider.note) && (
+        <details className="group mt-4 border-t border-brand-ink/10 pt-3">
+          <summary className="cursor-pointer list-none text-xs font-semibold text-brand-muted marker:content-none">
+            Technical details <span className="ml-1 inline-block transition group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="mt-3 space-y-3">
+            {provider.capabilities.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {provider.capabilities.map((capability) => (
+                  <span key={capability} className="border border-brand-chrome bg-brand-paper px-2 py-1 text-xs text-brand-muted">
+                    {capability}
+                  </span>
+                ))}
+              </div>
+            )}
+            {provider.evidence.map((item) => (
+              <p key={item} className="flex items-start gap-2 text-xs leading-5 text-brand-muted">
+                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
+                {item}
+              </p>
+            ))}
+            {provider.missingVariables.length > 0 && (
+              <p className="break-words border border-brand-chrome bg-brand-paper p-3 font-mono text-xs text-brand-ink">
+                Needed: {provider.missingVariables.join(" · ")}
+              </p>
+            )}
+            {provider.note ? <p className="text-xs leading-5 text-brand-muted">{provider.note}</p> : null}
+          </div>
+        </details>
       )}
     </article>
   );
@@ -293,32 +283,10 @@ function ConnectionsPageContent() {
         </button>
       </header>
 
-      <div className="grid gap-px border border-brand-chrome bg-brand-chrome md:grid-cols-2">
-        <div className="bg-brand-ink p-5 text-white">
-          <div className="flex gap-3">
-            <ShieldCheck className="mt-0.5 h-5 w-5 text-brand-cyan" />
-            <div>
-              <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Credentials stay server-side</h2>
-              <p className="mt-1 text-sm leading-6 text-brand-chrome">
-                OAuth tokens are designed to be encrypted before storage. This screen only
-                reports configuration state and never returns secret values.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-5">
-          <div className="flex gap-3">
-            <Database className="mt-0.5 h-5 w-5 text-brand-blue" />
-            <div>
-              <h2 className="font-display text-lg font-semibold uppercase tracking-wide text-brand-ink">Unified conversation model</h2>
-              <p className="mt-1 text-sm leading-6 text-brand-muted">
-                Email, Instagram, LinkedIn-assisted outreach, drafts, and replies share one
-                provider-neutral inbox foundation.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <p className="flex items-center gap-2 border-y border-brand-ink/10 py-3 text-sm text-brand-muted">
+        <ShieldCheck className="h-4 w-4 text-brand-blue" />
+        Each teammate connects their own accounts. Credentials stay encrypted and server-side.
+      </p>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">

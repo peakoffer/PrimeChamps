@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const sport = searchParams.get("sport");
     const startDate =
       searchParams.get("start_date") ||
-      analyticsPeriodStart(searchParams.get("period") || "365d");
+      analyticsPeriodStart(searchParams.get("period") || "7d");
     const endDate = searchParams.get("end_date");
 
     let csvContent = "";

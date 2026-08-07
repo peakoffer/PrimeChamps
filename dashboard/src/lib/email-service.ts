@@ -1,5 +1,9 @@
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  isOutboundSendingEnabled,
+  OUTBOUND_DISABLED_MESSAGE,
+} from "@/lib/outbound-safety";
 
 const supabase = createAdminClient();
 
@@ -72,6 +76,10 @@ function getFromAddress(): string {
 // Send a single outreach email
 export async function sendOutreachEmail(options: SendEmailOptions): Promise<SendEmailResult> {
   const { to, subject, body, athleteId, templateId } = options;
+
+  if (!isOutboundSendingEnabled()) {
+    return { success: false, queued: false, error: OUTBOUND_DISABLED_MESSAGE };
+  }
 
   // Validate email
   if (!to || !isValidEmail(to)) {

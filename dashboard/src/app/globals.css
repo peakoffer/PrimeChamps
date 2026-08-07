@@ -62,11 +62,7 @@ a {
 
 .app-frame {
   min-height: 100vh;
-  background:
-    linear-gradient(rgba(6, 17, 31, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(6, 17, 31, 0.025) 1px, transparent 1px),
-    var(--pc-paper);
-  background-size: 32px 32px;
+  background: var(--pc-paper);
 }
 
 .app-workspace {
@@ -153,13 +149,46 @@ a {
 }
 
 .pc-sidebar-kicker {
-  margin: 20px 0 22px;
+  margin: 20px 0 14px;
   color: var(--pc-chrome);
+}
+
+.pc-safety-status {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  margin-bottom: 18px;
+  color: var(--pc-cyan);
+  font-family: var(--font-pc-mono), monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(61, 230, 239, 0.08);
+  border: 1px solid rgba(61, 230, 239, 0.28);
+}
+
+.pc-safety-status.is-live {
+  color: #ffd3cc;
+  background: rgba(255, 93, 73, 0.12);
+  border-color: rgba(255, 93, 73, 0.42);
+}
+
+.pc-safety-status svg {
+  width: 14px;
+  height: 14px;
 }
 
 .pc-nav-scroll {
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.pc-nav-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .pc-nav-group + .pc-nav-group {

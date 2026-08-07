@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth();
     const supabase = createAdminClient();
-    const startDate = analyticsPeriodStart(request.nextUrl.searchParams.get("period") || "365d");
+    const startDate = analyticsPeriodStart(request.nextUrl.searchParams.get("period") || "7d");
     const sport = request.nextUrl.searchParams.get("sport");
 
     let query = supabase
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       actual_revenue: totals.actual,
       average_contract_value: contracts.length ? totals.projected / contracts.length : 0,
       realization_rate: totals.projected > 0 ? totals.actual / totals.projected : 0,
-      definition: "Signed, non-test contracts for non-test athletes in the selected cohort.",
+      definition: "Signed deals for athletes in this view.",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load contract economics";

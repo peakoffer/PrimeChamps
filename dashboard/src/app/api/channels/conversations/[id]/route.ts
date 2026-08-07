@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { getChannelConversation, listChannelMessages } from "@/lib/channels/data";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  isOutboundSendingEnabled,
+  OUTBOUND_DISABLED_MESSAGE,
+} from "@/lib/outbound-safety";
 
 export const dynamic = "force-dynamic";
 
@@ -26,11 +30,15 @@ export async function GET(
         .eq("direction", "inbound")
         .eq("status", "received"),
     ]);
+    const canDraft = account?.owner_user_id === user.id;
+    const canSend = canDraft && isOutboundSendingEnabled();
     return NextResponse.json({
       conversation,
       account,
       messages,
-      canSend: account?.owner_user_id === user.id,
+      canDraft,
+      canSend,
+      sendBlockedReason: canDraft && !canSend ? OUTBOUND_DISABLED_MESSAGE : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load conversation";

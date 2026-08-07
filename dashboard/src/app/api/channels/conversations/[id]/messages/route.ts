@@ -10,6 +10,10 @@ import {
 import { sendInstagramMessage } from "@/lib/channels/instagram";
 import { sendMicrosoftMessage } from "@/lib/channels/microsoft";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  isOutboundSendingEnabled,
+  OUTBOUND_DISABLED_MESSAGE,
+} from "@/lib/outbound-safety";
 
 export async function POST(
   request: NextRequest,
@@ -17,6 +21,9 @@ export async function POST(
 ) {
   try {
     const user = await requireAuth();
+    if (!isOutboundSendingEnabled()) {
+      return NextResponse.json({ error: OUTBOUND_DISABLED_MESSAGE }, { status: 423 });
+    }
     const { id } = await params;
     const body = (await request.json()) as { content?: string };
     const content = body.content?.trim();

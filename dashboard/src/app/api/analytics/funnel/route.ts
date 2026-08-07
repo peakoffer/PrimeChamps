@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const user = await requireAuth();
     const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
-    const startDate = analyticsPeriodStart(searchParams.get("period") || "365d");
+    const startDate = analyticsPeriodStart(searchParams.get("period") || "7d");
     const sport = searchParams.get("sport");
 
     let athleteQuery = supabase

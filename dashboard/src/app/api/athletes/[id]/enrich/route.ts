@@ -15,6 +15,47 @@ import {
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const supabase = createAdminClient();
 
+async function downloadAndStoreProfilePic(
+  imageUrl: string,
+  athleteId: string
+): Promise<string | null> {
+  if (!imageUrl) return null;
+
+  try {
+    const response = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    const extension = contentType.includes("png")
+      ? "png"
+      : contentType.includes("webp")
+        ? "webp"
+        : "jpg";
+    const filePath = `${athleteId}.${extension}`;
+    const { error } = await supabase.storage
+      .from("profile-pics")
+      .upload(filePath, Buffer.from(await response.arrayBuffer()), {
+        contentType,
+        upsert: true,
+      });
+    if (error) {
+      console.error(`[Enrich] Failed to store profile picture: ${error.message}`);
+      return null;
+    }
+
+    const { data } = supabase.storage.from("profile-pics").getPublicUrl(filePath);
+    return `${data.publicUrl}?v=${Date.now()}`;
+  } catch (error) {
+    console.error("[Enrich] Failed to preserve profile picture", error);
+    return null;
+  }
+}
+
 async function persistEnrichmentResult(
   athleteId: string,
   source: EnrichmentSource,
@@ -453,6 +494,10 @@ export async function POST(
         scraped_at: new Date().toISOString(),
       };
       const igDataJson = JSON.stringify(storedInstagramData);
+      const scrapedProfilePic = igData.profilePicUrlHD || igData.profilePicUrl;
+      const durableProfilePic = scrapedProfilePic
+        ? await downloadAndStoreProfilePic(scrapedProfilePic, id)
+        : null;
 
       // Remove old IG_DATA if present
       const existingNotes = athlete.notes || "";
@@ -464,7 +509,8 @@ export async function POST(
         .from("athletes")
         .update({
           follower_count: igData.followersCount,
-          profile_pic_url: igData.profilePicUrlHD || igData.profilePicUrl || athlete.profile_pic_url,
+          // Never replace a working stored image with a short-lived Instagram CDN URL.
+          profile_pic_url: durableProfilePic || athlete.profile_pic_url,
           instagram_url: igData.url || athlete.instagram_url,
           notes: newNotes,
           enrichment_status: "enriched",

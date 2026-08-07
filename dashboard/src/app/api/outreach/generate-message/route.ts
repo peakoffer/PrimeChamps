@@ -79,9 +79,9 @@ export async function POST(request: NextRequest) {
     // Fetch recent posts for context
     const { data: posts } = await supabase
       .from("athlete_posts")
-      .select("caption, hashtags, likes_count")
+      .select("caption,likes_count,posted_at")
       .eq("athlete_id", athleteId)
-      .order("timestamp", { ascending: false })
+      .order("posted_at", { ascending: false, nullsFirst: false })
       .limit(5);
 
     // Build personalization context

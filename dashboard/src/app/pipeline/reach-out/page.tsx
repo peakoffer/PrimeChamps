@@ -17,12 +17,12 @@ interface Athlete {
 
 interface InstagramPost {
   id: string;
-  post_id: string;
   url: string;
-  display_url?: string;
+  displayUrl?: string;
   caption?: string;
-  likes_count?: number;
-  comments_count?: number;
+  likesCount?: number;
+  commentsCount?: number;
+  timestamp?: string | null;
 }
 
 interface GeneratedComment {
@@ -32,6 +32,7 @@ interface GeneratedComment {
   postUrl: string;
   postImage?: string;
   postCaption?: string;
+  postPublishedAt?: string | null;
   comment: string;
   scheduledFor?: string;
   approved: boolean;
@@ -46,6 +47,7 @@ interface OutreachPackage {
   comments: GeneratedComment[];
   generating: boolean;
   generated: boolean;
+  generationSource?: "ai" | "template" | "existing";
 }
 
 export default function ReachOutStagePage() {
@@ -98,8 +100,10 @@ export default function ReachOutStagePage() {
         body: JSON.stringify({ athleteId: athlete.id }),
       });
       const dmData = await dmResponse.json();
+      if (!dmResponse.ok) throw new Error(dmData.error || "Could not generate the direct-message draft");
       const dmId = dmData.message?.id;
       const dmMessage = dmData.message?.content || dmData.message || "";
+      const generationSource = dmData.source as OutreachPackage["generationSource"];
 
       // Fetch athlete's photos
       const photosResponse = await fetch(`/api/instagram/photos?athleteId=${athlete.id}`);
@@ -117,26 +121,27 @@ export default function ReachOutStagePage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               athleteId: athlete.id,
-              postId: photo.post_id,
+              postId: photo.id,
               postUrl: photo.url,
               postCaption: photo.caption,
-              postImage: photo.display_url,
+              postImage: photo.displayUrl,
             }),
           });
           const commentData = await commentResponse.json();
 
           comments.push({
-            id: `comment-${athlete.id}-${photo.post_id}`,
+            id: `comment-${athlete.id}-${photo.id}`,
             dbId: commentData.comment?.id,
-            postId: photo.post_id,
+            postId: photo.id,
             postUrl: photo.url,
-            postImage: photo.display_url,
+            postImage: photo.displayUrl,
             postCaption: photo.caption?.slice(0, 100),
+            postPublishedAt: photo.timestamp,
             comment: commentData.comment?.content || "",
             approved: false,
           });
         } catch (err) {
-          console.error("Error generating comment for post:", photo.post_id, err);
+          console.error("Error generating comment for post:", photo.id, err);
         }
       }
 
@@ -152,6 +157,7 @@ export default function ReachOutStagePage() {
           comments,
           generating: false,
           generated: true,
+          generationSource,
         });
         return next;
       });
@@ -319,13 +325,6 @@ export default function ReachOutStagePage() {
     return num.toString();
   };
 
-  // Stats
-  const pendingCount = athletes.length;
-  const generatedCount = Array.from(outreachPackages.values()).filter((p) => p.generated).length;
-  const readyCount = Array.from(outreachPackages.values()).filter(
-    (p) => p.generated && p.dmApproved && p.comments.some((c) => c.approved)
-  ).length;
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -340,21 +339,13 @@ export default function ReachOutStagePage() {
       <PipelineStageNav currentStage="reach_out" />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            Outreach queue
-          </h1>
-          <p className="text-gray-600">Review and save generated drafts; sending is always a separate manual action</p>
+          <p className="pc-eyebrow">Draft workspace</p>
+          <h1 className="pc-page-title">Outreach queue</h1>
+          <p className="pc-page-description">Generate, review, and save personal drafts. Nothing sends from this page.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchAthletes}
-            className="text-sm text-blue-600 hover:text-blue-800"
-          >
-            Refresh
-          </button>
-        </div>
+        <button onClick={fetchAthletes} className="pc-button-secondary">Refresh</button>
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -362,26 +353,9 @@ export default function ReachOutStagePage() {
       </div>
       {savedNotice ? <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{savedNotice}</div> : null}
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-blue-700">{pendingCount}</div>
-          <div className="text-sm text-blue-600">Pending Review</div>
-        </div>
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-purple-700">{generatedCount}</div>
-          <div className="text-sm text-purple-600">Content Generated</div>
-        </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-green-700">{readyCount}</div>
-          <div className="text-sm text-green-600">Ready to Save</div>
-        </div>
-      </div>
-
       {/* Main Content */}
       {athletes.length === 0 ? (
         <div className="bg-white shadow rounded-lg p-12 text-center">
-          <div className="text-6xl mb-4">📬</div>
           <h3 className="text-lg font-medium text-gray-900 mb-2">No athletes in outreach queue</h3>
           <p className="text-gray-600 mb-4">
             Athletes will appear here automatically after approval
@@ -451,14 +425,14 @@ export default function ReachOutStagePage() {
                         <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
                         <h2 className="mt-4 text-xl font-semibold text-gray-950">Create drafts for {athlete.name}</h2>
                         <p className="mt-2 text-sm leading-6 text-gray-600">
-                          This intentionally calls the AI and may use API credits. It creates reviewable drafts only—nothing is posted or sent.
+                          Creates one personal DM draft plus comment drafts for up to three recent posts. It uses AI credits and sends nothing.
                         </p>
                         <button
                           type="button"
                           onClick={() => void generateOutreachPackage(athlete)}
                           className="mt-5 rounded-lg bg-purple-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-800"
                         >
-                          Generate draft package
+                          Generate AI drafts
                         </button>
                       </div>
                     </div>
@@ -482,6 +456,11 @@ export default function ReachOutStagePage() {
                               @{pkg.athlete.instagram_handle} · {pkg.athlete.sport}
                             </div>
                           </div>
+                          {pkg.generated ? (
+                            <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
+                              {pkg.generationSource === "ai" ? "AI draft" : pkg.generationSource === "existing" ? "Saved draft" : "Playbook fallback"}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -508,9 +487,7 @@ export default function ReachOutStagePage() {
                       {/* DM Section */}
                       <div className="border rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
-                          <h3 className="font-medium text-gray-900 flex items-center gap-2">
-                            <span className="text-lg">📨</span> Direct Message
-                          </h3>
+                          <h3 className="font-medium text-gray-900">Direct message draft</h3>
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => handleCopy(pkg.dmMessage)}
@@ -562,8 +539,8 @@ export default function ReachOutStagePage() {
                                       className="w-full h-full object-cover"
                                     />
                                   ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-400">
-                                      📷
+                                    <div className="flex h-full w-full items-center justify-center px-2 text-center text-xs text-gray-400">
+                                      No image
                                     </div>
                                   )}
                                 </div>
@@ -571,7 +548,10 @@ export default function ReachOutStagePage() {
                                 {/* Comment content */}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-start justify-between mb-2">
-                                    <span className="text-xs text-gray-500">Comment #{index + 1}</span>
+                                    <span className="text-xs text-gray-500">
+                                      Comment #{index + 1}
+                                      {comment.postPublishedAt ? ` · Posted ${new Date(comment.postPublishedAt).toLocaleDateString()}` : ""}
+                                    </span>
                                     <button
                                       onClick={() => handleToggleCommentApproval(selectedAthlete, comment.id)}
                                       className={`px-2 py-0.5 text-xs font-medium rounded ${

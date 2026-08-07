@@ -40,7 +40,9 @@ type DetailResponse = {
     provider?: string;
   };
   messages: ChannelMessageDTO[];
+  canDraft: boolean;
   canSend: boolean;
+  sendBlockedReason?: string | null;
   error?: string;
 };
 
@@ -53,11 +55,11 @@ const WORKSPACES: Array<{
   description: string;
   icon: typeof Mail;
 }> = [
+  { id: "unified", label: "Unified", description: "Every relationship", icon: Layers3 },
   { id: "email", label: "Email", description: "Microsoft Exchange", icon: Mail },
   { id: "instagram", label: "Instagram", description: "Direct messages", icon: Instagram },
   { id: "linkedin", label: "LinkedIn", description: "Assisted outreach", icon: Linkedin },
   { id: "x", label: "X", description: "Planned channel", icon: AtSign },
-  { id: "unified", label: "Unified", description: "Every relationship", icon: Layers3 },
 ];
 
 const AUTOMATED_MAIL_PATTERN = [
@@ -208,7 +210,7 @@ function ChannelSetup({ channel }: { channel: Exclude<WorkspaceChannel, "email" 
 
 export default function UnifiedInbox() {
   const [scope, setScope] = useState<"mine" | "team">("mine");
-  const [activeChannel, setActiveChannel] = useState<WorkspaceChannel>("email");
+  const [activeChannel, setActiveChannel] = useState<WorkspaceChannel>("unified");
   const [emailView, setEmailView] = useState<EmailView>("focused");
   const [accountId, setAccountId] = useState("");
   const [query, setQuery] = useState("");
@@ -217,6 +219,8 @@ export default function UnifiedInbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [threadLoading, setThreadLoading] = useState(false);
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
@@ -226,6 +230,7 @@ export default function UnifiedInbox() {
   const [error, setError] = useState("");
 
   const loadInbox = useCallback(async () => {
+    setRefreshing(true);
     const search = new URLSearchParams({ scope, limit: "200" });
     if (accountId) search.set("account", accountId);
     try {
@@ -248,10 +253,12 @@ export default function UnifiedInbox() {
       setError("");
       setAccounts(accountsData.accounts || []);
       setConversations(conversationsData.conversations || []);
+      setLastRefreshedAt(new Date());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load inbox");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [accountId, scope]);
 
@@ -277,7 +284,18 @@ export default function UnifiedInbox() {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadInbox(), 0);
-    return () => window.clearTimeout(initialLoad);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadInbox();
+    };
+    const interval = window.setInterval(refreshWhenVisible, 30_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [loadInbox]);
 
   const channelCounts = useMemo(() => ({
@@ -519,14 +537,19 @@ export default function UnifiedInbox() {
                       : `${visibleConversations.length} conversations across channels`}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Refresh conversations"
-                  onClick={() => void loadInbox()}
-                  className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="hidden text-[11px] text-slate-500 sm:inline">
+                    Auto-updates{lastRefreshedAt ? ` · ${lastRefreshedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Refresh conversations"
+                    onClick={() => void loadInbox()}
+                    className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
               </div>
 
               <div className="relative mt-3">
@@ -815,9 +838,14 @@ export default function UnifiedInbox() {
                 </div>
 
                 <form onSubmit={sendReply} className="border-t border-slate-200 bg-white p-4 sm:p-5">
-                  {!detail?.canSend ? (
+                  {!detail?.canDraft ? (
                     <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       Team view is read-only. Only the person who connected this account can send from it.
+                    </p>
+                  ) : null}
+                  {detail?.canDraft && !detail.canSend ? (
+                    <p className="mb-3 rounded-lg border border-brand-cyan/40 bg-brand-cyan/10 px-3 py-2 text-xs font-medium text-brand-ink">
+                      Draft-only mode. AI can prepare this reply, but no email or DM can be sent from Prime Champs.
                     </p>
                   ) : null}
                   {selected.provider === "instagram" ? (
@@ -834,16 +862,16 @@ export default function UnifiedInbox() {
                     <textarea
                       value={composer}
                       onChange={(event) => setComposer(event.target.value)}
-                      disabled={!detail?.canSend || sending}
+                      disabled={!detail?.canDraft || sending}
                       rows={isEmailThread ? 4 : 3}
-                      placeholder={detail?.canSend ? (isEmailThread ? "Write your email reply…" : "Write a reply…") : "Read-only team conversation"}
+                      placeholder={detail?.canDraft ? (isEmailThread ? "Draft an email reply…" : "Draft a reply…") : "Read-only team conversation"}
                       className="block w-full resize-none border-0 px-3 py-3 text-sm leading-6 outline-none disabled:bg-slate-50"
                     />
                     <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5">
                       <button
                         type="button"
                         onClick={() => void draftReply()}
-                        disabled={!detail?.canSend || drafting}
+                        disabled={!detail?.canDraft || drafting}
                         className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
                       >
                         {drafting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
@@ -855,7 +883,7 @@ export default function UnifiedInbox() {
                         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
                       >
                         {sending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        {isEmailThread ? "Send email" : "Send reply"}
+                        {detail?.canSend ? (isEmailThread ? "Send email" : "Send reply") : "Sending off"}
                       </button>
                     </div>
                   </div>

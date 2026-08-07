@@ -80,6 +80,7 @@ interface ResearchConfig {
   depth?: "standard" | "extended";
   marketOverride?: string;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls", "rising stars under 25"
+  includeRecentGuidance?: boolean;
   followerMin: number;
   followerMax: number;
   resultCount: number;
@@ -271,6 +272,7 @@ function ResearchStageContent() {
     depth: "standard",
     marketOverride: "",
     customContext: "",
+    includeRecentGuidance: true,
     followerMin: 30000,
     followerMax: 500000,
     resultCount: 10,
@@ -721,7 +723,7 @@ function ResearchStageContent() {
     blocked: { label: "Safety blocked", className: "bg-red-100 text-red-800" },
     existing: { label: "Already in CRM", className: "bg-gray-100 text-gray-800" },
     skipped: { label: "Not saved", className: "bg-gray-100 text-gray-700" },
-    discovered: { label: "Sourced, not finalized", className: "bg-purple-100 text-purple-800" },
+    discovered: { label: "Review incomplete", className: "bg-purple-100 text-purple-800" },
     rejected: { label: "Rejected", className: "bg-rose-100 text-rose-800" },
   } as const)[disposition];
 
@@ -734,11 +736,10 @@ function ResearchStageContent() {
   );
 
   const fallbackToolchain = (log: ResearchLog) => [
-    { step: "Discovery", provider: "Perplexity", purpose: "Find source-linked athlete candidates" },
-    { step: "Identity & age", provider: "Apify Google Search", purpose: "Resolve profiles and trustworthy age sources" },
-    { step: "Instagram", provider: "Apify Instagram Profile Scraper", purpose: "Load profile and audience data" },
-    { step: "Scoring", provider: log.config_used?.scoringModel || RESEARCH_SCORING_MODEL, purpose: "Score fit and explain why" },
-    { step: "Pipeline", provider: "Supabase", purpose: "Store evidence and candidate disposition" },
+    { step: "Discover", provider: "Perplexity", purpose: "Find current, source-linked athlete candidates" },
+    { step: "Verify", provider: "Apify Google Search", purpose: "Confirm identity, age, and current career evidence" },
+    { step: "Enrich", provider: "Apify Instagram", purpose: "Load audience and creator signals" },
+    { step: "Score", provider: log.config_used?.scoringModel || RESEARCH_SCORING_MODEL, purpose: "Rank the verified candidates and explain why" },
   ];
 
   // Copy settings from a past research run to pre-fill the form
@@ -753,6 +754,7 @@ function ResearchStageContent() {
       depth: logConfig.depth || ((logConfig.resultCount || 10) > 10 ? "extended" : "standard"),
       marketOverride: logConfig.marketOverride || logConfig.customContext || "",
       customContext: logConfig.customContext || "",
+      includeRecentGuidance: logConfig.includeRecentGuidance !== false,
       followerMin: logConfig.followerMin || 30000,
       followerMax: logConfig.followerMax || 500000,
       resultCount: logConfig.resultCount || 10,
@@ -861,7 +863,7 @@ function ResearchStageContent() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="animate-pulse text-2xl">🔄</div>
+              <RefreshCw aria-hidden="true" className="h-5 w-5 animate-spin text-blue-700" />
               <div>
                 <div className="font-medium text-blue-800">
                   {backgroundRunId === "starting"
@@ -926,14 +928,14 @@ function ResearchStageContent() {
       {activeResearchView === "history" ? (
       <details className="pc-surface group">
         <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 marker:content-none">
-          <span className="flex items-center gap-2 text-sm font-semibold text-brand-ink"><ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" /> Quality controls</span>
+          <span className="flex items-center gap-2 text-sm font-semibold text-brand-ink"><ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" /> Safety checks</span>
           <span className="text-xs text-brand-muted transition group-open:rotate-180">⌄</span>
         </summary>
         <div className="flex flex-col gap-4 border-t border-brand-ink/10 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" />
-              <h2 className="font-semibold text-brand-ink">Research quality gate</h2>
+              <h2 className="font-semibold text-brand-ink">Test the research rules</h2>
               {benchmarkSummary?.passRate !== null && benchmarkSummary?.passRate !== undefined ? (
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${benchmarkSummary.passRate === 100 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
                   {benchmarkSummary.passRate}% passing
@@ -941,12 +943,12 @@ function ResearchStageContent() {
               ) : null}
             </div>
             <p className="mt-1 text-sm leading-6 text-brand-ink/60">
-              Repeatable controls verify score weighting, adult-age gating, minor blocking, and the minimum quality threshold before candidates can enter Approval.
+              Replay saved example athletes to confirm adults are handled correctly, minors stay blocked, and weak candidates cannot enter Approval.
             </p>
             <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.04em] text-brand-ink/55">
               {benchmarkUnavailable
                 ? "Quality suite is waiting for the database migration; research runs remain unavailable until setup is complete."
-                : `${benchmarkSummary?.total || 0} cases · ${benchmarkSummary?.evaluated || 0} evaluated · benchmark replays never create athletes or send outreach`}
+                : `${benchmarkSummary?.total || 0} saved examples · ${benchmarkSummary?.evaluated || 0} tested · tests never create athletes or send outreach`}
             </p>
           </div>
           <button
@@ -960,8 +962,8 @@ function ResearchStageContent() {
               : benchmarkUnavailable
                 ? "Setup required"
               : (benchmarkSummary?.total || 0) === 0
-                ? "Create baseline suite"
-                : "Run benchmark suite"}
+                ? "Create test examples"
+                : "Test scoring rules"}
           </button>
         </div>
       </details>
@@ -1035,9 +1037,9 @@ function ResearchStageContent() {
                 },
                 { approval: 0, held: 0, blocked: 0, existing: 0, skipped: 0, discovered: 0, rejected: 0 }
               );
-              const toolchain = log.context_summary?.toolchain?.length
+              const toolchain = (log.context_summary?.toolchain?.length
                 ? log.context_summary.toolchain
-                : fallbackToolchain(log);
+                : fallbackToolchain(log)).filter((tool) => !["Storage", "Pipeline"].includes(tool.step));
               const candidateLedger = log.candidate_ledger?.length
                 ? log.candidate_ledger
                 : log.final_results || [];
@@ -1131,9 +1133,7 @@ function ResearchStageContent() {
                       </summary>
                       <div className="space-y-4 border-t border-brand-ink/10 p-4">
                     <div className="bg-brand-paper p-4">
-                      <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <span>⚙️</span> Inputs
-                      </h4>
+                      <h4 className="mb-2 font-medium text-gray-900">Inputs</h4>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-gray-800">Sport:</span>{" "}
@@ -1148,8 +1148,8 @@ function ResearchStageContent() {
                           <span className="text-gray-900">{log.config_used?.followerMin?.toLocaleString()}-{log.config_used?.followerMax?.toLocaleString()}</span>
                         </div>
                         <div>
-                          <span className="text-gray-800">Market override:</span>{" "}
-                          <span className="text-gray-900">{log.config_used?.marketOverride || log.config_used?.customContext || "Active thesis default"}</span>
+                          <span className="text-gray-800">Team guidance:</span>{" "}
+                          <span className="text-gray-900">{log.config_used?.includeRecentGuidance === false ? "Not used" : "Included"}</span>
                         </div>
                         <div>
                           <span className="text-gray-800">Scoring Model:</span>{" "}
@@ -1165,7 +1165,7 @@ function ResearchStageContent() {
                         </div>
                         {log.config_used?.customContext && (
                           <div className="col-span-2">
-                            <span className="text-gray-800">Search brief:</span>{" "}
+                          <span className="text-gray-800">Extra context:</span>{" "}
                             <span className="text-gray-900">{log.config_used.customContext}</span>
                           </div>
                         )}
@@ -1174,17 +1174,15 @@ function ResearchStageContent() {
 
                     {/* Evidence and toolchain */}
                     <div className="bg-brand-cyan/5 p-4">
-                      <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <span>🧠</span> Research inputs and tools
-                      </h4>
+                      <h4 className="mb-2 font-medium text-gray-900">Research inputs and tools</h4>
                       <div className="mb-3 grid gap-2 text-sm sm:grid-cols-2">
                         <div className="rounded-md bg-white/80 px-3 py-2">
-                          <span className="text-gray-600">Signed/active contracts supplied to scoring:</span>{" "}
-                          <strong className="text-gray-900">{log.context_summary?.signed_conversion_count ?? log.context_summary?.historical_count ?? "Not recorded"}</strong>
+                          <span className="text-gray-600">Past successful signings used as examples:</span>{" "}
+                          <strong className="text-gray-900">{log.context_summary?.signed_conversion_count ?? log.context_summary?.historical_count ?? "Unavailable for older run"}</strong>
                         </div>
                         <div className="rounded-md bg-white/80 px-3 py-2">
-                          <span className="text-gray-600">Existing/historical handles excluded:</span>{" "}
-                          <strong className="text-gray-900">{log.context_summary?.exclusion_count ?? "Not recorded"}</strong>
+                          <span className="text-gray-600">Known athletes skipped:</span>{" "}
+                          <strong className="text-gray-900">{log.context_summary?.exclusion_count ?? "Unavailable for older run"}</strong>
                         </div>
                       </div>
                       {log.context_summary?.recruitingThesis && (
@@ -1259,7 +1257,7 @@ function ResearchStageContent() {
                                   <div className="mt-3 space-y-3 border-t pt-3 text-sm">
                                     <div>
                                       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Why this score</div>
-                                      <p className="mt-1 text-gray-800">{result.reasoning || "No scoring explanation was stored for this legacy run."}</p>
+                                      <p className="mt-1 text-gray-800">{result.reasoning || "Older run — no explanation was saved."}</p>
                                     </div>
                                     {result.score_breakdown && Object.keys(result.score_breakdown).length > 0 && (
                                       <div>
@@ -1514,10 +1512,10 @@ function ResearchStageContent() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <span>🔬</span> Start athlete research
+                Start athlete research
               </h2>
               <p className="text-sm text-gray-800 mt-1">
-                Three choices. The active recruiting thesis handles the rest.
+                Choose the sport and depth. Approved team guidance handles the rest when enabled.
               </p>
             </div>
 
@@ -1551,7 +1549,27 @@ function ResearchStageContent() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  2. Market override <span className="font-normal text-gray-500">(optional)</span>
+                  2. Use recent Zach + Dylan guidance
+                </label>
+                <button
+                  type="button"
+                  aria-pressed={config.includeRecentGuidance !== false}
+                  onClick={() => setConfig({ ...config, includeRecentGuidance: config.includeRecentGuidance === false })}
+                  className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left ${config.includeRecentGuidance !== false ? "border-brand-blue bg-blue-50" : "border-gray-200 bg-white"}`}
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-gray-950">{config.includeRecentGuidance !== false ? "Included" : "Not included"}</span>
+                    <span className="mt-1 block text-xs text-gray-600">Use the latest approved weekly recruiting guidance for this run.</span>
+                  </span>
+                  <span className={`h-6 w-11 rounded-full p-1 transition ${config.includeRecentGuidance !== false ? "bg-brand-blue" : "bg-gray-300"}`}>
+                    <span className={`block h-4 w-4 rounded-full bg-white transition ${config.includeRecentGuidance !== false ? "translate-x-5" : ""}`} />
+                  </span>
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  3. Extra context <span className="font-normal text-gray-500">(optional)</span>
                 </label>
                 <input
                   type="text"
@@ -1561,13 +1579,13 @@ function ResearchStageContent() {
                   className="w-full border rounded-lg px-3 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
                 <p className="text-xs text-gray-800 mt-1">
-                  Leave blank to use the active thesis exactly as published.
+                  Add a focus for this run only. Leave blank for the normal search.
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  3. Research depth
+                  4. Research depth
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   {([

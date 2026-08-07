@@ -12,6 +12,7 @@ import ContractModal from "@/components/ContractModal";
 import { ComposeBox, OutcomeModal } from "@/components/conversations";
 import type { BenchmarkMetrics } from "@/app/api/benchmarks/route";
 import { sortInstagramPostsNewestFirst } from "@/lib/instagram-post-order";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 interface Message {
   id: string;
@@ -945,18 +946,16 @@ export default function AthleteDetailPage() {
         ← Back
       </button>
 
-      {/* Instagram-Style Profile Header */}
-      <div className="bg-white shadow rounded-lg p-6">
+      {/* Athlete summary */}
+      <div className="pc-surface p-5 sm:p-6">
         <div className="flex flex-col md:flex-row gap-6">
           {/* Profile Picture */}
           <div className="flex-shrink-0">
-            <img
-              src={athlete.profile_pic_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(athlete.name)}&size=150&background=6366f1&color=fff`}
-              alt={athlete.name}
-              className="w-36 h-36 rounded-full object-cover border-4 border-gray-200"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(athlete.name)}&size=150&background=6366f1&color=fff`;
-              }}
+            <AthleteAvatar
+              name={athlete.name}
+              profilePicUrl={athlete.profile_pic_url}
+              size="xl"
+              className="!h-28 !w-28 !text-2xl ring-4 ring-brand-paper"
             />
           </div>
 
@@ -972,7 +971,7 @@ export default function AthleteDetailPage() {
                   className="text-2xl font-bold text-gray-900 border-b-2 border-blue-500 focus:outline-none bg-transparent"
                 />
               ) : (
-                <h1 className="text-2xl font-bold text-gray-900">{athlete.name}</h1>
+                <h1 className="font-display text-3xl font-bold uppercase tracking-wide text-brand-ink">{athlete.name}</h1>
               )}
               {ig.verified && (
                 <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full font-medium">✓ Verified</span>
@@ -1008,7 +1007,7 @@ export default function AthleteDetailPage() {
                 <>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="bg-gray-100 text-gray-900 px-3 py-1.5 text-sm rounded-lg hover:bg-gray-200 font-medium"
+                    className="pc-button-secondary"
                   >
                     Edit
                   </button>
@@ -1017,7 +1016,7 @@ export default function AthleteDetailPage() {
                       href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-3 py-1.5 text-sm rounded-lg hover:opacity-90 font-medium"
+                      className="pc-button-primary"
                     >
                       View IG
                     </a>
@@ -1037,55 +1036,24 @@ export default function AthleteDetailPage() {
               </span>
             </div>
 
-            {/* Stats - Two Rows for Compact Layout */}
-            <div className="space-y-2 mb-4">
-              {/* Row 1 - Main Metrics */}
-              <div className="flex flex-wrap gap-4">
+            <div className="mb-4 grid grid-cols-2 border-l border-t border-brand-ink/10 sm:grid-cols-3 lg:grid-cols-6">
+              {[
+                ["Followers", formatNumber(athlete.follower_count)],
+                ["Following", formatNumber(ig.following) || "—"],
+                ["Posts", formatNumber(ig.posts) || "—"],
+                ["Engagement", engagementRate ? `${engagementRate}%` : ig.engagement_rate ? `${ig.engagement_rate}%` : "—"],
+                ["Avg likes", formatNumber(recentAverageLikes ?? ig.avg_likes) || "—"],
+                ["Avg comments", formatNumber(recentAverageComments ?? ig.avg_comments) || "—"],
+              ].map(([label, value]) => (
                 <div
-                  className="text-center min-w-[60px]"
-                  title="Average likes plus comments on the 8 newest non-pinned posts, divided by followers"
+                  key={label}
+                  className="border-b border-r border-brand-ink/10 bg-brand-paper-bright px-3 py-3"
+                  title={label === "Engagement" ? "Average likes plus comments on the 8 newest non-pinned posts, divided by followers" : undefined}
                 >
-                  <div className="text-lg font-bold text-gray-900">{formatNumber(athlete.follower_count)}</div>
-                  <div className="text-xs text-gray-600">Followers</div>
+                  <div className="text-lg font-bold tabular-nums text-brand-ink">{value}</div>
+                  <div className="mt-1 text-xs text-brand-muted">{label}</div>
                 </div>
-                <div className="text-center min-w-[60px]">
-                  <div className="text-lg font-bold text-gray-900">{formatNumber(ig.following) || "—"}</div>
-                  <div className="text-xs text-gray-600">Following</div>
-                </div>
-                <div className="text-center min-w-[60px]">
-                  <div className="text-lg font-bold text-gray-900">{formatNumber(ig.posts) || "—"}</div>
-                  <div className="text-xs text-gray-600">Posts</div>
-                </div>
-                <div className="text-center min-w-[60px]">
-                  <div className="text-lg font-bold text-green-600">
-                    {engagementRate
-                      ? `${engagementRate}%`
-                      : ig.engagement_rate
-                        ? `${ig.engagement_rate}%`
-                        : "—"}
-                  </div>
-                  <div className="text-xs text-gray-600">Engagement</div>
-                </div>
-              </div>
-              {/* Row 2 - Secondary Metrics */}
-              <div className="flex flex-wrap gap-4">
-                <div className="text-center min-w-[60px]">
-                  <div className="text-sm font-semibold text-gray-800">{formatNumber(recentAverageLikes ?? ig.avg_likes) || "—"}</div>
-                  <div className="text-xs text-gray-500">Avg Likes</div>
-                </div>
-                <div className="text-center min-w-[60px]">
-                  <div className="text-sm font-semibold text-gray-800">{formatNumber(recentAverageComments ?? ig.avg_comments) || "—"}</div>
-                  <div className="text-xs text-gray-500">Avg Comments</div>
-                </div>
-                <div className="text-center min-w-[60px]">
-                  <div className="text-sm font-semibold text-gray-800">{ig.highlights ? formatNumber(ig.highlights) : "—"}</div>
-                  <div className="text-xs text-gray-500">Highlights</div>
-                </div>
-                <div className="text-center min-w-[60px]">
-                  <div className="text-sm font-semibold text-gray-800">{ig.igtv_videos ? formatNumber(ig.igtv_videos) : "—"}</div>
-                  <div className="text-xs text-gray-500">IGTV/Reels</div>
-                </div>
-              </div>
+              ))}
             </div>
 
             {/* Link in Bio */}
@@ -1204,7 +1172,7 @@ export default function AthleteDetailPage() {
               <button
                 onClick={() => handleMoveStage("response")}
                 disabled={movingStage}
-                className="px-4 py-2 bg-yellow-500 text-white text-sm rounded-lg hover:bg-yellow-600 disabled:opacity-50 font-medium"
+                className="pc-button-primary disabled:opacity-50"
               >
                 {movingStage ? "..." : "Mark as Contacted"}
               </button>
@@ -1213,7 +1181,7 @@ export default function AthleteDetailPage() {
               <>
                 <button
                   onClick={() => setShowAppointmentModal(true)}
-                  className="px-4 py-2 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 font-medium"
+                  className="pc-button-primary"
                 >
                   Schedule Appointment
                 </button>
@@ -1230,7 +1198,7 @@ export default function AthleteDetailPage() {
               <>
                 <button
                   onClick={() => setShowContractModal(true)}
-                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium"
+                  className="pc-button-primary"
                 >
                   Create Contract
                 </button>
@@ -1259,19 +1227,19 @@ export default function AthleteDetailPage() {
             {/* Common Actions - Always visible */}
             <button
               onClick={() => setShowAppointmentModal(true)}
-              className="px-3 py-2 bg-orange-100 text-orange-700 text-sm rounded-lg hover:bg-orange-200 font-medium"
+              className="pc-button-secondary"
             >
               Schedule Appt
             </button>
             <button
               onClick={() => setShowContractModal(true)}
-              className="px-3 py-2 bg-green-100 text-green-700 text-sm rounded-lg hover:bg-green-200 font-medium"
+              className="pc-button-secondary"
             >
               Create Contract
             </button>
             <button
               onClick={handleResetEnrichment}
-              className="px-3 py-2 bg-yellow-100 text-yellow-800 text-sm rounded-lg hover:bg-yellow-200 font-medium"
+              className="pc-button-secondary"
             >
               Reset Status
             </button>
@@ -2579,21 +2547,19 @@ function FullFitScoreCard({
     : 0;
 
   let grade = "";
-  let gradeColor = "";
-  let gradeBg = "";
-  if (totalScore >= 85) { grade = "A"; gradeColor = "text-green-600"; gradeBg = "bg-green-100"; }
-  else if (totalScore >= 70) { grade = "B"; gradeColor = "text-blue-600"; gradeBg = "bg-blue-100"; }
-  else if (totalScore >= 55) { grade = "C"; gradeColor = "text-yellow-600"; gradeBg = "bg-yellow-100"; }
-  else { grade = "D"; gradeColor = "text-red-600"; gradeBg = "bg-red-100"; }
+  if (totalScore >= 85) grade = "A";
+  else if (totalScore >= 70) grade = "B";
+  else if (totalScore >= 55) grade = "C";
+  else grade = "D";
 
   return (
-    <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg p-3 text-white">
+    <div className="border border-brand-ink/15 bg-brand-paper-bright p-4 text-brand-ink">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium opacity-80">Fit Score</span>
-        <span className="text-xs opacity-60">{benchmarks.totalAthletes} athletes</span>
+        <span className="text-sm font-semibold">Fit score</span>
+        <span className="text-xs text-brand-muted">{benchmarks.totalAthletes} comparisons</span>
       </div>
       <div className="flex items-center gap-3 mb-2">
-        <div className={`w-12 h-12 rounded-full ${gradeBg} ${gradeColor} flex flex-col items-center justify-center font-bold`}>
+        <div className="flex h-12 w-12 flex-col items-center justify-center bg-brand-ink font-bold text-brand-cyan">
           <span className="text-xl">{grade}</span>
         </div>
         <div>
@@ -2601,10 +2567,10 @@ function FullFitScoreCard({
         </div>
       </div>
       {/* Metric breakdown - always visible */}
-      <div className="space-y-1 pt-2 border-t border-white/20">
+      <div className="space-y-1 border-t border-brand-ink/10 pt-2">
         {metricDetails.map((m, i) => (
           <div key={i} className="flex items-center justify-between text-xs">
-            <span className="opacity-80">{m.label}</span>
+            <span className="text-brand-muted">{m.label}</span>
             <div className="flex items-center gap-1">
               <span className="font-medium">{m.value}</span>
               <span className={`w-2 h-2 rounded-full ${
@@ -2631,43 +2597,38 @@ function FullTierCard({ followers }: { followers: number | null }) {
   }
 
   let tier = "";
-  let icon = "";
-  let color = "";
   let description = "";
   let range = "";
 
   if (followers >= 5000000) {
-    tier = "Mega Star"; icon = "A"; color = "bg-brand-ink border-brand-ink text-brand-cyan";
+    tier = "Mega Star";
     description = "Marquee signing"; range = "5M+";
   } else if (followers >= 1000000) {
-    tier = "Star"; icon = "⭐"; color = "bg-purple-100 border-purple-400 text-purple-800";
+    tier = "Star";
     description = "Major talent"; range = "1M-5M";
   } else if (followers >= 500000) {
-    tier = "Rising Star"; icon = "🔥"; color = "bg-orange-100 border-orange-400 text-orange-800";
+    tier = "Rising Star";
     description = "High potential"; range = "500K-1M";
   } else if (followers >= 100000) {
-    tier = "Sweet Spot"; icon = "💎"; color = "bg-green-100 border-green-400 text-green-800";
+    tier = "Sweet Spot";
     description = "Ideal OF range"; range = "100K-500K";
   } else if (followers >= 50000) {
-    tier = "Growing"; icon = "B"; color = "bg-brand-blue border-brand-blue text-white";
+    tier = "Growing";
     description = "Emerging"; range = "50K-100K";
   } else {
-    tier = "Micro"; icon = "🌱"; color = "bg-gray-100 border-gray-400 text-gray-800";
+    tier = "Micro";
     description = "Niche reach"; range = "<50K";
   }
 
   return (
-    <div className={`${color} border-2 rounded-lg p-3`}>
-      <div className="text-xs font-medium opacity-70 mb-1">Follower Tier</div>
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">{icon}</span>
-        <div>
-          <div className="font-bold">{tier}</div>
-          <div className="text-xs opacity-75">{description}</div>
-        </div>
+    <div className="border border-brand-ink/15 bg-brand-paper-bright p-4 text-brand-ink">
+      <div className="mb-1 text-xs font-medium text-brand-muted">Follower tier</div>
+      <div>
+        <div className="font-bold">{tier}</div>
+        <div className="text-xs text-brand-muted">{description}</div>
       </div>
-      <div className="mt-2 pt-2 border-t border-current/20 flex justify-between text-xs">
-        <span className="opacity-70">Range: {range}</span>
+      <div className="mt-2 flex justify-between border-t border-brand-ink/10 pt-2 text-xs">
+        <span className="text-brand-muted">Range: {range}</span>
         <span className="font-medium">{followers.toLocaleString()}</span>
       </div>
     </div>

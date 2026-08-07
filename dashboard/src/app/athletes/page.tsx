@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Athlete } from "@/lib/supabase/types";
@@ -10,6 +10,18 @@ import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, FlaskConical, Search } fro
 
 type SortKey = "followers" | "name" | "created_at";
 type SortDirection = "asc" | "desc";
+type RecordScope = "all" | "active" | "historical";
+type AthleteListItem = Pick<
+  Athlete,
+  | "id"
+  | "name"
+  | "sport"
+  | "instagram_handle"
+  | "follower_count"
+  | "enrichment_status"
+  | "created_at"
+  | "profile_pic_url"
+> & { is_historical: boolean | null };
 
 function SortIcon({
   active,
@@ -31,25 +43,23 @@ function SortIcon({
 
 export default function AthletesPage() {
   const router = useRouter();
-  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [athletes, setAthletes] = useState<AthleteListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sportFilter, setSportFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [recordScope, setRecordScope] = useState<RecordScope>("all");
   const [sortKey, setSortKey] = useState<SortKey>("followers");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sports, setSports] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   useEffect(() => {
     async function fetchAthletes() {
       try {
-        const sort = sortKey === "followers" ? "follower_count" : sortKey;
-        const search = new URLSearchParams({ sort, direction: sortDirection, limit: "1000" });
-        if (sportFilter) search.set("sport", sportFilter);
-        if (statusFilter) search.set("status", statusFilter);
-        const response = await fetch(`/api/athletes?${search}`, { cache: "no-store" });
+        const response = await fetch("/api/athletes?sort=created_at&direction=desc&limit=1000&compact=true", { cache: "no-store" });
         const payload = await response.json() as {
-          athletes?: Athlete[];
+          athletes?: AthleteListItem[];
           sports?: string[];
           error?: string;
         };
@@ -64,7 +74,7 @@ export default function AthletesPage() {
     }
 
     fetchAthletes();
-  }, [sportFilter, statusFilter, sortKey, sortDirection]);
+  }, []);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -84,14 +94,31 @@ export default function AthletesPage() {
     setSortDirection(direction);
   };
 
-  const normalizedQuery = searchQuery.trim().toLowerCase();
-  const visibleAthletes = normalizedQuery
-    ? athletes.filter((athlete) =>
-        [athlete.name, athlete.sport, athlete.instagram_handle]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(normalizedQuery))
-      )
-    : athletes;
+  const visibleAthletes = useMemo(() => {
+    const normalizedQuery = deferredSearchQuery.trim().toLowerCase();
+    const filtered = athletes.filter((athlete) => {
+      if (sportFilter && athlete.sport !== sportFilter) return false;
+      if (statusFilter && athlete.enrichment_status !== statusFilter) return false;
+      if (recordScope === "active" && athlete.is_historical === true) return false;
+      if (recordScope === "historical" && athlete.is_historical !== true) return false;
+      if (!normalizedQuery) return true;
+      return [athlete.name, athlete.sport, athlete.instagram_handle]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+    });
+
+    return filtered.sort((left, right) => {
+      let comparison = 0;
+      if (sortKey === "followers") {
+        comparison = (left.follower_count || 0) - (right.follower_count || 0);
+      } else if (sortKey === "name") {
+        comparison = left.name.localeCompare(right.name);
+      } else {
+        comparison = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+      }
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [athletes, deferredSearchQuery, recordScope, sortDirection, sortKey, sportFilter, statusFilter]);
 
   if (loading) {
     return (
@@ -127,7 +154,7 @@ export default function AthletesPage() {
             className="min-h-10 w-full border border-brand-chrome bg-white py-2 pl-10 pr-3 text-sm text-brand-ink outline-none transition focus:border-brand-blue"
           />
         </label>
-        <div className="grid gap-2 sm:grid-cols-3 lg:w-auto">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 xl:w-auto">
           <select
             value={sportFilter}
             onChange={(e) => setSportFilter(e.target.value)}
@@ -140,6 +167,16 @@ export default function AthletesPage() {
                 {sport}
               </option>
             ))}
+          </select>
+          <select
+            value={recordScope}
+            onChange={(e) => setRecordScope(e.target.value as RecordScope)}
+            className="min-h-10 border border-brand-chrome bg-white px-3 py-2 text-xs text-brand-ink"
+            aria-label="Filter active and historical athletes"
+          >
+            <option value="all">All Records</option>
+            <option value="active">Active CRM</option>
+            <option value="historical">Historical</option>
           </select>
           <select
             value={statusFilter}
@@ -271,7 +308,7 @@ export default function AthletesPage() {
       </div>
 
       <div className="text-xs text-brand-muted">
-        Showing {visibleAthletes.length} of {athletes.length} athletes
+        Showing {visibleAthletes.length} of {athletes.length} athletes. All Records includes active CRM and historical data.
       </div>
     </div>
   );

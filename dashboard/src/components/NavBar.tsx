@@ -11,6 +11,7 @@ import {
   FlaskConical,
   Inbox,
   LayoutDashboard,
+  LockKeyhole,
   LogOut,
   Menu,
   Network,
@@ -78,6 +79,7 @@ export default function NavBar() {
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [mobileOpenPath, setMobileOpenPath] = useState<string | null>(null);
+  const [outboundSendingEnabled, setOutboundSendingEnabled] = useState(false);
   const mobileOpen = mobileOpenPath === pathname;
 
   useEffect(() => {
@@ -85,6 +87,13 @@ export default function NavBar() {
       .then((res) => res.json())
       .then((data) => setUser(data.user))
       .catch(() => setUser(null));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/system/safety", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => setOutboundSendingEnabled(data.outboundSendingEnabled === true))
+      .catch(() => setOutboundSendingEnabled(false));
   }, []);
 
   useEffect(() => {
@@ -156,6 +165,13 @@ export default function NavBar() {
     </div>
   );
 
+  const safetyStatus = (
+    <div className={`pc-safety-status ${outboundSendingEnabled ? "is-live" : ""}`}>
+      <LockKeyhole aria-hidden="true" />
+      <span>{outboundSendingEnabled ? "Live sends enabled" : "Draft only · sends off"}</span>
+    </div>
+  );
+
   return (
     <>
       <header className="pc-mobile-bar">
@@ -180,12 +196,14 @@ export default function NavBar() {
       <aside className="pc-sidebar" aria-label="Workspace navigation">
         <Link href="/" className="pc-sidebar-logo"><PrimeChampsMark /></Link>
         <p className="pc-sidebar-kicker">Partnership operations</p>
+        {safetyStatus}
         {navigation}
         {account}
       </aside>
 
       {mobileOpen && (
         <div className="pc-mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation">
+          {safetyStatus}
           {navigation}
           {account}
         </div>

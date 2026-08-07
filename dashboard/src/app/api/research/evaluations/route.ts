@@ -17,7 +17,7 @@ function benchmarkResult(snapshot: EvaluationSnapshot) {
   const fallbackScore = typeof snapshot.score === "number" ? snapshot.score : null;
   const score = breakdown ? calculateResearchScore(breakdown) : fallbackScore;
   if (score === null || !Number.isFinite(score) || score < 0 || score > 100) {
-    throw new Error("The benchmark snapshot needs a valid score or six-dimension score_breakdown");
+    throw new Error("This saved test case is incomplete. Add an overall score or every required score part.");
   }
   const disposition = resolveResearchDisposition({
     score,

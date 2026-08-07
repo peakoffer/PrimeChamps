@@ -88,7 +88,7 @@ export default function AnalyticsPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState("365d");
+  const [period, setPeriod] = useState("7d");
   const [sportFilter, setSportFilter] = useState<string>("");
   const [exporting, setExporting] = useState(false);
 
@@ -127,6 +127,14 @@ export default function AnalyticsPage() {
           timelineRes.json(),
           economicsRes.json(),
         ]);
+
+      const availableSports = (sportsData.sports || []).map((item: SportData) => item.sport);
+      if (sportFilter && !availableSports.includes(sportFilter)) {
+        // The selected sport has no records in the new date window. Clear the
+        // stale selection and let the effect immediately reload All Sports.
+        setSportFilter("");
+        return;
+      }
 
       setOverview(overviewData);
       setFunnel(funnelData.stages || []);
@@ -213,7 +221,7 @@ export default function AnalyticsPage() {
           <p className="pc-eyebrow">Performance intelligence</p>
           <h1 className="pc-page-title">Analytics</h1>
           <p className="pc-page-description">
-            Track non-historical pipeline cohorts, outreach, and signed-contract conversion
+            The few numbers that show whether sourcing and outreach are moving forward.
           </p>
         </div>
 
@@ -287,23 +295,21 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {economics && (
+      {economics && economics.signed_contracts > 0 && (
         <section className="relative overflow-hidden border border-brand-ink bg-brand-ink p-5 text-white">
           <span className="absolute inset-y-0 left-0 w-1 bg-brand-cyan" />
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="font-display text-2xl font-bold uppercase text-white">Contract economics</h2>
+              <h2 className="font-display text-2xl font-bold uppercase text-white">Signed deals</h2>
               <p className="text-sm text-white/60">{economics.definition}</p>
             </div>
-            <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.06em] text-brand-cyan">{economics.signed_contracts} signed contracts</p>
+            <p className="text-sm font-semibold text-brand-cyan">{economics.signed_contracts} signed</p>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {[
               ["Guaranteed", economics.guaranteed_value],
-              ["Projected revenue share", economics.projected_revenue_share_value],
               ["Projected total", economics.projected_contract_value],
               ["Actual revenue", economics.actual_revenue],
-              ["Average contract", economics.average_contract_value],
             ].map(([label, value]) => (
               <div key={String(label)} className="border border-white/15 bg-white/5 px-4 py-3">
                 <div className="font-mono text-[9px] uppercase tracking-[0.05em] text-white/45">{label}</div>
@@ -313,21 +319,7 @@ export default function AnalyticsPage() {
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-white/55">
-            Revenue realization: {(economics.realization_rate * 100).toFixed(1)}% of projected value recorded so far.
-          </p>
         </section>
-      )}
-
-      {overview?.cohort && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          <span className="font-semibold">Current analytics cohort:</span>{" "}
-          {overview.cohort.size} athletes
-          {overview.cohort.firstAddedAt && overview.cohort.lastAddedAt
-            ? ` added ${new Date(overview.cohort.firstAddedAt).toLocaleDateString()}–${new Date(overview.cohort.lastAddedAt).toLocaleDateString()}`
-            : ""}
-          . Historical records are excluded.
-        </div>
       )}
 
       {overview?.data_quality &&
@@ -346,38 +338,32 @@ export default function AnalyticsPage() {
         )}
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 border-l border-t border-brand-ink/15 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 border-l border-t border-brand-ink/15 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          title="Total in Pipeline"
-          value={overview?.total_in_pipeline || 0}
-          subtitle={`${overview?.total_athletes || 0} total athletes`}
+          title="Athletes added"
+          value={overview?.total_athletes || 0}
+          subtitle="In this view"
           color="blue"
         />
         <MetricCard
-          title="Signed Contract Rate"
-          value={`${((overview?.conversion_rate || 0) * 100).toFixed(1)}%`}
-          subtitle="Cohort → signed contract"
+          title="Response rate"
+          value={`${((overview?.response_rate || 0) * 100).toFixed(1)}%`}
+          subtitle="Replies to sent outreach"
+          trend={overview?.week_over_week.responses}
+          trendLabel="vs last week"
           color="green"
         />
         <MetricCard
-          title="Avg. Days to Convert"
-          value={overview?.avg_days_to_conversion || 0}
-          subtitle="From first contact"
+          title="Signed deals"
+          value={economics?.signed_contracts || 0}
+          subtitle="Completed in this view"
           color="purple"
         />
         <MetricCard
-          title="Response Rate"
-          value={`${((overview?.response_rate || 0) * 100).toFixed(1)}%`}
-          trend={overview?.week_over_week.responses}
-          trendLabel="vs last week"
+          title="Avg. days to sign"
+          value={overview?.avg_days_to_conversion || 0}
+          subtitle="From first contact"
           color="orange"
-        />
-        <MetricCard
-          title="Athletes This Week"
-          value={overview?.this_week.athletes || 0}
-          trend={overview?.week_over_week.athletes}
-          trendLabel="vs last week"
-          color="gray"
         />
       </div>
 
@@ -388,38 +374,11 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Sport Breakdown + Template Performance */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={`grid grid-cols-1 gap-6 ${templates.some((template) => template.sent > 0) ? "lg:grid-cols-2" : ""}`}>
         <SportPieChart data={sports} />
-        <TemplatePerformanceTable templates={templates} />
-      </div>
-
-      {/* Stage Breakdown Cards */}
-      <div className="pc-surface p-6">
-        <h3 className="pc-section-heading mb-4">
-          Current Pipeline Positions
-        </h3>
-        <p className="-mt-2 mb-4 text-sm leading-6 text-gray-500">
-          Exclusive: each athlete appears once in the stage where they currently sit.
-          These counts are not expected to match cumulative progression above.
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
-          {Object.entries(overview?.by_stage || {}).map(([stage, count]) => (
-            <div
-              key={stage}
-              className={cn(
-                "p-4 rounded-lg text-center",
-                stage === "rejected"
-                  ? "bg-red-50 border border-red-200"
-                  : "bg-gray-50 border border-gray-200"
-              )}
-            >
-              <div className="text-2xl font-bold text-gray-900">{count}</div>
-              <div className="text-xs text-gray-600 mt-1 capitalize">
-                {stage.replace(/_/g, " ")}
-              </div>
-            </div>
-          ))}
-        </div>
+        {templates.some((template) => template.sent > 0) ? (
+          <TemplatePerformanceTable templates={templates} />
+        ) : null}
       </div>
     </div>
   );

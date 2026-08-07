@@ -7,6 +7,7 @@ import {
   type ApifyOnlyFansReverseLookup,
   type ApifyOnlyFansUsernameProfile,
 } from "@/lib/apify";
+import { isHighConfidenceTikTokMatch } from "@/lib/enrichment-identity";
 
 export const enrichmentSources = [
   "instagram",
@@ -195,7 +196,7 @@ async function discoverTikTokHandle(athlete: EnrichmentAthlete) {
   );
   for (const result of search.results) {
     const match = result.url.match(/tiktok\.com\/@([^/?#]+)/i);
-    if (match?.[1]) return match[1];
+    if (match?.[1] && isHighConfidenceTikTokMatch(athlete, result)) return match[1];
   }
 
   return null;
@@ -215,7 +216,7 @@ async function enrichTikTok(athlete: EnrichmentAthlete): Promise<EnrichmentProvi
     return {
       status: "not_found",
       data: {},
-      message: "No matching TikTok account was found in current Google results from Apify.",
+      message: "No identity-safe TikTok account was found. League, team, and other third-party accounts were ignored.",
     };
   }
 

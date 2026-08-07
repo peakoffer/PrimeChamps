@@ -131,6 +131,7 @@ export interface ResearchConfig {
   depth?: ResearchDepth;
   marketOverride?: string;
   customContext?: string; // e.g., "Winter Olympics 2026 hopefuls"
+  includeRecentGuidance?: boolean;
   followerMin: number;
   followerMax: number;
   resultCount: number;

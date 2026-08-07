@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth();
     const supabase = createAdminClient();
-    const period = new URL(request.url).searchParams.get("period") || "365d";
+    const period = new URL(request.url).searchParams.get("period") || "7d";
     const daysMatch = period.match(/^(\d+)d$/);
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - (daysMatch ? Number(daysMatch[1]) : 365));

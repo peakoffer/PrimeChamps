@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const user = await requireAuth();
     const supabase = createAdminClient();
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "365d";
+    const period = searchParams.get("period") || "7d";
     const sport = searchParams.get("sport");
 
     // Parse period (e.g., "30d", "7d", "90d")

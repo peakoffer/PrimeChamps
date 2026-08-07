@@ -52,26 +52,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Sport is required" }, { status: 400 });
     }
 
-    const { data: activeProfile, error: profileError } = await supabase
-      .from("research_profile_versions")
-      .select("id,version,name,compiled_profile")
-      .eq("organization_id", user.organizationId)
-      .eq("status", "active")
-      .maybeSingle();
+    const includeRecentGuidance = submitted.includeRecentGuidance !== false;
+    const { data: activeProfile, error: profileError } = includeRecentGuidance
+      ? await supabase
+          .from("research_profile_versions")
+          .select("id,version,name,compiled_profile")
+          .eq("organization_id", user.organizationId)
+          .eq("status", "active")
+          .maybeSingle()
+      : { data: null, error: null };
     if (profileError) throw profileError;
-    if (!activeProfile) {
+    if (includeRecentGuidance && !activeProfile) {
       return NextResponse.json(
-        { error: "No active recruiting thesis is available. Open Recruiting Thesis and publish one first." },
+        { error: "No approved weekly guidance is available. Publish it first or turn the guidance toggle off." },
         { status: 409 }
       );
     }
 
     const profile = {
       ...DEFAULT_RECRUITING_PROFILE,
-      ...(activeProfile.compiled_profile as Partial<RecruitingProfile>),
+      ...((activeProfile?.compiled_profile as Partial<RecruitingProfile> | undefined) || {}),
       parameters: {
         ...DEFAULT_RECRUITING_PROFILE.parameters,
-        ...((activeProfile.compiled_profile as Partial<RecruitingProfile>)?.parameters || {}),
+        ...((activeProfile?.compiled_profile as Partial<RecruitingProfile> | undefined)?.parameters || {}),
       },
     };
     const depth: ResearchDepth = submitted.depth === "extended" ? "extended" : "standard";
@@ -85,14 +88,15 @@ export async function POST(request: NextRequest) {
       depth,
       marketOverride: marketOverride || undefined,
       customContext: marketOverride || undefined,
+      includeRecentGuidance,
       followerMin: Math.max(0, Number(profile.parameters.follower_min) || 30_000),
       followerMax: Math.max(1, Number(profile.parameters.follower_max) || 500_000),
       resultCount: depth === "extended" ? 20 : 10,
       scoringModel: undefined,
       evaluationMode: false,
-      profileVersionId: activeProfile.id,
-      profileVersion: activeProfile.version,
-      profileName: activeProfile.name,
+      profileVersionId: activeProfile?.id,
+      profileVersion: activeProfile?.version,
+      profileName: activeProfile?.name || "Prime Champs baseline",
       profileSnapshot: profile,
     };
 
@@ -108,7 +112,7 @@ export async function POST(request: NextRequest) {
       .insert({
         organization_id: user.organizationId,
         requested_by_user_id: user.id,
-        profile_version_id: activeProfile.id,
+        profile_version_id: activeProfile?.id || null,
         research_depth: depth,
         status: "queued",
         phase: "queued",
@@ -121,11 +125,12 @@ export async function POST(request: NextRequest) {
           partnershipGoal: config.partnershipGoal,
           objectiveProfile: ONLYFANS_CREATOR_PROFILE,
           customContext: config.customContext,
-          recruitingThesis: {
+          recruitingThesis: activeProfile ? {
             id: activeProfile.id,
             version: activeProfile.version,
             name: activeProfile.name,
-          },
+          } : null,
+          recentGuidanceIncluded: includeRecentGuidance,
           safety: "draft-only; no outreach is sent by research",
           toolchain: [
             { step: "Discovery", provider: "Perplexity Search", purpose: "Raw ranked, source-linked candidate discovery" },
