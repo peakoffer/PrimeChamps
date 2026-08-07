@@ -1,10 +1,31 @@
 import type { Metadata } from "next";
+import { Barlow_Condensed, IBM_Plex_Mono, Manrope } from "next/font/google";
 import "./globals.css";
-import NavBar from "@/components/NavBar";
+import { WorkspaceShell } from "@/components/WorkspaceShell";
+
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-pc-body",
+  display: "swap",
+});
+
+const barlowCondensed = Barlow_Condensed({
+  subsets: ["latin"],
+  variable: "--font-pc-display",
+  weight: ["600", "700"],
+  display: "swap",
+});
+
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  variable: "--font-pc-mono",
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Prime Champs Dashboard",
-  description: "Athlete outreach management system",
+  title: "Prime Champs CRM",
+  description: "Athlete research, partnerships, and outreach operations",
 };
 
 export default function RootLayout({
@@ -14,13 +35,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">
-        <div className="min-h-screen bg-gray-50">
-          <NavBar />
-          <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-            {children}
-          </main>
-        </div>
+      <body className={`${manrope.variable} ${barlowCondensed.variable} ${ibmPlexMono.variable} antialiased`}>
+        <WorkspaceShell>{children}</WorkspaceShell>
       </body>
     </html>
   );

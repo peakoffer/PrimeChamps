@@ -181,7 +181,7 @@ export default function ContractStagePage() {
                 to sign contracts
               </p>
             </div>
-            <div className="text-5xl">🏆</div>
+            <div className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Closed partnerships</div>
           </div>
         </div>
       )}

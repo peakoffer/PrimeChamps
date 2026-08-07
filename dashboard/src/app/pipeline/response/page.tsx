@@ -84,7 +84,7 @@ export default function ResponseStagePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-3xl">💬</span> Response Tracking
+            Response tracking
           </h1>
           <p className="text-gray-600">Monitor and categorize responses from outreach</p>
         </div>
@@ -136,7 +136,7 @@ export default function ResponseStagePage() {
       {/* Athletes List */}
       {athletes.length === 0 ? (
         <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="text-4xl mb-3">💬</div>
+          <div className="mb-3 font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Inbox clear</div>
           <h3 className="font-semibold text-gray-800 mb-2">No Prospects Awaiting Response</h3>
           <p className="text-sm text-gray-800">
             Send outreach messages to prospects to track their responses here.

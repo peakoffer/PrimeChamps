@@ -44,13 +44,13 @@ type SyncResult = {
 };
 
 const statusStyles: Record<ProviderStatus, string> = {
-  operational: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  connected: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  ready: "bg-blue-50 text-blue-700 border-blue-200",
-  partial: "bg-amber-50 text-amber-700 border-amber-200",
-  missing: "bg-red-50 text-red-700 border-red-200",
-  manual: "bg-violet-50 text-violet-700 border-violet-200",
-  planned: "bg-slate-100 text-slate-700 border-slate-200",
+  operational: "border-brand-cyan/40 bg-brand-cyan/10 text-brand-ink",
+  connected: "border-brand-cyan/40 bg-brand-cyan/10 text-brand-ink",
+  ready: "border-brand-blue/30 bg-brand-blue/5 text-brand-blue",
+  partial: "border-amber-300 bg-amber-50 text-amber-800",
+  missing: "border-brand-coral/30 bg-brand-coral/5 text-brand-coral",
+  manual: "border-brand-chrome bg-brand-paper text-brand-ink",
+  planned: "border-brand-chrome bg-brand-paper text-brand-muted",
 };
 
 const statusLabels: Record<ProviderStatus, string> = {
@@ -80,14 +80,14 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
       : statusLabels[provider.status];
 
   return (
-    <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <article className="pc-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="font-semibold text-gray-950">{provider.name}</h3>
-          <p className="mt-1 text-sm leading-6 text-gray-600">{provider.description}</p>
+          <h3 className="font-display text-xl font-semibold uppercase tracking-wide text-brand-ink">{provider.name}</h3>
+          <p className="mt-1 text-sm leading-6 text-brand-muted">{provider.description}</p>
         </div>
         <span
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${statusStyles[provider.status]}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] ${statusStyles[provider.status]}`}
         >
           <StatusIcon status={provider.status} />
           {statusLabel}
@@ -98,7 +98,7 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
         {provider.capabilities.map((capability) => (
           <span
             key={capability}
-            className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700"
+            className="border border-brand-chrome bg-brand-paper px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-brand-muted"
           >
             {capability}
           </span>
@@ -106,7 +106,7 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
       </div>
 
       {provider.connectedAccounts > 0 && (
-        <p className="mt-4 text-sm font-medium text-emerald-700">
+        <p className="mt-4 text-sm font-semibold text-brand-blue">
           {provider.connectedAccounts} connected account
           {provider.connectedAccounts === 1 ? "" : "s"}
         </p>
@@ -115,8 +115,8 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
       {provider.evidence.length > 0 && (
         <div className="mt-4 space-y-1.5">
           {provider.evidence.map((item) => (
-            <p key={item} className="flex items-start gap-2 text-xs leading-5 text-gray-600">
-              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <p key={item} className="flex items-start gap-2 text-xs leading-5 text-brand-muted">
+              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" />
               {item}
             </p>
           ))}
@@ -126,7 +126,7 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
       {provider.connectPath && provider.connectedAccounts === 0 && (
         <a
           href={provider.connectPath}
-          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gray-950 px-3.5 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          className="pc-button pc-button-primary mt-4"
         >
           <Link2 className="h-4 w-4" />
           Connect {provider.name}
@@ -136,33 +136,33 @@ function ProviderCard({ provider }: { provider: ProviderHealthItem }) {
       {provider.connectPath && provider.connectedAccounts > 0 && (
         <a
           href="#connected-accounts"
-          className="mt-4 inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="pc-button pc-button-secondary mt-4"
         >
-          <ShieldCheck className="h-4 w-4 text-emerald-600" />
+          <ShieldCheck className="h-4 w-4 text-brand-blue" />
           Manage connected account
         </a>
       )}
 
       {provider.missingVariables.length > 0 && (
-        <div className="mt-4 rounded-lg bg-gray-50 p-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        <div className="mt-4 border border-brand-chrome bg-brand-paper p-3">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-muted">
             Server variables needed
           </p>
-          <p className="mt-1 break-words font-mono text-xs text-gray-700">
+          <p className="mt-1 break-words font-mono text-xs text-brand-ink">
             {provider.missingVariables.join(" · ")}
           </p>
         </div>
       )}
 
       {provider.note && (
-        <p className="mt-4 border-l-2 border-amber-300 pl-3 text-xs leading-5 text-gray-600">
+        <p className="mt-4 border-l-2 border-amber-400 pl-3 text-xs leading-5 text-brand-muted">
           {provider.note}
         </p>
       )}
 
 
       {provider.nextAction && (
-        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-xs leading-5 text-blue-950">
+        <div className="mt-4 border border-brand-blue/20 bg-brand-blue/5 p-3 text-xs leading-5 text-brand-ink">
           <span className="font-semibold">Next:</span> {provider.nextAction}
         </div>
       )}
@@ -270,10 +270,11 @@ function ConnectionsPageContent() {
 
   return (
     <div className="space-y-8 pb-12">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <header className="pc-page-header flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between md:p-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-950">Connections</h1>
-          <p className="mt-1 max-w-3xl text-gray-600">
+          <p className="pc-eyebrow">Workspace infrastructure</p>
+          <h1 className="pc-page-title mt-3">Connections</h1>
+          <p className="pc-page-description mt-3">
             One place to see the accounts and data providers that power research,
             enrichment, drafting, sending, and inbox sync.
           </p>
@@ -285,32 +286,32 @@ function ConnectionsPageContent() {
             void loadHealth();
           }}
           disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          className="pc-button pc-button-secondary"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           Refresh status
         </button>
-      </div>
+      </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+      <div className="grid gap-px border border-brand-chrome bg-brand-chrome md:grid-cols-2">
+        <div className="bg-brand-ink p-5 text-white">
           <div className="flex gap-3">
-            <ShieldCheck className="mt-0.5 h-5 w-5 text-blue-700" />
+            <ShieldCheck className="mt-0.5 h-5 w-5 text-brand-cyan" />
             <div>
-              <h2 className="font-semibold text-blue-950">Credentials stay server-side</h2>
-              <p className="mt-1 text-sm leading-6 text-blue-900/75">
+              <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Credentials stay server-side</h2>
+              <p className="mt-1 text-sm leading-6 text-brand-chrome">
                 OAuth tokens are designed to be encrypted before storage. This screen only
                 reports configuration state and never returns secret values.
               </p>
             </div>
           </div>
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="bg-white p-5">
           <div className="flex gap-3">
-            <Database className="mt-0.5 h-5 w-5 text-gray-700" />
+            <Database className="mt-0.5 h-5 w-5 text-brand-blue" />
             <div>
-              <h2 className="font-semibold text-gray-950">Unified conversation model</h2>
-              <p className="mt-1 text-sm leading-6 text-gray-600">
+              <h2 className="font-display text-lg font-semibold uppercase tracking-wide text-brand-ink">Unified conversation model</h2>
+              <p className="mt-1 text-sm leading-6 text-brand-muted">
                 Email, Instagram, LinkedIn-assisted outreach, drafts, and replies share one
                 provider-neutral inbox foundation.
               </p>
@@ -351,8 +352,10 @@ function ConnectionsPageContent() {
       )}
 
       {loading && !health && (
-        <div className="flex h-48 items-center justify-center text-gray-600">
-          <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading connections…
+        <div className="grid gap-4 lg:grid-cols-2" aria-label="Loading connections">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="pc-surface h-48 animate-pulse bg-white" />
+          ))}
         </div>
       )}
 
@@ -365,10 +368,11 @@ function ConnectionsPageContent() {
             </div>
           )}
 
-          <section id="connected-accounts" className="scroll-mt-6 space-y-3">
+          <section id="connected-accounts" className="scroll-mt-6 space-y-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-950">{health.currentUserName}&apos;s connected accounts</h2>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="pc-eyebrow text-brand-blue">Personal workspace</p>
+              <h2 className="mt-2 font-display text-2xl font-bold uppercase tracking-wide text-brand-ink">{health.currentUserName}&apos;s connected accounts</h2>
+              <p className="mt-1 text-sm text-brand-muted">
                 These identities belong to your user. Teammates connect their own accounts
                 after accepting an invitation.
               </p>
@@ -378,22 +382,22 @@ function ConnectionsPageContent() {
                 {health.accounts.map((account) => (
                   <article
                     key={account.id}
-                    className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                    className="pc-surface p-5"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex min-w-0 gap-3">
-                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center bg-brand-cyan text-brand-ink">
                           <UserRound className="h-5 w-5" />
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate font-semibold text-slate-950">{account.label}</p>
-                          <p className="truncate text-sm text-slate-500">
+                          <p className="truncate font-semibold text-brand-ink">{account.label}</p>
+                          <p className="truncate text-sm text-brand-muted">
                             {account.email || (account.username ? `@${account.username}` : account.provider)}
                           </p>
-                          <p className="mt-1 text-xs text-slate-400">Owned by {account.ownerName}</p>
+                          <p className="mt-1 font-mono text-[10px] uppercase tracking-wide text-brand-muted">Owned by {account.ownerName}</p>
                         </div>
                       </div>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${account.status === "connected" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                      <span className={`border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${account.status === "connected" ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-ink" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
                         {account.status.replaceAll("_", " ")}
                       </span>
                     </div>
@@ -414,7 +418,7 @@ function ConnectionsPageContent() {
                     ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
                       {(account.provider === "outlook" || account.provider === "instagram") && account.status !== "disconnected" ? (
-                        <button type="button" disabled={busyAccountId === account.id || Boolean(account.lastSyncStartedAt)} onClick={() => void accountAction(account.id, "sync")} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                        <button type="button" disabled={busyAccountId === account.id || Boolean(account.lastSyncStartedAt)} onClick={() => void accountAction(account.id, "sync")} className="pc-button pc-button-secondary">
                           <RefreshCw className={`h-4 w-4 ${busyAccountId === account.id || account.lastSyncStartedAt ? "animate-spin" : ""}`} />
                           {account.lastSyncStartedAt ? "Syncing" : "Sync now"}
                         </button>
@@ -422,14 +426,14 @@ function ConnectionsPageContent() {
                       {(account.provider === "outlook" || account.provider === "instagram") && account.status !== "disconnected" ? (
                         <a
                           href={`/api/providers/${account.provider}/connect`}
-                          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                          className="pc-button pc-button-primary"
                         >
                           <Link2 className="h-4 w-4" />
                           Reconnect {account.provider === "instagram" ? "Instagram" : "Microsoft"}
                         </a>
                       ) : null}
                       {account.status !== "disconnected" ? (
-                        <button type="button" disabled={busyAccountId === account.id} onClick={() => void accountAction(account.id, "disconnect")} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
+                        <button type="button" disabled={busyAccountId === account.id} onClick={() => void accountAction(account.id, "disconnect")} className="inline-flex min-h-10 items-center gap-2 border border-brand-coral/30 bg-white px-4 font-mono text-[10px] font-bold uppercase tracking-wide text-brand-coral hover:bg-brand-coral/5 disabled:opacity-50">
                           <Unplug className="h-4 w-4" />Disconnect
                         </button>
                       ) : null}
@@ -438,7 +442,7 @@ function ConnectionsPageContent() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-600">
+              <div className="border border-dashed border-brand-chrome bg-white px-5 py-8 text-sm text-brand-muted">
                 No personal messaging accounts are connected yet. Configure the provider
                 variables below, then connect your Microsoft mailbox first.
               </div>
@@ -451,7 +455,7 @@ function ConnectionsPageContent() {
 
             return (
               <section key={category} className="space-y-3">
-                <h2 className="text-lg font-semibold text-gray-950">{categoryLabels[category]}</h2>
+                <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-brand-ink">{categoryLabels[category]}</h2>
                 <div className="grid gap-4 lg:grid-cols-2">
                   {providers.map((provider) => (
                     <ProviderCard key={provider.id} provider={provider} />
@@ -470,8 +474,10 @@ export default function ConnectionsPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-48 items-center justify-center text-gray-600">
-          <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading connections…
+        <div className="grid gap-4 lg:grid-cols-2" aria-label="Loading connections">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="pc-surface h-48 animate-pulse bg-white" />
+          ))}
         </div>
       }
     >

@@ -64,12 +64,12 @@ interface PipelineColumn {
 }
 
 const STAGES = [
-  { id: "research", name: "Research", description: "Run audits and held candidates", color: "border-purple-500", bgColor: "bg-purple-50", icon: "🔍", href: "/pipeline/research" },
-  { id: "approval", name: "Approval", description: "Pending review", color: "border-blue-500", bgColor: "bg-blue-50", icon: "✅", href: "/pipeline/approval" },
-  { id: "reach_out", name: "Reach Out", description: "Ready to contact", color: "border-cyan-500", bgColor: "bg-cyan-50", icon: "📤", href: "/pipeline/reach-out" },
-  { id: "response", name: "Response", description: "Awaiting reply", color: "border-yellow-500", bgColor: "bg-yellow-50", icon: "💬", href: "/pipeline/response" },
-  { id: "appointment", name: "Appointment", description: "Meeting scheduled", color: "border-orange-500", bgColor: "bg-orange-50", icon: "📅", href: "/pipeline/appointment" },
-  { id: "contract", name: "Contract", description: "Deal secured", color: "border-green-500", bgColor: "bg-green-50", icon: "🎉", href: "/pipeline/contract" },
+  { id: "research", name: "Research", description: "Audits and held candidates", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "01", href: "/pipeline/research" },
+  { id: "approval", name: "Approval", description: "Pending review", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "02", href: "/pipeline/approval" },
+  { id: "reach_out", name: "Reach Out", description: "Ready to contact", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "03", href: "/pipeline/reach-out" },
+  { id: "response", name: "Response", description: "Awaiting reply", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "04", href: "/pipeline/response" },
+  { id: "appointment", name: "Appointment", description: "Meeting scheduled", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "05", href: "/pipeline/appointment" },
+  { id: "contract", name: "Contract", description: "Deal secured", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "06", href: "/pipeline/contract" },
 ];
 
 export default function PipelinePage() {
@@ -450,8 +450,14 @@ export default function PipelinePage() {
   const totalProspects = columns.reduce((sum, col) => sum + col.athletes.length, 0);
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading pipeline...</div>
+      <div className="space-y-5" aria-label="Loading pipeline">
+        <div className="h-44 animate-pulse bg-brand-ink" />
+        <div className="grid grid-cols-2 gap-px border border-brand-chrome bg-brand-chrome md:grid-cols-6">
+          {STAGES.map((stage) => <div key={stage.id} className="h-24 animate-pulse bg-white" />)}
+        </div>
+        <div className="grid grid-cols-2 gap-4 overflow-hidden lg:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => <div key={item} className="pc-surface h-72 animate-pulse" />)}
+        </div>
       </div>
     );
   }
@@ -459,17 +465,18 @@ export default function PipelinePage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <header className="pc-page-header bg-brand-ink p-6 text-white md:p-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Sales Pipeline</h1>
-          <p className="text-gray-800 mt-1">
-            {totalProspects} active prospects • {selectionMode ? "Click cards to select" : "Drag cards forward one stage at a time"}
+          <p className="pc-eyebrow !text-brand-cyan">Partnership operations</p>
+          <h1 className="!text-white">Pipeline</h1>
+          <p className="mt-3 max-w-2xl text-sm text-brand-chrome">
+            {totalProspects} active prospects · {selectionMode ? "Click cards to select" : "Move qualified athletes forward one stage at a time"}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowImportModal(true)}
-            className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1"
+            className="pc-button-secondary"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -478,7 +485,7 @@ export default function PipelinePage() {
           </button>
           <button
             onClick={handleExport}
-            className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1"
+            className="pc-button-secondary"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -493,16 +500,16 @@ export default function PipelinePage() {
                 setSelectionMode(true);
               }
             }}
-            className={`px-3 py-1.5 text-sm rounded-lg flex items-center gap-1 ${
+            className={`pc-button-secondary ${
               selectionMode
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                ? "!border-brand-cyan !bg-brand-cyan !text-brand-ink"
+                : ""
             }`}
           >
             {selectionMode ? (
               <>
                 <span>Exit Selection</span>
-                {selectedIds.size > 0 && <span className="bg-white/20 px-1.5 rounded">{selectedIds.size}</span>}
+                {selectedIds.size > 0 && <span className="border-l border-brand-ink/20 pl-2">{selectedIds.size}</span>}
               </>
             ) : (
               <>
@@ -515,41 +522,38 @@ export default function PipelinePage() {
           </button>
           <button
             onClick={fetchPipeline}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="min-h-10 px-3 font-mono text-[10px] font-bold uppercase tracking-wide text-brand-cyan hover:text-white"
           >
             Refresh
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Funnel Overview */}
-      <div className="bg-white shadow rounded-lg p-4">
-        <div className="flex items-center justify-between">
+      <div className="grid grid-cols-2 gap-px border border-brand-chrome bg-brand-chrome md:grid-cols-3 xl:grid-cols-6">
           {columns.map((col, index) => {
             const count = col.athletes.length;
             return (
-              <div key={col.id} className="flex items-center">
-                <Link href={col.href} className="text-center group">
-                  <div className={`w-16 h-16 rounded-lg ${col.bgColor} border-2 ${col.color} flex items-center justify-center transition-transform group-hover:scale-105 group-hover:shadow-md cursor-pointer`}>
-                    <div>
-                      <div className="text-xl font-bold text-gray-900">{count}</div>
-                    </div>
+              <div key={col.id} className="relative bg-white">
+                <Link href={col.href} className="group block p-4 hover:bg-brand-cyan/10">
+                  <div className="flex items-start justify-between">
+                    <span className="font-mono text-[10px] font-bold tracking-wide text-brand-blue">{col.icon}</span>
+                    <span className="font-display text-3xl font-bold leading-none text-brand-ink">{count}</span>
                   </div>
-                  <div className="text-xs font-medium text-gray-800 mt-1 group-hover:text-gray-900">{col.name}</div>
+                  <div className="mt-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-brand-muted group-hover:text-brand-ink">{col.name}</div>
                 </Link>
                 {index < columns.length - 1 && (
-                  <div className="mx-2 text-gray-700 text-xl">→</div>
+                  <div className="absolute -right-2 top-1/2 z-10 hidden h-4 w-4 -translate-y-1/2 place-items-center bg-brand-cyan font-mono text-[9px] text-brand-ink xl:grid">→</div>
                 )}
               </div>
             );
           })}
-        </div>
       </div>
 
       {/* Stage Conversion */}
       {totalProspects > 0 && (
-        <div className="bg-white shadow rounded-lg p-4">
-          <div className="flex items-center justify-between">
+        <div className="pc-surface overflow-x-auto p-4">
+          <div className="flex min-w-[720px] items-center justify-between">
             {columns.slice(1, -1).map((col, index) => {
               const nextCol = columns[index + 2];
               const currentCount = col.athletes.length;
@@ -560,12 +564,10 @@ export default function PipelinePage() {
               return (
                 <div key={col.id} className="flex items-center">
                   <div className="text-center px-2">
-                    <div className={`text-lg font-bold ${
-                      rate >= 50 ? "text-green-600" : rate >= 25 ? "text-yellow-600" : "text-gray-500"
-                    }`}>
+                    <div className="font-display text-2xl font-bold text-brand-ink">
                       {rate}%
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="font-mono text-[9px] uppercase tracking-wide text-brand-muted">
                       {col.name} → {nextCol.name}
                     </div>
                   </div>
@@ -581,16 +583,16 @@ export default function PipelinePage() {
 
       {/* Empty State */}
       {totalProspects === 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
-          <div className="text-4xl mb-3">🔍</div>
-          <h3 className="font-semibold text-yellow-800 mb-2">No Prospects Yet</h3>
-          <p className="text-sm text-yellow-700 max-w-md mx-auto">
+        <div className="border border-dashed border-brand-chrome bg-white p-10 text-center">
+          <p className="pc-eyebrow mx-auto w-max text-brand-blue">Ready for discovery</p>
+          <h3 className="mb-2 mt-3 font-display text-3xl font-bold uppercase text-brand-ink">No prospects yet</h3>
+          <p className="mx-auto max-w-md text-sm text-brand-muted">
             Your pipeline is empty because all existing athletes are historical success stories.
             Run the Research Agent to discover new prospects that will appear here.
           </p>
           <Link
             href="/pipeline/research"
-            className="inline-block mt-4 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm"
+            className="pc-button-primary mt-5"
           >
             Run Research Agent
           </Link>
@@ -598,7 +600,7 @@ export default function PipelinePage() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex gap-4 overflow-x-auto pb-4">
+      <div className="flex gap-3 overflow-x-auto pb-4">
         {columns.map((column) => {
           const isResearchColumn = column.id === "research";
           const itemCount = isResearchColumn
@@ -610,19 +612,19 @@ export default function PipelinePage() {
           const isActiveDropZone = dragOverColumn === column.id;
 
           // Column border styling based on drag state
-          let columnBorderClass = "border-gray-200 bg-gray-50";
+          let columnBorderClass = "border-brand-chrome bg-brand-paper";
           if (draggedAthlete) {
             if (isActiveDropZone && isValidDropTarget) {
-              columnBorderClass = "border-green-400 bg-green-50 ring-2 ring-green-200";
+              columnBorderClass = "border-brand-blue bg-brand-cyan/10 ring-2 ring-brand-cyan/30";
             } else if (isValidDropTarget) {
-              columnBorderClass = "border-green-300 bg-green-50/50";
+              columnBorderClass = "border-brand-cyan bg-brand-cyan/5";
             }
           }
 
           return (
           <div
             key={column.id}
-            className={`flex-shrink-0 w-72 rounded-lg border-2 ${columnBorderClass} transition-colors`}
+            className={`w-72 flex-shrink-0 border ${columnBorderClass} transition-colors`}
             onDragOver={(e) => !isResearchColumn && handleDragOver(e, column.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => !isResearchColumn && handleDrop(e, column.id)}
@@ -630,20 +632,20 @@ export default function PipelinePage() {
             {/* Column Header */}
             <Link
               href={column.href}
-              className={`block p-3 border-b-2 ${column.color} ${column.bgColor} rounded-t-lg hover:opacity-90 transition-opacity`}
+              className={`block border-b-2 p-3 text-white ${column.color} ${column.bgColor} transition-colors hover:bg-brand-raised`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">{column.icon}</span>
-                  <span className="font-semibold text-gray-800">{column.name}</span>
+                  <span className="font-mono text-[10px] font-bold text-brand-cyan">{column.icon}</span>
+                  <span className="font-display text-lg font-semibold uppercase tracking-wide text-white">{column.name}</span>
                 </div>
-                <span className="bg-white px-2 py-0.5 rounded-full text-sm font-medium text-gray-800">
+                <span className="border border-white/20 px-2 py-0.5 font-mono text-xs font-medium text-white">
                   {itemCount}
                 </span>
               </div>
-              <p className="text-xs text-gray-800 mt-1">{column.description}</p>
+              <p className="mt-1 text-xs text-brand-chrome">{column.description}</p>
               {isResearchColumn && (
-                <p className="mt-1 text-[11px] text-purple-800">
+                <p className="mt-1 font-mono text-[10px] text-brand-cyan">
                   {column.athletes.length} held · {column.researchSessions?.length || 0} recent runs
                 </p>
               )}
@@ -670,10 +672,10 @@ export default function PipelinePage() {
                           type="button"
                           onClick={() => toggleSessionExpand(session.id)}
                           onDoubleClick={() => handleSessionDoubleClick(session.id)}
-                          className={`w-full bg-white rounded-lg shadow-sm border p-3 text-left cursor-pointer transition-all ${
+                          className={`w-full cursor-pointer border bg-white p-3 text-left transition-all ${
                             isExpanded
-                              ? "border-purple-400 bg-purple-50 ring-1 ring-purple-200"
-                              : "hover:shadow-md hover:border-purple-300"
+                              ? "border-brand-blue bg-brand-cyan/10 ring-1 ring-brand-cyan/30"
+                              : "border-brand-chrome hover:border-brand-blue"
                           }`}
                         >
                           <div className="flex items-center gap-2">
@@ -686,9 +688,9 @@ export default function PipelinePage() {
                             >
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                             </svg>
-                            <span className={`w-2 h-2 rounded-full ${
-                              session.status === "completed" ? "bg-green-500" :
-                              session.status === "running" ? "bg-yellow-500 animate-pulse" :
+                            <span className={`h-2 w-2 ${
+                              session.status === "completed" ? "bg-brand-cyan" :
+                              session.status === "running" ? "animate-pulse bg-amber-500" :
                               "bg-gray-400"
                             }`} />
                             <span className="font-medium text-gray-900 text-sm capitalize flex-1">
@@ -711,7 +713,7 @@ export default function PipelinePage() {
                         {/* Expanded candidate audit. Held Research candidates can
                             be dragged one lane forward into Approval. */}
                         {isExpanded && (
-                          <div className="ml-4 space-y-1 border-l-2 border-purple-200 pl-2">
+                          <div className="ml-4 space-y-1 border-l-2 border-brand-cyan pl-2">
                             {isLoading ? (
                               <div className="text-xs text-gray-500 py-2 text-center">Loading athletes...</div>
                             ) : athletes.length === 0 ? (
@@ -724,7 +726,7 @@ export default function PipelinePage() {
                                   draggable={!selectionMode && athlete.can_move === true}
                                   onDragStart={(event) => athlete.can_move && handleDragStart(event, athlete)}
                                   onClick={() => athlete.persisted && router.push(`/athletes/${athlete.id}`)}
-                                  className={`bg-white rounded-lg shadow-sm border p-2 transition-all hover:shadow-md hover:border-purple-300 ${
+                                  className={`border border-brand-chrome bg-white p-2 transition-all hover:border-brand-blue ${
                                     athlete.persisted ? "cursor-pointer" : "cursor-default"
                                   } ${athlete.can_move ? "cursor-grab active:cursor-grabbing" : ""} ${
                                     draggedAthlete?.id === athlete.id ? "opacity-50" : ""
@@ -744,7 +746,7 @@ export default function PipelinePage() {
                                     {/* Key Metrics */}
                                     <div className="flex items-center gap-2 text-xs flex-shrink-0">
                                       {typeof athlete.research_score === "number" && (
-                                        <span className="rounded bg-purple-100 px-1.5 py-0.5 font-semibold text-purple-700">
+                                        <span className="bg-brand-ink px-1.5 py-0.5 font-semibold text-brand-cyan">
                                           {athlete.research_score}
                                         </span>
                                       )}
@@ -756,14 +758,14 @@ export default function PipelinePage() {
                                         </span>
                                       )}
                                       {(athlete as Athlete & { engagement_rate?: number }).engagement_rate && (
-                                        <span className="text-green-600 font-medium">
+                                        <span className="font-medium text-brand-blue">
                                           {((athlete as Athlete & { engagement_rate?: number }).engagement_rate! * 100).toFixed(1)}%
                                         </span>
                                       )}
                                     </div>
                                   </div>
                                   <div className="mt-2 flex items-center justify-between gap-2 border-t pt-1.5 text-[11px]">
-                                    <span className={`rounded-full px-2 py-0.5 font-medium ${
+                                    <span className={`border px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide ${
                                       athlete.pipeline_stage === "approval"
                                         ? "bg-blue-100 text-blue-700"
                                         : athlete.disposition === "blocked"
@@ -782,7 +784,7 @@ export default function PipelinePage() {
                                             ? "Held in Research"
                                             : athlete.pipeline_stage.replaceAll("_", " ")}
                                     </span>
-                                    {athlete.can_move && <span className="text-purple-700">Drag → Approval</span>}
+                                    {athlete.can_move && <span className="font-mono text-[9px] font-semibold uppercase text-brand-blue">Drag → Approval</span>}
                                   </div>
                                 </div>
                               ))
@@ -814,10 +816,10 @@ export default function PipelinePage() {
                             router.push(`/athletes/${athlete.id}`);
                           }
                         }}
-                        className={`bg-white rounded-lg shadow-sm border p-3 cursor-pointer transition-all ${
+                        className={`cursor-pointer border bg-white p-3 transition-all ${
                           isSelected
                             ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
-                            : "hover:shadow-md hover:border-blue-300"
+                            : "border-brand-chrome hover:border-brand-blue"
                         } ${draggedAthlete?.id === athlete.id ? "opacity-50 cursor-grabbing" : ""}`}
                       >
                         <div className="flex items-center gap-3">
@@ -855,7 +857,7 @@ export default function PipelinePage() {
                           <div className="mt-3 pt-2 border-t flex gap-2">
                             <button
                               onClick={(e) => openApproveModal(athlete, e)}
-                              className="flex-1 py-1.5 px-2 text-xs font-medium bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+                              className="flex-1 bg-brand-cyan px-2 py-1.5 font-mono text-[9px] font-bold uppercase tracking-wide text-brand-ink transition-colors hover:bg-[#7aedf3]"
                             >
                               Approve
                             </button>

@@ -175,8 +175,8 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   await page.goto("/pipeline/research");
   await expect(page.getByText("Research quality gate")).toBeVisible();
   await expect(page.getByText("100% passing")).toBeVisible();
-  await page.getByRole("button", { name: /Run Research Agent/ }).click();
-  await page.getByRole("button", { name: "🔬 Start Research" }).click();
+  await page.getByRole("button", { name: /Run research agent/i }).click();
+  await page.getByRole("button", { name: "Start research", exact: true }).last().click();
   await expect(page.getByText("Research running in background")).toBeVisible();
   await expect(page.getByText(/Research queued safely/)).toBeVisible();
 
@@ -269,7 +269,7 @@ test("completed research notifications open the exact run audit", async ({ page 
   await page.goto("/notifications");
   await page.getByRole("button", { name: /Research Complete.*Gymnastics research finished/ }).click();
   await expect(page).toHaveURL("/pipeline/research?session=run-e2e-1");
-  await expect(page.getByRole("heading", { name: "🔍 Research" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Research", exact: true })).toBeVisible();
 });
 
 test("research run expansion only makes safe candidates movable", async ({ page }) => {

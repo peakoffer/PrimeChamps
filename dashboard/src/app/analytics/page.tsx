@@ -174,10 +174,14 @@ export default function AnalyticsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex items-center gap-3 text-gray-600">
-          <RefreshCw className="h-5 w-5 animate-spin" />
-          <span>Loading analytics...</span>
+      <div className="space-y-6" aria-label="Loading analytics">
+        <div className="h-20 w-2/3 animate-pulse bg-brand-ink/8" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          {[0, 1, 2, 3, 4].map((item) => <div key={item} className="h-32 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />)}
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="h-80 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />
+          <div className="h-80 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />
         </div>
       </div>
     );
@@ -204,10 +208,11 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
-          <p className="text-gray-600 mt-1">
+          <p className="pc-eyebrow">Performance intelligence</p>
+          <h1 className="pc-page-title">Analytics</h1>
+          <p className="pc-page-description">
             Track non-historical pipeline cohorts, outreach, and signed-contract conversion
           </p>
         </div>
@@ -238,8 +243,7 @@ export default function AnalyticsPage() {
             <button
               disabled={exporting}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg",
-                "text-sm text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500",
+                "pc-button-secondary",
                 exporting && "opacity-50 cursor-not-allowed"
               )}
             >
@@ -249,18 +253,21 @@ export default function AnalyticsPage() {
             <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
               <div className="py-1">
                 <button
+                  aria-label="Export athletes as CSV"
                   onClick={() => handleExport("athletes")}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Export Athletes (CSV)
                 </button>
                 <button
+                  aria-label="Export messages as CSV"
                   onClick={() => handleExport("messages")}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Export Messages (CSV)
                 </button>
                 <button
+                  aria-label="Export funnel as CSV"
                   onClick={() => handleExport("funnel")}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
                 >
@@ -272,7 +279,7 @@ export default function AnalyticsPage() {
 
           <button
             onClick={fetchData}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="pc-button-primary"
           >
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -281,13 +288,14 @@ export default function AnalyticsPage() {
       </div>
 
       {economics && (
-        <section className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-5">
+        <section className="relative overflow-hidden border border-brand-ink bg-brand-ink p-5 text-white">
+          <span className="absolute inset-y-0 left-0 w-1 bg-brand-cyan" />
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-emerald-950">Contract economics</h2>
-              <p className="text-sm text-emerald-800">{economics.definition}</p>
+              <h2 className="font-display text-2xl font-bold uppercase text-white">Contract economics</h2>
+              <p className="text-sm text-white/60">{economics.definition}</p>
             </div>
-            <p className="text-xs font-medium text-emerald-800">{economics.signed_contracts} signed contracts</p>
+            <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.06em] text-brand-cyan">{economics.signed_contracts} signed contracts</p>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
             {[
@@ -297,15 +305,15 @@ export default function AnalyticsPage() {
               ["Actual revenue", economics.actual_revenue],
               ["Average contract", economics.average_contract_value],
             ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-lg border border-emerald-100 bg-white px-4 py-3">
-                <div className="text-xs text-slate-500">{label}</div>
-                <div className="mt-1 text-xl font-semibold text-slate-950">
+              <div key={String(label)} className="border border-white/15 bg-white/5 px-4 py-3">
+                <div className="font-mono text-[9px] uppercase tracking-[0.05em] text-white/45">{label}</div>
+                <div className="mt-1 font-display text-2xl font-bold text-white">
                   {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value))}
                 </div>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-emerald-900">
+          <p className="mt-3 text-xs text-white/55">
             Revenue realization: {(economics.realization_rate * 100).toFixed(1)}% of projected value recorded so far.
           </p>
         </section>
@@ -338,7 +346,7 @@ export default function AnalyticsPage() {
         )}
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 border-l border-t border-brand-ink/15 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Total in Pipeline"
           value={overview?.total_in_pipeline || 0}
@@ -386,8 +394,8 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Stage Breakdown Cards */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+      <div className="pc-surface p-6">
+        <h3 className="pc-section-heading mb-4">
           Current Pipeline Positions
         </h3>
         <p className="-mt-2 mb-4 text-sm leading-6 text-gray-500">

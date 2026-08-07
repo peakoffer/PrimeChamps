@@ -165,12 +165,12 @@ async function waitForEnrichmentJob(jobId: string): Promise<EnrichmentJob> {
 }
 
 const PIPELINE_STAGES = {
-  research: { label: "Research", color: "bg-purple-100 text-purple-800 border-purple-300", icon: "🔍" },
-  approval: { label: "Pending Approval", color: "bg-blue-100 text-blue-800 border-blue-300", icon: "✅" },
-  reach_out: { label: "Ready for Outreach", color: "bg-cyan-100 text-cyan-800 border-cyan-300", icon: "📤" },
-  response: { label: "Awaiting Response", color: "bg-yellow-100 text-yellow-800 border-yellow-300", icon: "💬" },
-  appointment: { label: "Appointment Set", color: "bg-orange-100 text-orange-800 border-orange-300", icon: "📅" },
-  contract: { label: "Contract Signed", color: "bg-green-100 text-green-800 border-green-300", icon: "🎉" },
+  research: { label: "Research", color: "bg-brand-ink text-white border-brand-ink", icon: "01" },
+  approval: { label: "Pending Approval", color: "bg-brand-cyan text-brand-ink border-brand-cyan", icon: "02" },
+  reach_out: { label: "Ready for Outreach", color: "bg-brand-blue text-white border-brand-blue", icon: "03" },
+  response: { label: "Awaiting Response", color: "bg-brand-paper text-brand-ink border-brand-chrome", icon: "04" },
+  appointment: { label: "Appointment Set", color: "bg-brand-paper text-brand-ink border-brand-chrome", icon: "05" },
+  contract: { label: "Contract Signed", color: "bg-brand-ink text-brand-cyan border-brand-ink", icon: "06" },
   rejected: { label: "Rejected", color: "bg-red-100 text-red-800 border-red-300", icon: "❌" },
 };
 
@@ -1310,7 +1310,7 @@ export default function AthleteDetailPage() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <span className="text-orange-500">📅</span> Appointments
+                  Appointments
                   {athleteAppointments.length > 0 && (
                     <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
                       {athleteAppointments.length}
@@ -1665,7 +1665,7 @@ export default function AthleteDetailPage() {
           <div className="bg-white shadow rounded-lg overflow-hidden">
             <div className="px-6 py-4 bg-gray-800 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                🔍 Web / Wikipedia Research
+                Web / Wikipedia research
               </h2>
               <div className="flex gap-2">
                 <button
@@ -2282,7 +2282,7 @@ function TierBadge({ followers }: { followers: number | null }) {
   let description = "";
 
   if (followers >= 5000000) {
-    tier = "🏆 Mega Star";
+    tier = "Mega Star";
     color = "bg-yellow-100 text-yellow-800 border-yellow-300";
     description = "5M+ followers - Marquee signing";
   } else if (followers >= 1000000) {
@@ -2298,7 +2298,7 @@ function TierBadge({ followers }: { followers: number | null }) {
     color = "bg-green-100 text-green-800 border-green-300";
     description = "100K-500K - OF's target range";
   } else if (followers >= 50000) {
-    tier = "📈 Growing";
+    tier = "Growing";
     color = "bg-blue-100 text-blue-800 border-blue-300";
     description = "50K-100K - Emerging talent";
   } else {
@@ -2637,7 +2637,7 @@ function FullTierCard({ followers }: { followers: number | null }) {
   let range = "";
 
   if (followers >= 5000000) {
-    tier = "Mega Star"; icon = "🏆"; color = "bg-yellow-100 border-yellow-400 text-yellow-800";
+    tier = "Mega Star"; icon = "A"; color = "bg-brand-ink border-brand-ink text-brand-cyan";
     description = "Marquee signing"; range = "5M+";
   } else if (followers >= 1000000) {
     tier = "Star"; icon = "⭐"; color = "bg-purple-100 border-purple-400 text-purple-800";
@@ -2649,7 +2649,7 @@ function FullTierCard({ followers }: { followers: number | null }) {
     tier = "Sweet Spot"; icon = "💎"; color = "bg-green-100 border-green-400 text-green-800";
     description = "Ideal OF range"; range = "100K-500K";
   } else if (followers >= 50000) {
-    tier = "Growing"; icon = "📈"; color = "bg-blue-100 border-blue-400 text-blue-800";
+    tier = "Growing"; icon = "B"; color = "bg-brand-blue border-brand-blue text-white";
     description = "Emerging"; range = "50K-100K";
   } else {
     tier = "Micro"; icon = "🌱"; color = "bg-gray-100 border-gray-400 text-gray-800";
@@ -2786,7 +2786,7 @@ function CompactTierBadge({ followers }: { followers: number | null }) {
   let range = "";
 
   if (followers >= 5000000) {
-    tier = "Mega Star"; icon = "🏆"; color = "bg-yellow-100 border-yellow-400 text-yellow-800";
+    tier = "Mega Star"; icon = "A"; color = "bg-brand-ink border-brand-ink text-brand-cyan";
     description = "Marquee signing potential"; range = "5M+ followers";
   } else if (followers >= 1000000) {
     tier = "Star"; icon = "⭐"; color = "bg-purple-100 border-purple-400 text-purple-800";
@@ -2798,7 +2798,7 @@ function CompactTierBadge({ followers }: { followers: number | null }) {
     tier = "Sweet Spot"; icon = "💎"; color = "bg-green-100 border-green-400 text-green-800";
     description = "Ideal OF target range"; range = "100K-500K followers";
   } else if (followers >= 50000) {
-    tier = "Growing"; icon = "📈"; color = "bg-blue-100 border-blue-400 text-blue-800";
+    tier = "Growing"; icon = "B"; color = "bg-brand-blue border-brand-blue text-white";
     description = "Emerging talent"; range = "50K-100K followers";
   } else {
     tier = "Micro"; icon = "🌱"; color = "bg-gray-100 border-gray-400 text-gray-800";

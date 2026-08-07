@@ -1,8 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  BarChart3,
+  Blocks,
+  BriefcaseBusiness,
+  Database,
+  FlaskConical,
+  Inbox,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Network,
+  Users,
+  X,
+} from "lucide-react";
 import NotificationsBell from "./NotificationsBell";
 
 interface User {
@@ -15,18 +29,62 @@ interface User {
   organizationName: string;
 }
 
+const NAV_GROUPS = [
+  {
+    label: "Work",
+    links: [
+      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/pipeline/research", label: "Research", icon: FlaskConical },
+      { href: "/pipeline", label: "Pipeline", icon: Network },
+      { href: "/inbox", label: "Inbox", icon: Inbox },
+      { href: "/athletes", label: "Athletes", icon: Users },
+      { href: "/brand-opportunities", label: "Brand briefs", icon: BriefcaseBusiness },
+    ],
+  },
+  {
+    label: "Intelligence",
+    links: [
+      { href: "/historical", label: "Historical", icon: Database },
+      { href: "/analytics", label: "Analytics", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Workspace",
+    links: [
+      { href: "/connections", label: "Connections", icon: Blocks },
+      { href: "/team", label: "Team", icon: Users },
+    ],
+  },
+] as const;
+
+function PrimeChampsMark() {
+  return (
+    <span className="pc-wordmark" aria-label="Prime Champs">
+      <span>PRIME</span>
+      <small>CHAMPS</small>
+    </span>
+  );
+}
+
+function isActivePath(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  if (href === "/pipeline/research") return pathname.startsWith("/pipeline/research");
+  if (href === "/pipeline") return pathname.startsWith("/pipeline") && !pathname.startsWith("/pipeline/research");
+  return pathname.startsWith(href);
+}
+
 export default function NavBar() {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    // Check session on mount
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((data) => setUser(data.user))
       .catch(() => setUser(null));
-  }, [pathname]);
+  }, []);
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -35,74 +93,84 @@ export default function NavBar() {
     router.refresh();
   };
 
-  // Keep authentication and public legal pages free of the signed-in workspace navigation.
-  if (
-    pathname === "/login" ||
-    pathname === "/setup" ||
-    pathname === "/privacy" ||
-    pathname === "/terms" ||
-    pathname === "/data-deletion"
-  ) {
-    return null;
-  }
+  const navigation = (
+    <div className="pc-nav-scroll">
+      {NAV_GROUPS.map((group) => (
+        <section key={group.label} className="pc-nav-group" aria-label={group.label}>
+          <p className="pc-nav-label">{group.label}</p>
+          <div className="pc-nav-links">
+            {group.links.map((link) => {
+              const active = isActivePath(pathname, link.href);
+              const Icon = link.icon;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`pc-nav-link ${active ? "is-active" : ""}`}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{link.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 
-  const navLinks = [
-    { href: "/", label: "Dashboard" },
-    { href: "/pipeline", label: "Pipeline" },
-    { href: "/brand-opportunities", label: "Brand briefs" },
-    { href: "/inbox", label: "Inbox" },
-    { href: "/historical", label: "Historical" },
-    { href: "/analytics", label: "Analytics" },
-    { href: "/connections", label: "Connections" },
-    { href: "/team", label: "Team" },
-  ];
+  const account = (
+    <div className="pc-account">
+      <div className="pc-account-row">
+        <span className="pc-avatar" aria-hidden="true">
+          {(user?.name || "Z").slice(0, 1).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1">
+          <strong>{user?.name || "Prime Champs"}</strong>
+          <small>{user?.role || "workspace"}</small>
+        </span>
+        <NotificationsBell />
+      </div>
+      <button type="button" onClick={handleLogout} className="pc-logout">
+        <LogOut aria-hidden="true" />
+        Sign out
+      </button>
+    </div>
+  );
 
   return (
-    <nav className="bg-white shadow-sm border-b sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16 gap-4">
-          <div className="flex shrink-0 items-center">
-            <Link href="/" className="text-xl font-bold text-gray-900">
-              Prime Champs
-            </Link>
-          </div>
-          <div className="flex items-center space-x-2 overflow-x-auto">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`px-3 py-2 text-sm font-medium ${
-                  (link.href === "/" ? pathname === "/" : pathname.startsWith(link.href))
-                    ? "text-blue-600"
-                    : "text-gray-800 hover:text-gray-900"
-                } whitespace-nowrap`}
-              >
-                {link.label}
-              </Link>
-            ))}
-
-            {/* Notifications */}
-            <div className="ml-2">
-              <NotificationsBell />
-            </div>
-
-            {/* User menu */}
-            {user && (
-              <div className="flex items-center gap-3 ml-2 pl-4 border-l">
-                <span className="text-sm text-gray-800">
-                  Hi, <span className="font-medium">{user.name}</span>
-                </span>
-                <button
-                  onClick={handleLogout}
-                  className="text-sm text-red-600 hover:text-red-800"
-                >
-                  Logout
-                </button>
-              </div>
-            )}
-          </div>
+    <>
+      <header className="pc-mobile-bar">
+        <Link href="/" className="pc-mobile-logo"><PrimeChampsMark /></Link>
+        <div className="flex items-center gap-2">
+          <NotificationsBell />
+          <button
+            type="button"
+            className="pc-icon-button"
+            onClick={() => setMobileOpen((open) => !open)}
+            aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen ? <X /> : <Menu />}
+          </button>
         </div>
-      </div>
-    </nav>
+      </header>
+
+      <aside className="pc-sidebar" aria-label="Workspace navigation">
+        <Link href="/" className="pc-sidebar-logo"><PrimeChampsMark /></Link>
+        <p className="pc-sidebar-kicker">Partnership operations</p>
+        {navigation}
+        {account}
+      </aside>
+
+      {mobileOpen && (
+        <div className="pc-mobile-drawer" role="dialog" aria-label="Navigation">
+          {navigation}
+          {account}
+        </div>
+      )}
+    </>
   );
 }

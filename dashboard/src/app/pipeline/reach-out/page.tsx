@@ -343,7 +343,7 @@ export default function ReachOutStagePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-3xl">📤</span> Outreach Queue
+            Outreach queue
           </h1>
           <p className="text-gray-600">Review and save generated drafts; sending is always a separate manual action</p>
         </div>
@@ -541,7 +541,7 @@ export default function ReachOutStagePage() {
                       {/* Comments Section */}
                       <div className="border rounded-lg p-4">
                         <h3 className="font-medium text-gray-900 flex items-center gap-2 mb-3">
-                          <span className="text-lg">💬</span> Comments on Posts
+                          Comments on posts
                           <span className="text-xs text-gray-500 font-normal">
                             ({pkg.comments.filter((c) => c.approved).length}/{pkg.comments.length} approved)
                           </span>

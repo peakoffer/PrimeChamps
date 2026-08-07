@@ -31,12 +31,12 @@ const stageLabels: Record<string, string> = {
 };
 
 const stageColors: Record<string, string> = {
-  research: "#3B82F6",
-  approval: "#8B5CF6",
-  reach_out: "#F59E0B",
-  response: "#10B981",
-  appointment: "#6366F1",
-  contract: "#EC4899",
+  research: "#AAB7C3",
+  approval: "#74D7DF",
+  reach_out: "#3DE6EF",
+  response: "#21B7C4",
+  appointment: "#1258CF",
+  contract: "#06111F",
 };
 
 export default function FunnelChart({ stages }: FunnelChartProps) {
@@ -47,8 +47,8 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
   }));
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+    <div className="pc-surface p-6">
+      <h3 className="pc-section-heading mb-4">
         Stage Progression
       </h3>
       <p className="-mt-2 mb-4 text-sm leading-6 text-gray-500">
@@ -66,7 +66,7 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
             <YAxis
               type="category"
               dataKey="label"
-              tick={{ fill: "#374151", fontSize: 13 }}
+              tick={{ fill: "#5F6D79", fontSize: 12 }}
               width={80}
             />
             <Tooltip
@@ -77,13 +77,13 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
               }}
               contentStyle={{
                 backgroundColor: "#fff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "8px",
+                border: "1px solid #CBD5DB",
+                borderRadius: "2px",
               }}
             />
             <Bar
               dataKey="count"
-              radius={[0, 4, 4, 0]}
+              radius={[0, 0, 0, 0]}
               maxBarSize={40}
             >
               {data.map((entry, index) => (
@@ -103,7 +103,7 @@ export default function FunnelChart({ stages }: FunnelChartProps) {
         {data.map((stage) => (
           <div key={stage.name} className="flex items-center gap-2 text-sm">
             <div
-              className="w-3 h-3 rounded-full"
+                className="h-2.5 w-2.5"
               style={{ backgroundColor: stage.fill }}
             />
             <span className="text-gray-600">

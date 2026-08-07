@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { ArrowRight, FlaskConical, History, RefreshCw, ShieldCheck } from "lucide-react";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
 import {
@@ -771,43 +772,46 @@ function ResearchStageContent() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading...</div>
+      <div className="space-y-5" aria-label="Loading research workspace">
+        <div className="h-[54px] animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />
+        <div className="h-16 w-2/3 animate-pulse bg-brand-ink/8" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />)}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Stage Navigation */}
       <PipelineStageNav currentStage="research" />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-3xl">🔍</span> Research
-          </h1>
-          <p className="text-gray-600">Discover and evaluate new prospects</p>
+          <p className="pc-eyebrow">Candidate intelligence</p>
+          <h1 className="pc-page-title">Research</h1>
+          <p className="pc-page-description">Source, verify, and score emerging athletes before they enter the partnership pipeline.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="pc-header-actions">
           <Link
             href="/pipeline/research/intelligence"
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:border-violet-300 hover:text-violet-800"
+            className="pc-button-secondary"
           >
             Recruiting thesis
           </Link>
           <button
             onClick={() => setShowConfigModal(true)}
             disabled={isResearching}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+            className="pc-button-primary"
           >
             {isResearching ? (
-              <><span className="animate-spin">⏳</span> Researching...</>
+              <><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" /> Researching</>
             ) : backgroundRunId ? (
-              <><span className="animate-pulse">🔄</span> Background Running</>
+              <><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" /> Research running</>
             ) : (
-              <><span>🚀</span> Run Research Agent</>
+              <><FlaskConical aria-hidden="true" className="h-4 w-4" /> Run research agent</>
             )}
           </button>
         </div>
@@ -815,14 +819,14 @@ function ResearchStageContent() {
 
       {/* Research Progress */}
       {isResearching && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+        <div className="border border-brand-cyan bg-brand-cyan/10 p-4">
           <div className="flex items-center gap-3">
-            <div className="animate-spin text-2xl">🔍</div>
+            <RefreshCw className="h-5 w-5 animate-spin text-brand-blue" />
             <div className="flex-1">
-              <div className="font-medium text-purple-800">{researchProgress.message}</div>
-              <div className="w-full bg-purple-200 rounded-full h-2 mt-2">
+              <div className="font-medium text-brand-ink">{researchProgress.message}</div>
+              <div className="mt-2 h-1 w-full bg-brand-chrome/50">
                 <div
-                  className="bg-purple-600 h-2 rounded-full transition-all"
+                  className="h-1 bg-brand-blue transition-all"
                   style={{
                     width: `${researchProgress.total > 0 ? (researchProgress.current / researchProgress.total) * 100 : 0}%`,
                   }}
@@ -873,47 +877,49 @@ function ResearchStageContent() {
       )}
 
       {/* Latest run funnel */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-purple-700">{latestStats?.sourced || latestStats?.discovered || 0}</div>
-          <div className="text-sm text-purple-700">Sourced candidates</div>
+      <div className="grid grid-cols-2 border-l border-t border-brand-ink/15 lg:grid-cols-4">
+        <div className="min-h-[116px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-4">
+          <div className="font-display text-4xl font-bold leading-none text-brand-ink">{latestStats?.sourced || latestStats?.discovered || 0}</div>
+          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-ink/55">Sourced candidates</div>
         </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">{latestStats?.discovered || 0}</div>
-          <div className="text-sm text-gray-700">Identity research pool</div>
+        <div className="min-h-[116px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-4">
+          <div className="font-display text-4xl font-bold leading-none text-brand-ink">{latestStats?.discovered || 0}</div>
+          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-ink/55">Identity research pool</div>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-green-800">{latestStats?.returned || 0}</div>
-          <div className="text-sm text-green-700">Scored finalists</div>
+        <div className="min-h-[116px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-4">
+          <div className="font-display text-4xl font-bold leading-none text-brand-ink">{latestStats?.returned || 0}</div>
+          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-ink/55">Scored finalists</div>
         </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-blue-800">
+        <div className="relative min-h-[116px] overflow-hidden border-b border-r border-brand-ink/15 bg-brand-ink p-4 text-white">
+          <span className="absolute inset-y-0 left-0 w-1 bg-brand-cyan" />
+          <div className="font-display text-4xl font-bold leading-none text-white">
             {latestOutcomeCounts.approval}
           </div>
-          <div className="text-sm text-blue-700">
+          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-cyan">
             {latestCompletedLog?.is_evaluation ? "Qualified in simulation" : "Added to Approval"}
           </div>
-          <div className="mt-1 text-xs text-blue-700">
+          <div className="mt-1 text-[10px] text-white/55">
             {latestOutcomeCounts.held} held · {latestOutcomeCounts.blocked} blocked
           </div>
         </div>
       </div>
 
-      <section className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-4">
+      <section className="pc-surface border-l-4 !border-l-brand-blue p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-indigo-950">Research quality gate</h2>
+              <ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" />
+              <h2 className="font-semibold text-brand-ink">Research quality gate</h2>
               {benchmarkSummary?.passRate !== null && benchmarkSummary?.passRate !== undefined ? (
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${benchmarkSummary.passRate === 100 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
                   {benchmarkSummary.passRate}% passing
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-sm leading-6 text-indigo-900/75">
+            <p className="mt-1 text-sm leading-6 text-brand-ink/60">
               Repeatable controls verify score weighting, adult-age gating, minor blocking, and the minimum quality threshold before candidates can enter Approval.
             </p>
-            <p className="mt-1 text-xs text-indigo-900">
+            <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.04em] text-brand-ink/55">
               {benchmarkUnavailable
                 ? "Quality suite is waiting for the database migration; research runs remain unavailable until setup is complete."
                 : `${benchmarkSummary?.total || 0} cases · ${benchmarkSummary?.evaluated || 0} evaluated · benchmark replays never create athletes or send outreach`}
@@ -923,7 +929,7 @@ function ResearchStageContent() {
             type="button"
             disabled={benchmarkBusy || benchmarkUnavailable}
             onClick={() => void handleBenchmarkAction((benchmarkSummary?.total || 0) === 0 ? "seed" : "run")}
-            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800 disabled:opacity-60"
+            className="pc-button-secondary shrink-0"
           >
             {benchmarkBusy
               ? "Working…"
@@ -969,25 +975,28 @@ function ResearchStageContent() {
       )}
 
       {/* Research History */}
-      <div className="bg-white shadow rounded-lg">
-        <div className="p-4 border-b flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-            <span>📋</span> Research History
+      <div className="pc-surface overflow-hidden">
+        <div className="flex items-center justify-between border-b border-brand-ink/15 p-4">
+          <h2 className="flex items-center gap-2 font-display text-2xl font-bold uppercase text-brand-ink">
+            <History aria-hidden="true" className="h-4 w-4 text-brand-blue" /> Research history
           </h2>
           <button
             onClick={fetchResearchLogs}
-            className="text-sm text-purple-600 hover:text-purple-700"
+            className="inline-flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.06em] text-brand-blue hover:text-brand-ink"
           >
-            Refresh
+            <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" /> Refresh
           </button>
         </div>
 
         {loadingLogs ? (
           <div className="p-8 text-center text-gray-800">Loading history...</div>
         ) : researchLogs.length === 0 ? (
-          <div className="p-8 text-center text-gray-800">
-            <div className="text-2xl mb-2">📭</div>
-            No research runs yet. Click &quot;Run Research Agent&quot; to get started.
+          <div className="p-12 text-center text-brand-ink/60">
+            <FlaskConical aria-hidden="true" className="mx-auto mb-3 h-6 w-6 text-brand-blue" />
+            <p className="text-sm">No research runs yet. Start a focused search to build the first candidate set.</p>
+            <button type="button" onClick={() => setShowConfigModal(true)} className="mt-4 inline-flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.06em] text-brand-blue">
+              Configure research <ArrowRight aria-hidden="true" className="h-3 w-3" />
+            </button>
           </div>
         ) : (
           <div className="divide-y">
@@ -1181,9 +1190,9 @@ function ResearchStageContent() {
                     </div>
 
                     {/* Outputs */}
-                    <div className="bg-green-50 rounded-lg p-4">
+                    <div className="border border-brand-cyan/40 bg-brand-cyan/5 p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <span>📤</span> Candidates, evidence, and decisions
+                        <ArrowRight className="h-4 w-4 text-brand-blue" /> Candidates, evidence, and decisions
                       </h4>
                       <div className="mb-3 flex flex-wrap gap-2 text-xs">
                         <span className="rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-800">
@@ -1365,28 +1374,29 @@ function ResearchStageContent() {
       </div>
 
       {/* Search */}
-      <div className="bg-white shadow rounded-lg p-4">
+      <div className="pc-surface p-4">
         <input
           type="text"
           placeholder="Search prospects..."
+          aria-label="Search research prospects"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          className="w-full border px-4 py-2 focus:outline-none"
         />
       </div>
 
       {/* Prospects List */}
       {filteredAthletes.length === 0 ? (
-        <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="text-4xl mb-3">🔍</div>
-          <h3 className="font-semibold text-gray-800 mb-2">No Prospects in Research</h3>
+        <div className="border border-dashed border-brand-chrome bg-white p-12 text-center">
+          <FlaskConical className="mx-auto mb-4 h-8 w-8 text-brand-blue" />
+          <h3 className="mb-2 font-display text-2xl font-semibold uppercase tracking-wide text-brand-ink">No prospects in research</h3>
           <p className="text-sm text-gray-800 max-w-md mx-auto mb-4">
             Run the Research Agent to discover new athlete prospects from Instagram, news, and social media.
           </p>
           <button
             onClick={() => setShowConfigModal(true)}
             disabled={isResearching}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+            className="pc-button-primary"
           >
             {isResearching ? "Running..." : "Start Research"}
           </button>
@@ -1584,9 +1594,9 @@ function ResearchStageContent() {
               <button
                 onClick={() => handleRunResearch()}
                 disabled={!!backgroundRunId || isResearching || !config.sportFocus}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+                className="pc-button-primary"
               >
-                <span>🔬</span> Start Research
+                <FlaskConical className="h-4 w-4" /> Start research
               </button>
             </div>
           </div>
@@ -1596,11 +1606,11 @@ function ResearchStageContent() {
       {/* Results Modal */}
       {showResultsModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="mx-4 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden border border-brand-chrome bg-white">
             <div className="p-6 border-b flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  <span>✨</span> Research Results
+                <h2 className="flex items-center gap-2 font-display text-2xl font-bold uppercase tracking-wide text-brand-ink">
+                  <FlaskConical className="h-5 w-5 text-brand-blue" /> Research results
                 </h2>
                 <p className="text-sm text-gray-800 mt-1">
                   {researchResults.length} candidates found • Approve or reject each
@@ -1616,9 +1626,9 @@ function ResearchStageContent() {
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {researchResults.length === 0 ? (
-                <div className="text-center py-12 text-gray-800">
-                  <div className="text-4xl mb-3">🎉</div>
-                  <p>All candidates processed!</p>
+                <div className="py-12 text-center text-brand-muted">
+                  <ShieldCheck className="mx-auto mb-3 h-8 w-8 text-brand-blue" />
+                  <p>All candidates processed.</p>
                 </div>
               ) : (
                 researchResults.map((candidate) => (

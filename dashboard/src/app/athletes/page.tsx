@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { Athlete } from "@/lib/supabase/types";
 import { formatNumber, formatDate, getStatusColor } from "@/lib/utils";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, FlaskConical } from "lucide-react";
 
 type SortKey = "followers" | "name" | "created_at";
 type SortDirection = "asc" | "desc";
@@ -84,21 +85,27 @@ export default function AthletesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading athletes...</div>
+      <div className="space-y-5" aria-label="Loading athletes">
+        <div className="h-20 w-1/2 animate-pulse bg-brand-ink/8" />
+        <div className="h-[520px] animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Athletes</h1>
-        <div className="flex space-x-4">
+      <header className="pc-page-header !mb-0">
+        <div>
+          <p className="pc-eyebrow">Candidate database</p>
+          <h1 className="pc-page-title">Athletes</h1>
+          <p className="pc-page-description">Review every sourced profile, sort by audience or recency, and open the full research record.</p>
+        </div>
+        <div className="grid w-full gap-2 sm:grid-cols-3 md:w-auto">
           <select
             value={sportFilter}
             onChange={(e) => setSportFilter(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
+            className="min-h-10 border px-3 py-2 text-xs"
+            aria-label="Filter by sport"
           >
             <option value="">All Sports</option>
             {sports.map((sport) => (
@@ -110,7 +117,8 @@ export default function AthletesPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
+            className="min-h-10 border px-3 py-2 text-xs"
+            aria-label="Filter by enrichment status"
           >
             <option value="">All Status</option>
             <option value="pending">Pending</option>
@@ -120,7 +128,7 @@ export default function AthletesPage() {
           <select
             value={sortSelectValue}
             onChange={(e) => handleSortSelect(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
+            className="min-h-10 border px-3 py-2 text-xs"
             aria-label="Sort athletes"
           >
             <option value="followers:desc">Followers: High to Low</option>
@@ -131,11 +139,11 @@ export default function AthletesPage() {
             <option value="name:desc">Name: Z to A</option>
           </select>
         </div>
-      </div>
+      </header>
 
-      <div className="bg-white shadow rounded-lg overflow-hidden">
+      <div className="pc-surface overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="bg-brand-paper">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider">
                 <button
@@ -189,7 +197,7 @@ export default function AthletesPage() {
               <tr
                 key={athlete.id}
                 onClick={() => router.push(`/athletes/${athlete.id}`)}
-                className="hover:bg-blue-50 cursor-pointer transition-colors"
+                className="cursor-pointer transition-colors hover:bg-brand-cyan/10"
               >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
@@ -238,8 +246,11 @@ export default function AthletesPage() {
           </tbody>
         </table>
         {athletes.length === 0 && (
-          <div className="px-6 py-12 text-center text-gray-800">
-            No athletes found. Import seed data to get started.
+          <div className="px-6 py-16 text-center text-brand-ink/60">
+            <FlaskConical aria-hidden="true" className="mx-auto h-7 w-7 text-brand-blue" />
+            <h2 className="mt-4 font-display text-2xl font-bold uppercase text-brand-ink">No athletes match this view</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6">Clear the current filters or run a focused research query to source new candidates.</p>
+            <Link href="/pipeline/research" className="pc-button-primary mt-5">Open research</Link>
           </div>
         )}
       </div>

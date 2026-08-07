@@ -430,30 +430,26 @@ export default function UnifiedInbox() {
 
   return (
     <div className="space-y-5 pb-8">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <header className="pc-page-header !mb-0">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
-            Outreach command center
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-            Conversations
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+          <p className="pc-eyebrow">Outreach command center</p>
+          <h1 className="pc-page-title">Conversations</h1>
+          <p className="pc-page-description">
             Work each channel in its native rhythm, then use Unified to see the whole relationship.
           </p>
         </div>
-        <div className="inline-flex self-start rounded-xl border border-slate-200 bg-white p-1 shadow-sm lg:self-auto">
+        <div className="inline-flex self-start border border-brand-ink/20 bg-brand-paper-bright p-1 lg:self-auto">
           <button
             type="button"
             onClick={() => { setScope("mine"); setSelectedId(null); setDetail(null); }}
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition ${scope === "mine" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-[0.05em] transition ${scope === "mine" ? "bg-brand-ink text-white" : "text-brand-ink/55 hover:bg-brand-cyan/10 hover:text-brand-ink"}`}
           >
             My inbox
           </button>
           <button
             type="button"
             onClick={() => { setScope("team"); setSelectedId(null); setDetail(null); }}
-            className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${scope === "team" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`inline-flex items-center gap-2 px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-[0.05em] transition ${scope === "team" ? "bg-brand-ink text-white" : "text-brand-ink/55 hover:bg-brand-cyan/10 hover:text-brand-ink"}`}
           >
             <UsersRound className="h-4 w-4" />
             Team view
@@ -461,8 +457,8 @@ export default function UnifiedInbox() {
         </div>
       </header>
 
-      <nav aria-label="Outreach channels" className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
-        <div className="flex min-w-max gap-1">
+      <nav aria-label="Outreach channels" className="overflow-x-auto border border-brand-ink/15 bg-brand-paper-bright">
+        <div className="flex min-w-max">
           {WORKSPACES.map((workspace) => {
             const Icon = workspace.icon;
             const active = activeChannel === workspace.id;
@@ -471,9 +467,9 @@ export default function UnifiedInbox() {
                 key={workspace.id}
                 type="button"
                 onClick={() => switchChannel(workspace.id)}
-                className={`group flex min-w-[148px] items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${active ? "bg-slate-950 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`group relative flex min-w-[158px] items-center gap-3 border-r border-brand-ink/10 px-3 py-3 text-left transition ${active ? "bg-brand-ink text-white" : "text-brand-ink/60 hover:bg-brand-cyan/10"}`}
               >
-                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${active ? "bg-white/10 text-white" : "bg-slate-100 text-slate-700 group-hover:bg-white"}`}>
+                <span className={`grid h-8 w-8 shrink-0 place-items-center border ${active ? "border-brand-cyan bg-brand-cyan text-brand-ink" : "border-brand-ink/15 bg-brand-paper text-brand-ink/60"}`}>
                   <Icon className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -488,6 +484,7 @@ export default function UnifiedInbox() {
                   <span className={`mt-0.5 block text-[11px] ${active ? "text-slate-300" : "text-slate-600"}`}>
                     {workspace.description}
                   </span>
+                  {active && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand-cyan" />}
                 </span>
               </button>
             );
@@ -508,7 +505,7 @@ export default function UnifiedInbox() {
       ) : activeChannel === "x" ? (
         <ChannelSetup channel="x" />
       ) : (
-        <div className="grid min-h-[680px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[390px_minmax(0,1fr)]">
+        <div className="grid min-h-[680px] overflow-hidden border border-brand-ink/15 bg-brand-paper-bright lg:grid-cols-[390px_minmax(0,1fr)]">
           <aside className={`${selectedId ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-slate-200 bg-white`}>
             <div className="border-b border-slate-200 px-4 pb-3 pt-4">
               <div className="flex items-center justify-between gap-3">
@@ -538,6 +535,7 @@ export default function UnifiedInbox() {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={activeChannel === "email" ? "Search mail" : "Search conversations"}
+                  aria-label={activeChannel === "email" ? "Search mail" : "Search conversations"}
                   className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                 />
               </div>

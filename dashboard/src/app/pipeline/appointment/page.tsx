@@ -136,7 +136,7 @@ export default function AppointmentStagePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-3xl">📅</span> Appointments
+            Appointments
           </h1>
           <p className="text-gray-600">
             Schedule and manage meetings with prospects
@@ -305,7 +305,7 @@ export default function AppointmentStagePage() {
                     onClick={() => setSelectedAthlete(athlete)}
                     className="flex-1 px-3 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200"
                   >
-                    📅 Schedule Meeting
+                    Schedule meeting
                   </button>
                   <button
                     onClick={() => handleMoveToContract(athlete.id)}
@@ -323,7 +323,7 @@ export default function AppointmentStagePage() {
       {/* Empty State */}
       {athletes.length === 0 && appointments.length === 0 && (
         <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="text-4xl mb-3">📅</div>
+          <div className="mb-3 font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Calendar clear</div>
           <h3 className="font-semibold text-gray-800 mb-2">
             No Pending Appointments
           </h3>

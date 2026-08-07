@@ -1,94 +1,72 @@
 "use client";
 
 import Link from "next/link";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 
 const PIPELINE_STAGES = [
-  { id: "research", name: "Research", href: "/pipeline/research", icon: "🔍" },
-  { id: "approval", name: "Approval", href: "/pipeline/approval", icon: "✅" },
-  { id: "reach_out", name: "Reach Out", href: "/pipeline/reach-out", icon: "📤" },
-  { id: "response", name: "Response", href: "/pipeline/response", icon: "💬" },
-  { id: "appointment", name: "Appointment", href: "/pipeline/appointment", icon: "📅" },
-  { id: "contract", name: "Contract", href: "/pipeline/contract", icon: "📝" },
-];
+  { id: "research", name: "Research", short: "01" },
+  { id: "approval", name: "Approval", short: "02" },
+  { id: "reach_out", name: "Reach out", short: "03" },
+  { id: "response", name: "Response", short: "04" },
+  { id: "appointment", name: "Appointment", short: "05" },
+  { id: "contract", name: "Contract", short: "06" },
+].map((stage) => ({ ...stage, href: `/pipeline/${stage.id.replace("_", "-")}` }));
 
 interface PipelineStageNavProps {
   currentStage: string;
 }
 
 export function PipelineStageNav({ currentStage }: PipelineStageNavProps) {
-  const currentIndex = PIPELINE_STAGES.findIndex((s) => s.id === currentStage);
+  const currentIndex = PIPELINE_STAGES.findIndex((stage) => stage.id === currentStage);
   const prevStage = currentIndex > 0 ? PIPELINE_STAGES[currentIndex - 1] : null;
   const nextStage = currentIndex < PIPELINE_STAGES.length - 1 ? PIPELINE_STAGES[currentIndex + 1] : null;
 
   return (
-    <div className="bg-white shadow rounded-lg p-2">
-      <div className="flex items-center justify-between">
-        {/* Previous Stage Button */}
-        <div className="w-32">
-          {prevStage ? (
-            <Link
-              href={prevStage.href}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <span>←</span>
-              <span>{prevStage.name}</span>
-            </Link>
-          ) : (
-            <Link
-              href="/pipeline"
-              className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <span>←</span>
-              <span>Pipeline</span>
-            </Link>
-          )}
-        </div>
+    <nav aria-label="Pipeline stages" className="pc-surface overflow-hidden">
+      <div className="flex min-w-max items-stretch overflow-x-auto">
+        <Link
+          href={prevStage?.href || "/pipeline"}
+          className="flex min-w-[112px] items-center gap-2 border-r border-brand-ink/15 px-4 font-mono text-[9px] font-semibold uppercase tracking-[0.06em] text-brand-ink/55 hover:bg-brand-cyan/10 hover:text-brand-ink"
+        >
+          <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5" />
+          {prevStage?.name || "Pipeline"}
+        </Link>
 
-        {/* Stage Pills */}
-        <div className="flex items-center gap-1">
+        <div className="flex flex-1 items-stretch">
           {PIPELINE_STAGES.map((stage, index) => {
-            const isCurrent = stage.id === currentStage;
-            const isPast = index < currentIndex;
-
+            const current = stage.id === currentStage;
+            const completed = index < currentIndex;
             return (
-              <div key={stage.id} className="flex items-center">
-                <Link
-                  href={stage.href}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
-                    isCurrent
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : isPast
-                      ? "bg-green-100 text-green-700 hover:bg-green-200"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                  title={stage.name}
-                >
-                  <span className="hidden sm:inline">{stage.name}</span>
-                  <span className="sm:hidden">{stage.icon}</span>
-                </Link>
-                {index < PIPELINE_STAGES.length - 1 && (
-                  <span className="text-gray-300 mx-1">→</span>
-                )}
-              </div>
+              <Link
+                key={stage.id}
+                href={stage.href}
+                aria-current={current ? "step" : undefined}
+                className={`relative flex min-h-[54px] min-w-[116px] flex-1 items-center gap-2 border-r border-brand-ink/10 px-3 font-mono text-[9px] font-semibold uppercase tracking-[0.055em] transition-colors ${
+                  current
+                    ? "bg-brand-ink text-white"
+                    : completed
+                      ? "bg-brand-cyan/10 text-brand-ink"
+                      : "text-brand-ink/45 hover:bg-brand-paper hover:text-brand-ink"
+                }`}
+              >
+                <span className={`grid h-5 w-5 place-items-center border text-[8px] ${current ? "border-brand-cyan bg-brand-cyan text-brand-ink" : "border-brand-ink/20"}`}>
+                  {completed ? <Check aria-hidden="true" className="h-3 w-3" /> : stage.short}
+                </span>
+                {stage.name}
+                {current && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand-cyan" />}
+              </Link>
             );
           })}
         </div>
 
-        {/* Next Stage Button */}
-        <div className="w-32 flex justify-end">
-          {nextStage ? (
-            <Link
-              href={nextStage.href}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <span>{nextStage.name}</span>
-              <span>→</span>
-            </Link>
-          ) : (
-            <span className="px-3 py-1.5 text-sm text-gray-400">End</span>
-          )}
-        </div>
+        <Link
+          href={nextStage?.href || "/pipeline/contract"}
+          className={`flex min-w-[112px] items-center justify-end gap-2 px-4 font-mono text-[9px] font-semibold uppercase tracking-[0.06em] ${nextStage ? "text-brand-blue hover:bg-brand-cyan/10 hover:text-brand-ink" : "pointer-events-none text-brand-ink/25"}`}
+        >
+          {nextStage?.name || "Complete"}
+          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+        </Link>
       </div>
-    </div>
+    </nav>
   );
 }

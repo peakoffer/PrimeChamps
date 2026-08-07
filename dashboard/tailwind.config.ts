@@ -11,6 +11,23 @@ export default {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        brand: {
+          ink: "var(--pc-ink)",
+          raised: "var(--pc-ink-raised)",
+          blue: "var(--pc-blue)",
+          cyan: "var(--pc-cyan)",
+          coral: "var(--pc-coral)",
+          paper: "var(--pc-paper)",
+          "paper-bright": "var(--pc-paper-bright)",
+          chrome: "var(--pc-chrome)",
+          muted: "var(--pc-muted)",
+          line: "var(--pc-line)",
+        },
+      },
+      fontFamily: {
+        sans: ["var(--font-pc-body)", "system-ui", "sans-serif"],
+        display: ["var(--font-pc-display)", "Impact", "sans-serif"],
+        mono: ["var(--font-pc-mono)", "ui-monospace", "monospace"],
       },
     },
   },

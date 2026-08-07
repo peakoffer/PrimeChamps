@@ -32,8 +32,8 @@ export default function TimelineChart({ data }: TimelineChartProps) {
   }));
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+    <div className="pc-surface p-6">
+      <h3 className="pc-section-heading mb-4">
         Activity Timeline
       </h3>
       <div className="h-80">
@@ -42,7 +42,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
             data={chartData}
             margin={{ top: 10, right: 30, left: 0, bottom: 10 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#CBD5DB" />
             <XAxis
               dataKey="date"
               tick={{ fill: "#6B7280", fontSize: 11 }}
@@ -57,8 +57,8 @@ export default function TimelineChart({ data }: TimelineChartProps) {
             <Tooltip
               contentStyle={{
                 backgroundColor: "#fff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "8px",
+                border: "1px solid #CBD5DB",
+                borderRadius: "2px",
               }}
               labelFormatter={(label) => {
                 const item = chartData.find((d) => d.date === label);
@@ -72,7 +72,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
             <Line
               type="monotone"
               dataKey="Athletes Added"
-              stroke="#3B82F6"
+              stroke="#1258CF"
               strokeWidth={2}
               dot={{ r: 3 }}
               activeDot={{ r: 5 }}
@@ -80,7 +80,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
             <Line
               type="monotone"
               dataKey="Messages Sent"
-              stroke="#F59E0B"
+              stroke="#FF5D49"
               strokeWidth={2}
               dot={{ r: 3 }}
               activeDot={{ r: 5 }}
@@ -88,7 +88,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
             <Line
               type="monotone"
               dataKey="Responses"
-              stroke="#10B981"
+              stroke="#21B7C4"
               strokeWidth={2}
               dot={{ r: 3 }}
               activeDot={{ r: 5 }}

@@ -20,16 +20,15 @@ interface SportPieChartProps {
 }
 
 const COLORS = [
-  "#3B82F6",
-  "#8B5CF6",
-  "#EC4899",
-  "#F59E0B",
-  "#10B981",
-  "#6366F1",
-  "#EF4444",
-  "#14B8A6",
-  "#F97316",
-  "#84CC16",
+  "#06111F",
+  "#1258CF",
+  "#21B7C4",
+  "#3DE6EF",
+  "#5F6D79",
+  "#7D8C98",
+  "#AAB7C3",
+  "#C8D3D9",
+  "#FF5D49",
 ];
 
 export default function SportPieChart({ data }: SportPieChartProps) {
@@ -53,8 +52,8 @@ export default function SportPieChart({ data }: SportPieChartProps) {
   const total = chartData.reduce((sum, s) => sum + s.count, 0);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+    <div className="pc-surface p-6">
+      <h3 className="pc-section-heading mb-4">
         Athletes by Sport
       </h3>
       <p className="sr-only">
@@ -88,8 +87,8 @@ export default function SportPieChart({ data }: SportPieChartProps) {
               }}
               contentStyle={{
                 backgroundColor: "#fff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "8px",
+                border: "1px solid #CBD5DB",
+                borderRadius: "2px",
               }}
             />
           </PieChart>
@@ -98,7 +97,7 @@ export default function SportPieChart({ data }: SportPieChartProps) {
       <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-2" role="list" aria-label="Sport distribution legend">
         {chartData.map((entry, index) => (
           <div key={entry.sport} role="listitem" className="flex items-center gap-2 text-xs text-gray-700">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+            <span className="h-2.5 w-2.5" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
             <span>{entry.sport}: {entry.count} ({total ? Math.round((entry.count / total) * 100) : 0}%)</span>
           </div>
         ))}

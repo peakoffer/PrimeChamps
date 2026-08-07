@@ -1,6 +1,5 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import { ArrowUp, ArrowDown, Minus } from "lucide-react";
 
 interface MetricCardProps {
@@ -12,31 +11,12 @@ interface MetricCardProps {
   color?: "blue" | "green" | "purple" | "orange" | "red" | "gray";
 }
 
-const colorClasses = {
-  blue: "bg-blue-50 border-blue-200",
-  green: "bg-green-50 border-green-200",
-  purple: "bg-purple-50 border-purple-200",
-  orange: "bg-orange-50 border-orange-200",
-  red: "bg-red-50 border-red-200",
-  gray: "bg-gray-50 border-gray-200",
-};
-
-const valueColorClasses = {
-  blue: "text-blue-700",
-  green: "text-green-700",
-  purple: "text-purple-700",
-  orange: "text-orange-700",
-  red: "text-red-700",
-  gray: "text-gray-700",
-};
-
 export default function MetricCard({
   title,
   value,
   subtitle,
   trend,
   trendLabel,
-  color = "blue",
 }: MetricCardProps) {
   const TrendIcon = trend === undefined || trend === 0 ? Minus : trend > 0 ? ArrowUp : ArrowDown;
   const trendColor = trend === undefined || trend === 0
@@ -46,28 +26,21 @@ export default function MetricCard({
       : "text-red-700";
 
   return (
-    <div
-      className={cn(
-        "rounded-lg border p-5 shadow-sm",
-        colorClasses[color]
-      )}
-    >
-      <h3 className="text-sm font-medium text-gray-600">{title}</h3>
-      <p className={cn("text-3xl font-bold mt-2", valueColorClasses[color])}>
-        {value}
-      </p>
+    <div className="min-h-[142px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-5">
+      <h3 className="font-mono text-[9px] font-semibold uppercase tracking-[0.06em] text-brand-ink/50">{title}</h3>
+      <p className="mt-4 font-display text-4xl font-bold leading-none text-brand-ink">{value}</p>
       {subtitle && (
-        <p className="text-sm text-gray-700 mt-1">{subtitle}</p>
+        <p className="mt-2 text-[11px] text-brand-ink/50">{subtitle}</p>
       )}
       {trend !== undefined && (
-        <div className={cn("flex items-center gap-1 mt-2 text-sm", trendColor)}>
+        <div className={`mt-2 flex items-center gap-1 text-xs ${trendColor}`}>
           <TrendIcon className="h-4 w-4" />
           <span>
             {trend > 0 ? "+" : ""}
             {trend}%
           </span>
           {trendLabel && (
-            <span className="text-gray-700 ml-1">{trendLabel}</span>
+            <span className="ml-1 text-brand-ink/45">{trendLabel}</span>
           )}
         </div>
       )}
