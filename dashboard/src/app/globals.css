@@ -236,6 +236,51 @@ a {
   white-space: nowrap;
 }
 
+.pc-notification-trigger {
+  position: relative;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--pc-line-dark);
+  border-radius: 2px;
+}
+
+.pc-global-notifications {
+  position: fixed;
+  top: 17px;
+  right: 62px;
+  z-index: 65;
+}
+
+.pc-notification-trigger:hover,
+.pc-notification-trigger[aria-expanded="true"] {
+  color: var(--pc-ink);
+  background: var(--pc-cyan);
+  border-color: var(--pc-cyan);
+}
+
+.pc-notification-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  place-items: center;
+  color: var(--pc-white);
+  font-family: var(--font-pc-mono), monospace;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--pc-coral);
+  border: 2px solid var(--pc-ink);
+  border-radius: 2px;
+}
+
 .pc-account-row strong {
   color: var(--pc-white);
   font-size: 12px;
@@ -585,6 +630,13 @@ a {
   .app-workspace {
     padding: 34px 32px 64px;
     margin-left: 248px;
+  }
+
+  .pc-global-notifications {
+    top: auto;
+    right: auto;
+    bottom: 43px;
+    left: 195px;
   }
 }
 

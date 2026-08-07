@@ -77,7 +77,8 @@ export default function NavBar() {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileOpenPath, setMobileOpenPath] = useState<string | null>(null);
+  const mobileOpen = mobileOpenPath === pathname;
 
   useEffect(() => {
     fetch("/api/auth/session")
@@ -85,6 +86,22 @@ export default function NavBar() {
       .then((data) => setUser(data.user))
       .catch(() => setUser(null));
   }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpenPath(null);
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileOpen]);
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -108,7 +125,7 @@ export default function NavBar() {
                   href={link.href}
                   aria-current={active ? "page" : undefined}
                   className={`pc-nav-link ${active ? "is-active" : ""}`}
-                  onClick={() => setMobileOpen(false)}
+                  onClick={() => setMobileOpenPath(null)}
                 >
                   <Icon aria-hidden="true" />
                   <span>{link.label}</span>
@@ -131,7 +148,6 @@ export default function NavBar() {
           <strong>{user?.name || "Prime Champs"}</strong>
           <small>{user?.role || "workspace"}</small>
         </span>
-        <NotificationsBell />
       </div>
       <button type="button" onClick={handleLogout} className="pc-logout">
         <LogOut aria-hidden="true" />
@@ -145,11 +161,10 @@ export default function NavBar() {
       <header className="pc-mobile-bar">
         <Link href="/" className="pc-mobile-logo"><PrimeChampsMark /></Link>
         <div className="flex items-center gap-2">
-          <NotificationsBell />
           <button
             type="button"
             className="pc-icon-button"
-            onClick={() => setMobileOpen((open) => !open)}
+            onClick={() => setMobileOpenPath((openPath) => openPath === pathname ? null : pathname)}
             aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
             aria-expanded={mobileOpen}
           >
@@ -157,6 +172,10 @@ export default function NavBar() {
           </button>
         </div>
       </header>
+
+      <div className="pc-global-notifications">
+        <NotificationsBell />
+      </div>
 
       <aside className="pc-sidebar" aria-label="Workspace navigation">
         <Link href="/" className="pc-sidebar-logo"><PrimeChampsMark /></Link>
@@ -166,7 +185,7 @@ export default function NavBar() {
       </aside>
 
       {mobileOpen && (
-        <div className="pc-mobile-drawer" role="dialog" aria-label="Navigation">
+        <div className="pc-mobile-drawer" role="dialog" aria-modal="true" aria-label="Navigation">
           {navigation}
           {account}
         </div>
