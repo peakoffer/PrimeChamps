@@ -465,33 +465,15 @@ export default function PipelinePage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <header className="pc-page-header bg-brand-ink p-6 text-white md:p-8">
+      <header className="pc-page-header !mb-0">
         <div>
-          <p className="pc-eyebrow !text-brand-cyan">Partnership operations</p>
-          <h1 className="!text-white">Pipeline</h1>
-          <p className="mt-3 max-w-2xl text-sm text-brand-chrome">
+          <p className="pc-eyebrow">Partnership operations</p>
+          <h1 className="pc-page-title">Pipeline</h1>
+          <p className="pc-page-description">
             {totalProspects} active prospects · {selectionMode ? "Click cards to select" : "Move qualified athletes forward one stage at a time"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="pc-button-secondary"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Import
-          </button>
-          <button
-            onClick={handleExport}
-            className="pc-button-secondary"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export
-          </button>
           <button
             onClick={() => {
               if (selectionMode) {
@@ -522,85 +504,32 @@ export default function PipelinePage() {
           </button>
           <button
             onClick={fetchPipeline}
-            className="min-h-10 px-3 font-mono text-[10px] font-bold uppercase tracking-wide text-brand-cyan hover:text-white"
+            className="pc-button-secondary"
           >
             Refresh
           </button>
+          <details className="group relative">
+            <summary className="pc-button-secondary cursor-pointer list-none marker:content-none">More</summary>
+            <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-40 border border-brand-chrome bg-white p-1 shadow-lg">
+              <button onClick={() => setShowImportModal(true)} className="block w-full px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-paper">Import</button>
+              <button onClick={handleExport} className="block w-full px-3 py-2 text-left text-sm text-brand-ink hover:bg-brand-paper">Export</button>
+            </div>
+          </details>
         </div>
       </header>
 
-      {/* Funnel Overview */}
-      <div className="grid grid-cols-2 gap-px border border-brand-chrome bg-brand-chrome md:grid-cols-3 xl:grid-cols-6">
-          {columns.map((col, index) => {
-            const count = col.athletes.length;
-            return (
-              <div key={col.id} className="relative bg-white">
-                <Link href={col.href} className="group block p-4 hover:bg-brand-cyan/10">
-                  <div className="flex items-start justify-between">
-                    <span className="font-mono text-[10px] font-bold tracking-wide text-brand-blue">{col.icon}</span>
-                    <span className="font-display text-3xl font-bold leading-none text-brand-ink">{count}</span>
-                  </div>
-                  <div className="mt-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-brand-muted group-hover:text-brand-ink">{col.name}</div>
-                </Link>
-                {index < columns.length - 1 && (
-                  <div className="absolute -right-2 top-1/2 z-10 hidden h-4 w-4 -translate-y-1/2 place-items-center bg-brand-cyan font-mono text-[9px] text-brand-ink xl:grid">→</div>
-                )}
-              </div>
-            );
-          })}
-      </div>
-
-      {/* Stage Conversion */}
-      {totalProspects > 0 && (
-        <div className="pc-surface overflow-x-auto p-4">
-          <div className="flex min-w-[720px] items-center justify-between">
-            {columns.slice(1, -1).map((col, index) => {
-              const nextCol = columns[index + 2];
-              const currentCount = col.athletes.length;
-              const nextCount = nextCol.athletes.length;
-              const rate = currentCount > 0
-                ? Math.round((nextCount / currentCount) * 100)
-                : 0;
-              return (
-                <div key={col.id} className="flex items-center">
-                  <div className="text-center px-2">
-                    <div className="font-display text-2xl font-bold text-brand-ink">
-                      {rate}%
-                    </div>
-                    <div className="font-mono text-[9px] uppercase tracking-wide text-brand-muted">
-                      {col.name} → {nextCol.name}
-                    </div>
-                  </div>
-                  {index < columns.length - 3 && (
-                    <div className="mx-2 text-gray-300">|</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Empty State */}
       {totalProspects === 0 && (
-        <div className="border border-dashed border-brand-chrome bg-white p-10 text-center">
-          <p className="pc-eyebrow mx-auto w-max text-brand-blue">Ready for discovery</p>
-          <h3 className="mb-2 mt-3 font-display text-3xl font-bold uppercase text-brand-ink">No prospects yet</h3>
-          <p className="mx-auto max-w-md text-sm text-brand-muted">
-            Your pipeline is empty because all existing athletes are historical success stories.
-            Run the Research Agent to discover new prospects that will appear here.
-          </p>
-          <Link
-            href="/pipeline/research"
-            className="pc-button-primary mt-5"
-          >
-            Run Research Agent
+        <div className="flex flex-col gap-3 border-l-2 border-brand-cyan bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-brand-muted"><strong className="text-brand-ink">No active prospects.</strong> Start a focused research run to fill the first stage.</p>
+          <Link href="/pipeline/research" className="shrink-0 font-mono text-[9px] font-bold uppercase tracking-wide text-brand-blue hover:text-brand-ink">
+            Run research →
           </Link>
         </div>
       )}
 
       {/* Kanban Board */}
-      <div className="flex gap-3 overflow-x-auto pb-4">
+      <div className="flex gap-4 overflow-x-auto pb-4">
         {columns.map((column) => {
           const isResearchColumn = column.id === "research";
           const itemCount = isResearchColumn
@@ -624,7 +553,7 @@ export default function PipelinePage() {
           return (
           <div
             key={column.id}
-            className={`w-72 flex-shrink-0 border ${columnBorderClass} transition-colors`}
+            className={`w-80 flex-shrink-0 border ${columnBorderClass} transition-colors`}
             onDragOver={(e) => !isResearchColumn && handleDragOver(e, column.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => !isResearchColumn && handleDrop(e, column.id)}
@@ -632,20 +561,19 @@ export default function PipelinePage() {
             {/* Column Header */}
             <Link
               href={column.href}
-              className={`block border-b-2 p-3 text-white ${column.color} ${column.bgColor} transition-colors hover:bg-brand-raised`}
+              className="block border-b border-brand-ink/10 bg-white p-3 transition-colors hover:bg-brand-cyan/10"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] font-bold text-brand-cyan">{column.icon}</span>
-                  <span className="font-display text-lg font-semibold uppercase tracking-wide text-white">{column.name}</span>
+                  <span className="font-mono text-[9px] font-bold text-brand-blue">{column.icon}</span>
+                  <span className="text-sm font-semibold text-brand-ink">{column.name}</span>
                 </div>
-                <span className="border border-white/20 px-2 py-0.5 font-mono text-xs font-medium text-white">
+                <span className="min-w-7 bg-brand-ink px-2 py-1 text-center font-mono text-[10px] font-bold text-white">
                   {itemCount}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-brand-chrome">{column.description}</p>
               {isResearchColumn && (
-                <p className="mt-1 font-mono text-[10px] text-brand-cyan">
+                <p className="mt-1.5 font-mono text-[9px] uppercase tracking-wide text-brand-muted">
                   {column.athletes.length} held · {column.researchSessions?.length || 0} recent runs
                 </p>
               )}

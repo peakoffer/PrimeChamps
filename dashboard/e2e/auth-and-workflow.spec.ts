@@ -173,6 +173,9 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   });
 
   await page.goto("/pipeline/research");
+  await expect(page.getByRole("tab", { name: /Runs/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Held prospects/ })).toBeVisible();
+  await page.getByText("Quality controls", { exact: true }).click();
   await expect(page.getByText("Research quality gate")).toBeVisible();
   await expect(page.getByText("100% passing")).toBeVisible();
   await page.getByRole("button", { name: /Run research agent/i }).click();

@@ -254,6 +254,7 @@ function ResearchStageContent() {
   const [researchLogs, setResearchLogs] = useState<ResearchLog[]>([]);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [activeResearchView, setActiveResearchView] = useState<"history" | "prospects">("history");
 
   // Notification/toast state
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -817,6 +818,24 @@ function ResearchStageContent() {
         </div>
       </div>
 
+      <div className="flex items-center gap-6 border-b border-brand-ink/10" role="tablist" aria-label="Research workspace views">
+        {([
+          { id: "history", label: "Runs", count: researchLogs.length },
+          { id: "prospects", label: "Held prospects", count: athletes.length },
+        ] as const).map((view) => (
+          <button
+            key={view.id}
+            type="button"
+            role="tab"
+            aria-selected={activeResearchView === view.id}
+            onClick={() => setActiveResearchView(view.id)}
+            className={`border-b-2 pb-3 text-sm font-semibold transition ${activeResearchView === view.id ? "border-brand-blue text-brand-ink" : "border-transparent text-brand-muted hover:text-brand-ink"}`}
+          >
+            {view.label} <span className="ml-1 font-mono text-[9px] text-brand-muted">{view.count}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Research Progress */}
       {isResearching && (
         <div className="border border-brand-cyan bg-brand-cyan/10 p-4">
@@ -876,36 +895,41 @@ function ResearchStageContent() {
         </div>
       )}
 
-      {/* Latest run funnel */}
-      <div className="grid grid-cols-2 border-l border-t border-brand-ink/15 lg:grid-cols-4">
-        <div className="min-h-[116px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-4">
-          <div className="font-display text-4xl font-bold leading-none text-brand-ink">{latestStats?.sourced || latestStats?.discovered || 0}</div>
-          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-ink/55">Sourced candidates</div>
-        </div>
-        <div className="min-h-[116px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-4">
-          <div className="font-display text-4xl font-bold leading-none text-brand-ink">{latestStats?.discovered || 0}</div>
-          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-ink/55">Identity research pool</div>
-        </div>
-        <div className="min-h-[116px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-4">
-          <div className="font-display text-4xl font-bold leading-none text-brand-ink">{latestStats?.returned || 0}</div>
-          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-ink/55">Scored finalists</div>
-        </div>
-        <div className="relative min-h-[116px] overflow-hidden border-b border-r border-brand-ink/15 bg-brand-ink p-4 text-white">
-          <span className="absolute inset-y-0 left-0 w-1 bg-brand-cyan" />
-          <div className="font-display text-4xl font-bold leading-none text-white">
-            {latestOutcomeCounts.approval}
+      {activeResearchView === "history" && latestCompletedLog ? (
+        <section className="pc-surface flex flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            type="button"
+            onClick={() => setExpandedLogId(latestCompletedLog.id)}
+            className="min-w-0 text-left"
+          >
+            <span className="font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-brand-blue">Latest completed run</span>
+            <span className="mt-1 block truncate text-sm font-semibold capitalize text-brand-ink">
+              {latestCompletedLog.config_used?.sportFocus || "Research"}
+            </span>
+            <span className="mt-0.5 block text-xs text-brand-muted">{new Date(latestCompletedLog.created_at).toLocaleDateString()}</span>
+          </button>
+          <div className="grid grid-cols-3 divide-x divide-brand-ink/10 border border-brand-ink/10 bg-brand-paper-bright">
+            {[
+              ["Researched", latestStats?.discovered || 0],
+              ["Finalists", latestStats?.returned || 0],
+              [latestCompletedLog.is_evaluation ? "Qualified" : "Approval", latestOutcomeCounts.approval],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="min-w-20 px-3 py-2 text-center sm:min-w-24">
+                <div className="text-lg font-bold tabular-nums text-brand-ink">{value}</div>
+                <div className="font-mono text-[8px] font-bold uppercase tracking-[0.06em] text-brand-muted">{label}</div>
+              </div>
+            ))}
           </div>
-          <div className="mt-3 font-mono text-[9px] font-semibold uppercase tracking-[0.07em] text-brand-cyan">
-            {latestCompletedLog?.is_evaluation ? "Qualified in simulation" : "Added to Approval"}
-          </div>
-          <div className="mt-1 text-[10px] text-white/55">
-            {latestOutcomeCounts.held} held · {latestOutcomeCounts.blocked} blocked
-          </div>
-        </div>
-      </div>
+        </section>
+      ) : null}
 
-      <section className="pc-surface border-l-4 !border-l-brand-blue p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {activeResearchView === "history" ? (
+      <details className="pc-surface group">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 marker:content-none">
+          <span className="flex items-center gap-2 text-sm font-semibold text-brand-ink"><ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" /> Quality controls</span>
+          <span className="text-xs text-brand-muted transition group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="flex flex-col gap-4 border-t border-brand-ink/10 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" />
@@ -940,7 +964,8 @@ function ResearchStageContent() {
                 : "Run benchmark suite"}
           </button>
         </div>
-      </section>
+      </details>
+      ) : null}
 
       {/* Toast Notification */}
       {toast && (
@@ -975,10 +1000,11 @@ function ResearchStageContent() {
       )}
 
       {/* Research History */}
+      {activeResearchView === "history" ? (
       <div className="pc-surface overflow-hidden">
-        <div className="flex items-center justify-between border-b border-brand-ink/15 p-4">
-          <h2 className="flex items-center gap-2 font-display text-2xl font-bold uppercase text-brand-ink">
-            <History aria-hidden="true" className="h-4 w-4 text-brand-blue" /> Research history
+        <div className="flex items-center justify-between border-b border-brand-ink/10 px-4 py-3">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-brand-ink">
+            <History aria-hidden="true" className="h-4 w-4 text-brand-blue" /> Runs
           </h2>
           <button
             onClick={fetchResearchLogs}
@@ -1016,24 +1042,24 @@ function ResearchStageContent() {
                 ? log.candidate_ledger
                 : log.final_results || [];
               return (
-              <div key={log.id} id={`research-log-${log.id}`} className={`hover:bg-gray-50 ${isRunning ? "bg-yellow-50/50" : ""} ${expandedLogId === log.id ? "ring-2 ring-purple-300 rounded-lg" : ""}`}>
+              <div key={log.id} id={`research-log-${log.id}`} className={`${isRunning ? "bg-amber-50/40" : ""} ${expandedLogId === log.id ? "bg-brand-paper-bright" : "hover:bg-brand-paper/60"}`}>
                 {/* Log Header - Clickable */}
                 <button
                   onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-                  className="w-full p-4 flex items-center justify-between text-left"
+                  className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div
-                      className={`w-3 h-3 rounded-full ${
+                      className={`h-2 w-2 shrink-0 ${
                         log.status === "completed"
-                          ? "bg-green-500"
+                          ? "bg-emerald-500"
                           : log.status === "error" || log.status === "failed"
                           ? "bg-red-500"
                           : "bg-yellow-500 animate-pulse"
                       }`}
                     />
-                    <div>
-                      <div className="font-medium text-gray-900 flex items-center gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold capitalize text-brand-ink">
                         {log.config_used?.sportFocus || "Research Run"}
                         {log.is_evaluation && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
@@ -1046,36 +1072,25 @@ function ResearchStageContent() {
                           </span>
                         )}
                       </div>
-                      <div className="text-sm text-gray-800">
-                        {new Date(log.created_at).toLocaleString()}
+                      <div className="mt-0.5 text-xs text-brand-muted">
+                        {new Date(log.created_at).toLocaleDateString()} · {log.config_used?.scoringModel || RESEARCH_SCORING_MODEL}
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex shrink-0 items-center gap-3">
                     {isRunning ? (
                       <div className="text-right">
-                        <div className="text-sm font-medium text-yellow-700">
-                          Searching...
-                        </div>
-                        <div className="text-xs text-gray-800">
-                          {log.config_used?.followerMin?.toLocaleString()}-{log.config_used?.followerMax?.toLocaleString()} followers
-                        </div>
+                        <div className="text-xs font-semibold text-amber-800">Searching…</div>
                       </div>
                     ) : (
                       <div className="text-right">
-                        <div className="text-sm font-medium text-gray-900">
+                        <div className="text-sm font-semibold tabular-nums text-brand-ink">
                           {log.stats?.returned || log.final_results?.length || 0} finalists
-                        </div>
-                        <div className="text-xs text-gray-800">
-                          {log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0} identity researched
-                          {(log.stats?.sourced || 0) > (log.stats?.discovered || 0)
-                            ? ` · ${log.stats?.sourced} sourced`
-                            : ""}
                         </div>
                       </div>
                     )}
-                    <span className="text-gray-800">
-                      {expandedLogId === log.id ? "▼" : "▶"}
+                    <span className={`text-xs text-brand-muted transition ${expandedLogId === log.id ? "rotate-180" : ""}`}>
+                      ⌄
                     </span>
                   </div>
                 </button>
@@ -1089,34 +1104,33 @@ function ResearchStageContent() {
                         <p className="mt-1">{log.error_message || "The run did not complete. Copy the settings and try a smaller batch."}</p>
                       </div>
                     )}
-                    {/* Copy & Tweak Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        copySettingsFromLog(log);
-                      }}
-                      className="w-full py-2 px-4 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 font-medium flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <span>📋</span> Copy & Tweak Settings
-                    </button>
-
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                      {[
-                        ["Sourced", log.stats?.sourced || log.candidate_ledger?.length || log.stats?.discovered || 0],
-                        ["Identity researched", log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0],
-                        ["Enriched", log.stats?.enriched || 0],
-                        ["Scored", log.stats?.scored || log.scoring_details?.length || 0],
-                        ["Finalists", log.stats?.returned || log.final_results?.length || 0],
-                      ].map(([label, value]) => (
-                        <div key={String(label)} className="rounded-lg border bg-white px-3 py-2 text-center">
-                          <div className="text-xl font-bold text-gray-900">{value}</div>
-                          <div className="text-xs text-gray-600">{label}</div>
-                        </div>
-                      ))}
+                    <div className="flex flex-col gap-3 border-y border-brand-ink/10 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-brand-muted">
+                        <strong className="text-brand-ink">{log.stats?.sourced || log.candidate_ledger?.length || log.stats?.discovered || 0}</strong> sourced
+                        <span aria-hidden="true">→</span>
+                        <strong className="text-brand-ink">{log.stats?.discovered || log.stats?.searched || log.raw_results?.length || 0}</strong> researched
+                        <span aria-hidden="true">→</span>
+                        <strong className="text-brand-ink">{log.stats?.returned || log.final_results?.length || 0}</strong> finalists
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copySettingsFromLog(log);
+                        }}
+                        className="inline-flex min-h-9 items-center justify-center border border-brand-chrome bg-white px-3 font-mono text-[9px] font-bold uppercase tracking-wide text-brand-blue hover:border-brand-blue"
+                      >
+                        Reuse settings
+                      </button>
                     </div>
 
                     {/* Inputs */}
-                    <div className="bg-gray-50 rounded-lg p-4">
+                    <details className="group border border-brand-ink/10 bg-white">
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-brand-ink marker:content-none">
+                        Run setup and sources
+                        <span className="text-xs text-brand-muted transition group-open:rotate-180">⌄</span>
+                      </summary>
+                      <div className="space-y-4 border-t border-brand-ink/10 p-4">
+                    <div className="bg-brand-paper p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
                         <span>⚙️</span> Inputs
                       </h4>
@@ -1159,7 +1173,7 @@ function ResearchStageContent() {
                     </div>
 
                     {/* Evidence and toolchain */}
-                    <div className="bg-blue-50 rounded-lg p-4">
+                    <div className="bg-brand-cyan/5 p-4">
                       <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
                         <span>🧠</span> Research inputs and tools
                       </h4>
@@ -1188,37 +1202,27 @@ function ResearchStageContent() {
                         ))}
                       </div>
                     </div>
+                      </div>
+                    </details>
 
                     {/* Outputs */}
-                    <div className="border border-brand-cyan/40 bg-brand-cyan/5 p-4">
-                      <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                        <ArrowRight className="h-4 w-4 text-brand-blue" /> Candidates, evidence, and decisions
+                    <div className="border border-brand-ink/10 bg-white p-4">
+                      <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-brand-ink">
+                        <ArrowRight className="h-4 w-4 text-brand-blue" /> Finalists
                       </h4>
-                      <div className="mb-3 flex flex-wrap gap-2 text-xs">
-                        <span className="rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-800">
-                          {outcomeCounts.approval} {log.is_evaluation ? "qualified in simulation" : "now in approval"}
-                        </span>
-                        <span className="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800">
-                          {outcomeCounts.held} {log.is_evaluation ? "held in simulation" : "held"}
-                        </span>
-                        <span className="rounded-full bg-red-100 px-2.5 py-1 font-medium text-red-800">
-                          {outcomeCounts.blocked} blocked
-                        </span>
-                        {(log.stats?.duplicates ?? outcomeCounts.existing) > 0 && (
-                          <span className="rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-700">
-                            {log.stats?.duplicates ?? outcomeCounts.existing} already in CRM
-                          </span>
-                        )}
-                      </div>
+                      <p className="mb-2 text-xs text-brand-muted">
+                        {outcomeCounts.approval} {log.is_evaluation ? "qualified" : "in approval"} · {outcomeCounts.held} held · {outcomeCounts.blocked} blocked
+                        {(log.stats?.duplicates ?? outcomeCounts.existing) > 0 ? ` · ${log.stats?.duplicates ?? outcomeCounts.existing} already in CRM` : ""}
+                      </p>
                       {candidateLedger.length > 0 && (
-                        <div className="space-y-2">
+                        <div className="divide-y divide-brand-ink/10">
                           {candidateLedger.map((result, idx) => {
                             const disposition = getCandidateDisposition(result);
                             const presentation = getDispositionPresentation(disposition, log.is_evaluation === true);
                             const reasoningKey = `${log.id}:${result.instagram_handle || idx}`;
                             const isReasoningExpanded = expandedReasoning.has(reasoningKey);
                             return (
-                              <div key={reasoningKey} className="rounded-lg border border-green-100 bg-white px-3 py-3">
+                              <div key={reasoningKey} className="py-3">
                                 <button
                                   type="button"
                                   onClick={() => toggleReasoning(reasoningKey)}
@@ -1229,7 +1233,7 @@ function ResearchStageContent() {
                                     <div className="flex flex-wrap items-center gap-2">
                                       <span className="font-semibold text-gray-900">{result.name}</span>
                                       <span className="text-sm text-gray-600">@{result.instagram_handle}</span>
-                                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${presentation.className}`}>
+                                      <span className={`px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${presentation.className}`}>
                                         {presentation.label}
                                       </span>
                                     </div>
@@ -1238,12 +1242,12 @@ function ResearchStageContent() {
                                     </div>
                                   </div>
                                   <div className="flex flex-shrink-0 items-center gap-2">
-                                    <span className={`rounded px-2 py-1 text-xs font-bold ${
+                                    <span className={`px-2 py-1 text-xs font-bold ${
                                       (result.score || 0) >= 80
-                                        ? "bg-green-100 text-green-800"
+                                        ? "bg-brand-ink text-brand-cyan"
                                         : (result.score || 0) >= 60
-                                          ? "bg-yellow-100 text-yellow-800"
-                                          : "bg-gray-100 text-gray-800"
+                                          ? "bg-amber-100 text-amber-900"
+                                          : "bg-brand-paper text-brand-muted"
                                     }`}>
                                       {typeof result.score === "number" ? `${result.score}/100` : "Unscored"}
                                     </span>
@@ -1372,8 +1376,11 @@ function ResearchStageContent() {
           </div>
         )}
       </div>
+      ) : null}
 
       {/* Search */}
+      {activeResearchView === "prospects" ? (
+      <>
       <div className="pc-surface p-4">
         <input
           type="text"
@@ -1498,6 +1505,8 @@ function ResearchStageContent() {
           </table>
         </div>
       )}
+      </>
+      ) : null}
 
       {/* Focused research launcher */}
       {showConfigModal && (
