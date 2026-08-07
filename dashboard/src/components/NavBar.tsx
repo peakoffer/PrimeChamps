@@ -49,6 +49,7 @@ export default function NavBar() {
   const navLinks = [
     { href: "/", label: "Dashboard" },
     { href: "/pipeline", label: "Pipeline" },
+    { href: "/brand-opportunities", label: "Brand briefs" },
     { href: "/inbox", label: "Inbox" },
     { href: "/historical", label: "Historical" },
     { href: "/analytics", label: "Analytics" },
@@ -59,22 +60,22 @@ export default function NavBar() {
   return (
     <nav className="bg-white shadow-sm border-b sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex items-center">
+        <div className="flex justify-between h-16 gap-4">
+          <div className="flex shrink-0 items-center">
             <Link href="/" className="text-xl font-bold text-gray-900">
               Prime Champs
             </Link>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 overflow-x-auto">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
                 className={`px-3 py-2 text-sm font-medium ${
-                  pathname === link.href
+                  (link.href === "/" ? pathname === "/" : pathname.startsWith(link.href))
                     ? "text-blue-600"
                     : "text-gray-800 hover:text-gray-900"
-                }`}
+                } whitespace-nowrap`}
               >
                 {link.label}
               </Link>

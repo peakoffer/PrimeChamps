@@ -17,7 +17,7 @@ interface Notification {
   link?: string;
 }
 
-type FilterType = "all" | "unread" | "response" | "appointment" | "milestone" | "system";
+type FilterType = "all" | "unread" | "response" | "appointment" | "milestone" | "intake" | "system";
 
 const typeIcons: Record<string, string> = {
   response: "💬",
@@ -32,6 +32,9 @@ const typeIcons: Record<string, string> = {
   enrichment_completed: "📊",
   message_sent: "📤",
   message_received: "📥",
+  website_brand_inquiry: "🏢",
+  website_athlete_application: "🏅",
+  website_lead_routing_failed: "⚠️",
   error: "❌",
 };
 
@@ -48,6 +51,9 @@ const typeColors: Record<string, string> = {
   enrichment_completed: "bg-indigo-100 text-indigo-800",
   message_sent: "bg-cyan-100 text-cyan-800",
   message_received: "bg-teal-100 text-teal-800",
+  website_brand_inquiry: "bg-blue-100 text-blue-800",
+  website_athlete_application: "bg-cyan-100 text-cyan-800",
+  website_lead_routing_failed: "bg-orange-100 text-orange-800",
   error: "bg-red-100 text-red-800",
 };
 
@@ -64,6 +70,9 @@ const typeLabels: Record<string, string> = {
   enrichment_completed: "Enrichment",
   message_sent: "Messages",
   message_received: "Messages",
+  website_brand_inquiry: "Brand brief",
+  website_athlete_application: "Athlete application",
+  website_lead_routing_failed: "Intake alert",
   error: "Errors",
 };
 
@@ -159,6 +168,7 @@ export default function NotificationsPage() {
     if (filter === "response") return n.type === "response" || n.type === "message_received";
     if (filter === "appointment") return n.type === "appointment" || n.type === "appointment_reminder";
     if (filter === "milestone") return n.type === "milestone";
+    if (filter === "intake") return n.type.startsWith("website_");
     if (filter === "system") return n.type === "system" || n.type === "error";
     return true;
   });
@@ -169,6 +179,7 @@ export default function NotificationsPage() {
     { value: "response", label: "Responses" },
     { value: "appointment", label: "Appointments" },
     { value: "milestone", label: "Milestones" },
+    { value: "intake", label: "Website intake" },
     { value: "system", label: "System" },
   ];
 

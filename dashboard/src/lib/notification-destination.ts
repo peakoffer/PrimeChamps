@@ -17,6 +17,9 @@ const DEFAULT_DESTINATIONS: Record<string, string> = {
   enrichment_completed: "/athletes",
   message_sent: "/inbox",
   message_received: "/inbox",
+  website_brand_inquiry: "/brand-opportunities",
+  website_athlete_application: "/pipeline/approval",
+  website_lead_routing_failed: "/notifications",
   system: "/",
   error: "/",
 };

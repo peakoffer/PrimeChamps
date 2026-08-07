@@ -29,6 +29,9 @@ const typeIcons: Record<string, string> = {
   enrichment_completed: "📊",
   message_sent: "📤",
   message_received: "📥",
+  website_brand_inquiry: "🏢",
+  website_athlete_application: "🏅",
+  website_lead_routing_failed: "⚠️",
   system: "⚙️",
   error: "❌",
 };
@@ -45,6 +48,9 @@ const typeColors: Record<string, string> = {
   enrichment_completed: "bg-indigo-100 text-indigo-800",
   message_sent: "bg-cyan-100 text-cyan-800",
   message_received: "bg-teal-100 text-teal-800",
+  website_brand_inquiry: "bg-blue-100 text-blue-800",
+  website_athlete_application: "bg-cyan-100 text-cyan-800",
+  website_lead_routing_failed: "bg-orange-100 text-orange-800",
   system: "bg-gray-100 text-gray-800",
   error: "bg-red-100 text-red-800",
 };
