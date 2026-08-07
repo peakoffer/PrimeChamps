@@ -472,7 +472,7 @@ function ApprovalPageContent() {
                                 className={`px-2 py-0.5 text-xs font-bold rounded-full ${
                                   score >= 80
                                     ? "bg-green-500 text-white"
-                                    : score >= 60
+                                    : score >= 75
                                     ? "bg-yellow-500 text-white"
                                     : "bg-gray-400 text-white"
                                 }`}
@@ -802,7 +802,7 @@ function ApprovalPageContent() {
                             <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${
                               notes.research_score >= 80
                                 ? "bg-green-100 text-green-700"
-                                : notes.research_score >= 60
+                                : notes.research_score >= 75
                                 ? "bg-yellow-100 text-yellow-700"
                                 : "bg-gray-100 text-gray-800"
                             }`}>

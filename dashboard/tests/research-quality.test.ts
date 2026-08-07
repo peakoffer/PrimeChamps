@@ -9,6 +9,7 @@ import {
   parseResearchScoreBreakdown,
   resolveResearchDisposition,
 } from "../src/lib/research/scoring.ts";
+import { compileRecruitingProfile } from "../src/lib/research/intelligence.ts";
 
 test("sport strategies cover every major archetype with current discovery queries", () => {
   const samples = {
@@ -61,23 +62,21 @@ test("every sport offered by the research UI has a complete search strategy", ()
 
 test("weighted research score is deterministic and rejects incomplete dimensions", () => {
   const breakdown = parseResearchScoreBreakdown({
-    professional_legitimacy: 90,
-    audience_fit: 80,
-    brand_fit: 70,
     momentum: 60,
+    brand_fit: 70,
+    audience_fit: 80,
     accessibility: 50,
-    evidence_quality: 40,
+    thesis_fit: 40,
   });
   assert.ok(breakdown);
-  assert.equal(calculateResearchScore(breakdown), 68);
-  assert.equal(parseResearchScoreBreakdown({ professional_legitimacy: 90 }), null);
+  assert.equal(calculateResearchScore(breakdown), 62);
+  assert.equal(parseResearchScoreBreakdown({ momentum: 90 }), null);
   assert.equal(parseResearchScoreBreakdown({
-    professional_legitimacy: 101,
-    audience_fit: 80,
-    brand_fit: 70,
     momentum: 60,
+    brand_fit: 70,
+    audience_fit: 80,
     accessibility: 50,
-    evidence_quality: 40,
+    thesis_fit: 101,
   }), null);
 });
 
@@ -85,7 +84,8 @@ test("minor, age, and quality gates keep unsafe or weak candidates out of Approv
   assert.equal(resolveResearchDisposition({ score: 95, isMinor: true, ageVerified: true }), "blocked");
   assert.equal(resolveResearchDisposition({ score: 95, isMinor: false, ageVerified: false }), "held");
   assert.equal(resolveResearchDisposition({ score: 59, isMinor: false, ageVerified: true }), "held");
-  assert.equal(resolveResearchDisposition({ score: 60, isMinor: false, ageVerified: true }), "approval");
+  assert.equal(resolveResearchDisposition({ score: 74, isMinor: false, ageVerified: true }), "held");
+  assert.equal(resolveResearchDisposition({ score: 75, isMinor: false, ageVerified: true }), "approval");
   assert.equal(resolveResearchDisposition({
     score: 85,
     isMinor: false,
@@ -117,28 +117,28 @@ test("OnlyFans objective favors verified emerging adults over risky or veteran p
     age: 20,
     careerStage: "emerging",
     objectiveFit: "strong",
-  }), 59);
+  }), 74);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 85,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 39,
     careerStage: "established",
     objectiveFit: "strong",
-  }), 55);
+  }), 69);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 85,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 27,
     careerStage: "veteran",
     objectiveFit: "strong",
-  }), 55);
+  }), 69);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 67,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
     age: 29,
     careerStage: "established",
     objectiveFit: "weak",
-  }), 59);
+  }), 67);
   assert.equal(applyResearchObjectiveScoreGuardrails({
     score: 82,
     objective: DEFAULT_RESEARCH_OBJECTIVE,
@@ -146,6 +146,24 @@ test("OnlyFans objective favors verified emerging adults over risky or veteran p
     careerStage: "established",
     objectiveFit: "strong",
   }), 82);
+});
+
+test("approved weekly intelligence compiles into a versionable thesis", () => {
+  const profile = compileRecruitingProfile([{
+    id: "item-1",
+    meeting_id: "meeting-1",
+    category: "follower_band",
+    statement: "Prioritize athletes with 40K to 250K followers.",
+    normalized_value: { minimum: 40_000, maximum: 250_000 },
+    confidence: 96,
+    evidence_refs: [{ segment_id: "seg_2", quote: "40K to 250K is working now" }],
+    status: "approved",
+    created_at: "2026-08-06T12:00:00.000Z",
+  }]);
+
+  assert.equal(profile.parameters.follower_min, 40_000);
+  assert.equal(profile.parameters.follower_max, 250_000);
+  assert.deepEqual(profile.follower_band, ["Prioritize athletes with 40K to 250K followers."]);
 });
 
 test("browser pages use authenticated app APIs instead of a Supabase client", () => {
@@ -189,4 +207,8 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.doesNotMatch(workflowSource, /Include a mix of established stars and rising talents/);
   assert.match(workflowSource, /"use workflow"/);
   assert.match(workflowSource, /"use step"/);
+  assert.match(workflowSource, /targetPhase: "discovery"/);
+  assert.match(workflowSource, /targetPhase: "enrichment"/);
+  assert.match(workflowSource, /targetPhase: "scoring"/);
+  assert.match(workflowSource, /targetPhase: "persistence"/);
 });

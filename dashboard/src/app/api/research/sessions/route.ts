@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from("research_logs")
-      .select("id, status, phase, workflow_run_id, prompt_version, scoring_model, is_evaluation, config_used, stats, final_results, created_at, completed_at, heartbeat_at, error_message")
+      .select("id, status, phase, workflow_run_id, profile_version_id, research_depth, prompt_version, scoring_model, is_evaluation, config_used, stats, final_results, created_at, completed_at, heartbeat_at, error_message")
       .eq("organization_id", user.organizationId)
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
             counts.held++;
           } else if (candidate.disposition === "blocked" || candidate.is_minor === true || candidate.score === 0) {
             counts.blocked++;
-          } else if (candidate.disposition === "held" || candidate.age_verified !== true || (candidate.score || 0) < 60) {
+          } else if (candidate.disposition === "held" || candidate.age_verified !== true || (candidate.score || 0) < 75) {
             counts.held++;
           }
           return counts;
