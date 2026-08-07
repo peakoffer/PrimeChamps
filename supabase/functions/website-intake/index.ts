@@ -521,7 +521,11 @@ Deno.serve(async (request) => {
   const resendKey = Deno.env.get("RESEND_API_KEY");
   const resendFrom = Deno.env.get("RESEND_FROM_EMAIL");
   const notifyTo = Deno.env.get("LEAD_NOTIFICATION_EMAIL") ?? "info@prime-champs.com";
-  const canEmail = Boolean(resendKey && resendFrom && !isTest);
+  const crmEmailSecret = Deno.env.get("WEBSITE_INTAKE_SHARED_SECRET");
+  const crmEmailUrl = Deno.env.get("CRM_EMAIL_DELIVERY_URL") ?? "https://crm.prime-champs.com/api/internal/website-email";
+  const canEmailDirect = Boolean(resendKey && resendFrom && !isTest);
+  const canEmailProxy = Boolean(crmEmailSecret && !isTest);
+  const canEmail = canEmailDirect || canEmailProxy;
 
   const { data: lead, error: insertError } = await supabase
     .from("website_leads")
@@ -585,7 +589,7 @@ Deno.serve(async (request) => {
   });
 
   let confirmationSent = false;
-  if (canEmail && resendKey && resendFrom) {
+  if (canEmailDirect && resendKey && resendFrom) {
     const summary = Object.entries(details)
       .map(([key, value]) => `<li><strong>${escapeHtml(key.replaceAll("_", " "))}:</strong> ${escapeHtml(value)}</li>`)
       .join("");
@@ -635,6 +639,50 @@ Deno.serve(async (request) => {
       await supabase.from("website_leads").update({
         confirmation_status: "failed",
         confirmation_error: (error instanceof Error ? error.message : "Unknown confirmation error").slice(0, 1_000),
+      }).eq("id", lead.id);
+    }
+  } else if (canEmailProxy && crmEmailSecret) {
+    try {
+      const deliveryResponse = await fetch(crmEmailUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${crmEmailSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          lead_id: lead.id,
+          lead_type: leadType,
+          full_name: fullName,
+          email,
+          phone,
+          details,
+        }),
+      });
+      const delivery = await deliveryResponse.json().catch(() => ({})) as {
+        internal_sent?: boolean;
+        confirmation_sent?: boolean;
+        internal_error?: string;
+        confirmation_error?: string;
+        error?: string;
+      };
+      if (!deliveryResponse.ok) throw new Error(delivery.error || `CRM email delivery returned ${deliveryResponse.status}`);
+      confirmationSent = Boolean(delivery.confirmation_sent);
+      await supabase.from("website_leads").update({
+        notification_status: delivery.internal_sent ? "sent" : "failed",
+        notification_error: delivery.internal_sent ? null : (delivery.internal_error || "Internal email was not accepted").slice(0, 1_000),
+        notified_at: delivery.internal_sent ? new Date().toISOString() : null,
+        confirmation_status: delivery.confirmation_sent ? "sent" : "failed",
+        confirmation_error: delivery.confirmation_sent ? null : (delivery.confirmation_error || "Confirmation email was not accepted").slice(0, 1_000),
+        confirmed_at: delivery.confirmation_sent ? new Date().toISOString() : null,
+      }).eq("id", lead.id);
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "Unknown CRM email delivery error").slice(0, 1_000);
+      console.error("website-intake CRM email delivery failed", message);
+      await supabase.from("website_leads").update({
+        notification_status: "failed",
+        notification_error: message,
+        confirmation_status: "failed",
+        confirmation_error: message,
       }).eq("id", lead.id);
     }
   }
