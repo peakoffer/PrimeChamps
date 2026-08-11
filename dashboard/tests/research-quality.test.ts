@@ -805,3 +805,15 @@ test("Anthropic scoring requests remain compatible with the latest Sonnet API", 
     assert.doesNotMatch(requestBody, /temperature\s*:/);
   }
 });
+
+test("evaluation forks rebuild full enrichment dossiers instead of compact run summaries", () => {
+  const evaluationSource = readFileSync(
+    new URL("../src/lib/research/evaluation-runs.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(evaluationSource, /\.from\("research_candidates"\)/);
+  assert.match(evaluationSource, /isFullCandidateCheckpoint/);
+  assert.match(evaluationSource, /typeof candidate\.sport === "string"/);
+  assert.match(evaluationSource, /scoring_details: checkpointDetails/);
+});

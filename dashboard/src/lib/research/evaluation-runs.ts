@@ -196,7 +196,27 @@ export async function forkResearchEvaluationFromEnrichment(sourceRunId: string) 
   if (!config || typeof config.sportFocus !== "string" || !config.sportFocus.trim()) {
     throw new Error("Source evaluation has no valid saved configuration");
   }
-  if (rawResults.length === 0 || scoringDetails.length === 0) {
+  const { data: candidateRows, error: candidateRowsError } = await admin
+    .from("research_candidates")
+    .select("raw_candidate")
+    .eq("research_log_id", source.id)
+    .eq("identity_status", "verified")
+    .order("discovered_rank", { ascending: true });
+  if (candidateRowsError) throw candidateRowsError;
+  const isFullCandidateCheckpoint = (value: unknown): value is Record<string, unknown> => {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Record<string, unknown>;
+    return typeof candidate.name === "string"
+      && typeof candidate.sport === "string"
+      && typeof candidate.instagram_handle === "string";
+  };
+  const durableCandidateDetails = (candidateRows || []).flatMap((row) =>
+    isFullCandidateCheckpoint(row.raw_candidate) ? [row.raw_candidate] : []
+  );
+  const checkpointDetails = durableCandidateDetails.length > 0
+    ? durableCandidateDetails
+    : scoringDetails.filter(isFullCandidateCheckpoint);
+  if (rawResults.length === 0 || checkpointDetails.length === 0) {
     throw new Error("Source evaluation has no durable enrichment checkpoint to fork");
   }
 
@@ -224,11 +244,11 @@ export async function forkResearchEvaluationFromEnrichment(sourceRunId: string) 
       evaluation_fork_reason: "Re-score the same verified identity pool with a changed provider stage",
     },
     raw_results: rawResults,
-    scoring_details: scoringDetails,
+    scoring_details: checkpointDetails,
     final_results: [],
     stats: {
       ...sourceStats,
-      enriched: scoringDetails.length,
+      enriched: checkpointDetails.length,
       scored: 0,
       returned: 0,
       added: 0,
@@ -252,7 +272,7 @@ export async function forkResearchEvaluationFromEnrichment(sourceRunId: string) 
       runId: forked.id,
       workflowRunId: workflow.runId,
       resumedFrom: "scoring",
-      enriched: scoringDetails.length,
+      enriched: checkpointDetails.length,
     };
   } catch (error) {
     await admin.from("research_logs").update({

@@ -157,6 +157,8 @@ Age verification now starts with one batched Apify Google run per five-candidate
 
 If a scoring provider fails for every enriched candidate, the run retains its paid enrichment checkpoint. A corrected deployment can fork from that checkpoint rather than repeating discovery and Instagram work.
 
+Completed-run re-score forks rebuild full dossiers from `research_candidates.raw_candidate`; the compact history summary is never treated as a scoring input.
+
 1. Resolve the explicit outcome conflicts surfaced by the 100-case mailbox ledger, then complete achievability, pursue-today, public knowability, sport, and point-in-time source/cutoff fields. Do not assign approximate reconstructions to a benchmark split.
 2. Add approximately 30–40 genuine hard negatives. The mailbox sample contains only three `Not a Fit` cases; `Possible Fit`, `Uncertain`, and right-censored `Stalled` records must not be relabeled as negatives.
 3. Automatically assign only completed, point-in-time-usable labels to development and held-out splits, then freeze the latest-Sonnet baseline. Determinism comes from pinned model/version metadata, strict schemas, deterministic score caps, and repeated benchmark measurement; newer Sonnet APIs may reject legacy sampling parameters.
