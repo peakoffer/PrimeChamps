@@ -55,6 +55,20 @@ type EvidenceSummary = {
   blockerCounts: Record<string, number>;
 };
 
+type EvidencePreparationRun = {
+  id: string;
+  record_ids: string[];
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  records_processed: number;
+  records_ready: number;
+  safe_source_count: number;
+  safe_claim_count: number;
+  max_apify_charge_microusd: number;
+  actual_apify_cost_microusd: number | null;
+  error_message: string | null;
+  created_at: string;
+};
+
 type BenchmarkSummary = {
   total: number;
   usable: number;
@@ -207,6 +221,8 @@ export default function ResearchBenchmarkPage() {
   const [records, setRecords] = useState<GoldenRecord[]>([]);
   const [summary, setSummary] = useState(INITIAL_SUMMARY);
   const [evidenceSummary, setEvidenceSummary] = useState(INITIAL_EVIDENCE_SUMMARY);
+  const [evidencePreparationRuns, setEvidencePreparationRuns] = useState<EvidencePreparationRun[]>([]);
+  const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -219,12 +235,18 @@ export default function ResearchBenchmarkPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/research/golden-records", { cache: "no-store" });
-      const payload = await response.json();
+      const [response, preparationResponse] = await Promise.all([
+        fetch("/api/research/golden-records", { cache: "no-store" }),
+        fetch("/api/research/golden-records/prepare-evidence", { cache: "no-store" }),
+      ]);
+      const [payload, preparationPayload] = await Promise.all([response.json(), preparationResponse.json()]);
       if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
+      if (!preparationResponse.ok) throw new Error(preparationPayload.error || "Could not load evidence preparation");
       setRecords(payload.records || []);
       setSummary(payload.summary || INITIAL_SUMMARY);
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
+      setEvidencePreparationRuns(preparationPayload.runs || []);
+      setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
@@ -237,6 +259,15 @@ export default function ResearchBenchmarkPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const activeEvidenceRun = evidencePreparationRuns.find((run) => run.status === "queued" || run.status === "running");
+  const latestEvidenceRun = evidencePreparationRuns[0];
+
+  useEffect(() => {
+    if (!activeEvidenceRun) return;
+    const timer = window.setInterval(() => { void load(); }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [activeEvidenceRun, load]);
 
   const visibleRecords = useMemo(() => records.filter((record) => {
     if (filter === "needs_label") return record.fit_label === "uncertain" || record.achievability_label === "uncertain";
@@ -374,6 +405,26 @@ export default function ResearchBenchmarkPage() {
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sport enrichment failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const prepareHistoricalEvidence = async () => {
+    setWorking(true);
+    setMessage("Starting a bounded archive-evidence run…");
+    try {
+      const response = await fetch("/api/research/golden-records/prepare-evidence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ maxRecords: 10, maxApifyChargeUsd: 0.75 }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Evidence preparation failed to start");
+      setMessage(`Queued ${payload.records} records. Google discovery is capped at $${payload.maxApifyChargeUsd.toFixed(2)}; archive retrieval is free and scoring-token spend is zero.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Evidence preparation failed to start");
     } finally {
       setWorking(false);
     }
@@ -567,8 +618,19 @@ export default function ResearchBenchmarkPage() {
             <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
               Freeze benchmark cohort
             </button>
+            <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
+              {activeEvidenceRun ? `Preparing ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…` : `Build evidence packets (${Math.min(eligibleEvidenceRecords, 10)})`}
+            </button>
           </div>
         </div>
+
+        {latestEvidenceRun && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-500">
+            <span>Latest evidence run: <strong className="font-medium text-zinc-300">{titleize(latestEvidenceRun.status)}</strong> · {latestEvidenceRun.records_ready}/{latestEvidenceRun.records_processed} packets ready · {latestEvidenceRun.safe_claim_count} safe claims</span>
+            <span>Discovery ceiling ${(latestEvidenceRun.max_apify_charge_microusd / 1_000_000).toFixed(2)} USD · scoring tokens 0</span>
+            {latestEvidenceRun.error_message && <span className="w-full text-red-300/80">{latestEvidenceRun.error_message}</span>}
+          </div>
+        )}
 
         {showNew && (
           <section className="mb-6 grid gap-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4 sm:grid-cols-[1fr_1fr_auto_auto]">

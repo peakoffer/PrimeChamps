@@ -52,6 +52,15 @@ import {
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
 } from "../src/lib/research/benchmark-runner-support.ts";
+import {
+  buildHistoricalEvidenceQueries,
+  dedupeHistoricalSearchCandidates,
+  extractPreparedArchivedEvidence,
+  normalizeEvidencePreparationBudget,
+  parseWaybackTimestamp,
+  selectWaybackCapture,
+  waybackCdxUrl,
+} from "../src/lib/research/historical-evidence-preparation.ts";
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
   assert.equal(normalizeResearchEvaluationProfile(undefined), "smoke");
@@ -735,4 +744,134 @@ test("benchmark sport enrichment uses Sonnet-compatible structured output schema
   assert.match(source, /confidence: \{ type: "integer" \}/);
   assert.doesNotMatch(source, /confidence: \{ type: "integer", (minimum|maximum)/);
   assert.match(source, /output_config: \{ effort: "low", format:/);
+});
+
+test("Wayback selection uses the latest exact HTML capture no later than the evidence cutoff", () => {
+  const canonicalUrl = "https://sports.example/athletes/jane-doe";
+  const capture = selectWaybackCapture([
+    ["timestamp", "original", "statuscode", "digest", "mimetype"],
+    ["20240301010101", canonicalUrl, "200", "OLD", "text/html"],
+    ["20240501010101", canonicalUrl, "200", "LATEST", "text/html"],
+    ["20240701010101", canonicalUrl, "200", "FUTURE", "text/html"],
+    ["20240401010101", "https://sports.example/athletes/other", "200", "WRONG", "text/html"],
+    ["20240402010101", canonicalUrl, "200", "PDF", "application/pdf"],
+  ], canonicalUrl, "2024-06-01T00:00:00Z");
+
+  assert.equal(capture?.timestamp, "20240501010101");
+  assert.equal(capture?.digest, "LATEST");
+  assert.equal(capture?.archivedUrl, `https://web.archive.org/web/20240501010101id_/${canonicalUrl}`);
+  assert.equal(parseWaybackTimestamp("20240230010101"), null);
+  assert.equal(selectWaybackCapture([["timestamp", "original", "statuscode"]], canonicalUrl, "2024-06-01T00:00:00Z"), null);
+  const cdxUrl = new URL(waybackCdxUrl(canonicalUrl, "2024-06-01T12:34:56Z"));
+  assert.equal(cdxUrl.hostname, "web.archive.org");
+  assert.equal(cdxUrl.searchParams.get("matchType"), "exact");
+  assert.equal(cdxUrl.searchParams.get("to"), "20240601123456");
+});
+
+test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
+  const record = {
+    id: "golden-jane",
+    athlete_name: "Jane Doe",
+    sport: "Volleyball",
+    fit_label: "fit" as const,
+    evidence_cutoff_at: "2024-06-01T23:59:59Z",
+  };
+  const candidate = {
+    query: '"Jane Doe" "Volleyball" athlete profile before:2024-06-01',
+    title: "Jane Doe athlete profile",
+    url: "https://volleyball.example/players/jane-doe",
+    snippet: "Jane Doe is a volleyball player.",
+    position: 1,
+  };
+  const capture = {
+    timestamp: "20240501010101",
+    capturedAt: "2024-05-01T01:01:01.000Z",
+    originalUrl: candidate.url,
+    statusCode: "200",
+    digest: "ABC123",
+    mimeType: "text/html",
+    archivedUrl: `https://web.archive.org/web/20240501010101id_/${candidate.url}`,
+  };
+  const html = `<!doctype html><html><head><title>Jane Doe | Volleyball Roster</title><script type="application/ld+json">{"datePublished":"2023-09-01"}</script></head><body><main><h1>Jane Doe</h1><p>Jane Doe was born January 15, 2000 and is a volleyball outside hitter. The nationally ranked rookie won a conference championship and shares training content on Instagram.</p></main></body></html>`;
+  const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
+
+  assert.equal(prepared.rejectionReason, null);
+  assert.equal(prepared.evidence?.historicalAsOf, capture.capturedAt);
+  assert.equal(prepared.evidence?.publishedAt, "2023-09-01T00:00:00.000Z");
+  assert.ok(prepared.evidence?.claims.some((claim) => claim.claimType === "sport_identity"));
+  const age = prepared.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(age?.structuredValue.birth_date, "2000-01-15");
+  assert.ok(prepared.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
+  assert.ok(prepared.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const wrongPerson = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: "<html><title>Janet Doe | Volleyball</title><body>Janet Doe plays volleyball.</body></html>",
+  });
+  assert.equal(wrongPerson.evidence, null);
+  assert.equal(wrongPerson.rejectionReason, "archived_page_does_not_name_exact_athlete");
+
+  const separatedNameTokens = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: "<html><title>Jane volleyball roster</title><body>Jane is a volleyball athlete coached by John Doe.</body></html>",
+  });
+  assert.equal(separatedNameTokens.evidence, null);
+  assert.equal(separatedNameTokens.rejectionReason, "archived_page_does_not_name_exact_athlete");
+
+  const wrongSport = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: "<html><title>Jane Doe</title><body>Jane Doe competes professionally in tennis.</body></html>",
+  });
+  assert.equal(wrongSport.evidence, null);
+  assert.equal(wrongSport.rejectionReason, "archived_page_does_not_support_requested_sport");
+});
+
+test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {
+  const queries = buildHistoricalEvidenceQueries({
+    athlete_name: "Jane Doe",
+    sport: "Volleyball",
+    evidence_cutoff_at: "2024-06-01T12:00:00Z",
+  });
+  assert.equal(queries.length, 2);
+  assert.ok(queries.every((query) => query.includes("before:2024-06-01")));
+  assert.equal(normalizeEvidencePreparationBudget(100), 1);
+  assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
+  assert.equal(normalizeEvidencePreparationBudget(undefined), 0.75);
+  const deduped = dedupeHistoricalSearchCandidates([
+    { query: "q", title: "A", url: "https://one.example/a", snippet: "", position: 1 },
+    { query: "q", title: "A duplicate", url: "http://one.example/a/", snippet: "", position: 2 },
+    { query: "q", title: "B", url: "https://one.example/b", snippet: "", position: 3 },
+    { query: "q", title: "C over domain cap", url: "https://one.example/c", snippet: "", position: 4 },
+    { query: "q", title: "Local", url: "http://localhost/private", snippet: "", position: 5 },
+    { query: "q", title: "D", url: "https://two.example/d", snippet: "", position: 6 },
+  ]);
+  assert.deepEqual(deduped.map((item) => item.title), ["A", "B", "D"]);
+});
+
+test("evidence preparation is durable, replay-safe, zero-scoring, and isolated from outreach", () => {
+  const workflow = readFileSync(new URL("../src/workflows/benchmark-evidence.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
+  assert.match(workflow, /"use workflow"/);
+  assert.match(workflow, /"use step"/);
+  assert.match(workflow, /discoverHistoricalEvidence\.maxRetries = 0/);
+  assert.match(workflow, /maxTotalChargeUsd: input\.maxApifyChargeUsd/);
+  assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
+  assert.match(workflow, /scoringTokensSpent: 0/);
+  assert.match(workflow, /provider: "internet_archive_wayback"/);
+  for (const forbiddenTable of ["athletes", "research_candidates", "pipeline_athletes", "messages", "outreach_touchpoints", "channel_messages"]) {
+    assert.ok(!workflow.includes(`from("${forbiddenTable}")`), `evidence workflow must not touch ${forbiddenTable}`);
+    assert.ok(!route.includes(`from("${forbiddenTable}")`), `evidence route must not touch ${forbiddenTable}`);
+  }
+  assert.ok(route.indexOf("if (!selected.length)") < route.indexOf("await start(prepareBenchmarkEvidenceWorkflow"), "blind-label gate must run before workflow start");
+  assert.match(route, /no provider call was started/);
+  assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
+  assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
+  assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);
 });

@@ -19,6 +19,14 @@ type ApifyRun = {
   status?: ApifyRunStatus;
   statusMessage?: string;
   defaultDatasetId?: string;
+  usageTotalUsd?: number;
+  chargedEventCounts?: Record<string, number>;
+};
+
+export type ApifyRunUsage = {
+  runId: string;
+  usageTotalUsd: number | null;
+  chargedEventCounts: Record<string, number>;
 };
 
 export type ApifyGoogleResult = {
@@ -214,6 +222,20 @@ export async function runApifyActor<T>(
     maxTotalChargeUsd?: number;
   } = {}
 ): Promise<T[]> {
+  const result = await runApifyActorWithUsage<T>(actorId, input, options);
+  return result.items;
+}
+
+export async function runApifyActorWithUsage<T>(
+  actorId: string,
+  input: Record<string, unknown>,
+  options: {
+    datasetLimit?: number;
+    timeoutMs?: number;
+    maxItems?: number;
+    maxTotalChargeUsd?: number;
+  } = {}
+): Promise<{ items: T[]; usage: ApifyRunUsage }> {
   const timeoutMs = options.timeoutMs || DEFAULT_RUN_TIMEOUT_MS;
   const startedAt = Date.now();
   const runParameters = new URLSearchParams();
@@ -265,11 +287,23 @@ export async function runApifyActor<T>(
   }
 
   const limit = Math.max(1, Math.min(options.datasetLimit || 100, 1_000));
-  return apifyFetch<T[]>(
+  const items = await apifyFetch<T[]>(
     `/datasets/${run.defaultDatasetId}/items?clean=true&limit=${limit}`,
     undefined,
     Math.min(timeoutMs, DEFAULT_REQUEST_TIMEOUT_MS)
   );
+  return {
+    items,
+    usage: {
+      runId: run.id,
+      usageTotalUsd: typeof run.usageTotalUsd === "number" && Number.isFinite(run.usageTotalUsd)
+        ? Math.max(0, run.usageTotalUsd)
+        : null,
+      chargedEventCounts: run.chargedEventCounts && typeof run.chargedEventCounts === "object"
+        ? run.chargedEventCounts
+        : {},
+    },
+  };
 }
 
 export async function runApifyGoogleSearch(
