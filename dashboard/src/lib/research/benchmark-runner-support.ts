@@ -345,6 +345,7 @@ export type BenchmarkTokenUsage = {
 };
 
 export type BenchmarkPriceSnapshot = {
+  provider: "anthropic" | "openrouter";
   model: string;
   inputUsdPerMillion: number;
   outputUsdPerMillion: number;
@@ -354,11 +355,93 @@ export type BenchmarkPriceSnapshot = {
   effectiveUntil: string | null;
 };
 
+export type OpenRouterBenchmarkModel = {
+  id?: string;
+  created?: number;
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+    input_cache_read?: string;
+    input_cache_write?: string;
+  };
+  supported_parameters?: string[];
+};
+
+export type OpenRouterBenchmarkUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cost?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
+};
+
+function openRouterPerMillion(value: string | undefined) {
+  const perToken = Number(value);
+  if (!Number.isFinite(perToken) || perToken < 0) return null;
+  return Math.round(perToken * 1_000_000 * 1_000_000_000) / 1_000_000_000;
+}
+
+export function selectLatestOpenRouterSonnet(models: OpenRouterBenchmarkModel[]) {
+  const model = models.filter((candidate) =>
+    typeof candidate.id === "string"
+    && candidate.id.startsWith("anthropic/")
+    && /sonnet/i.test(candidate.id)
+    && !candidate.id.includes(":")
+  ).sort((left, right) => Number(right.created || 0) - Number(left.created || 0)
+    || String(right.id).localeCompare(String(left.id)))[0];
+  if (!model?.id) return null;
+  if (!(model.supported_parameters || []).some((parameter) =>
+    parameter === "response_format" || parameter === "structured_outputs"
+  )) return null;
+  const input = openRouterPerMillion(model.pricing?.prompt);
+  const output = openRouterPerMillion(model.pricing?.completion);
+  const cacheRead = openRouterPerMillion(model.pricing?.input_cache_read);
+  const cacheWrite = openRouterPerMillion(model.pricing?.input_cache_write);
+  if (input === null || input <= 0 || output === null || output <= 0) return null;
+  return {
+    model: model.id,
+    releaseCreatedAt: model.created ? new Date(model.created * 1_000).toISOString() : null,
+    price: {
+      provider: "openrouter" as const,
+      model: model.id,
+      inputUsdPerMillion: input,
+      outputUsdPerMillion: output,
+      cacheCreationUsdPerMillion: cacheWrite ?? input,
+      cacheReadUsdPerMillion: cacheRead ?? input,
+      source: "OpenRouter live model catalog resolved at benchmark start",
+      effectiveUntil: null,
+    } satisfies BenchmarkPriceSnapshot,
+  };
+}
+
+export function normalizeOpenRouterBenchmarkUsage(value: OpenRouterBenchmarkUsage | undefined) {
+  const promptTokens = Math.max(0, Math.round(Number(value?.prompt_tokens) || 0));
+  const outputTokens = Math.max(0, Math.round(Number(value?.completion_tokens) || 0));
+  const cacheReadInputTokens = Math.max(0, Math.round(Number(value?.prompt_tokens_details?.cached_tokens) || 0));
+  const cacheCreationInputTokens = Math.max(0, Math.round(Number(value?.prompt_tokens_details?.cache_write_tokens) || 0));
+  const uncachedInputTokens = Math.max(0, promptTokens - cacheReadInputTokens - cacheCreationInputTokens);
+  const reportedCost = typeof value?.cost === "number" ? value.cost : Number.NaN;
+  return {
+    usage: {
+      inputTokens: uncachedInputTokens,
+      outputTokens,
+      cacheCreationInputTokens,
+      cacheReadInputTokens,
+    } satisfies BenchmarkTokenUsage,
+    reportedCostMicrousd: Number.isFinite(reportedCost) && reportedCost >= 0
+      ? Math.ceil(reportedCost * 1_000_000)
+      : null,
+  };
+}
+
 export function sonnetPriceSnapshot(model: string, now = new Date()): BenchmarkPriceSnapshot {
   const overrideInput = Number(process.env.RESEARCH_SONNET_INPUT_USD_PER_MTOK);
   const overrideOutput = Number(process.env.RESEARCH_SONNET_OUTPUT_USD_PER_MTOK);
   if (overrideInput > 0 && overrideOutput > 0) {
     return {
+      provider: "anthropic",
       model,
       inputUsdPerMillion: overrideInput,
       outputUsdPerMillion: overrideOutput,
@@ -373,6 +456,7 @@ export function sonnetPriceSnapshot(model: string, now = new Date()): BenchmarkP
   }
   const introductory = now.getTime() < Date.parse("2026-09-01T00:00:00Z");
   return {
+    provider: "anthropic",
     model,
     inputUsdPerMillion: introductory ? 2 : 3,
     outputUsdPerMillion: introductory ? 10 : 15,

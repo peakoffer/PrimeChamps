@@ -40,7 +40,7 @@ A cohort cannot be frozen on labels alone. Every record must also contain at lea
 ## Execution sequence
 
 1. An owner or admin starts a development run with a case count and cost ceiling.
-2. The server resolves the newest available Anthropic Sonnet model and stores its exact ID and a dated price snapshot.
+2. The server resolves the newest priced, structured-output Anthropic Sonnet model in OpenRouter's live catalog and stores its exact ID, provider route, release timestamp, and price snapshot. If OpenRouter is unavailable, a configured direct Anthropic key is the failover route.
 3. The server freezes the selected case IDs in the run checkpoint. Labels are not stored in that checkpoint or sent to a model.
 4. Each resume request processes one case under a five-minute execution lease:
    - Researcher assessment;
@@ -84,8 +84,9 @@ Repeat `resume` until `completed` is `true`. A failed run retains its checkpoint
 
 - The default run ceiling is $1 (`1,000,000` microusd).
 - A paid call is rejected before execution when its conservative full-output projection would exceed the run's dollar, input-token, or output-token limit.
-- Actual provider usage is persisted after every call, including a schema retry.
-- Unknown future Sonnet models cannot run until explicit per-million-token prices are configured.
+- Actual provider usage is persisted after every call, including a schema retry. OpenRouter's provider-reported charge is authoritative; the catalog snapshot remains the pre-admission estimate and audit record.
+- OpenRouter catalog discovery fails closed when the latest Sonnet lacks structured output or usable pricing. Direct Anthropic models with unknown pricing cannot run until explicit per-million-token prices are configured.
+- `RESEARCH_BENCHMARK_MODEL_PROVIDER=openrouter` or `anthropic` can deliberately pin a route. Without a pin, OpenRouter is preferred when configured and direct Anthropic is the fallback.
 - Optional price overrides are `RESEARCH_SONNET_INPUT_USD_PER_MTOK` and `RESEARCH_SONNET_OUTPUT_USD_PER_MTOK`.
 
 ## Held-out release rule

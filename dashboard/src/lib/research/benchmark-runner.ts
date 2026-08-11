@@ -1,6 +1,5 @@
 import "server-only";
 
-import { resolveAnthropicScoringModel } from "@/lib/ai/anthropic-models";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import { calculateBenchmarkMetrics, stratifiedSample, type BenchmarkCaseResult } from "@/lib/research/v2";
@@ -12,9 +11,9 @@ import {
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
   estimateBenchmarkCostMicrousd,
+  normalizeOpenRouterBenchmarkUsage,
   projectedBenchmarkCallCostMicrousd,
   selectLeakageSafeBenchmarkEvidence,
-  sonnetPriceSnapshot,
   type BenchmarkEvidenceClaimRow,
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
@@ -22,11 +21,12 @@ import {
   type BenchmarkTokenUsage,
   type LeakageSafeBenchmarkEvidence,
 } from "@/lib/research/benchmark-runner-support";
+import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/research/benchmark-model-provider";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v1";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v2";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -176,7 +176,9 @@ type RunCheckpoint = {
   case_ids: string[];
   completed_ids: string[];
   current_case_id: string | null;
+  provider: BenchmarkModelProvider;
   model: string;
+  model_release_created_at: string | null;
   pricing: BenchmarkPriceSnapshot;
   no_outreach: true;
   input_token_limit: number;
@@ -265,8 +267,10 @@ class BenchmarkBudgetLedger {
     }
   }
 
-  async record(usage: BenchmarkTokenUsage) {
-    const cost = estimateBenchmarkCostMicrousd(usage, this.price);
+  async record(usage: BenchmarkTokenUsage, providerReportedCostMicrousd?: number | null) {
+    const cost = typeof providerReportedCostMicrousd === "number"
+      ? Math.max(0, Math.round(providerReportedCostMicrousd))
+      : estimateBenchmarkCostMicrousd(usage, this.price);
     this.usage = combinedUsage(this.usage, usage);
     this.costMicrousd += cost;
     const exceeded = this.costMicrousd > this.run.cost_limit_microusd
@@ -293,11 +297,14 @@ async function callStructuredSonnet<T>(input: {
   prompt: string;
   schema: Record<string, unknown>;
   model: string;
+  provider: BenchmarkModelProvider;
   maximumOutputTokens: number;
   ledger: BenchmarkBudgetLedger;
 }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
+  const apiKey = input.provider === "openrouter"
+    ? process.env.OPENROUTER_API_KEY
+    : process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error(`${input.provider === "openrouter" ? "OPENROUTER_API_KEY" : "ANTHROPIC_API_KEY"} is not configured`);
   let accumulatedUsage: BenchmarkTokenUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -312,14 +319,31 @@ async function callStructuredSonnet<T>(input: {
       : `${input.prompt}\n\nThe prior response was incomplete or invalid. Return one complete JSON object matching the schema, with no markdown.`;
     input.ledger.admit(prompt, input.maximumOutputTokens);
     const startedAt = Date.now();
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const openRouter = input.provider === "openrouter";
+    const response = await fetch(openRouter
+      ? "https://openrouter.ai/api/v1/chat/completions"
+      : "https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
+      headers: openRouter ? {
+        "content-type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://crm.prime-champs.com",
+        "X-Title": "Prime Champs Research V2 Benchmark",
+      } : {
         "content-type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
+      body: JSON.stringify(openRouter ? {
+        model: input.model,
+        max_tokens: input.maximumOutputTokens,
+        messages: [{ role: "user", content: sanitizeUnicodeForJson(prompt) }],
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "benchmark_assessment", strict: true, schema: input.schema },
+        },
+        provider: { require_parameters: true, data_collection: "deny" },
+      } : {
         model: input.model,
         max_tokens: input.maximumOutputTokens,
         output_config: { effort: "medium", format: { type: "json_schema", schema: input.schema } },
@@ -328,31 +352,39 @@ async function callStructuredSonnet<T>(input: {
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     });
     if (!response.ok) {
-      throw new Error(`Sonnet benchmark call failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
+      throw new Error(`${input.provider} Sonnet benchmark call failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
     }
     const payload = await response.json() as {
       content?: Array<{ type?: string; text?: string }>;
       stop_reason?: string;
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
       usage?: {
         input_tokens?: number;
         output_tokens?: number;
         cache_creation_input_tokens?: number;
         cache_read_input_tokens?: number;
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        cost?: number;
+        prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
       };
     };
-    const usage: BenchmarkTokenUsage = {
+    const openRouterUsage = openRouter ? normalizeOpenRouterBenchmarkUsage(payload.usage) : null;
+    const usage: BenchmarkTokenUsage = openRouterUsage?.usage || {
       inputTokens: integer(payload.usage?.input_tokens),
       outputTokens: integer(payload.usage?.output_tokens),
       cacheCreationInputTokens: integer(payload.usage?.cache_creation_input_tokens),
       cacheReadInputTokens: integer(payload.usage?.cache_read_input_tokens),
     };
-    const costMicrousd = await input.ledger.record(usage);
+    const costMicrousd = await input.ledger.record(usage, openRouterUsage?.reportedCostMicrousd);
     accumulatedUsage = combinedUsage(accumulatedUsage, usage);
     accumulatedCostMicrousd += costMicrousd;
     accumulatedLatencyMs += Date.now() - startedAt;
-    const text = (payload.content || []).filter((block) => block.type === "text")
-      .map((block) => block.text || "").join("\n");
-    if (text && payload.stop_reason !== "max_tokens") {
+    const text = openRouter
+      ? payload.choices?.[0]?.message?.content || ""
+      : (payload.content || []).filter((block) => block.type === "text").map((block) => block.text || "").join("\n");
+    const truncated = openRouter ? payload.choices?.[0]?.finish_reason === "length" : payload.stop_reason === "max_tokens";
+    if (text && !truncated) {
       try {
         return {
           value: JSON.parse(text) as T,
@@ -375,9 +407,11 @@ async function ensureBenchmarkArtifacts(input: {
   organizationId: string;
   userId: string;
   model: string;
+  provider: BenchmarkModelProvider;
+  releaseCreatedAt: string | null;
   price: BenchmarkPriceSnapshot;
 }): Promise<BenchmarkArtifacts> {
-  const { admin, organizationId, userId, model, price } = input;
+  const { admin, organizationId, userId, model, provider, releaseCreatedAt, price } = input;
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
@@ -428,7 +462,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensureModel = async (capability: "judgment" | "audit") => {
     const { data, error } = await admin.from("research_model_versions").upsert({
       organization_id: organizationId,
-      provider: "anthropic",
+      provider,
       model_id: model,
       capability,
       release_label: "latest-sonnet-resolved-at-run-start",
@@ -436,6 +470,7 @@ async function ensureBenchmarkArtifacts(input: {
         structured_outputs: true,
         effort: "medium",
         runner_version: RUNNER_VERSION,
+        release_created_at: releaseCreatedAt,
         price_snapshot: price,
       },
       status: "active",
@@ -544,14 +579,15 @@ export async function startBenchmarkRun(input: {
     throw new Error(`Benchmark evidence is not execution-ready (${readinessFailures.length}/${selected.length} selected cases): ${preview}`);
   }
 
-  const model = await resolveAnthropicScoringModel();
-  if (!/sonnet/i.test(model)) throw new Error(`Latest Sonnet could not be resolved (resolved ${model})`);
-  const pricing = sonnetPriceSnapshot(model);
+  const resolution = await resolveBenchmarkSonnet();
+  const { model, provider, releaseCreatedAt, price: pricing } = resolution;
   const artifacts = await ensureBenchmarkArtifacts({
     admin,
     organizationId: input.organizationId,
     userId: input.userId,
     model,
+    provider,
+    releaseCreatedAt,
     price: pricing,
   });
   const now = new Date().toISOString();
@@ -561,7 +597,9 @@ export async function startBenchmarkRun(input: {
     case_ids: selected.map((record) => record.id),
     completed_ids: [],
     current_case_id: null,
+    provider,
     model,
+    model_release_created_at: releaseCreatedAt,
     pricing,
     no_outreach: true,
     input_token_limit: selected.length * 30_000,
@@ -754,6 +792,7 @@ async function processBenchmarkCase(input: {
       prompt: buildBenchmarkResearcherPrompt(record, selection.evidence),
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
+      provider: run.metrics.provider,
       maximumOutputTokens: 1_400,
       ledger,
     });
@@ -828,6 +867,7 @@ async function processBenchmarkCase(input: {
       prompt: blindPrompt(record, selection.evidence),
       schema: BLIND_AUDITOR_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
+      provider: run.metrics.provider,
       maximumOutputTokens: 1_100,
       ledger,
     });
@@ -847,6 +887,7 @@ async function processBenchmarkCase(input: {
       prompt: reviewPrompt(researcher, blind),
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
+      provider: run.metrics.provider,
       maximumOutputTokens: 900,
       ledger,
     });

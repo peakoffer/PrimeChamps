@@ -41,8 +41,10 @@ import {
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
   estimateBenchmarkCostMicrousd,
+  normalizeOpenRouterBenchmarkUsage,
   promptContainsBenchmarkLeakage,
   projectedBenchmarkCallCostMicrousd,
+  selectLatestOpenRouterSonnet,
   selectLeakageSafeBenchmarkEvidence,
   sonnetPriceSnapshot,
   type BenchmarkEvidenceClaimRow,
@@ -518,6 +520,7 @@ test("benchmark prompts are constructed from a safe whitelist and never expose l
 
 test("Sonnet benchmark cost admission uses a dated price snapshot and conservative projection", () => {
   const introductory = sonnetPriceSnapshot("claude-sonnet-5", new Date("2026-08-11T00:00:00Z"));
+  assert.equal(introductory.provider, "anthropic");
   assert.equal(introductory.inputUsdPerMillion, 2);
   assert.equal(introductory.outputUsdPerMillion, 10);
   assert.equal(estimateBenchmarkCostMicrousd({
@@ -534,6 +537,87 @@ test("Sonnet benchmark cost admission uses a dated price snapshot and conservati
   assert.throws(() => sonnetPriceSnapshot("claude-sonnet-6", new Date("2026-08-11T00:00:00Z")), /Pricing is not configured/);
 });
 
+test("OpenRouter benchmark selection chooses the latest structured-output Sonnet and snapshots catalog pricing", () => {
+  const selected = selectLatestOpenRouterSonnet([
+    {
+      id: "anthropic/claude-sonnet-4.6",
+      created: 100,
+      pricing: { prompt: "0.000003", completion: "0.000015" },
+      supported_parameters: ["response_format"],
+    },
+    {
+      id: "anthropic/claude-sonnet-5:batch",
+      created: 300,
+      pricing: { prompt: "0.000001", completion: "0.000005" },
+      supported_parameters: ["response_format"],
+    },
+    {
+      id: "anthropic/claude-sonnet-5",
+      created: 200,
+      pricing: {
+        prompt: "0.000002",
+        completion: "0.000010",
+        input_cache_read: "0.0000002",
+        input_cache_write: "0.0000025",
+      },
+      supported_parameters: ["structured_outputs"],
+    },
+    {
+      id: "anthropic/claude-sonnet-unpriced",
+      created: 150,
+      pricing: { prompt: "0", completion: "0" },
+      supported_parameters: ["response_format"],
+    },
+    {
+      id: "openai/gpt-future",
+      created: 400,
+      pricing: { prompt: "0.000001", completion: "0.000001" },
+      supported_parameters: ["response_format"],
+    },
+  ]);
+
+  assert.equal(selected?.model, "anthropic/claude-sonnet-5");
+  assert.equal(selected?.price.provider, "openrouter");
+  assert.equal(selected?.price.inputUsdPerMillion, 2);
+  assert.equal(selected?.price.outputUsdPerMillion, 10);
+  assert.equal(selected?.price.cacheReadUsdPerMillion, 0.2);
+  assert.equal(selected?.price.cacheCreationUsdPerMillion, 2.5);
+  assert.equal(selectLatestOpenRouterSonnet([{
+    id: "anthropic/claude-sonnet-5",
+    created: 200,
+    pricing: { prompt: "0", completion: "0" },
+    supported_parameters: ["response_format"],
+  }]), null);
+  assert.equal(selectLatestOpenRouterSonnet([{
+    id: "anthropic/claude-sonnet-6",
+    created: 300,
+    pricing: { prompt: "0.000003", completion: "0.000015" },
+    supported_parameters: ["tools"],
+  }, {
+    id: "anthropic/claude-sonnet-5",
+    created: 200,
+    pricing: { prompt: "0.000002", completion: "0.000010" },
+    supported_parameters: ["response_format"],
+  }]), null, "an incompatible newest release must fail closed instead of silently using an older Sonnet");
+});
+
+test("OpenRouter usage separates cache reads and writes and preserves provider-reported cost", () => {
+  assert.deepEqual(normalizeOpenRouterBenchmarkUsage({
+    prompt_tokens: 1_000,
+    completion_tokens: 125,
+    cost: 0.004321,
+    prompt_tokens_details: { cached_tokens: 600, cache_write_tokens: 250 },
+  }), {
+    usage: {
+      inputTokens: 150,
+      outputTokens: 125,
+      cacheCreationInputTokens: 250,
+      cacheReadInputTokens: 600,
+    },
+    reportedCostMicrousd: 4_321,
+  });
+});
+
 test("benchmark execution is evaluation-only and cannot mutate outreach or live pipeline tables", () => {
   const source = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   for (const forbiddenTable of [
@@ -544,6 +628,8 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   }
   assert.ok(source.includes('score_stage: "benchmark"'));
   assert.ok(source.includes("no_outreach: true"));
+  assert.ok(source.includes('data_collection: "deny"'));
+  assert.ok(source.includes("providerReportedCostMicrousd"));
 });
 
 test("benchmark sport enrichment associates only the exact quoted athlete query", () => {
