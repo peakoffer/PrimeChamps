@@ -2911,7 +2911,6 @@ type AthleteAgeLookupResult = {
 
 function trustedAgeDomainsForSport(sport: string) {
   return [
-    "wikipedia.org",
     "britannica.com",
     "olympics.com",
     "teamusa.com",

@@ -237,14 +237,32 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
   assert.equal(isCredibleAgeSourceUrl("https://cev.eu/player/kendall-kipp"), true);
 });
 
-test("verified age selection reuses attributable trusted evidence and rejects nearby ages", () => {
+test("verified age selection requires authoritative evidence or independent corroboration", () => {
   const trusted = selectVerifiedAthleteAge("Lexi Rodriguez", [{
-    title: "Lexi Rodriguez - Wikipedia",
+    title: "Lexi Rodriguez - Player profile",
     snippet: "Lexi Rodriguez (born March 12, 2003) is an American volleyball player.",
-    link: "https://en.wikipedia.org/wiki/Lexi_Rodriguez",
-  }], ["wikipedia.org", "volleyballworld.com"]);
+    link: "https://volleyballworld.com/players/lexi-rodriguez",
+  }], ["volleyballworld.com"]);
   assert.equal(trusted?.birthYear, 2003);
-  assert.equal(trusted?.source, "https://en.wikipedia.org/wiki/Lexi_Rodriguez");
+  assert.equal(trusted?.source, "https://volleyballworld.com/players/lexi-rodriguez");
+
+  const wikipediaOnly = selectVerifiedAthleteAge("Camilla Lamina", [{
+    title: "Camilla Lamina - Wikipedia",
+    snippet: "Camilla Lamina (born April 23, 2002) is a Filipino volleyball player.",
+    link: "https://en.wikipedia.org/wiki/Camilla_Lamina",
+  }], ["volleyballworld.com"]);
+  assert.equal(wikipediaOnly, null);
+
+  const corroborated = selectVerifiedAthleteAge("Camilla Lamina", [{
+    title: "Camilla Lamina - Wikipedia",
+    snippet: "Camilla Lamina (born April 23, 2002) is a Filipino volleyball player.",
+    link: "https://en.wikipedia.org/wiki/Camilla_Lamina",
+  }, {
+    title: "Camilla Lamina profile",
+    snippet: "Camilla Lamina, born April 23, 2002, is a setter.",
+    link: "https://example-sports-news.com/camilla-lamina",
+  }], ["volleyballworld.com"]);
+  assert.equal(corroborated?.birthYear, 2002);
 
   const contaminated = selectVerifiedAthleteAge("Rebekah Allick", [{
     title: "Volleyball roster",
