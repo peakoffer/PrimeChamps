@@ -30,8 +30,32 @@ export type BenchmarkSportClassification = {
   sport: BenchmarkSport;
   confidence: number;
   source_url: string;
+  corroborating_source_url: string;
   source_title: string;
   source_excerpt: string;
+  identity_ambiguous: boolean;
+  identity_evidence: string;
+};
+
+const SPORT_TERMS: Partial<Record<BenchmarkSport, string[]>> = {
+  Baseball: ["baseball"], Basketball: ["basketball"], BMX: ["bmx"],
+  Bobsleigh: ["bobsleigh", "bobsled"], Boxing: ["boxing", "boxer", "featherweight", "lightweight", "welterweight"],
+  Climbing: ["climbing", "climber"], CrossFit: ["crossfit"], Cycling: ["cycling", "cyclist"],
+  Diving: ["diving", "diver"], Equestrian: ["equestrian", "horse rider"],
+  "Figure Skating": ["figure skating", "figure skater"], Football: ["american football", "nfl"],
+  Freediving: ["freediving", "freediver"], Golf: ["golf", "golfer"], Gymnastics: ["gymnastics", "gymnast"],
+  Hockey: ["hockey"], "Jet Ski": ["jet ski", "jetski"], Kitesurfing: ["kitesurfing", "kiteboarding"],
+  MMA: ["mixed martial arts", "mma", "ufc"], Motocross: ["motocross"],
+  "Motorcycle Racing": ["motorcycle racing", "moto gp", "motogp", "superbike"],
+  Motorsports: ["motorsport", "racing driver"], "Mountain Biking": ["mountain bike", "mountain biking", "downhill rider"],
+  Padel: ["padel"], Pickleball: ["pickleball"], Powerlifting: ["powerlifting", "powerlifter"],
+  Rugby: ["rugby"], Running: ["running", "runner", "ultrarunner", "ultra runner"],
+  Skateboarding: ["skateboarding", "skateboarder"], Skiing: ["skiing", "skier"],
+  Snowboarding: ["snowboarding", "snowboarder"], Soccer: ["soccer", "footballer", "football player", "futbol", "fútbol"],
+  Softball: ["softball"], Surfing: ["surfing", "surfer", "world surf league"], Swimming: ["swimming", "swimmer"],
+  Tennis: ["tennis", "atp tour", "wta tour"], "Track & Field": ["track and field", "athletics", "heptathlon", "pole vault"],
+  Triathlon: ["triathlon", "triathlete"], Volleyball: ["volleyball"], Wakeboarding: ["wakeboarding", "wakeboarder"],
+  Wingfoil: ["wingfoil", "wing foil"],
 };
 
 export function normalizeBenchmarkIdentity(value: unknown) {
@@ -77,6 +101,37 @@ export function benchmarkSourceNamesAthlete(name: string, sourceText: string) {
   return nameTokens.length >= 2 && nameTokens.every((token) => sourceTokens.has(token));
 }
 
+export function benchmarkSourceSupportsSport(sport: BenchmarkSport, sourceText: string) {
+  const normalized = normalizeBenchmarkIdentity(sourceText);
+  return (SPORT_TERMS[sport] || [sport]).some((term) => normalized.includes(normalizeBenchmarkIdentity(term)));
+}
+
+export function benchmarkSourceDomain(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+    if (hostname === "wikipedia.org" || hostname.endsWith(".wikipedia.org")) return "wikipedia.org";
+    const parts = hostname.split(".");
+    if (parts.length <= 2) return hostname;
+    const suffix = parts.slice(-2).join(".");
+    if (["co.uk", "com.au", "co.nz", "com.br"].includes(suffix)) return parts.slice(-3).join(".");
+    return suffix;
+  } catch {
+    return "";
+  }
+}
+
+export function benchmarkSportHints(name: string, sources: BenchmarkSearchResult[]) {
+  const hints = new Set<BenchmarkSport>();
+  for (const source of sources) {
+    const text = `${source.title} ${source.snippet}`;
+    if (!benchmarkSourceNamesAthlete(name, text)) continue;
+    for (const sport of BENCHMARK_SPORTS) {
+      if (sport !== "Unknown" && benchmarkSourceSupportsSport(sport, text)) hints.add(sport);
+    }
+  }
+  return hints;
+}
+
 export function validateBenchmarkSportClassification(
   classification: BenchmarkSportClassification,
   record: BenchmarkSportRecord | undefined,
@@ -85,8 +140,18 @@ export function validateBenchmarkSportClassification(
   if (!record) return null;
   if (normalizeBenchmarkIdentity(classification.athlete_name) !== normalizeBenchmarkIdentity(record.athlete_name)) return null;
   if (!BENCHMARK_SPORTS.includes(classification.sport) || classification.sport === "Unknown") return null;
-  if (!Number.isFinite(classification.confidence) || classification.confidence < 90) return null;
+  if (!Number.isFinite(classification.confidence) || classification.confidence < 95) return null;
+  if (classification.identity_ambiguous !== false) return null;
   const source = sources.find((item) => item.url === classification.source_url);
-  if (!source || !benchmarkSourceNamesAthlete(record.athlete_name, `${source.title} ${source.snippet}`)) return null;
-  return { record, source, classification };
+  const corroboratingSource = sources.find((item) => item.url === classification.corroborating_source_url);
+  if (!source || !corroboratingSource || source.url === corroboratingSource.url) return null;
+  if (benchmarkSourceDomain(source.url) === benchmarkSourceDomain(corroboratingSource.url)) return null;
+  for (const item of [source, corroboratingSource]) {
+    const text = `${item.title} ${item.snippet}`;
+    if (!benchmarkSourceNamesAthlete(record.athlete_name, text)) return null;
+    if (!benchmarkSourceSupportsSport(classification.sport, text)) return null;
+  }
+  const sportHints = benchmarkSportHints(record.athlete_name, sources);
+  if (sportHints.size > 1) return null;
+  return { record, sources: [source, corroboratingSource] as const, classification };
 }

@@ -29,6 +29,8 @@ import {
 import { selectBalancedResearchCandidates } from "../src/lib/research/candidate-selection.ts";
 import {
   benchmarkSourceNamesAthlete,
+  benchmarkSourceDomain,
+  benchmarkSportHints,
   groupBenchmarkSearchResults,
   validateBenchmarkSportClassification,
 } from "../src/lib/research/benchmark-sport-validation.ts";
@@ -401,6 +403,10 @@ test("benchmark sport enrichment rejects wrong names, weak confidence, and inven
     title: "Anna Bright | PPA Tour",
     url: "https://example.com/anna",
     snippet: "Anna Bright is a professional pickleball athlete.",
+  }, {
+    title: "Anna Bright athlete profile",
+    url: "https://ppa.example.org/players/anna-bright",
+    snippet: "Professional pickleball player Anna Bright competes on the PPA Tour.",
   }];
   const valid = {
     golden_record_id: "anna",
@@ -408,13 +414,52 @@ test("benchmark sport enrichment rejects wrong names, weak confidence, and inven
     sport: "Pickleball" as const,
     confidence: 96,
     source_url: "https://example.com/anna",
+    corroborating_source_url: "https://ppa.example.org/players/anna-bright",
     source_title: "Anna Bright | PPA Tour",
     source_excerpt: "Professional pickleball athlete",
+    identity_ambiguous: false,
+    identity_evidence: "Both independent sources identify the same pickleball athlete.",
   };
   assert.ok(validateBenchmarkSportClassification(valid, record, sources));
   assert.equal(validateBenchmarkSportClassification({ ...valid, athlete_name: "Anna Leigh Waters" }, record, sources), null);
   assert.equal(validateBenchmarkSportClassification({ ...valid, confidence: 89 }, record, sources), null);
   assert.equal(validateBenchmarkSportClassification({ ...valid, source_url: "https://invented.test" }, record, sources), null);
+  assert.equal(validateBenchmarkSportClassification({ ...valid, identity_ambiguous: true }, record, sources), null);
+  assert.equal(validateBenchmarkSportClassification({ ...valid, corroborating_source_url: valid.source_url }, record, sources), null);
+});
+
+test("benchmark sport enrichment rejects same-name sport collisions and same-domain corroboration", () => {
+  const record = { id: "javier", athlete_name: "Javier Garrido" };
+  const sources = [
+    { title: "Javier Garrido football profile", url: "https://sports.test/javier", snippet: "Football player Javier Garrido is a defender." },
+    { title: "Javier Garrido padel profile", url: "https://padel.test/javier", snippet: "Javier Garrido is a professional padel player." },
+    { title: "Javier Garrido football archive", url: "https://archive.test/javier", snippet: "Footballer Javier Garrido played as a defender." },
+  ];
+  const classification = {
+    golden_record_id: "javier", athlete_name: "Javier Garrido", sport: "Soccer" as const, confidence: 98,
+    source_url: sources[0].url, corroborating_source_url: sources[2].url,
+    source_title: sources[0].title, source_excerpt: sources[0].snippet,
+    identity_ambiguous: false, identity_evidence: "Two football sources",
+  };
+  assert.deepEqual([...benchmarkSportHints(record.athlete_name, sources)].sort(), ["Padel", "Soccer"]);
+  assert.equal(validateBenchmarkSportClassification(classification, record, sources), null);
+
+  const sameDomain = sources.slice(0, 1).concat({
+    title: "Javier Garrido football stats", url: "https://stats.sports.test/javier", snippet: "Footballer Javier Garrido stats.",
+  });
+  assert.equal(benchmarkSourceDomain(sources[0].url), benchmarkSourceDomain(sameDomain[1].url));
+  assert.equal(validateBenchmarkSportClassification({
+    ...classification, corroborating_source_url: sameDomain[1].url,
+  }, record, sameDomain), null);
+});
+
+test("benchmark sport enrichment rejects a spelling-only near match", () => {
+  const record = { id: "jeremy", athlete_name: "Jeremy Mallott" };
+  const sources = [
+    { title: "Jeremy Malott BMX", url: "https://one.test/jeremy", snippet: "BMX rider Jeremy Malott." },
+    { title: "Jeremy Malott profile", url: "https://two.test/jeremy", snippet: "Jeremy Malott competes in BMX." },
+  ];
+  assert.equal(benchmarkSourceNamesAthlete(record.athlete_name, `${sources[0].title} ${sources[0].snippet}`), false);
 });
 
 test("benchmark sport enrichment uses Sonnet-compatible structured output schema", () => {

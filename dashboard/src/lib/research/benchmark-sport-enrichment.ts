@@ -43,9 +43,11 @@ async function classifySports(records: GoldenRecord[], sources: Map<string, Benc
           properties: {
             golden_record_id: { type: "string" }, athlete_name: { type: "string" },
             sport: { type: "string", enum: BENCHMARK_SPORTS }, confidence: { type: "integer" },
-            source_url: { type: "string" }, source_title: { type: "string" }, source_excerpt: { type: "string" },
+            source_url: { type: "string" }, corroborating_source_url: { type: "string" },
+            source_title: { type: "string" }, source_excerpt: { type: "string" },
+            identity_ambiguous: { type: "boolean" }, identity_evidence: { type: "string" },
           },
-          required: ["golden_record_id", "athlete_name", "sport", "confidence", "source_url", "source_title", "source_excerpt"],
+          required: ["golden_record_id", "athlete_name", "sport", "confidence", "source_url", "corroborating_source_url", "source_title", "source_excerpt", "identity_ambiguous", "identity_evidence"],
         },
       },
     },
@@ -60,7 +62,7 @@ async function classifySports(records: GoldenRecord[], sources: Map<string, Benc
       output_config: { effort: "low", format: { type: "json_schema", schema } },
       messages: [{ role: "user", content: sanitizeUnicodeForJson(`Classify the sport of each named athlete using only the supplied Google results.
 
-Return one row per case. Copy the case ID and name exactly. Use Unknown unless a result clearly names the same person and supports the sport. Never infer sport from nationality, appearance, a social profile, or a similarly named person. Select one supporting URL from that case only. Confidence 90+ requires an exact identity match and unambiguous sport evidence. Use the closest standardized sport in the schema.
+Return one row per case. Copy the case ID and name exactly. Use Unknown unless two independent domains clearly name the same person and independently support the same sport. Never infer sport from nationality, appearance, a social profile, or a similarly named person. Return both supporting URLs from that case only. Set identity_ambiguous=true whenever results contain multiple exact-name athletes, conflicting sports, a spelling mismatch, or insufficient attributes to distinguish the person. Confidence 95+ requires two exact-name sources, no identity ambiguity, and unambiguous same-sport evidence. Use the closest standardized sport in the schema.
 
 ${cases}`) }],
     }),
@@ -81,68 +83,76 @@ async function ensureSportProvenance(input: {
   admin: ReturnType<typeof createAdminClient>;
   organizationId: string;
   record: GoldenRecord;
-  source: BenchmarkSearchResult;
+  sources: readonly [BenchmarkSearchResult, BenchmarkSearchResult];
   classification: BenchmarkSportClassification;
   model: string;
   usage: Record<string, number>;
 }) {
-  const { admin, organizationId, record, source, classification, model, usage } = input;
-  const hostname = new URL(source.url).hostname.toLowerCase().replace(/^www\./, "");
-  const { data: existing, error: existingError } = await admin.from("research_evidence_sources")
-    .select("id")
-    .eq("organization_id", organizationId)
-    .eq("golden_record_id", record.id)
-    .eq("provider", "apify_google_sport_enrichment")
-    .eq("canonical_url", source.url)
-    .maybeSingle();
-  if (existingError) throw existingError;
+  const { admin, organizationId, record, sources, classification, model, usage } = input;
+  const hostnames: string[] = [];
+  for (const source of sources) {
+    const hostname = new URL(source.url).hostname.toLowerCase().replace(/^www\./, "");
+    hostnames.push(hostname);
+    const { data: existing, error: existingError } = await admin.from("research_evidence_sources")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("golden_record_id", record.id)
+      .eq("provider", "apify_google_sport_enrichment")
+      .eq("canonical_url", source.url)
+      .maybeSingle();
+    if (existingError) throw existingError;
 
-  let evidenceSourceId = existing?.id as string | undefined;
-  if (!evidenceSourceId) {
-    const { data: inserted, error: sourceError } = await admin.from("research_evidence_sources").insert({
-      organization_id: organizationId,
-      golden_record_id: record.id,
-      canonical_url: source.url,
-      domain: hostname,
-      title: source.title || classification.source_title,
-      source_type: "other",
-      provider: "apify_google_sport_enrichment",
-      historical_as_of: record.evidence_cutoff_at,
-      eligible_before_cutoff: false,
-      exclusion_reason: "Current source classifies sport only and is excluded from point-in-time model scoring.",
-      metadata: { classification_model: model, confidence: classification.confidence, anthropic_usage: usage },
-    }).select("id").single();
-    if (sourceError) throw sourceError;
-    evidenceSourceId = inserted.id as string;
-  }
+    let evidenceSourceId = existing?.id as string | undefined;
+    if (!evidenceSourceId) {
+      const { data: inserted, error: sourceError } = await admin.from("research_evidence_sources").insert({
+        organization_id: organizationId,
+        golden_record_id: record.id,
+        canonical_url: source.url,
+        domain: hostname,
+        title: source.title || classification.source_title,
+        source_type: "other",
+        provider: "apify_google_sport_enrichment",
+        historical_as_of: record.evidence_cutoff_at,
+        eligible_before_cutoff: false,
+        exclusion_reason: "Current source classifies sport only and is excluded from point-in-time model scoring.",
+        metadata: {
+          classification_model: model, confidence: classification.confidence, anthropic_usage: usage,
+          identity_gate: "two_independent_exact_name_sources", supporting_urls: sources.map((item) => item.url),
+          identity_evidence: classification.identity_evidence,
+        },
+      }).select("id").single();
+      if (sourceError) throw sourceError;
+      evidenceSourceId = inserted.id as string;
+    }
 
-  const { data: existingClaim, error: existingClaimError } = await admin.from("research_evidence_claims")
-    .select("id")
-    .eq("organization_id", organizationId)
-    .eq("golden_record_id", record.id)
-    .eq("evidence_source_id", evidenceSourceId)
-    .eq("claim_type", "sport_identity")
-    .maybeSingle();
-  if (existingClaimError) throw existingClaimError;
-  if (!existingClaim) {
-    const { error: claimError } = await admin.from("research_evidence_claims").insert({
-      organization_id: organizationId,
-      evidence_source_id: evidenceSourceId,
-      golden_record_id: record.id,
-      claim_type: "sport_identity",
-      claim_text: `${record.athlete_name} competes in ${classification.sport}.`,
-      source_excerpt: String(source.snippet || classification.source_excerpt).slice(0, 1_000),
-      support_status: "supported",
-      extraction_confidence: classification.confidence,
-      independence_group: hostname,
-      material: false,
-      eligible_for_scoring: false,
-      exclusion_reason: "Sport classification provenance is not a point-in-time scoring feature.",
-      verified_at: new Date().toISOString(),
-    });
-    if (claimError) throw claimError;
+    const { data: existingClaim, error: existingClaimError } = await admin.from("research_evidence_claims")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("golden_record_id", record.id)
+      .eq("evidence_source_id", evidenceSourceId)
+      .eq("claim_type", "sport_identity")
+      .maybeSingle();
+    if (existingClaimError) throw existingClaimError;
+    if (!existingClaim) {
+      const { error: claimError } = await admin.from("research_evidence_claims").insert({
+        organization_id: organizationId,
+        evidence_source_id: evidenceSourceId,
+        golden_record_id: record.id,
+        claim_type: "sport_identity",
+        claim_text: `${record.athlete_name} competes in ${classification.sport}.`,
+        source_excerpt: String(source.snippet || classification.source_excerpt).slice(0, 1_000),
+        support_status: "supported",
+        extraction_confidence: classification.confidence,
+        independence_group: hostname,
+        material: false,
+        eligible_for_scoring: false,
+        exclusion_reason: "Sport classification provenance is not a point-in-time scoring feature.",
+        verified_at: new Date().toISOString(),
+      });
+      if (claimError) throw claimError;
+    }
   }
-  return hostname;
+  return hostnames;
 }
 
 export async function enrichBenchmarkSports(organizationId: string) {
@@ -162,7 +172,7 @@ export async function enrichBenchmarkSports(organizationId: string) {
     {
       queries: records.map((record) => `"${record.athlete_name}" athlete sport official profile`).join("\n"),
       maxPagesPerQuery: 1,
-      resultsPerPage: 4,
+      resultsPerPage: 8,
       countryCode: "us",
       languageCode: "en",
       mobileResults: false,
@@ -191,8 +201,8 @@ export async function enrichBenchmarkSports(organizationId: string) {
     if (!validated) continue;
     processed.add(record.id);
     try {
-      const hostname = await ensureSportProvenance({
-        admin, organizationId, record, source: validated.source,
+      const hostnames = await ensureSportProvenance({
+        admin, organizationId, record, sources: validated.sources,
         classification, model: classified.model, usage: classified.usage,
       });
       const tags = Array.from(new Set([
@@ -204,7 +214,7 @@ export async function enrichBenchmarkSports(organizationId: string) {
         stratification_tags: tags,
       }).eq("organization_id", organizationId).eq("id", record.id);
       if (updateError) throw updateError;
-      enriched.push({ name: record.athlete_name, sport: classification.sport, source: hostname });
+      enriched.push({ name: record.athlete_name, sport: classification.sport, source: hostnames.join(" + ") });
     } catch (error) {
       failures.push({
         name: record.athlete_name,
