@@ -773,6 +773,9 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /Discovery evidence target reached after wave 1/);
   assert.match(workflowSource, /Skipping Apify Google discovery supplement/);
   assert.match(workflowSource, /lookupAthleteAgesWithOpenAI/);
+  assert.match(workflowSource, /lookupAthleteAgesWithApify/);
+  assert.match(workflowSource, /Apify Google Search age batch/);
+  assert.match(workflowSource, /batch\.filter\(\(athlete\) => !apifyAgeByCandidate\.has/);
   assert.match(workflowSource, /source_linked_age_batch_call_cap/);
   assert.match(workflowSource, /APIFY_GOOGLE_DOSSIER_FALLBACK/);
   assert.match(workflowSource, /findInstagramCandidatesWithOpenAI/);

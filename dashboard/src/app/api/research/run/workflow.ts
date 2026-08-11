@@ -75,6 +75,7 @@ const RESEARCH_IDENTITY_PROVIDER = process.env.RESEARCH_IDENTITY_PROVIDER === "o
     : "apify";
 const APIFY_GOOGLE_IDENTITY_FALLBACK = process.env.RESEARCH_APIFY_GOOGLE_IDENTITY_FALLBACK === "true";
 const APIFY_GOOGLE_DOSSIER_FALLBACK = process.env.RESEARCH_APIFY_GOOGLE_DOSSIER_FALLBACK === "true";
+const APIFY_GOOGLE_AGE_LOOKUP = process.env.RESEARCH_APIFY_GOOGLE_AGE_LOOKUP !== "false";
 const APIFY_INSTAGRAM_SEARCH_ACTOR = process.env.APIFY_INSTAGRAM_SEARCH_ACTOR || "apify/instagram-search-scraper";
 
 const supabase = createAdminClient({ disableRealtime: true });
@@ -1497,7 +1498,10 @@ Respond with JSON array:
   // quota when at least two thirds of the requested pool (and at least ten
   // people) is already available for the downstream identity and quality
   // gates. The final result contract is enforced after scoring and audit.
-  const minimumViableDiscoveryPool = Math.max(10, Math.ceil(targetCount * 2 / 3));
+  const minimumViableDiscoveryPool = Math.max(
+    Math.min(10, targetCount),
+    Math.ceil(targetCount * 2 / 3)
+  );
   if (athletes.length < minimumViableDiscoveryPool && extractionModel) {
     const supplemental = await discoverAthletesFromApify(
       sport,
@@ -2928,6 +2932,52 @@ function trustedAgeDomainsForSport(sport: string) {
   ];
 }
 
+async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
+  const byCandidateKey = new Map<string, AthleteAgeLookupResult>();
+  if (!APIFY_API_KEY || !APIFY_GOOGLE_AGE_LOOKUP || athletes.length === 0) return byCandidateKey;
+
+  try {
+    log(`Resolving source-linked ages for ${athletes.length} athletes with one batched Apify Google run`);
+    const search = await runApifyGoogleSearchQueries(
+      athletes.map((athlete) =>
+        `"${athlete.name}" ${athlete.sport} athlete ("date of birth" OR born OR birthday OR age)`
+      ),
+      5
+    );
+    const results = search.results.map((result) => ({
+      title: result.title,
+      snippet: result.snippet,
+      link: result.url,
+    }));
+
+    for (const athlete of athletes) {
+      const verifiedAge = selectVerifiedAthleteAge(
+        athlete.name,
+        results,
+        trustedAgeDomainsForSport(athlete.sport)
+      );
+      if (!verifiedAge) continue;
+      byCandidateKey.set(researchCandidateKey(athlete.name, athlete.sport), {
+        ...verifiedAge,
+        researchEvidence: [{
+          url: verifiedAge.source,
+          title: `${athlete.name} age source`,
+          claim: `${athlete.name}: ${verifiedAge.evidence}`.slice(0, 1_400),
+          provider: "Apify Google Search age batch",
+          sourceExcerpt: verifiedAge.evidence,
+        }],
+      });
+    }
+    log(`Apify Google resolved ${byCandidateKey.size}/${athletes.length} source-verified ages`, {
+      queries: athletes.length,
+      results: search.results.length,
+    });
+  } catch (error) {
+    log(`Batched Apify Google age search failed: ${describeError(error)}`);
+  }
+  return byCandidateKey;
+}
+
 async function lookupAthleteAgesWithOpenAI(athletes: EnrichedAthlete[]) {
   const byCandidateKey = new Map<string, AthleteAgeLookupResult>();
   if (!OPENAI_API_KEY || athletes.length === 0) return byCandidateKey;
@@ -3249,13 +3299,17 @@ async function scoreAthletes(
       break;
     }
     const batch = pendingAthletes.slice(index, index + scoringBatchSize);
-    const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(batch);
+    const apifyAgeByCandidate = await lookupAthleteAgesWithApify(batch);
+    const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(
+      batch.filter((athlete) => !apifyAgeByCandidate.has(researchCandidateKey(athlete.name, athlete.sport)))
+    );
     const batchScores = await Promise.all(batch.map(async (athlete) => {
       // Verify age before semantic scoring. Otherwise Claude is asked to score
       // a profile with "age unknown" and the verified source is attached only
       // afterward, producing a systematic penalty that cannot be recovered.
       log(`    🔍 Verifying age for ${athlete.name} with source-linked web research...`);
-      const ageInfo = openAiAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))
+      const ageInfo = apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))
+        || openAiAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))
         || await lookupAthleteAge(athlete.name, athlete.sport, athlete.evidence);
       const mergedEvidence = Array.from(new Map([
         ...(athlete.evidence || []),
@@ -5291,6 +5345,11 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               instagram_search_actor: APIFY_INSTAGRAM_SEARCH_ACTOR,
               instagram_search_runs: RESEARCH_IDENTITY_PROVIDER === "apify" ? Math.ceil(discoveredAthletes.length / 10) : 0,
               instagram_search_maximum_results: RESEARCH_IDENTITY_PROVIDER === "apify" ? discoveredAthletes.length * 5 : 0,
+              google_age_batch_active: APIFY_GOOGLE_AGE_LOOKUP,
+              google_age_batch_runs: APIFY_GOOGLE_AGE_LOOKUP && enrichedAthletes.length > 0
+                ? Math.ceil(enrichedAthletes.length / 5)
+                : 0,
+              google_age_batch_query_cap: APIFY_GOOGLE_AGE_LOOKUP ? enrichedAthletes.length : 0,
               google_identity_fallback_candidate_cap: discoveredAthletes.length,
               google_dossier_fallback_active: APIFY_GOOGLE_DOSSIER_FALLBACK,
               google_dossier_fallback_candidate_cap: APIFY_GOOGLE_DOSSIER_FALLBACK ? enrichedAthletes.length : 0,

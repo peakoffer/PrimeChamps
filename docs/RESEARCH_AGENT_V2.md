@@ -153,6 +153,8 @@ API-backed evaluation now has three explicit budgets. `smoke` is the safe defaul
 
 Paid enrichment uses a two-thirds fresh / one-third remembered mix when both lanes are available, preventing old candidate memory from monopolizing a new sport run. Each evaluation profile also caps researcher input/output tokens and the number of candidates eligible for the independent audit.
 
+Age verification now starts with one batched Apify Google run per five-candidate scoring batch. Only unresolved names reach OpenAI age search. The broad Apify dossier lane remains off by default, so age verification gains a cheap fallback without automatically buying four research queries per candidate.
+
 If a scoring provider fails for every enriched candidate, the run retains its paid enrichment checkpoint. A corrected deployment can fork from that checkpoint rather than repeating discovery and Instagram work.
 
 1. Resolve the explicit outcome conflicts surfaced by the 100-case mailbox ledger, then complete achievability, pursue-today, public knowability, sport, and point-in-time source/cutoff fields. Do not assign approximate reconstructions to a benchmark split.
