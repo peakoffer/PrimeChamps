@@ -26,6 +26,11 @@ import {
   normalizeResearchEvaluationProfile,
 } from "../src/lib/research/evaluation-budget.ts";
 import { selectBalancedResearchCandidates } from "../src/lib/research/candidate-selection.ts";
+import {
+  benchmarkSourceNamesAthlete,
+  groupBenchmarkSearchResults,
+  validateBenchmarkSportClassification,
+} from "../src/lib/research/benchmark-sport-validation.ts";
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
   assert.equal(normalizeResearchEvaluationProfile(undefined), "smoke");
@@ -370,4 +375,43 @@ test("model prompts replace lone Unicode surrogates without damaging valid emoji
   const cleaned = sanitizeUnicodeForJson(`source \ud83d text \udc00 valid \ud83c\udfc4`);
   assert.equal(cleaned, "source � text � valid 🏄");
   assert.doesNotThrow(() => JSON.stringify({ prompt: cleaned }));
+});
+
+test("benchmark sport enrichment associates only the exact quoted athlete query", () => {
+  const records = [
+    { id: "anna", athlete_name: "Anna Bright" },
+    { id: "ann", athlete_name: "Ann Li" },
+  ];
+  const grouped = groupBenchmarkSearchResults(records, [{
+    searchQuery: { term: '"Anna Bright" athlete sport official profile' },
+    organicResults: [
+      { title: "Anna Bright | PPA Tour", url: "https://example.com/anna", description: "Anna Bright is a professional pickleball athlete." },
+      { title: "Unsafe", url: "http://example.com/unsafe", description: "Anna Bright" },
+    ],
+  }]);
+  assert.equal(grouped.get("anna")?.length, 1);
+  assert.equal(grouped.get("ann")?.length, 0);
+  assert.equal(benchmarkSourceNamesAthlete("Ann Li", "Joann Lister plays tennis"), false);
+});
+
+test("benchmark sport enrichment rejects wrong names, weak confidence, and invented sources", () => {
+  const record = { id: "anna", athlete_name: "Anna Bright" };
+  const sources = [{
+    title: "Anna Bright | PPA Tour",
+    url: "https://example.com/anna",
+    snippet: "Anna Bright is a professional pickleball athlete.",
+  }];
+  const valid = {
+    golden_record_id: "anna",
+    athlete_name: "Anna Bright",
+    sport: "Pickleball" as const,
+    confidence: 96,
+    source_url: "https://example.com/anna",
+    source_title: "Anna Bright | PPA Tour",
+    source_excerpt: "Professional pickleball athlete",
+  };
+  assert.ok(validateBenchmarkSportClassification(valid, record, sources));
+  assert.equal(validateBenchmarkSportClassification({ ...valid, athlete_name: "Anna Leigh Waters" }, record, sources), null);
+  assert.equal(validateBenchmarkSportClassification({ ...valid, confidence: 89 }, record, sources), null);
+  assert.equal(validateBenchmarkSportClassification({ ...valid, source_url: "https://invented.test" }, record, sources), null);
 });

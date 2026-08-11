@@ -334,6 +334,22 @@ export default function ResearchBenchmarkPage() {
     setShowNew(false);
   };
 
+  const enrichMissingSports = async () => {
+    setWorking(true);
+    setMessage("Running one capped source lookup for missing sports…");
+    try {
+      const response = await fetch("/api/research/golden-records/enrich-sports", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Sport enrichment failed");
+      setMessage(`Enriched ${payload.accepted} sports; ${payload.unresolved} remain unresolved. One Apify run was capped at $1.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Sport enrichment failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const importCsv = async (file: File) => {
     setWorking(true);
     setMessage("");
@@ -438,6 +454,9 @@ export default function ResearchBenchmarkPage() {
             </button>
             <button disabled={working} onClick={() => void mutate({ action: "seed_challenge_set", count: 30 })} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-50">
               Seed challenge drafts
+            </button>
+            <button disabled={working || summary.needsSportEnrichment === 0} onClick={() => void enrichMissingSports()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-50">
+              Enrich missing sports
             </button>
           </div>
         </header>
