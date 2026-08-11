@@ -4728,10 +4728,19 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
 
     // STEP 4: Score current public evidence against the pinned thesis. Outcomes
     // from signed, rejected, or stalled opportunities are offline labels only.
+    const checkpointedScores = Array.isArray(checkpoint.scoring_details)
+      ? (checkpoint.scoring_details as unknown[]).filter((candidate): candidate is ScoredAthlete => {
+          if (!candidate || typeof candidate !== "object") return false;
+          const value = candidate as Partial<ScoredAthlete>;
+          return typeof value.score === "number"
+            && typeof value.onlyfans_fit_score === "number"
+            && typeof value.commercial_achievability_score === "number"
+            && typeof value.research_confidence_score === "number";
+        })
+      : [];
     const scoredAthletes = reachedPhase("saving_candidates")
-      && Array.isArray(checkpoint.scoring_details)
-      && checkpoint.scoring_details.length > 0
-      ? checkpoint.scoring_details as unknown as ScoredAthlete[]
+      && checkpointedScores.length > 0
+      ? checkpointedScores
       : await scoreAthletes(enrichedAthletes, scoringModel, config, input, {
         sourced: allDiscoveredAthletes.length,
         discovered: discoveredAthletes.length,
@@ -4786,7 +4795,11 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     await supabase
       .from("research_logs")
       .update({
-        scoring_details: auditedAthletes,
+        // Keep the durable enrichment checkpoint when every provider call
+        // fails. That allows a fixed deployment to re-score the same paid
+        // identity/profile work instead of buying discovery and enrichment
+        // again. A non-empty scored set replaces the checkpoint as usual.
+        ...(auditedAthletes.length > 0 ? { scoring_details: auditedAthletes } : {}),
         final_results: finalResults,
       })
       .eq("id", researchLogId);
