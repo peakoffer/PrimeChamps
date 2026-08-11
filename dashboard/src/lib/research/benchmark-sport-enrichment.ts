@@ -42,7 +42,7 @@ async function classifySports(records: GoldenRecord[], sources: Map<string, Benc
           additionalProperties: false,
           properties: {
             golden_record_id: { type: "string" }, athlete_name: { type: "string" },
-            sport: { type: "string", enum: BENCHMARK_SPORTS }, confidence: { type: "integer", minimum: 0, maximum: 100 },
+            sport: { type: "string", enum: BENCHMARK_SPORTS }, confidence: { type: "integer" },
             source_url: { type: "string" }, source_title: { type: "string" }, source_excerpt: { type: "string" },
           },
           required: ["golden_record_id", "athlete_name", "sport", "confidence", "source_url", "source_title", "source_excerpt"],

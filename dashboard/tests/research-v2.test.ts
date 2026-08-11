@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   assignGoldenRecordSplits,
   calculateBenchmarkMetrics,
@@ -414,4 +415,11 @@ test("benchmark sport enrichment rejects wrong names, weak confidence, and inven
   assert.equal(validateBenchmarkSportClassification({ ...valid, athlete_name: "Anna Leigh Waters" }, record, sources), null);
   assert.equal(validateBenchmarkSportClassification({ ...valid, confidence: 89 }, record, sources), null);
   assert.equal(validateBenchmarkSportClassification({ ...valid, source_url: "https://invented.test" }, record, sources), null);
+});
+
+test("benchmark sport enrichment uses Sonnet-compatible structured output schema", () => {
+  const source = readFileSync(new URL("../src/lib/research/benchmark-sport-enrichment.ts", import.meta.url), "utf8");
+  assert.match(source, /confidence: \{ type: "integer" \}/);
+  assert.doesNotMatch(source, /confidence: \{ type: "integer", (minimum|maximum)/);
+  assert.match(source, /output_config: \{ effort: "low", format:/);
 });
