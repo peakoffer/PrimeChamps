@@ -28,6 +28,7 @@ import {
   type InstagramSearchCandidate,
 } from "@/lib/research/instagram-identity";
 import { searchInstagramIdentitiesWithApify } from "@/lib/research/apify-instagram-identity";
+import type { ResearchEvaluationBudget } from "@/lib/research/evaluation-budget";
 import { auditResearchResults, RESEARCH_PRIORITY_THRESHOLD } from "@/lib/research/run-audit";
 import {
   selectVerifiedAthleteAge,
@@ -363,6 +364,7 @@ export interface ResearchConfig {
   targetRegions?: string[];
   scoringModel?: string;
   evaluationMode?: boolean;
+  evaluationBudget?: ResearchEvaluationBudget;
   profileVersionId?: string;
   profileVersion?: number;
   profileName?: string;
@@ -1672,7 +1674,7 @@ async function discoverAthletesFromOpenAIWebSearch({
   const currentYear = new Date().getUTCFullYear();
   const strategy = getSportResearchStrategy(sport);
   const params = recruitingProfile?.parameters || DEFAULT_RECRUITING_PROFILE.parameters;
-  const requestedCount = Math.min(Math.max(targetCount, 20), 50);
+  const requestedCount = Math.min(Math.max(targetCount, 5), 50);
   const prompt = `Research up to ${requestedCount} real, active female professional ${sport} athletes for a source-verified recruiting candidate pool.
 
 SEARCH BRIEF:
@@ -4348,6 +4350,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       partnershipGoal: DEFAULT_RESEARCH_OBJECTIVE,
       resultCount: Math.min(Math.max(submittedConfig.resultCount || 10, 1), 20),
       scoringModel,
+      evaluationBudget: submittedConfig.evaluationMode ? submittedConfig.evaluationBudget : undefined,
     };
 
     log("═══════════════════════════════════════════════════════════════");
@@ -4467,8 +4470,15 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       });
       const candidateMemory = await loadReusableCandidateMemory(input, config.sportFocus);
       if (candidateMemory.length > 0) log(`Revalidating ${candidateMemory.length} strong-fit candidates from quality memory`);
-      const desiredEvidencePool = Math.min(60, Math.max(config.resultCount * 3, 30));
-      const discoveryWaveTarget = Math.min(40, Math.max(20, desiredEvidencePool));
+      const evaluationBudget = config.evaluationBudget;
+      const desiredEvidencePool = evaluationBudget
+        ? evaluationBudget.discoveryCandidatesPerWave
+        : Math.min(60, Math.max(config.resultCount * 3, 30));
+      const discoveryWaveTarget = evaluationBudget
+        ? evaluationBudget.discoveryCandidatesPerWave
+        : Math.min(40, Math.max(20, desiredEvidencePool));
+      const maxDiscoveryWaves = evaluationBudget?.maxDiscoveryWaves
+        ?? (config.depth === "extended" ? 3 : 2);
       const firstWave = await discoverAthletes(
         config.sportFocus,
         sportContext,
@@ -4490,7 +4500,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         returned: 0,
         added: 0,
       });
-      if (firstWaveEvidenceCount < desiredEvidencePool) {
+      if (maxDiscoveryWaves > 1 && firstWaveEvidenceCount < desiredEvidencePool) {
         const secondWave = await discoverAthletes(
           config.sportFocus,
           sportContext,
@@ -4512,7 +4522,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           returned: 0,
           added: 0,
         });
-        if (config.depth === "extended" && secondWaveEvidenceCount < desiredEvidencePool) {
+        if (maxDiscoveryWaves > 2 && secondWaveEvidenceCount < desiredEvidencePool) {
           const thirdWave = await discoverAthletes(
             config.sportFocus,
             sportContext,
@@ -4569,8 +4579,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // into paid scrapers. Extended mode can widen the ceiling for larger runs,
     // but never bypasses the result-relative budget.
     const enrichmentPoolLimit = Math.min(
-      config.depth === "extended" ? 60 : 40,
-      Math.max(config.resultCount * 4, 30)
+      config.evaluationBudget?.enrichmentPoolLimit
+        ?? (config.depth === "extended" ? 60 : 40),
+      config.evaluationBudget?.enrichmentPoolLimit
+        ?? Math.max(config.resultCount * 4, 30)
     );
     const discoveredAthletes = evidenceQualifiedAthletes.slice(0, enrichmentPoolLimit);
     if (allDiscoveredAthletes.length !== evidenceQualifiedAthletes.length) {
@@ -5186,13 +5198,20 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             reasoning: a.reasoning,
           })),
           provider_costs: {
+            evaluation_budget: config.evaluationBudget || {
+              profile: "production",
+              resultCount: config.resultCount,
+              maximumDiscoveryWaves: config.depth === "extended" ? 3 : 2,
+              enrichmentPoolLimit,
+            },
             candidate_memory: {
               maximum_revalidated_candidates: 40,
               note: "Database reuse has no external provider charge; every remembered candidate still passes current evidence, identity, activity, age, and scoring checks.",
             },
             openai: {
               model: OPENAI_RESEARCH_MODEL,
-              maximum_discovery_waves: config.depth === "extended" ? 3 : 2,
+              maximum_discovery_waves: config.evaluationBudget?.maxDiscoveryWaves
+                ?? (config.depth === "extended" ? 3 : 2),
               web_search_calls_per_wave: 1,
               instagram_identity_call_cap: RESEARCH_IDENTITY_PROVIDER === "openai" ? Math.ceil(discoveredAthletes.length / 10) : 0,
               source_linked_age_batch_call_cap: Math.ceil(enrichedAthletes.length / 5),

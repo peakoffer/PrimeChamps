@@ -15,6 +15,7 @@ import {
   scoreInstagramProfileIdentity,
   type InstagramNativeProfileSearchResult,
 } from "@/lib/research/instagram-identity";
+import { normalizeResearchEvaluationProfile } from "@/lib/research/evaluation-budget";
 
 export const maxDuration = 300;
 
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest) {
       includeSurnameSearch?: unknown;
       resultsLimit?: unknown;
       marketOverride?: unknown;
+      evaluationProfile?: unknown;
     };
     if (body.action === "resume_run") {
       const runId = typeof body.runId === "string" ? body.runId.trim() : "";
@@ -477,6 +479,7 @@ export async function POST(request: NextRequest) {
       requestedByUserId: membership.user_id,
       sports,
       marketOverride: typeof body.marketOverride === "string" ? body.marketOverride : undefined,
+      evaluationProfile: normalizeResearchEvaluationProfile(body.evaluationProfile),
     });
     return NextResponse.json({ ok: result.failed.length === 0, ...result }, { status: result.started.length > 0 ? 202 : 500 });
   } catch (error) {

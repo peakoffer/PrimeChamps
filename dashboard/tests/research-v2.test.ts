@@ -18,6 +18,27 @@ import {
   reconcileHistoricalGoldenRecord,
   type HistoricalBenchmarkRecord,
 } from "../src/lib/research/historical-benchmark.ts";
+import {
+  getResearchEvaluationBudget,
+  normalizeResearchEvaluationProfile,
+} from "../src/lib/research/evaluation-budget.ts";
+
+test("evaluation profiles default to a genuinely bounded smoke budget", () => {
+  assert.equal(normalizeResearchEvaluationProfile(undefined), "smoke");
+  assert.equal(normalizeResearchEvaluationProfile("unexpected"), "smoke");
+  assert.equal(normalizeResearchEvaluationProfile("release"), "release");
+
+  const smoke = getResearchEvaluationBudget("smoke");
+  assert.deepEqual(smoke, {
+    profile: "smoke",
+    resultCount: 3,
+    depth: "standard",
+    maxDiscoveryWaves: 1,
+    discoveryCandidatesPerWave: 8,
+    enrichmentPoolLimit: 6,
+  });
+  assert.ok(smoke.enrichmentPoolLimit < getResearchEvaluationBudget("development").enrichmentPoolLimit);
+});
 
 const HISTORICAL_CASE: HistoricalBenchmarkRecord = {
   athleteName: "Example Athlete",

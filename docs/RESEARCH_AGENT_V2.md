@@ -149,6 +149,8 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 
 ## Next controlled sequence
 
+API-backed evaluation now has three explicit budgets. `smoke` is the safe default and requests three finalists from one eight-candidate discovery wave with no more than six Instagram enrichments. `development` runs the full ten-candidate target with two waves and up to forty enrichments. `release` is the only three-wave profile and is reserved for a frozen configuration. These limits are stored with every run; evaluation mode still creates no athletes, notifications, drafts, or outreach.
+
 1. Resolve the explicit outcome conflicts surfaced by the 100-case mailbox ledger, then complete achievability, pursue-today, public knowability, sport, and point-in-time source/cutoff fields. Do not assign approximate reconstructions to a benchmark split.
 2. Add approximately 30–40 genuine hard negatives. The mailbox sample contains only three `Not a Fit` cases; `Possible Fit`, `Uncertain`, and right-censored `Stalled` records must not be relabeled as negatives.
 3. Automatically assign only completed, point-in-time-usable labels to development and held-out splits, then freeze the temperature-zero Sonnet baseline.

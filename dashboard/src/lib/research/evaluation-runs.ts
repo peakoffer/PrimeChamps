@@ -5,6 +5,10 @@ import { runResearchWorkflow, type ResearchConfig } from "@/app/api/research/run
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_RECRUITING_PROFILE, type RecruitingProfile } from "@/lib/research/intelligence";
 import { RESEARCH_PROMPT_VERSION } from "@/lib/research/scoring";
+import {
+  getResearchEvaluationBudget,
+  type ResearchEvaluationProfile,
+} from "@/lib/research/evaluation-budget";
 
 export function normalizeEvaluationSports(values: unknown[]) {
   return Array.from(new Set(values
@@ -19,6 +23,7 @@ export async function launchResearchEvaluations(input: {
   requestedByUserId: string;
   sports: string[];
   marketOverride?: string;
+  evaluationProfile?: ResearchEvaluationProfile;
 }) {
   const missingVariables = ["OPENAI_API_KEY", "APIFY_API_KEY", "ANTHROPIC_API_KEY"]
     .filter((name) => !process.env[name]);
@@ -42,18 +47,20 @@ export async function launchResearchEvaluations(input: {
     parameters: { ...DEFAULT_RECRUITING_PROFILE.parameters, ...(storedProfile.parameters || {}) },
   };
   const marketOverride = input.marketOverride?.trim().slice(0, 500) || "";
+  const evaluationBudget = getResearchEvaluationBudget(input.evaluationProfile);
   const launches = await Promise.allSettled(sports.map(async (sportFocus) => {
     const config: ResearchConfig = {
       sportFocus,
       partnershipGoal: "onlyfans_creator",
-      depth: "extended",
+      depth: evaluationBudget.depth,
       marketOverride: marketOverride || undefined,
       customContext: marketOverride || undefined,
       includeRecentGuidance: true,
       followerMin: profile.parameters.follower_min,
       followerMax: profile.parameters.follower_max,
-      resultCount: 10,
+      resultCount: evaluationBudget.resultCount,
       evaluationMode: true,
+      evaluationBudget,
       profileVersionId: activeProfile?.id,
       profileVersion: activeProfile?.version,
       profileName: activeProfile?.name || "Prime Champs baseline",
@@ -63,7 +70,7 @@ export async function launchResearchEvaluations(input: {
       organization_id: input.organizationId,
       requested_by_user_id: input.requestedByUserId,
       profile_version_id: activeProfile?.id || null,
-      research_depth: "extended",
+      research_depth: evaluationBudget.depth,
       status: "queued",
       phase: "queued",
       heartbeat_at: new Date().toISOString(),
@@ -73,8 +80,10 @@ export async function launchResearchEvaluations(input: {
       context_summary: {
         sport: sportFocus,
         mode: "quality evaluation",
+        evaluation_profile: evaluationBudget.profile,
+        evaluation_budget: evaluationBudget,
         safety: "evaluation-only; no athletes, notifications, drafts, or outreach are created",
-        requested_priority_candidates: 10,
+        requested_priority_candidates: evaluationBudget.resultCount,
       },
       raw_results: [],
       scoring_details: [],
