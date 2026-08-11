@@ -40,7 +40,19 @@ type GoldenRecord = {
   outcome_masked: boolean;
   label_conflict: boolean;
   ready_for_split: boolean;
+  evidence_ready_for_freeze: boolean;
+  evidence_blockers: string[];
+  safe_evidence_claim_count: number;
+  safe_evidence_source_count: number;
   updated_at: string;
+};
+
+type EvidenceSummary = {
+  totalRecords: number;
+  readyForFreeze: number;
+  recordsWithAnySafeEvidence: number;
+  safeClaimCount: number;
+  blockerCounts: Record<string, number>;
 };
 
 type BenchmarkSummary = {
@@ -103,6 +115,14 @@ const INITIAL_SUMMARY: BenchmarkSummary = {
   lockedHeldOut: 0,
   revealedHeldOut: 0,
   developmentChallengeCount: 0,
+};
+
+const INITIAL_EVIDENCE_SUMMARY: EvidenceSummary = {
+  totalRecords: 0,
+  readyForFreeze: 0,
+  recordsWithAnySafeEvidence: 0,
+  safeClaimCount: 0,
+  blockerCounts: {},
 };
 
 function dateValue(value: string | null) {
@@ -186,6 +206,7 @@ function SegmentedChoice<T extends string>({
 export default function ResearchBenchmarkPage() {
   const [records, setRecords] = useState<GoldenRecord[]>([]);
   const [summary, setSummary] = useState(INITIAL_SUMMARY);
+  const [evidenceSummary, setEvidenceSummary] = useState(INITIAL_EVIDENCE_SUMMARY);
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -203,6 +224,7 @@ export default function ResearchBenchmarkPage() {
       if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
       setRecords(payload.records || []);
       setSummary(payload.summary || INITIAL_SUMMARY);
+      setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
@@ -515,10 +537,10 @@ export default function ResearchBenchmarkPage() {
 
         <section className="mb-6 grid gap-3 md:grid-cols-4">
           {[
-            { label: "Historical ledger", value: `${summary.historicalMailboxCount} / 100`, detail: `${summary.highConfidenceLabels} high · ${summary.mediumConfidenceLabels} medium confidence` },
-            { label: "Fit coverage", value: `${summary.fit} fit · ${summary.notFit} not fit`, detail: `${summary.uncertain} uncertain · ${summary.developmentChallengeCount} challenge drafts` },
-            { label: "Excluded risks", value: `${summary.censoredOutcomes} censored`, detail: `${summary.labelConflicts} outcome conflicts · ${summary.needsSportEnrichment} need sport enrichment` },
-            { label: "Blind labels ready", value: summary.readyForSplit, detail: `${summary.readyFit} fit + ${summary.readyNotFit} not fit · evidence gate runs before freeze` },
+            { label: "Blind labels locked", value: summary.readyForSplit, detail: `${summary.readyFit} fit + ${summary.readyNotFit} not fit · target 40 + 40` },
+            { label: "Evidence packets", value: `${evidenceSummary.readyForFreeze} / ${evidenceSummary.totalRecords}`, detail: `${evidenceSummary.recordsWithAnySafeEvidence} have any safe evidence · ${evidenceSummary.safeClaimCount} safe claims` },
+            { label: "Frozen development", value: summary.development, detail: "Used for iterative prompt and rubric tuning" },
+            { label: "Locked held out", value: summary.heldOut, detail: `${summary.lockedHeldOut} locked · ${summary.revealedHeldOut} revealed` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{metric.label}</p>
@@ -612,6 +634,18 @@ export default function ResearchBenchmarkPage() {
                     This record is frozen in cohort {selected.benchmark_cohort_version || "unknown"}. Labels and evidence cannot be edited before the release evaluation is revealed.
                   </div>
                 )}
+
+                <div className={`mb-6 rounded-lg border p-4 text-sm ${selected.evidence_ready_for_freeze ? "border-emerald-900/50 bg-emerald-950/20 text-emerald-100/80" : "border-zinc-800 bg-zinc-900/50 text-zinc-400"}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <strong className={selected.evidence_ready_for_freeze ? "font-medium text-emerald-100" : "font-medium text-zinc-200"}>
+                      {selected.evidence_ready_for_freeze ? "Point-in-time evidence packet ready" : "Point-in-time evidence packet not ready"}
+                    </strong>
+                    <span className="text-xs text-zinc-500">{selected.safe_evidence_claim_count} claims · {selected.safe_evidence_source_count} independent sources</span>
+                  </div>
+                  {!selected.evidence_ready_for_freeze && selected.evidence_blockers.length > 0 && (
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">{selected.evidence_blockers.join(" · ")}</p>
+                  )}
+                </div>
 
                 <fieldset disabled={selectedLocked} className="space-y-7 disabled:opacity-70">
                   <div>

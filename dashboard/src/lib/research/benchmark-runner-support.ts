@@ -288,6 +288,31 @@ export function benchmarkEvidenceFreezeReadiness(input: {
   return { ready: reasons.length === 0, reasons, identity, adult, independentSources: domains.size };
 }
 
+export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
+  record: BenchmarkGoldenCase;
+  fitLabel: "fit" | "not_fit";
+  selection: BenchmarkEvidenceSelection;
+}>) {
+  const blockerCounts: Record<string, number> = {};
+  let readyForFreeze = 0;
+  let recordsWithAnySafeEvidence = 0;
+  let safeClaimCount = 0;
+  for (const entry of entries) {
+    const readiness = benchmarkEvidenceFreezeReadiness(entry);
+    if (readiness.ready) readyForFreeze += 1;
+    if (entry.selection.evidence.length > 0) recordsWithAnySafeEvidence += 1;
+    safeClaimCount += entry.selection.evidence.length;
+    for (const reason of readiness.reasons) blockerCounts[reason] = (blockerCounts[reason] || 0) + 1;
+  }
+  return {
+    totalRecords: entries.length,
+    readyForFreeze,
+    recordsWithAnySafeEvidence,
+    safeClaimCount,
+    blockerCounts,
+  };
+}
+
 export function buildBenchmarkResearcherPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
   const dossier = evidence.map((item) => [
     `[${item.sourceRef}] ${item.title}`,

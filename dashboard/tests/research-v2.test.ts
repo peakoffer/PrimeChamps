@@ -47,6 +47,7 @@ import {
   selectLatestOpenRouterSonnet,
   selectLeakageSafeBenchmarkEvidence,
   sonnetPriceSnapshot,
+  summarizeBenchmarkEvidenceReadiness,
   type BenchmarkEvidenceClaimRow,
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
@@ -493,6 +494,21 @@ test("benchmark finalist gates require two independent identity and adult source
     fitLabel: "fit",
     selection: missingAge,
   }).reasons.includes("fit record lacks two-source 21+ corroboration"));
+
+  const summary = summarizeBenchmarkEvidenceReadiness([{
+    record: BENCHMARK_CASE,
+    fitLabel: "fit",
+    selection,
+  }, {
+    record: { ...BENCHMARK_CASE, id: "missing-evidence" },
+    fitLabel: "not_fit",
+    selection: { evidence: [], rejected: [], totalClaims: 0, pointInTimeCompliant: true },
+  }]);
+  assert.equal(summary.totalRecords, 2);
+  assert.equal(summary.readyForFreeze, 1);
+  assert.equal(summary.recordsWithAnySafeEvidence, 1);
+  assert.equal(summary.safeClaimCount, 4);
+  assert.equal(summary.blockerCounts["fewer than four supported public claims exist before the cutoff"], 1);
 });
 
 test("benchmark prompts are constructed from a safe whitelist and never expose labels or outcomes", () => {

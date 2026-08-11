@@ -14,6 +14,7 @@ import {
 import {
   benchmarkEvidenceFreezeReadiness,
   selectLeakageSafeBenchmarkEvidence,
+  summarizeBenchmarkEvidenceReadiness,
   type BenchmarkEvidenceClaimRow,
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
@@ -118,9 +119,47 @@ export async function GET(request: NextRequest) {
         },
       });
     }
+    const recordIds = allRecords.map((record) => String(record.id));
+    const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = recordIds.length
+      ? await Promise.all([
+        admin.from("research_evidence_sources").select(
+          "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
+        ).eq("organization_id", user.organizationId).in("golden_record_id", recordIds),
+        admin.from("research_evidence_claims").select(
+          "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
+        ).eq("organization_id", user.organizationId).in("golden_record_id", recordIds),
+      ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (sourceError) throw sourceError;
+    if (claimError) throw claimError;
+    const sourceRows = (sources || []) as BenchmarkEvidenceSourceRow[];
+    const claimRows = (claims || []) as BenchmarkEvidenceClaimRow[];
+    const evidenceEntries = allRecords.map((record) => {
+      const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
+      const selection = selectLeakageSafeBenchmarkEvidence({
+        record: benchmarkRecord,
+        sources: sourceRows.filter((source) => source.golden_record_id === record.id),
+        claims: claimRows.filter((claim) => claim.golden_record_id === record.id),
+      });
+      const fitLabel = record.fit_label === "not_fit" ? "not_fit" as const : "fit" as const;
+      const readiness = benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel, selection });
+      return { record: benchmarkRecord, fitLabel, selection, readiness };
+    });
+    const evidenceByRecord = new Map(evidenceEntries.map((entry) => [entry.record.id, entry]));
+    const evidenceSummary = summarizeBenchmarkEvidenceReadiness(evidenceEntries);
     return NextResponse.json({
-      records: filteredRecords.map(maskGoldenRecordForBlindLabeling),
+      records: filteredRecords.map((record) => {
+        const evidence = evidenceByRecord.get(String(record.id));
+        return {
+          ...maskGoldenRecordForBlindLabeling(record),
+          evidence_ready_for_freeze: evidence?.readiness.ready || false,
+          evidence_blockers: evidence?.readiness.reasons || [],
+          safe_evidence_claim_count: evidence?.selection.evidence.length || 0,
+          safe_evidence_source_count: evidence?.readiness.independentSources || 0,
+        };
+      }),
       summary: summarizeGoldenRecords(allRecords),
+      evidenceSummary,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load golden records";
