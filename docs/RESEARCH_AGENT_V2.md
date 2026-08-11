@@ -151,6 +151,8 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 
 API-backed evaluation now has three explicit budgets. `smoke` is the safe default and requests three finalists from one eight-candidate discovery wave with no more than six Instagram enrichments. `development` runs the full ten-candidate target with two waves and up to forty enrichments. `release` is the only three-wave profile and is reserved for a frozen configuration. These limits are stored with every run; evaluation mode still creates no athletes, notifications, drafts, or outreach.
 
+Paid enrichment uses a two-thirds fresh / one-third remembered mix when both lanes are available, preventing old candidate memory from monopolizing a new sport run. Each evaluation profile also caps researcher input/output tokens and the number of candidates eligible for the independent audit.
+
 If a scoring provider fails for every enriched candidate, the run retains its paid enrichment checkpoint. A corrected deployment can fork from that checkpoint rather than repeating discovery and Instagram work.
 
 1. Resolve the explicit outcome conflicts surfaced by the 100-case mailbox ledger, then complete achievability, pursue-today, public knowability, sport, and point-in-time source/cutoff fields. Do not assign approximate reconstructions to a benchmark split.

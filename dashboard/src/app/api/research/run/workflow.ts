@@ -29,6 +29,10 @@ import {
 } from "@/lib/research/instagram-identity";
 import { searchInstagramIdentitiesWithApify } from "@/lib/research/apify-instagram-identity";
 import type { ResearchEvaluationBudget } from "@/lib/research/evaluation-budget";
+import {
+  selectBalancedResearchCandidates,
+  type ResearchCandidateLane,
+} from "@/lib/research/candidate-selection";
 import { auditResearchResults, RESEARCH_PRIORITY_THRESHOLD } from "@/lib/research/run-audit";
 import {
   selectVerifiedAthleteAge,
@@ -411,6 +415,7 @@ interface DiscoveredAthlete {
   }>;
   discovery_verification?: DiscoveryQuality;
   known_instagram_handle?: string;
+  discovery_lane?: ResearchCandidateLane;
 }
 
 interface EnrichedAthlete extends DiscoveredAthlete {
@@ -510,6 +515,7 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
       known_instagram_handle: Number(row.identity_confidence || 0) >= 70 && typeof row.instagram_handle === "string"
         ? row.instagram_handle
         : undefined,
+      discovery_lane: "memory",
     });
     return candidate.discovery_verification?.passed === true ? [candidate] : [];
   });
@@ -3219,6 +3225,10 @@ async function scoreAthletes(
     return [[row.candidate_key, row.raw_candidate as ScoredAthlete] as const];
   }));
   const scored: ScoredAthlete[] = Array.from(cachedByKey.values());
+  const maxInputTokens = config.evaluationBudget?.maxResearcherInputTokens ?? Number.POSITIVE_INFINITY;
+  const maxOutputTokens = config.evaluationBudget?.maxResearcherOutputTokens ?? Number.POSITIVE_INFINITY;
+  let consumedInputTokens = scored.reduce((sum, candidate) => sum + (candidate.researcher_input_tokens || 0), 0);
+  let consumedOutputTokens = scored.reduce((sum, candidate) => sum + (candidate.researcher_output_tokens || 0), 0);
   const pendingAthletes = athletes.filter((athlete) =>
     !cachedByKey.has(researchCandidateKey(athlete.name, athlete.sport))
   );
@@ -3229,6 +3239,15 @@ async function scoreAthletes(
   // pool inside one durable step more reliably.
   const scoringBatchSize = 5;
   for (let index = 0; index < pendingAthletes.length; index += scoringBatchSize) {
+    if (consumedInputTokens >= maxInputTokens || consumedOutputTokens >= maxOutputTokens) {
+      log("Researcher token budget reached; stopping before the next scoring batch", {
+        consumedInputTokens,
+        consumedOutputTokens,
+        maxInputTokens,
+        maxOutputTokens,
+      });
+      break;
+    }
     const batch = pendingAthletes.slice(index, index + scoringBatchSize);
     const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(batch);
     const batchScores = await Promise.all(batch.map(async (athlete) => {
@@ -3343,6 +3362,8 @@ async function scoreAthletes(
     );
     await persistPartialScoringCheckpoint(input, versionedBatch, scoringModel);
     scored.push(...versionedBatch);
+    consumedInputTokens += versionedBatch.reduce((sum, candidate) => sum + (candidate.researcher_input_tokens || 0), 0);
+    consumedOutputTokens += versionedBatch.reduce((sum, candidate) => sum + (candidate.researcher_output_tokens || 0), 0);
     await updateResearchProgress(input.researchLogId, "scoring", {
       sourced: runCounts.sourced,
       discovered: runCounts.discovered,
@@ -3813,10 +3834,13 @@ async function persistAuditExecutionFailure(
 async function auditPriorityCandidates(
   input: ResearchWorkflowInput,
   athletes: ScoredAthlete[],
-  scoringModel: string
+  scoringModel: string,
+  maxAuditCandidates = Number.POSITIVE_INFINITY
 ) {
   const artifacts = await ensureResearchV2Artifacts(input, scoringModel);
-  const priorityCandidates = athletes.filter((athlete) => athlete.score > RESEARCH_PRIORITY_THRESHOLD);
+  const priorityCandidates = athletes
+    .filter((athlete) => athlete.score > RESEARCH_PRIORITY_THRESHOLD)
+    .slice(0, Math.max(0, maxAuditCandidates));
   const audited: ScoredAthlete[] = [];
   for (let index = 0; index < priorityCandidates.length; index += 5) {
     const batch = priorityCandidates.slice(index, index + 5);
@@ -4486,7 +4510,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         scoringModel,
         config.profileSnapshot
       );
-      const discoveryWaves = [candidateMemory, firstWave];
+      const discoveryWaves = [
+        candidateMemory,
+        firstWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })),
+      ];
       const firstWaveEvidenceCount = [...candidateMemory, ...firstWave].filter((athlete) =>
         verifyDiscoveredAthlete(athlete).discovery_verification?.passed === true
       ).length;
@@ -4508,7 +4535,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           scoringModel,
           config.profileSnapshot
         );
-        discoveryWaves.push(secondWave);
+        discoveryWaves.push(secondWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
         const secondWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
           verifyDiscoveredAthlete(athlete).discovery_verification?.passed === true
         ).length;
@@ -4530,7 +4557,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             scoringModel,
             config.profileSnapshot
           );
-          discoveryWaves.push(thirdWave);
+          discoveryWaves.push(thirdWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
           const thirdWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
             verifyDiscoveredAthlete(athlete).discovery_verification?.passed === true
           ).length;
@@ -4582,7 +4609,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       config.evaluationBudget?.enrichmentPoolLimit
         ?? Math.max(config.resultCount * 4, 30)
     );
-    const discoveredAthletes = evidenceQualifiedAthletes.slice(0, enrichmentPoolLimit);
+    const discoveredAthletes = selectBalancedResearchCandidates(
+      evidenceQualifiedAthletes,
+      enrichmentPoolLimit
+    );
     if (allDiscoveredAthletes.length !== evidenceQualifiedAthletes.length) {
       log(`Rejected ${allDiscoveredAthletes.length - evidenceQualifiedAthletes.length} discoveries at the sport/source evidence gate`);
     }
@@ -4754,7 +4784,12 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // candidate then receives an independent blind audit before it can become
     // a finalist. The Auditor sees the Researcher's score only after completing
     // its own evidence review, so it cannot simply ratify the proposal.
-    const auditedAthletes = await auditPriorityCandidates(input, scoredAthletes, scoringModel);
+    const auditedAthletes = await auditPriorityCandidates(
+      input,
+      scoredAthletes,
+      scoringModel,
+      config.evaluationBudget?.maxAuditCandidates
+    );
 
     // Never pad a run with weak candidates just to hit a requested count. The
     // deterministic V1 gates and the independent V2 audit both have veto power.
@@ -5265,8 +5300,13 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             anthropic: {
               scored_candidates: auditedAthletes.length,
               audited_priority_candidates: auditedAthletes.filter((athlete) => Boolean(athlete.audit_verdict)).length,
-              calls_per_audited_candidate: 2,
+              researcher_calls_per_scored_candidate: 1,
+              auditor_calls_per_priority_candidate: 1,
               model: scoringModel,
+              researcher_input_tokens: auditedAthletes.reduce((sum, athlete) => sum + (athlete.researcher_input_tokens || 0), 0),
+              researcher_output_tokens: auditedAthletes.reduce((sum, athlete) => sum + (athlete.researcher_output_tokens || 0), 0),
+              audit_input_tokens: auditedAthletes.reduce((sum, athlete) => sum + (athlete.audit_input_tokens || 0), 0),
+              audit_output_tokens: auditedAthletes.reduce((sum, athlete) => sum + (athlete.audit_output_tokens || 0), 0),
             },
           },
           final_results: finalResults,

@@ -22,6 +22,7 @@ import {
   getResearchEvaluationBudget,
   normalizeResearchEvaluationProfile,
 } from "../src/lib/research/evaluation-budget.ts";
+import { selectBalancedResearchCandidates } from "../src/lib/research/candidate-selection.ts";
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
   assert.equal(normalizeResearchEvaluationProfile(undefined), "smoke");
@@ -36,8 +37,22 @@ test("evaluation profiles default to a genuinely bounded smoke budget", () => {
     maxDiscoveryWaves: 1,
     discoveryCandidatesPerWave: 8,
     enrichmentPoolLimit: 6,
+    maxResearcherInputTokens: 40_000,
+    maxResearcherOutputTokens: 12_000,
+    maxAuditCandidates: 3,
   });
   assert.ok(smoke.enrichmentPoolLimit < getResearchEvaluationBudget("development").enrichmentPoolLimit);
+});
+
+test("paid enrichment gives fresh discovery priority without discarding memory", () => {
+  const selected = selectBalancedResearchCandidates([
+    ...Array.from({ length: 8 }, (_, index) => ({ id: `memory-${index}`, discovery_lane: "memory" as const })),
+    ...Array.from({ length: 8 }, (_, index) => ({ id: `fresh-${index}`, discovery_lane: "fresh" as const })),
+  ], 6);
+
+  assert.deepEqual(selected.map((candidate) => candidate.id), [
+    "fresh-0", "fresh-1", "fresh-2", "fresh-3", "memory-0", "memory-1",
+  ]);
 });
 
 const HISTORICAL_CASE: HistoricalBenchmarkRecord = {
