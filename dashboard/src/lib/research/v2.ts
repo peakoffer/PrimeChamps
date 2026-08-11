@@ -115,6 +115,7 @@ export function parseGoldenRecordInput(value: unknown): GoldenRecordInput {
     if (record.achievabilityLabel === "uncertain") missing.push("achievability label");
     if (record.pointInTimeReliability === "unusable") missing.push("usable point-in-time evidence");
     if (record.decisiveInformationPubliclyKnowable === null) missing.push("public-knowability answer");
+    if (!record.labelOrderFitBeforeOutcome) missing.push("fit assessment locked before outcome review");
     if (!record.labeledAt) missing.push("label completion time");
     if (missing.length) throw new Error(`Benchmark record is incomplete: ${missing.join(", ")}`);
   }
@@ -145,6 +146,104 @@ export function goldenRecordToRow(record: GoldenRecordInput) {
   };
 }
 
+export function isGoldenRecordReadyForSplit(record: Record<string, unknown>) {
+  return record.benchmark_split === "excluded"
+    && record.fit_label !== "uncertain"
+    && record.achievability_label !== "uncertain"
+    && record.point_in_time_reliability !== "unusable"
+    && record.label_order_fit_before_outcome === true
+    && Boolean(record.decision_at)
+    && Boolean(record.evidence_cutoff_at)
+    && typeof record.decisive_information_publicly_knowable === "boolean"
+    && Boolean(record.labeled_at);
+}
+
+export function maskGoldenRecordForBlindLabeling(record: Record<string, unknown>): Record<string, unknown> & {
+  outcome_masked: boolean;
+  label_conflict: boolean;
+  ready_for_split: boolean;
+} {
+  const labelConflict = Array.isArray(record.stratification_tags)
+    && record.stratification_tags.includes("historical_label_conflict");
+  if (record.label_order_fit_before_outcome === true) {
+    return {
+      ...record,
+      outcome_masked: false,
+      label_conflict: labelConflict,
+      ready_for_split: isGoldenRecordReadyForSplit(record),
+    };
+  }
+  const stratificationTags = Array.isArray(record.stratification_tags)
+    ? record.stratification_tags.filter((tag) => typeof tag === "string"
+      && !tag.startsWith("outcome_")
+      && !tag.startsWith("conflicting_outcome_")
+      && tag !== "historical_label_conflict")
+    : [];
+  return {
+    ...record,
+    final_outcome: null,
+    primary_reason: null,
+    explanation: null,
+    internal_record_reference: null,
+    exclusion_reason: null,
+    stratification_tags: stratificationTags,
+    outcome_masked: true,
+    label_conflict: labelConflict,
+    ready_for_split: false,
+  };
+}
+
+type GoldenSplitCandidate = {
+  id: string;
+  fit_label: "fit" | "not_fit";
+  sport: string;
+  final_outcome: string;
+  stratification_tags?: string[] | null;
+};
+
+function stableBenchmarkHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+export function assignGoldenRecordSplits(
+  records: GoldenSplitCandidate[],
+  cohortVersion: string,
+  heldOutRatio = 0.2
+) {
+  const assignments: Array<{ id: string; split: "development" | "held_out" }> = [];
+  for (const fitLabel of ["fit", "not_fit"] as const) {
+    const labelRecords = records.filter((record) => record.fit_label === fitLabel);
+    const heldOutEligible = labelRecords.filter((record) =>
+      !record.stratification_tags?.includes("development_only")
+    );
+    const desiredHeldOut = labelRecords.length >= 5
+      ? Math.max(1, Math.floor(labelRecords.length * heldOutRatio))
+      : 0;
+    const orderedEligible = heldOutEligible
+      .map((record) => ({
+        record,
+        hash: stableBenchmarkHash(`${cohortVersion}|${record.id}`),
+      }))
+      .sort((left, right) => left.hash - right.hash || left.record.id.localeCompare(right.record.id));
+    const heldOut = new Set(
+      stratifiedSample(
+        orderedEligible.map((item) => item.record),
+        Math.min(desiredHeldOut, orderedEligible.length),
+        (record) => `${record.sport}|${record.final_outcome}`
+      ).map((record) => record.id)
+    );
+    for (const record of labelRecords) {
+      assignments.push({ id: record.id, split: heldOut.has(record.id) ? "held_out" : "development" });
+    }
+  }
+  return assignments;
+}
+
 export function stratifiedSample<T>(items: T[], count: number, stratum: (item: T) => string) {
   const groups = new Map<string, T[]>();
   for (const item of items) {
@@ -168,24 +267,27 @@ export function stratifiedSample<T>(items: T[], count: number, stratum: (item: T
   return sample;
 }
 
+export function goldenAthleteKey(name: string, sport: string) {
+  const normalize = (value: string) => value.toLowerCase().normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return `${normalize(name)}|${normalize(sport)}`;
+}
+
 export function summarizeGoldenRecords(records: Array<Record<string, unknown>>) {
   const usable = records.filter((record) => record.benchmark_split !== "excluded");
   const labeledFit = records.filter((record) => record.fit_label === "fit");
   const labeledNotFit = records.filter((record) => record.fit_label === "not_fit");
   const usableFit = usable.filter((record) => record.fit_label === "fit");
   const usableNotFit = usable.filter((record) => record.fit_label === "not_fit");
-  const readyForSplit = records.filter((record) =>
-    record.benchmark_split === "excluded"
-    && record.fit_label !== "uncertain"
-    && record.achievability_label !== "uncertain"
-    && record.point_in_time_reliability !== "unusable"
-    && Boolean(record.decision_at)
-    && Boolean(record.evidence_cutoff_at)
-    && typeof record.decisive_information_publicly_knowable === "boolean"
-    && Boolean(record.labeled_at)
-  );
+  const readyForSplit = records.filter(isGoldenRecordReadyForSplit);
+  const readyFit = readyForSplit.filter((record) => record.fit_label === "fit");
+  const readyNotFit = readyForSplit.filter((record) => record.fit_label === "not_fit");
   const hasTag = (record: Record<string, unknown>, tag: string) =>
     Array.isArray(record.stratification_tags) && record.stratification_tags.includes(tag);
+  const heldOutEligible = (record: Record<string, unknown>) =>
+    !hasTag(record, "development_only");
   return {
     total: records.length,
     usable: usable.length,
@@ -198,6 +300,10 @@ export function summarizeGoldenRecords(records: Array<Record<string, unknown>>) 
     usableNotFit: usableNotFit.length,
     uncertain: records.filter((record) => record.fit_label === "uncertain").length,
     readyForSplit: readyForSplit.length,
+    readyFit: readyFit.length,
+    readyNotFit: readyNotFit.length,
+    heldOutEligibleFit: readyFit.filter(heldOutEligible).length,
+    heldOutEligibleNotFit: readyNotFit.filter(heldOutEligible).length,
     positiveTarget: 40,
     negativeTarget: 40,
     positiveRemaining: Math.max(0, 40 - labeledFit.length),
@@ -208,6 +314,9 @@ export function summarizeGoldenRecords(records: Array<Record<string, unknown>>) 
     highConfidenceLabels: records.filter((record) => hasTag(record, "label_confidence_high")).length,
     mediumConfidenceLabels: records.filter((record) => hasTag(record, "label_confidence_medium")).length,
     needsSportEnrichment: records.filter((record) => hasTag(record, "needs_sport_enrichment")).length,
+    lockedHeldOut: records.filter((record) => record.benchmark_split === "held_out" && Boolean(record.held_out_locked_at)).length,
+    revealedHeldOut: records.filter((record) => record.benchmark_split === "held_out" && Boolean(record.held_out_revealed_at)).length,
+    developmentChallengeCount: records.filter((record) => hasTag(record, "model_mined_challenge_case")).length,
   };
 }
 

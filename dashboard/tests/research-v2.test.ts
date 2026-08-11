@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  assignGoldenRecordSplits,
   calculateBenchmarkMetrics,
+  goldenAthleteKey,
+  maskGoldenRecordForBlindLabeling,
   parseGoldenRecordInput,
   stratifiedSample,
   summarizeGoldenRecords,
@@ -81,7 +84,7 @@ test("strict golden records require leakage-safe point-in-time labels", () => {
     pursueToday: "yes",
     pointInTimeReliability: "strong",
     benchmarkSplit: "held_out",
-  }), /decision date.*evidence cutoff.*public-knowability.*label completion time/);
+  }), /decision date.*evidence cutoff.*public-knowability.*fit assessment locked.*label completion time/);
 
   const record = parseGoldenRecordInput({
     athleteName: "Example Athlete",
@@ -188,6 +191,63 @@ test("stratified sampling rotates through sports before taking deeper rows", () 
   );
 });
 
+test("golden athlete keys deduplicate punctuation and accents without crossing sports", () => {
+  assert.equal(
+    goldenAthleteKey("Asjia O’Neal", "Beach Volleyball"),
+    goldenAthleteKey("Asjia O'Neal", "beach-volleyball")
+  );
+  assert.notEqual(goldenAthleteKey("Jordan Lee", "surfing"), goldenAthleteKey("Jordan Lee", "volleyball"));
+});
+
+test("blind golden-record labeling hides outcomes until fit is locked", () => {
+  const hidden = maskGoldenRecordForBlindLabeling({
+    id: "golden-1",
+    athlete_name: "Example Athlete",
+    sport: "volleyball",
+    fit_label: "fit",
+    achievability_label: "uncertain",
+    final_outcome: "onlyfans_rejected",
+    primary_reason: "fit",
+    explanation: "Private outcome detail",
+    internal_record_reference: "gmail:secret",
+    label_order_fit_before_outcome: false,
+    benchmark_split: "excluded",
+    stratification_tags: ["historical_label_conflict", "outcome_rejected", "label_confidence_high"],
+  });
+  assert.equal(hidden.outcome_masked, true);
+  assert.equal(hidden.final_outcome, null);
+  assert.equal(hidden.primary_reason, null);
+  assert.equal(hidden.internal_record_reference, null);
+  assert.equal(hidden.label_conflict, true);
+  assert.deepEqual(hidden.stratification_tags, ["label_confidence_high"]);
+
+  const visible = maskGoldenRecordForBlindLabeling({
+    ...hidden,
+    final_outcome: "onlyfans_rejected",
+    label_order_fit_before_outcome: true,
+  });
+  assert.equal(visible.outcome_masked, false);
+  assert.equal(visible.final_outcome, "onlyfans_rejected");
+});
+
+test("benchmark splits are deterministic, balanced, and never hold out development-only cases", () => {
+  const records = ["fit", "not_fit"].flatMap((fitLabel) =>
+    Array.from({ length: 40 }, (_, index) => ({
+      id: `${fitLabel}-${index}`,
+      fit_label: fitLabel as "fit" | "not_fit",
+      sport: ["volleyball", "surfing", "mma", "motocross"][index % 4],
+      final_outcome: index % 2 ? "signed" : "non_signing",
+      stratification_tags: index < 10 ? ["development_only"] : [],
+    }))
+  );
+  const first = assignGoldenRecordSplits(records, "cohort-v1");
+  const second = assignGoldenRecordSplits(records, "cohort-v1");
+  assert.deepEqual(first, second);
+  assert.equal(first.filter((item) => item.split === "held_out" && item.id.startsWith("fit-")).length, 8);
+  assert.equal(first.filter((item) => item.split === "held_out" && item.id.startsWith("not_fit-")).length, 8);
+  assert.equal(first.filter((item) => item.split === "held_out" && Number(item.id.split("-").at(-1)) < 10).length, 0);
+});
+
 test("benchmark summary separates provisional labels from benchmark-ready records", () => {
   const summary = summarizeGoldenRecords([
     {
@@ -204,6 +264,7 @@ test("benchmark summary separates provisional labels from benchmark-ready record
       fit_label: "not_fit",
       achievability_label: "low",
       benchmark_split: "development",
+      label_order_fit_before_outcome: true,
       point_in_time_reliability: "strong",
       decision_at: "2026-01-01T00:00:00Z",
       evidence_cutoff_at: "2025-12-31T00:00:00Z",

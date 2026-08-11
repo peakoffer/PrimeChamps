@@ -22,8 +22,8 @@ type GoldenRecord = {
   evidence_cutoff_at: string | null;
   fit_label: "fit" | "not_fit" | "uncertain";
   achievability_label: "high" | "medium" | "low" | "uncertain";
-  final_outcome: "signed" | "signed_underperformed" | "non_signing" | "onlyfans_rejected" | "stalled" | "unresolved";
-  primary_reason: string;
+  final_outcome: "signed" | "signed_underperformed" | "non_signing" | "onlyfans_rejected" | "stalled" | "unresolved" | null;
+  primary_reason: string | null;
   explanation: string | null;
   decisive_information_publicly_knowable: boolean | null;
   pursue_today: "yes" | "no" | "uncertain";
@@ -34,6 +34,12 @@ type GoldenRecord = {
   exclusion_reason: string | null;
   stratification_tags: string[];
   labeled_at: string | null;
+  benchmark_cohort_version: string | null;
+  held_out_locked_at: string | null;
+  held_out_revealed_at: string | null;
+  outcome_masked: boolean;
+  label_conflict: boolean;
+  ready_for_split: boolean;
   updated_at: string;
 };
 
@@ -49,6 +55,10 @@ type BenchmarkSummary = {
   usableNotFit: number;
   uncertain: number;
   readyForSplit: number;
+  readyFit: number;
+  readyNotFit: number;
+  heldOutEligibleFit: number;
+  heldOutEligibleNotFit: number;
   positiveTarget: number;
   negativeTarget: number;
   positiveRemaining: number;
@@ -59,6 +69,9 @@ type BenchmarkSummary = {
   highConfidenceLabels: number;
   mediumConfidenceLabels: number;
   needsSportEnrichment: number;
+  lockedHeldOut: number;
+  revealedHeldOut: number;
+  developmentChallengeCount: number;
 };
 
 const INITIAL_SUMMARY: BenchmarkSummary = {
@@ -73,6 +86,10 @@ const INITIAL_SUMMARY: BenchmarkSummary = {
   usableNotFit: 0,
   uncertain: 0,
   readyForSplit: 0,
+  readyFit: 0,
+  readyNotFit: 0,
+  heldOutEligibleFit: 0,
+  heldOutEligibleNotFit: 0,
   positiveTarget: 40,
   negativeTarget: 40,
   positiveRemaining: 40,
@@ -83,6 +100,9 @@ const INITIAL_SUMMARY: BenchmarkSummary = {
   highConfidenceLabels: 0,
   mediumConfidenceLabels: 0,
   needsSportEnrichment: 0,
+  lockedHeldOut: 0,
+  revealedHeldOut: 0,
+  developmentChallengeCount: 0,
 };
 
 function dateValue(value: string | null) {
@@ -195,8 +215,8 @@ export default function ResearchBenchmarkPage() {
 
   const visibleRecords = useMemo(() => records.filter((record) => {
     if (filter === "needs_label") return record.fit_label === "uncertain" || record.achievability_label === "uncertain";
-    if (filter === "conflicts") return record.stratification_tags.includes("historical_label_conflict");
-    if (filter === "ready") return record.benchmark_split === "excluded" && Boolean(record.labeled_at);
+    if (filter === "conflicts") return record.label_conflict;
+    if (filter === "ready") return record.ready_for_split;
     if (filter === "usable") return record.benchmark_split !== "excluded";
     return true;
   }), [filter, records]);
@@ -247,7 +267,7 @@ export default function ResearchBenchmarkPage() {
           internalRecordReference: selected.internal_record_reference,
           labelOrderFitBeforeOutcome: selected.label_order_fit_before_outcome,
           pointInTimeReliability: selected.point_in_time_reliability,
-          benchmarkSplit: "excluded",
+          benchmarkSplit: selected.benchmark_split,
           exclusionReason: complete ? "Ready for automatic development/held-out assignment" : selected.exclusion_reason,
           stratificationTags: selected.stratification_tags,
           complete,
@@ -259,6 +279,33 @@ export default function ResearchBenchmarkPage() {
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save label");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const lockFitAssessment = async () => {
+    if (!selected || selected.fit_label === "uncertain" || selected.achievability_label === "uncertain") return;
+    setWorking(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/research/golden-records/${selected.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fitLabel: selected.fit_label,
+          achievabilityLabel: selected.achievability_label,
+          pursueToday: selected.pursue_today,
+          lockFitAssessment: true,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not lock fit assessment");
+      setSelected({ ...payload.record, outcome_masked: false });
+      setMessage("Fit assessment locked. Historical outcome is now visible.");
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not lock fit assessment");
     } finally {
       setWorking(false);
     }
@@ -342,7 +389,11 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const selectedLocked = Boolean(selected?.held_out_locked_at && !selected?.held_out_revealed_at);
   const selectedCanComplete = Boolean(selected
+    && !selected.outcome_masked
+    && selected.label_order_fit_before_outcome
+    && !selectedLocked
     && selected.fit_label !== "uncertain"
     && selected.achievability_label !== "uncertain"
     && selected.decision_at
@@ -385,15 +436,18 @@ export default function ResearchBenchmarkPage() {
             <button disabled={working} onClick={() => void mutate({ action: "seed_historical", count: 40 })} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-50">
               Seed signed sample
             </button>
+            <button disabled={working} onClick={() => void mutate({ action: "seed_challenge_set", count: 30 })} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-50">
+              Seed challenge drafts
+            </button>
           </div>
         </header>
 
         <section className="mb-6 grid gap-3 md:grid-cols-4">
           {[
             { label: "Historical ledger", value: `${summary.historicalMailboxCount} / 100`, detail: `${summary.highConfidenceLabels} high · ${summary.mediumConfidenceLabels} medium confidence` },
-            { label: "Fit coverage", value: `${summary.fit} fit · ${summary.notFit} not fit`, detail: `${summary.uncertain} uncertain · ${summary.negativeRemaining} hard negatives still needed` },
+            { label: "Fit coverage", value: `${summary.fit} fit · ${summary.notFit} not fit`, detail: `${summary.uncertain} uncertain · ${summary.developmentChallengeCount} challenge drafts` },
             { label: "Excluded risks", value: `${summary.censoredOutcomes} censored`, detail: `${summary.labelConflicts} outcome conflicts · ${summary.needsSportEnrichment} need sport enrichment` },
-            { label: "Benchmark-ready", value: summary.usable, detail: `${summary.readyForSplit} ready to split · ${summary.heldOut} held out` },
+            { label: "Benchmark-ready", value: summary.usable, detail: `${summary.readyFit} fit + ${summary.readyNotFit} not fit ready · ${summary.lockedHeldOut} locked` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{metric.label}</p>
@@ -404,9 +458,9 @@ export default function ResearchBenchmarkPage() {
         </section>
 
         <div className="mb-6 flex flex-col gap-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-4 text-sm text-amber-100/80 sm:flex-row sm:items-center sm:justify-between">
-          <p><strong className="font-medium text-amber-100">The 100-case mailbox ledger is preserved as historical truth, not model input.</strong> Stalled outcomes remain censored, conflicting outcome labels require review, and every record stays excluded until achievability and leakage-safe public evidence are complete.</p>
-          <button disabled={working || summary.readyForSplit === 0} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
-            Assign clean splits
+          <p><strong className="font-medium text-amber-100">Historical outcomes stay hidden until fit and achievability are locked.</strong> A cohort needs 40 fit and 40 not-fit records, including at least eight independent examples of each label for the immutable 20% held-out set.</p>
+          <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+            Freeze benchmark cohort
           </button>
         </div>
 
@@ -464,10 +518,18 @@ export default function ResearchBenchmarkPage() {
                     <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{selected.sport}</p>
                     <h2 className="mt-2 text-2xl font-semibold">{selected.athlete_name}</h2>
                   </div>
-                  <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-xs text-zinc-500">{titleize(selected.benchmark_split)}</span>
+                  <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-xs text-zinc-500">
+                    {selectedLocked ? "Locked held out" : titleize(selected.benchmark_split)}
+                  </span>
                 </div>
 
-                <div className="space-y-7">
+                {selectedLocked && (
+                  <div className="mb-6 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4 text-sm text-emerald-100/80">
+                    This record is frozen in cohort {selected.benchmark_cohort_version || "unknown"}. Labels and evidence cannot be edited before the release evaluation is revealed.
+                  </div>
+                )}
+
+                <fieldset disabled={selectedLocked} className="space-y-7 disabled:opacity-70">
                   <div>
                     <p className="mb-3 text-sm font-medium">1. OnlyFans fit at the time</p>
                     <SegmentedChoice value={selected.fit_label} onChange={(fit_label) => setSelected({ ...selected, fit_label })} options={[
@@ -515,17 +577,28 @@ export default function ResearchBenchmarkPage() {
                     </label>
                   </div>
 
-                  {selected.fit_label !== "uncertain" && selected.achievability_label !== "uncertain" ? (
+                  {selected.outcome_masked ? (
+                    selected.fit_label !== "uncertain" && selected.achievability_label !== "uncertain" ? (
+                      <div className="flex flex-col gap-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-4 text-sm text-blue-100/80 sm:flex-row sm:items-center sm:justify-between">
+                        <p><strong className="font-medium text-blue-100">Fit assessment is ready to lock.</strong> The historical outcome remains hidden until this step is committed.</p>
+                        <button disabled={working} onClick={() => void lockFitAssessment()} className="whitespace-nowrap rounded-lg bg-blue-100 px-4 py-2 text-sm font-medium text-blue-950 disabled:opacity-40">
+                          Lock fit and reveal outcome
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-500">Choose fit and achievability before the historical outcome can be revealed.</div>
+                    )
+                  ) : (
                     <div className="space-y-4 border-t border-zinc-900 pt-6">
-                      <div className="flex items-center gap-2 text-sm font-medium"><Check className="h-4 w-4 text-emerald-400" /> Fit judgment captured. Now record the outcome.</div>
+                      <div className="flex items-center gap-2 text-sm font-medium"><Check className="h-4 w-4 text-emerald-400" /> Fit judgment locked before outcome review.</div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <label className="text-sm text-zinc-400">Final outcome
-                          <select value={selected.final_outcome} onChange={(event) => setSelected({ ...selected, final_outcome: event.target.value as GoldenRecord["final_outcome"], label_order_fit_before_outcome: true })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                          <select value={selected.final_outcome || "unresolved"} onChange={(event) => setSelected({ ...selected, final_outcome: event.target.value as NonNullable<GoldenRecord["final_outcome"]> })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
                             {(["signed", "signed_underperformed", "non_signing", "onlyfans_rejected", "stalled", "unresolved"] as const).map((value) => <option key={value} value={value}>{titleize(value)}</option>)}
                           </select>
                         </label>
                         <label className="text-sm text-zinc-400">Primary reason
-                          <select value={selected.primary_reason} onChange={(event) => setSelected({ ...selected, primary_reason: event.target.value })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                          <select value={selected.primary_reason || "unknown"} onChange={(event) => setSelected({ ...selected, primary_reason: event.target.value })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
                             {(["fit", "price_economics", "terms", "timing", "interest", "representation", "eligibility", "brand_risk", "performance", "reach", "other", "unknown"]).map((value) => <option key={value} value={value}>{titleize(value)}</option>)}
                           </select>
                         </label>
@@ -537,15 +610,13 @@ export default function ResearchBenchmarkPage() {
                         <input value={selected.internal_record_reference || ""} onChange={(event) => setSelected({ ...selected, internal_record_reference: event.target.value })} placeholder="CRM note, shared document, email thread, or deal record reference" className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 outline-none focus:border-zinc-600" />
                       </label>
                     </div>
-                  ) : (
-                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-500">Choose fit and achievability before reviewing the outcome fields.</div>
                   )}
 
                   <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-900 pt-6">
-                    <button disabled={working} onClick={() => void saveSelected(false)} className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 disabled:opacity-40">Save draft</button>
+                    <button disabled={working || selectedLocked} onClick={() => void saveSelected(false)} className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 disabled:opacity-40">Save draft</button>
                     <button disabled={working || !selectedCanComplete} onClick={() => void saveSelected(true)} className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">Complete label</button>
                   </div>
-                </div>
+                </fieldset>
               </div>
             )}
           </section>

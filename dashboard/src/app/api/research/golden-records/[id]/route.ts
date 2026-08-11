@@ -44,10 +44,34 @@ export async function PATCH(
       .maybeSingle();
     if (loadError) throw loadError;
     if (!current) return NextResponse.json({ error: "Golden record not found" }, { status: 404 });
+    if (current.benchmark_split === "held_out" && current.held_out_locked_at && !current.held_out_revealed_at) {
+      return NextResponse.json({
+        error: "This held-out record is locked. Its labels and evidence cannot change before the release evaluation is revealed.",
+      }, { status: 409 });
+    }
+
+    const outcomeWasHidden = current.label_order_fit_before_outcome !== true;
+    const lockFitAssessment = body.lockFitAssessment === true;
+    if (lockFitAssessment && (body.fitLabel === "uncertain" || body.achievabilityLabel === "uncertain")) {
+      return NextResponse.json({ error: "Choose fit and achievability before revealing the historical outcome" }, { status: 400 });
+    }
+    if (body.complete === true && outcomeWasHidden && !lockFitAssessment) {
+      return NextResponse.json({ error: "Lock the fit assessment before completing the historical outcome label" }, { status: 409 });
+    }
 
     const merged = {
       ...databaseRecordToInput(current as Record<string, unknown>),
       ...body,
+      // Hidden outcomes never round-trip through the browser. Preserve the
+      // database truth until the independent fit assessment has been locked.
+      ...(outcomeWasHidden ? {
+        finalOutcome: current.final_outcome,
+        primaryReason: current.primary_reason,
+        explanation: current.explanation,
+        internalRecordReference: current.internal_record_reference,
+        stratificationTags: current.stratification_tags,
+      } : {}),
+      labelOrderFitBeforeOutcome: lockFitAssessment ? true : current.label_order_fit_before_outcome,
       labeledAt: body.complete === true ? new Date().toISOString() : body.labeledAt ?? current.labeled_at,
     };
     const parsed = parseGoldenRecordInput(merged);

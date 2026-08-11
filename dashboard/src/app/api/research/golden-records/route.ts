@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  assignGoldenRecordSplits,
+  goldenAthleteKey,
   goldenRecordToRow,
+  isGoldenRecordReadyForSplit,
+  maskGoldenRecordForBlindLabeling,
   parseGoldenRecordInput,
   stratifiedSample,
   summarizeGoldenRecords,
@@ -54,7 +58,10 @@ export async function GET(request: NextRequest) {
       (!split || !["development", "held_out", "excluded"].includes(split) || record.benchmark_split === split)
       && (!label || !["fit", "not_fit", "uncertain"].includes(label) || record.fit_label === label)
     );
-    return NextResponse.json({ records: filteredRecords, summary: summarizeGoldenRecords(allRecords) });
+    return NextResponse.json({
+      records: filteredRecords.map(maskGoldenRecordForBlindLabeling),
+      summary: summarizeGoldenRecords(allRecords),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load golden records";
     return NextResponse.json({ error: message }, { status: message === "Not authenticated" ? 401 : 500 });
@@ -65,45 +72,84 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
     const body = await request.json() as Record<string, unknown>;
-    const action = body.action === "seed_historical" || body.action === "bulk_import" || body.action === "assign_splits"
+    const action = body.action === "seed_historical" || body.action === "seed_challenge_set" || body.action === "bulk_import" || body.action === "assign_splits"
       ? body.action
       : "create";
     const admin = createAdminClient();
 
     if (action === "assign_splits") {
-      const { data: ready, error: readyError } = await admin
+      const { data: candidates, error: readyError } = await admin
         .from("research_golden_records")
-        .select("id,sport,fit_label,final_outcome")
+        .select("id,sport,fit_label,achievability_label,final_outcome,point_in_time_reliability,label_order_fit_before_outcome,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,labeled_at,benchmark_split,stratification_tags")
         .eq("organization_id", user.organizationId)
         .eq("benchmark_split", "excluded")
-        .neq("fit_label", "uncertain")
-        .neq("achievability_label", "uncertain")
-        .neq("point_in_time_reliability", "unusable")
-        .not("decision_at", "is", null)
-        .not("evidence_cutoff_at", "is", null)
-        .not("decisive_information_publicly_knowable", "is", null)
-        .not("labeled_at", "is", null)
         .order("id", { ascending: true });
       if (readyError) throw readyError;
-      const byStratum = new Map<string, NonNullable<typeof ready>>();
-      for (const record of ready || []) {
-        const key = `${record.fit_label}|${record.sport.toLowerCase()}|${record.final_outcome}`;
-        const group = byStratum.get(key) || [];
-        group.push(record);
-        byStratum.set(key, group);
+      const ready = (candidates || []).filter((record) =>
+        isGoldenRecordReadyForSplit(record as Record<string, unknown>)
+      ) as Array<{
+        id: string;
+        sport: string;
+        fit_label: "fit" | "not_fit";
+        final_outcome: string;
+        stratification_tags: string[];
+      }>;
+      const fitCount = ready.filter((record) => record.fit_label === "fit").length;
+      const notFitCount = ready.filter((record) => record.fit_label === "not_fit").length;
+      const heldOutEligible = (label: "fit" | "not_fit") => ready.filter((record) =>
+        record.fit_label === label && !record.stratification_tags?.includes("development_only")
+      ).length;
+      if (fitCount < 40 || notFitCount < 40) {
+        return NextResponse.json({
+          error: `A clean cohort requires 40 complete fit and 40 complete not-fit labels. Ready now: ${fitCount} fit and ${notFitCount} not fit.`,
+        }, { status: 409 });
       }
-      const assignments = Array.from(byStratum.values()).flatMap((group) =>
-        group.map((record, index) => ({ id: record.id, split: index % 4 === 0 ? "held_out" : "development" }))
-      );
-      await Promise.all(assignments.map(async (assignment) => {
-        const { error } = await admin.from("research_golden_records")
-          .update({ benchmark_split: assignment.split, exclusion_reason: null })
-          .eq("id", assignment.id)
-          .eq("organization_id", user.organizationId);
+      if (heldOutEligible("fit") < 8 || heldOutEligible("not_fit") < 8) {
+        return NextResponse.json({
+          error: "A locked held-out set requires at least eight independently sourced fit and eight independently sourced not-fit labels. Development-only cases cannot satisfy this gate.",
+        }, { status: 409 });
+      }
+      const assignedAt = new Date().toISOString();
+      const cohortVersion = `onlyfans-athlete-v1-${assignedAt.slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
+      const assignments = assignGoldenRecordSplits(ready, cohortVersion);
+      const developmentIds = assignments.filter((assignment) => assignment.split === "development").map((assignment) => assignment.id);
+      const heldOutIds = assignments.filter((assignment) => assignment.split === "held_out").map((assignment) => assignment.id);
+
+      if (developmentIds.length) {
+        const { error } = await admin.from("research_golden_records").update({
+          benchmark_split: "development",
+          benchmark_cohort_version: cohortVersion,
+          split_assigned_at: assignedAt,
+          held_out_locked_at: null,
+          held_out_revealed_at: null,
+          exclusion_reason: null,
+        }).eq("organization_id", user.organizationId).in("id", developmentIds);
         if (error) throw error;
-      }));
+      }
+      if (heldOutIds.length) {
+        const { error } = await admin.from("research_golden_records").update({
+          benchmark_split: "held_out",
+          benchmark_cohort_version: cohortVersion,
+          split_assigned_at: assignedAt,
+          held_out_locked_at: assignedAt,
+          held_out_revealed_at: null,
+          exclusion_reason: null,
+        }).eq("organization_id", user.organizationId).in("id", heldOutIds);
+        if (error) {
+          if (developmentIds.length) {
+            await admin.from("research_golden_records").update({
+              benchmark_split: "excluded",
+              benchmark_cohort_version: null,
+              split_assigned_at: null,
+              exclusion_reason: "Split assignment rolled back after held-out lock failed",
+            }).eq("organization_id", user.organizationId).in("id", developmentIds);
+          }
+          throw error;
+        }
+      }
       return NextResponse.json({
         ok: true,
+        cohortVersion,
         assigned: assignments.length,
         development: assignments.filter((assignment) => assignment.split === "development").length,
         heldOut: assignments.filter((assignment) => assignment.split === "held_out").length,
@@ -151,6 +197,67 @@ export async function POST(request: NextRequest) {
         if (error) throw error;
       }
       return NextResponse.json({ ok: true, created: rows.length, availableHistorical: eligible.length });
+    }
+
+    if (action === "seed_challenge_set") {
+      const requestedCount = typeof body.count === "number" ? Math.min(40, Math.max(1, Math.round(body.count))) : 30;
+      const [{ data: candidates, error: candidateError }, { data: existing, error: existingError }] = await Promise.all([
+        admin.from("research_candidates")
+          .select("id,athlete_id,name,sport,created_at,score")
+          .eq("organization_id", user.organizationId)
+          .eq("identity_status", "verified")
+          .eq("age_verified", true)
+          .eq("is_minor", false)
+          .gte("score", 50)
+          .lte("score", 79)
+          .in("disposition", ["rejected", "held", "blocked"])
+          .order("score", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(500),
+        admin.from("research_golden_records")
+          .select("athlete_name,sport")
+          .eq("organization_id", user.organizationId),
+      ]);
+      if (candidateError) throw candidateError;
+      if (existingError) throw existingError;
+      const existingKeys = new Set((existing || []).map((record) =>
+        goldenAthleteKey(record.athlete_name, record.sport)
+      ));
+      const uniqueCandidates = new Map<string, NonNullable<typeof candidates>[number]>();
+      for (const candidate of candidates || []) {
+        const key = goldenAthleteKey(candidate.name, candidate.sport);
+        if (!existingKeys.has(key) && !uniqueCandidates.has(key)) uniqueCandidates.set(key, candidate);
+      }
+      const selected = stratifiedSample(Array.from(uniqueCandidates.values()), requestedCount, (candidate) => candidate.sport);
+      const rows = selected.map((candidate) => ({
+        organization_id: user.organizationId,
+        athlete_id: candidate.athlete_id || null,
+        athlete_name: candidate.name,
+        sport: candidate.sport,
+        decision_at: candidate.created_at,
+        evidence_cutoff_at: candidate.created_at,
+        fit_label: "uncertain",
+        achievability_label: "uncertain",
+        final_outcome: "unresolved",
+        primary_reason: "unknown",
+        pursue_today: "uncertain",
+        label_order_fit_before_outcome: false,
+        point_in_time_reliability: "partial",
+        benchmark_split: "excluded",
+        exclusion_reason: "Awaiting an independent human fit and achievability label",
+        stratification_tags: [
+          "model_mined_challenge_case",
+          "development_only",
+          "needs_independent_fit_label",
+          `source_score_band_${Math.floor(Number(candidate.score) / 10) * 10}s`,
+        ],
+        internal_record_reference: `research_candidates:${candidate.id}`,
+      }));
+      if (rows.length) {
+        const { error } = await admin.from("research_golden_records").insert(rows);
+        if (error) throw error;
+      }
+      return NextResponse.json({ ok: true, created: rows.length, available: uniqueCandidates.size });
     }
 
     const rawRecords = action === "bulk_import"
