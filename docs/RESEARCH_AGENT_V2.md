@@ -153,7 +153,7 @@ API-backed evaluation now has three explicit budgets. `smoke` is the safe defaul
 
 1. Resolve the explicit outcome conflicts surfaced by the 100-case mailbox ledger, then complete achievability, pursue-today, public knowability, sport, and point-in-time source/cutoff fields. Do not assign approximate reconstructions to a benchmark split.
 2. Add approximately 30–40 genuine hard negatives. The mailbox sample contains only three `Not a Fit` cases; `Possible Fit`, `Uncertain`, and right-censored `Stalled` records must not be relabeled as negatives.
-3. Automatically assign only completed, point-in-time-usable labels to development and held-out splits, then freeze the temperature-zero Sonnet baseline.
+3. Automatically assign only completed, point-in-time-usable labels to development and held-out splits, then freeze the latest-Sonnet baseline. Determinism comes from pinned model/version metadata, strict schemas, deterministic score caps, and repeated benchmark measurement; newer Sonnet APIs may reject legacy sampling parameters.
 4. Add a cheap pre-score viability selector over a larger official-source pool. It should prioritize adult-verifiable, identity-confirmed athletes with public creator/commercial signals before expensive age research and scoring.
 5. Run the frozen baseline on the development split and fix its largest measured failure class one change at a time.
 6. Use OpenRouter only for explicit, versioned challenger experiments such as lower-cost extraction or summarization. Promote a model only when it beats the frozen baseline on quality, cost, and latency.

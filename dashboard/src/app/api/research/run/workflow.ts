@@ -3407,7 +3407,6 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
       body: JSON.stringify({
         model,
         max_tokens: 2_400,
-        temperature: 0,
         output_config: { format: { type: "json_schema", schema } },
         messages: [{ role: "user", content: sanitizeUnicodeForJson(prompt) }],
       }),
@@ -4042,7 +4041,6 @@ Respond with ONLY valid JSON:
       body: JSON.stringify({
         model: scoringModel,
         max_tokens: 1_800,
-        temperature: 0,
         output_config: {
           format: {
             type: "json_schema",

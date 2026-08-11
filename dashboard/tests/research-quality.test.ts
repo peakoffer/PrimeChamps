@@ -784,3 +784,19 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(instagramProviderSource, /liveSearch: true/);
   assert.match(workflowSource, /findInstagramCandidatesWithApifySearch/);
 });
+
+test("Anthropic scoring requests remain compatible with the latest Sonnet API", () => {
+  const workflowSource = readFileSync(
+    new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
+    "utf8"
+  );
+  const anthropicRequestBodies = workflowSource
+    .split('fetchWithTimeout("https://api.anthropic.com/v1/messages"')
+    .slice(1)
+    .map((section) => section.slice(0, section.indexOf("});") + 3));
+
+  assert.ok(anthropicRequestBodies.length >= 4);
+  for (const requestBody of anthropicRequestBodies) {
+    assert.doesNotMatch(requestBody, /temperature\s*:/);
+  }
+});
