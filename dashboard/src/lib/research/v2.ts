@@ -377,6 +377,18 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
     ),
     identityAccuracy: rate(results.filter((result) => result.identityCorrect).length, results.length),
     eligibilityVerificationRate: rate(results.filter((result) => result.eligibilityVerified).length, results.length),
+    finalistIdentityAccuracy: rate(
+      predictedPriority.filter((result) => result.identityCorrect).length,
+      predictedPriority.length
+    ),
+    finalistEligibilityVerificationRate: rate(
+      predictedPriority.filter((result) => result.eligibilityVerified).length,
+      predictedPriority.length
+    ),
+    finalistZeroUnsupportedClaimRate: rate(
+      predictedPriority.filter((result) => result.unsupportedClaimRate === 0).length,
+      predictedPriority.length
+    ),
     pointInTimeComplianceRate: rate(results.filter((result) => result.pointInTimeCompliant).length, results.length),
     unsupportedClaimRate: rate(
       results.reduce((total, result) => total + result.unsupportedClaimRate, 0),

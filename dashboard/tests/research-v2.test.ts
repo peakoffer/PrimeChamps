@@ -34,6 +34,20 @@ import {
   groupBenchmarkSearchResults,
   validateBenchmarkSportClassification,
 } from "../src/lib/research/benchmark-sport-validation.ts";
+import {
+  benchmarkAdultEligibilityGate,
+  benchmarkCaseReadiness,
+  benchmarkIdentityGate,
+  buildBenchmarkResearcherPrompt,
+  estimateBenchmarkCostMicrousd,
+  promptContainsBenchmarkLeakage,
+  projectedBenchmarkCallCostMicrousd,
+  selectLeakageSafeBenchmarkEvidence,
+  sonnetPriceSnapshot,
+  type BenchmarkEvidenceClaimRow,
+  type BenchmarkEvidenceSourceRow,
+  type BenchmarkGoldenCase,
+} from "../src/lib/research/benchmark-runner-support.ts";
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
   assert.equal(normalizeResearchEvaluationProfile(undefined), "smoke");
@@ -314,6 +328,9 @@ test("benchmark metrics reward precision rather than score volume", () => {
   assert.equal(metrics.precisionAbove80, 0.5);
   assert.equal(metrics.falsePositiveRate, 1);
   assert.equal(metrics.auditorCatchRate, 1);
+  assert.equal(metrics.finalistIdentityAccuracy, 1);
+  assert.equal(metrics.finalistEligibilityVerificationRate, 1);
+  assert.equal(metrics.finalistZeroUnsupportedClaimRate, 1);
   assert.equal(metrics.averageCostMicrousd, 1_000);
   assert.equal(metrics.costPerValidatedCandidateMicrousd, 2_000);
   assert.deepEqual(metrics.tokenUsage, {
@@ -378,6 +395,143 @@ test("model prompts replace lone Unicode surrogates without damaging valid emoji
   const cleaned = sanitizeUnicodeForJson(`source \ud83d text \udc00 valid \ud83c\udfc4`);
   assert.equal(cleaned, "source � text � valid 🏄");
   assert.doesNotThrow(() => JSON.stringify({ prompt: cleaned }));
+});
+
+const BENCHMARK_CASE: BenchmarkGoldenCase = {
+  id: "golden-safe",
+  athlete_name: "Example Athlete",
+  sport: "Beach Volleyball",
+  benchmark_split: "development",
+  benchmark_cohort_version: "cohort-v1",
+  decision_at: "2025-06-15T00:00:00Z",
+  evidence_cutoff_at: "2025-06-14T23:59:59Z",
+  point_in_time_reliability: "strong",
+  label_order_fit_before_outcome: true,
+};
+
+const BENCHMARK_SOURCES: BenchmarkEvidenceSourceRow[] = [
+  ["sport-a", "https://league.test/example", "league.test", "League profile", "league", "public_web"],
+  ["sport-b", "https://team.test/example", "team.test", "Team profile", "official_roster", "public_web"],
+  ["age-a", "https://bio.test/example", "bio.test", "Example Athlete biography", "news", "public_web"],
+  ["age-b", "https://university.test/example", "university.test", "Example Athlete roster", "university", "public_web"],
+  ["outcome", "https://mail.test/private", "mail.test", "Private outcome", "internal_record", "gmail_mailbox_benchmark"],
+  ["future", "https://future.test/example", "future.test", "Future article", "news", "public_web"],
+].map(([id, canonical_url, domain, title, source_type, provider]) => ({
+  id,
+  golden_record_id: BENCHMARK_CASE.id,
+  canonical_url,
+  domain,
+  title,
+  publisher: domain,
+  source_type,
+  provider,
+  published_at: id === "future" ? "2025-06-16T00:00:00Z" : "2025-06-01T00:00:00Z",
+  retrieved_at: "2026-08-11T00:00:00Z",
+  historical_as_of: null,
+  retrieval_status: "retrieved",
+  eligible_before_cutoff: true,
+}));
+
+const BENCHMARK_CLAIMS: BenchmarkEvidenceClaimRow[] = [
+  ["sport-claim-a", "sport-a", "sport_identity", "Example Athlete is a Beach Volleyball athlete.", {}],
+  ["sport-claim-b", "sport-b", "sport_identity", "Example Athlete competes in Beach Volleyball.", {}],
+  ["age-claim-a", "age-a", "birth_date", "Example Athlete was born January 2, 1998.", { birth_date: "1998-01-02" }],
+  ["age-claim-b", "age-b", "birth_date", "Example Athlete date of birth is 1998-01-02.", { birth_date: "1998-01-02" }],
+  ["outcome-claim", "outcome", "historical_outcome", "The private record says this person signed.", {}],
+  ["future-claim", "future", "candidate_evidence", "Example Athlete won a future event.", {}],
+].map(([id, evidence_source_id, claim_type, claim_text, structured_value]) => ({
+  id: id as string,
+  golden_record_id: BENCHMARK_CASE.id,
+  evidence_source_id: evidence_source_id as string,
+  claim_type: claim_type as string,
+  claim_text: claim_text as string,
+  structured_value: structured_value as Record<string, unknown>,
+  source_excerpt: claim_text as string,
+  effective_at: null,
+  observed_at: "2026-08-11T00:00:00Z",
+  support_status: "supported",
+  independence_group: null,
+  material: true,
+  eligible_for_scoring: true,
+}));
+
+test("benchmark evidence selection excludes private outcomes and post-cutoff facts", () => {
+  const selection = selectLeakageSafeBenchmarkEvidence({
+    record: BENCHMARK_CASE,
+    sources: BENCHMARK_SOURCES,
+    claims: BENCHMARK_CLAIMS,
+  });
+  assert.deepEqual(selection.evidence.map((item) => item.claimId).sort(), [
+    "age-claim-a", "age-claim-b", "sport-claim-a", "sport-claim-b",
+  ]);
+  assert.ok(selection.rejected.some((item) => item.claimId === "outcome-claim" && item.reason === "outcome_provider_excluded"));
+  assert.ok(selection.rejected.some((item) => item.claimId === "future-claim" && item.reason === "after_evidence_cutoff"));
+  assert.equal(selection.pointInTimeCompliant, true);
+});
+
+test("benchmark finalist gates require two independent identity and adult sources", () => {
+  const selection = selectLeakageSafeBenchmarkEvidence({
+    record: BENCHMARK_CASE,
+    sources: BENCHMARK_SOURCES.filter((source) => source.id !== "future" && source.id !== "outcome"),
+    claims: BENCHMARK_CLAIMS.filter((claim) => claim.id !== "future-claim" && claim.id !== "outcome-claim"),
+  });
+  assert.deepEqual(benchmarkIdentityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
+  assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
+  assert.equal(benchmarkCaseReadiness({ record: BENCHMARK_CASE, selection }).ready, true);
+  assert.equal(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence.filter((item) => item.sourceId !== "age-b")).passed, false);
+});
+
+test("benchmark prompts are constructed from a safe whitelist and never expose labels or outcomes", () => {
+  const record = {
+    ...BENCHMARK_CASE,
+    fit_label: "private-positive-label",
+    achievability_label: "private-high-label",
+    final_outcome: "private-signed-outcome",
+    primary_reason: "private-economics-reason",
+    explanation: "SECRET OUTCOME EXPLANATION",
+    internal_record_reference: "gmail:private-thread-123",
+  };
+  const selection = selectLeakageSafeBenchmarkEvidence({
+    record,
+    sources: BENCHMARK_SOURCES.filter((source) => source.id !== "future" && source.id !== "outcome"),
+    claims: BENCHMARK_CLAIMS.filter((claim) => claim.id !== "future-claim" && claim.id !== "outcome-claim"),
+  });
+  const prompt = buildBenchmarkResearcherPrompt(record, selection.evidence);
+  assert.equal(promptContainsBenchmarkLeakage(prompt, record), false);
+  assert.ok(prompt.includes("Example Athlete"));
+  assert.ok(prompt.includes("E1"));
+  assert.ok(!prompt.includes("SECRET OUTCOME"));
+  assert.ok(!prompt.includes("gmail:private"));
+});
+
+test("Sonnet benchmark cost admission uses a dated price snapshot and conservative projection", () => {
+  const introductory = sonnetPriceSnapshot("claude-sonnet-5", new Date("2026-08-11T00:00:00Z"));
+  assert.equal(introductory.inputUsdPerMillion, 2);
+  assert.equal(introductory.outputUsdPerMillion, 10);
+  assert.equal(estimateBenchmarkCostMicrousd({
+    inputTokens: 1_000_000,
+    outputTokens: 1_000_000,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  }, introductory), 12_000_000);
+  assert.equal(projectedBenchmarkCallCostMicrousd({
+    promptCharacters: 1_000,
+    maximumOutputTokens: 100,
+    price: introductory,
+  }), 3_000);
+  assert.throws(() => sonnetPriceSnapshot("claude-sonnet-6", new Date("2026-08-11T00:00:00Z")), /Pricing is not configured/);
+});
+
+test("benchmark execution is evaluation-only and cannot mutate outreach or live pipeline tables", () => {
+  const source = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
+  for (const forbiddenTable of [
+    "athletes", "research_candidates", "pipeline_athletes", "notifications",
+    "messages", "outreach_touchpoints", "channel_messages",
+  ]) {
+    assert.ok(!source.includes(`from(\"${forbiddenTable}\")`), `benchmark runner must not write ${forbiddenTable}`);
+  }
+  assert.ok(source.includes('score_stage: "benchmark"'));
+  assert.ok(source.includes("no_outreach: true"));
 });
 
 test("benchmark sport enrichment associates only the exact quoted athlete query", () => {

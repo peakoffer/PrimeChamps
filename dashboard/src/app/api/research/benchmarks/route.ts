@@ -1,7 +1,10 @@
-import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { calculateBenchmarkMetrics, type BenchmarkCaseResult } from "@/lib/research/v2";
+import { resumeBenchmarkRun, startBenchmarkRun } from "@/lib/research/benchmark-runner";
+
+export const maxDuration = 300;
 
 function asNumber(value: unknown, fallback = 0) {
   const number = Number(value);
@@ -81,7 +84,9 @@ export async function GET() {
       return {
         ...run,
         result_count: cases.length,
-        calculated_metrics: cases.length ? calculateBenchmarkMetrics(cases) : null,
+        calculated_metrics: cases.length && (run.benchmark_split === "development" || run.status === "completed")
+          ? calculateBenchmarkMetrics(cases)
+          : null,
       };
     });
     const goldenLabels = labels || [];
@@ -105,5 +110,49 @@ export async function GET() {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load Research V2 benchmarks";
     return NextResponse.json({ error: message }, { status: message === "Not authenticated" ? 401 : 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const user = await requireOrganizationRole(["owner", "admin"]);
+    const body = await request.json() as Record<string, unknown>;
+    const action = body.action === "resume" ? "resume" : "start";
+    if (action === "resume") {
+      if (typeof body.runId !== "string" || !body.runId.trim()) {
+        return NextResponse.json({ error: "runId is required" }, { status: 400 });
+      }
+      const result = await resumeBenchmarkRun({
+        organizationId: user.organizationId,
+        runId: body.runId.trim(),
+      });
+      return NextResponse.json(result, { status: result.completed ? 200 : 202 });
+    }
+
+    const split = body.split === "held_out" ? "held_out" : "development";
+    const result = await startBenchmarkRun({
+      organizationId: user.organizationId,
+      userId: user.id,
+      split,
+      caseLimit: typeof body.caseLimit === "number" ? body.caseLimit : undefined,
+      costLimitMicrousd: typeof body.costLimitMicrousd === "number" ? body.costLimitMicrousd : undefined,
+      baselineRunId: typeof body.baselineRunId === "string" ? body.baselineRunId : null,
+      changeDimension: typeof body.changeDimension === "string" ? body.changeDimension : null,
+      changeDescription: typeof body.changeDescription === "string" ? body.changeDescription : null,
+    });
+    return NextResponse.json({
+      ok: true,
+      run: result.run,
+      selectedCases: result.selectedCases,
+      nextAction: { action: "resume", runId: result.run.id },
+      message: "Benchmark created without spending model tokens. Resume processes one checkpointed case at a time.",
+    }, { status: 201 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not execute Research V2 benchmark";
+    const status = message === "Not authenticated" ? 401
+      : message === "Forbidden" ? 403
+        : /not ready|not execution-ready|needs both|frozen cohort|held-out|locked|already been evaluated/i.test(message) ? 409
+          : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
