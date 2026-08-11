@@ -52,9 +52,9 @@ const providerDefinitions: ProviderDefinition[] = [
     category: "research",
     description: "Discovers athlete candidates and enriches their public profiles.",
     capabilities: ["Candidate discovery", "Research runs", "Approval queue"],
-    required: ["PERPLEXITY_API_KEY", "APIFY_API_KEY", "ANTHROPIC_API_KEY"],
-    note: "Candidate scoring is pinned to the current Prime Champs Sonnet model; OpenAI is not used as a scoring fallback.",
-    nextAction: "Add valid Perplexity, Apify, and Anthropic API credentials, then run one low-volume research test.",
+    required: ["OPENAI_API_KEY", "APIFY_API_KEY", "ANTHROPIC_API_KEY"],
+    note: "OpenAI supplies citation-bound web discovery. Candidate scoring and blind auditing stay pinned to the current Prime Champs Sonnet model; Perplexity is an optional resilience path, not a scoring fallback.",
+    nextAction: "Add valid OpenAI, Apify, and Anthropic API credentials, then run one evaluation-only research test.",
   },
   {
     id: "instagram-enrichment",
@@ -183,6 +183,7 @@ type AgentServerProbe = {
 
 const credentialPrefixes: Partial<Record<string, string>> = {
   ANTHROPIC_API_KEY: "sk-ant-",
+  OPENAI_API_KEY: "sk-",
   PERPLEXITY_API_KEY: "pplx-",
   APIFY_API_KEY: "apify_api_",
 };

@@ -276,7 +276,18 @@ export async function runApifyGoogleSearch(
   query: string,
   limit = 10
 ): Promise<ApifyGoogleSearchResult> {
+  return runApifyGoogleSearchQueries([query], limit);
+}
+
+export async function runApifyGoogleSearchQueries(
+  queries: string[],
+  limit = 10
+): Promise<ApifyGoogleSearchResult> {
   const resultLimit = Math.max(1, Math.min(limit, 10));
+  const normalizedQueries = Array.from(new Set(queries.map((query) => query.trim()).filter(Boolean))).slice(0, 10);
+  if (normalizedQueries.length === 0) {
+    return { results: [], provider: "apify_google", knowledgeGraph: null, relatedQueries: [], totalResults: null };
+  }
   const actorId = process.env.APIFY_GOOGLE_SEARCH_ACTOR || "apify/google-search-scraper";
   const pages = await runApifyActor<{
     organicResults?: Array<{
@@ -294,7 +305,7 @@ export async function runApifyGoogleSearch(
   }>(
     actorId,
     {
-      queries: query,
+      queries: normalizedQueries.join("\n"),
       maxPagesPerQuery: 1,
       resultsPerPage: resultLimit,
       countryCode: "us",
@@ -303,14 +314,12 @@ export async function runApifyGoogleSearch(
       saveHtml: false,
       saveHtmlToKeyValueStore: false,
       includeUnfilteredResults: false,
-      maxConcurrency: 1,
+      maxConcurrency: Math.min(normalizedQueries.length, 5),
     },
-    { datasetLimit: 1, timeoutMs: 120_000 }
+    { datasetLimit: normalizedQueries.length, timeoutMs: 180_000 }
   );
 
-  const page = pages[0];
-  const results = (page?.organicResults || [])
-    .slice(0, resultLimit)
+  const results = pages.flatMap((page) => (page?.organicResults || []).slice(0, resultLimit))
     .map((result) => ({
       position: result.position,
       title: cleanText(result.title),
@@ -319,7 +328,7 @@ export async function runApifyGoogleSearch(
       date: cleanText(result.date) || undefined,
     }))
     .filter((result) => Boolean(result.url));
-  const relatedQueries = (page?.relatedQueries || [])
+  const relatedQueries = pages.flatMap((page) => page?.relatedQueries || [])
     .map((queryItem) =>
       typeof queryItem === "string"
         ? queryItem.trim()
@@ -330,8 +339,11 @@ export async function runApifyGoogleSearch(
   return {
     results,
     provider: "apify_google",
-    knowledgeGraph: page?.knowledgeGraph || null,
-    relatedQueries,
-    totalResults: page?.searchInformation?.totalResults || page?.totalResults || null,
+    knowledgeGraph: pages.find((page) => page?.knowledgeGraph)?.knowledgeGraph || null,
+    relatedQueries: Array.from(new Set(relatedQueries)),
+    totalResults: pages.reduce<number | null>((total, page) => {
+      const count = page?.searchInformation?.totalResults || page?.totalResults;
+      return typeof count === "number" ? (total || 0) + count : total;
+    }, null),
   };
 }

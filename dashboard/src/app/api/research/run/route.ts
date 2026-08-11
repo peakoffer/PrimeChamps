@@ -23,7 +23,7 @@ const supabase = createAdminClient();
 
 function getMissingResearchVariables() {
   return [
-    !process.env.PERPLEXITY_API_KEY ? "PERPLEXITY_API_KEY" : null,
+    !process.env.OPENAI_API_KEY ? "OPENAI_API_KEY" : null,
     !process.env.APIFY_API_KEY ? "APIFY_API_KEY" : null,
     !process.env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : null,
   ].filter((value): value is string => Boolean(value));
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
           recentGuidanceIncluded: includeRecentGuidance,
           safety: "draft-only; no outreach is sent by research",
           toolchain: [
-            { step: "Discovery", provider: "Perplexity Search", purpose: "Raw ranked, source-linked candidate discovery" },
+            { step: "Discovery", provider: "OpenAI web search", purpose: "Live, citation-bound candidate discovery" },
             { step: "Identity", provider: "Apify Google + Instagram", purpose: "Public identity and audience evidence" },
             { step: "Scoring", provider: "Latest Anthropic Sonnet", purpose: "Transparent partnership-fit scoring" },
             { step: "Storage", provider: "Supabase", purpose: "Evidence ledger and pipeline disposition" },

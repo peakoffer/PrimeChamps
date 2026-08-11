@@ -1,0 +1,556 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  Database,
+  Download,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Upload,
+} from "lucide-react";
+
+type GoldenRecord = {
+  id: string;
+  athlete_name: string;
+  sport: string;
+  decision_at: string | null;
+  evidence_cutoff_at: string | null;
+  fit_label: "fit" | "not_fit" | "uncertain";
+  achievability_label: "high" | "medium" | "low" | "uncertain";
+  final_outcome: "signed" | "signed_underperformed" | "non_signing" | "onlyfans_rejected" | "stalled" | "unresolved";
+  primary_reason: string;
+  explanation: string | null;
+  decisive_information_publicly_knowable: boolean | null;
+  pursue_today: "yes" | "no" | "uncertain";
+  internal_record_reference: string | null;
+  label_order_fit_before_outcome: boolean;
+  point_in_time_reliability: "strong" | "partial" | "unusable";
+  benchmark_split: "development" | "held_out" | "excluded";
+  exclusion_reason: string | null;
+  stratification_tags: string[];
+  labeled_at: string | null;
+  updated_at: string;
+};
+
+type BenchmarkSummary = {
+  total: number;
+  usable: number;
+  development: number;
+  heldOut: number;
+  excluded: number;
+  fit: number;
+  notFit: number;
+  usableFit: number;
+  usableNotFit: number;
+  uncertain: number;
+  readyForSplit: number;
+  positiveTarget: number;
+  negativeTarget: number;
+  positiveRemaining: number;
+  negativeRemaining: number;
+  historicalMailboxCount: number;
+  censoredOutcomes: number;
+  labelConflicts: number;
+  highConfidenceLabels: number;
+  mediumConfidenceLabels: number;
+  needsSportEnrichment: number;
+};
+
+const INITIAL_SUMMARY: BenchmarkSummary = {
+  total: 0,
+  usable: 0,
+  development: 0,
+  heldOut: 0,
+  excluded: 0,
+  fit: 0,
+  notFit: 0,
+  usableFit: 0,
+  usableNotFit: 0,
+  uncertain: 0,
+  readyForSplit: 0,
+  positiveTarget: 40,
+  negativeTarget: 40,
+  positiveRemaining: 40,
+  negativeRemaining: 40,
+  historicalMailboxCount: 0,
+  censoredOutcomes: 0,
+  labelConflicts: 0,
+  highConfidenceLabels: 0,
+  mediumConfidenceLabels: 0,
+  needsSportEnrichment: 0,
+};
+
+function dateValue(value: string | null) {
+  return value ? value.slice(0, 10) : "";
+}
+
+function titleize(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (quoted && character === '"' && text[index + 1] === '"') {
+      value += '"';
+      index += 1;
+    } else if (character === '"') {
+      quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      row.push(value.trim());
+      value = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(value.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+  row.push(value.trim());
+  if (row.some(Boolean)) rows.push(row);
+  if (quoted) throw new Error("CSV contains an unclosed quoted field");
+  const headers = rows.shift()?.map((header) => header.trim().toLowerCase()) || [];
+  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ""])));
+}
+
+function csvBoolean(value: string) {
+  if (/^(true|yes|1)$/i.test(value)) return true;
+  if (/^(false|no|0)$/i.test(value)) return false;
+  return null;
+}
+
+function SegmentedChoice<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-3">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+            value === option.value
+              ? "border-zinc-200 bg-zinc-100 text-zinc-950"
+              : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function ResearchBenchmarkPage() {
+  const [records, setRecords] = useState<GoldenRecord[]>([]);
+  const [summary, setSummary] = useState(INITIAL_SUMMARY);
+  const [selected, setSelected] = useState<GoldenRecord | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [filter, setFilter] = useState<"all" | "needs_label" | "conflicts" | "ready" | "usable">("needs_label");
+  const [message, setMessage] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newSport, setNewSport] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/research/golden-records", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
+      setRecords(payload.records || []);
+      setSummary(payload.summary || INITIAL_SUMMARY);
+      setSelected((current) => current
+        ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
+        : null
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load benchmark records");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const visibleRecords = useMemo(() => records.filter((record) => {
+    if (filter === "needs_label") return record.fit_label === "uncertain" || record.achievability_label === "uncertain";
+    if (filter === "conflicts") return record.stratification_tags.includes("historical_label_conflict");
+    if (filter === "ready") return record.benchmark_split === "excluded" && Boolean(record.labeled_at);
+    if (filter === "usable") return record.benchmark_split !== "excluded";
+    return true;
+  }), [filter, records]);
+
+  const mutate = async (body: Record<string, unknown>) => {
+    setWorking(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/research/golden-records", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Request failed");
+      setMessage(body.action === "assign_splits"
+        ? `Assigned ${payload.development} development and ${payload.heldOut} held-out records.`
+        : `Created ${payload.created} labeling records.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Request failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const saveSelected = async (complete: boolean) => {
+    if (!selected) return;
+    setWorking(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/research/golden-records/${selected.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          athleteName: selected.athlete_name,
+          sport: selected.sport,
+          decisionAt: selected.decision_at,
+          evidenceCutoffAt: selected.evidence_cutoff_at,
+          fitLabel: selected.fit_label,
+          achievabilityLabel: selected.achievability_label,
+          finalOutcome: selected.final_outcome,
+          primaryReason: selected.primary_reason,
+          explanation: selected.explanation,
+          decisiveInformationPubliclyKnowable: selected.decisive_information_publicly_knowable,
+          pursueToday: selected.pursue_today,
+          internalRecordReference: selected.internal_record_reference,
+          labelOrderFitBeforeOutcome: selected.label_order_fit_before_outcome,
+          pointInTimeReliability: selected.point_in_time_reliability,
+          benchmarkSplit: "excluded",
+          exclusionReason: complete ? "Ready for automatic development/held-out assignment" : selected.exclusion_reason,
+          stratificationTags: selected.stratification_tags,
+          complete,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not save label");
+      setMessage(complete ? "Label complete and ready for split assignment." : "Draft saved.");
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save label");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const createManualRecord = async () => {
+    if (!newName.trim() || !newSport.trim()) return;
+    await mutate({
+      action: "create",
+      record: {
+        athleteName: newName,
+        sport: newSport,
+        fitLabel: "uncertain",
+        achievabilityLabel: "uncertain",
+        finalOutcome: "unresolved",
+        primaryReason: "unknown",
+        pursueToday: "uncertain",
+        pointInTimeReliability: "unusable",
+        benchmarkSplit: "excluded",
+        exclusionReason: "Awaiting Dylan point-in-time labels",
+        stratificationTags: ["manual_commercial_outcome", "needs_dylan_review"],
+      },
+    });
+    setNewName("");
+    setNewSport("");
+    setShowNew(false);
+  };
+
+  const importCsv = async (file: File) => {
+    setWorking(true);
+    setMessage("");
+    try {
+      const rows = parseCsv(await file.text());
+      const now = new Date().toISOString();
+      const recordsToImport = rows.map((row) => {
+        const publicKnowability = csvBoolean(row.decisive_information_publicly_knowable || "");
+        const labelOrder = csvBoolean(row.label_order_fit_before_outcome || "") === true;
+        const pointInTimeReliability = row.point_in_time_reliability || "unusable";
+        const complete = Boolean(row.decision_at)
+          && Boolean(row.evidence_cutoff_at)
+          && ["fit", "not_fit"].includes(row.fit_label)
+          && ["high", "medium", "low"].includes(row.achievability_label)
+          && ["strong", "partial"].includes(pointInTimeReliability)
+          && publicKnowability !== null;
+        return {
+          athleteName: row.athlete_name,
+          sport: row.sport,
+          decisionAt: row.decision_at || null,
+          evidenceCutoffAt: row.evidence_cutoff_at || null,
+          fitLabel: row.fit_label || "uncertain",
+          achievabilityLabel: row.achievability_label || "uncertain",
+          finalOutcome: row.final_outcome || "unresolved",
+          primaryReason: row.primary_reason || "unknown",
+          explanation: row.explanation || null,
+          decisiveInformationPubliclyKnowable: publicKnowability,
+          pursueToday: row.pursue_today || "uncertain",
+          internalRecordReference: row.internal_record_reference || null,
+          labelOrderFitBeforeOutcome: labelOrder,
+          pointInTimeReliability,
+          benchmarkSplit: "excluded",
+          exclusionReason: complete ? "Ready for automatic development/held-out assignment" : "Imported draft needs point-in-time completion",
+          stratificationTags: (row.stratification_tags || "commercial_outcome_import")
+            .split(/[|;]/).map((tag) => tag.trim()).filter(Boolean),
+          labeledAt: complete ? now : null,
+        };
+      });
+      if (!recordsToImport.length) throw new Error("CSV has no data rows");
+      const response = await fetch("/api/research/golden-records", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "bulk_import", records: recordsToImport }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "CSV import failed");
+      setMessage(`Imported ${payload.created} records. Complete any open point-in-time fields before assigning splits.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "CSV import failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const selectedCanComplete = Boolean(selected
+    && selected.fit_label !== "uncertain"
+    && selected.achievability_label !== "uncertain"
+    && selected.decision_at
+    && selected.evidence_cutoff_at
+    && selected.point_in_time_reliability !== "unusable"
+    && selected.decisive_information_publicly_knowable !== null
+  );
+
+  return (
+    <main className="min-h-screen bg-[#090909] text-zinc-100">
+      <div className="mx-auto max-w-[1500px] px-5 py-6 lg:px-8">
+        <header className="mb-6 flex flex-col gap-4 border-b border-zinc-800 pb-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <Link href="/pipeline/research" className="mb-4 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200">
+              <ArrowLeft className="h-4 w-4" /> Research
+            </Link>
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-2.5"><Database className="h-5 w-5" /></div>
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight">Golden benchmark</h1>
+                <p className="mt-1 text-sm text-zinc-500">Fit first. Outcome second. Point-in-time evidence only.</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/api/research/golden-records?format=csv-template" className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700">
+              <Download className="h-4 w-4" /> CSV template
+            </Link>
+            <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700 ${working ? "pointer-events-none opacity-50" : ""}`}>
+              <Upload className="h-4 w-4" /> Import CSV
+              <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importCsv(file);
+                event.currentTarget.value = "";
+              }} />
+            </label>
+            <button onClick={() => setShowNew(true)} className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700">
+              <Plus className="h-4 w-4" /> Add outcome
+            </button>
+            <button disabled={working} onClick={() => void mutate({ action: "seed_historical", count: 40 })} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-50">
+              Seed signed sample
+            </button>
+          </div>
+        </header>
+
+        <section className="mb-6 grid gap-3 md:grid-cols-4">
+          {[
+            { label: "Historical ledger", value: `${summary.historicalMailboxCount} / 100`, detail: `${summary.highConfidenceLabels} high · ${summary.mediumConfidenceLabels} medium confidence` },
+            { label: "Fit coverage", value: `${summary.fit} fit · ${summary.notFit} not fit`, detail: `${summary.uncertain} uncertain · ${summary.negativeRemaining} hard negatives still needed` },
+            { label: "Excluded risks", value: `${summary.censoredOutcomes} censored`, detail: `${summary.labelConflicts} outcome conflicts · ${summary.needsSportEnrichment} need sport enrichment` },
+            { label: "Benchmark-ready", value: summary.usable, detail: `${summary.readyForSplit} ready to split · ${summary.heldOut} held out` },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{metric.label}</p>
+              <p className="mt-2 text-2xl font-semibold">{metric.value}</p>
+              <p className="mt-1 text-xs text-zinc-600">{metric.detail}</p>
+            </div>
+          ))}
+        </section>
+
+        <div className="mb-6 flex flex-col gap-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-4 text-sm text-amber-100/80 sm:flex-row sm:items-center sm:justify-between">
+          <p><strong className="font-medium text-amber-100">The 100-case mailbox ledger is preserved as historical truth, not model input.</strong> Stalled outcomes remain censored, conflicting outcome labels require review, and every record stays excluded until achievability and leakage-safe public evidence are complete.</p>
+          <button disabled={working || summary.readyForSplit === 0} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+            Assign clean splits
+          </button>
+        </div>
+
+        {showNew && (
+          <section className="mb-6 grid gap-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4 sm:grid-cols-[1fr_1fr_auto_auto]">
+            <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Athlete name" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500" />
+            <input value={newSport} onChange={(event) => setNewSport(event.target.value)} placeholder="Sport" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500" />
+            <button disabled={working || !newName.trim() || !newSport.trim()} onClick={() => void createManualRecord()} className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">Create</button>
+            <button onClick={() => setShowNew(false)} className="px-3 py-2 text-sm text-zinc-500">Cancel</button>
+          </section>
+        )}
+
+        {message && <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-300">{message}</div>}
+
+        <div className="grid min-h-[620px] gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
+            <div className="border-b border-zinc-800 p-3">
+              <div className="grid grid-cols-5 gap-1 rounded-lg bg-zinc-900 p-1 text-xs">
+                {(["needs_label", "conflicts", "ready", "usable", "all"] as const).map((value) => (
+                  <button key={value} onClick={() => setFilter(value)} className={`rounded-md px-2 py-1.5 ${filter === value ? "bg-zinc-700 text-white" : "text-zinc-500"}`}>
+                    {value === "needs_label" ? "Open" : titleize(value)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="max-h-[680px] overflow-y-auto">
+              {loading ? (
+                <div className="flex items-center justify-center py-20 text-zinc-600"><RefreshCw className="h-5 w-5 animate-spin" /></div>
+              ) : visibleRecords.length === 0 ? (
+                <div className="p-8 text-center text-sm text-zinc-600">No records in this view.</div>
+              ) : visibleRecords.map((record) => (
+                <button key={record.id} onClick={() => setSelected(record)} className={`flex w-full items-center gap-3 border-b border-zinc-900 p-4 text-left ${selected?.id === record.id ? "bg-zinc-900" : "hover:bg-zinc-900/60"}`}>
+                  <span className={`h-2 w-2 rounded-full ${record.fit_label === "uncertain" ? "bg-amber-400" : record.benchmark_split === "excluded" ? "bg-blue-400" : "bg-emerald-400"}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{record.athlete_name}</span>
+                    <span className="mt-1 block truncate text-xs text-zinc-600">{record.sport} · {titleize(record.fit_label)}</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-zinc-700" />
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          <section className="rounded-xl border border-zinc-800 bg-zinc-950">
+            {!selected ? (
+              <div className="flex min-h-[620px] flex-col items-center justify-center px-8 text-center">
+                <ShieldCheck className="h-8 w-8 text-zinc-700" />
+                <h2 className="mt-4 text-lg font-medium">Select a record to label</h2>
+                <p className="mt-2 max-w-md text-sm text-zinc-600">Complete fit and achievability before the outcome section appears. Use “Uncertain” when memory or point-in-time evidence is weak.</p>
+              </div>
+            ) : (
+              <div className="p-5 lg:p-7">
+                <div className="mb-7 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{selected.sport}</p>
+                    <h2 className="mt-2 text-2xl font-semibold">{selected.athlete_name}</h2>
+                  </div>
+                  <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-xs text-zinc-500">{titleize(selected.benchmark_split)}</span>
+                </div>
+
+                <div className="space-y-7">
+                  <div>
+                    <p className="mb-3 text-sm font-medium">1. OnlyFans fit at the time</p>
+                    <SegmentedChoice value={selected.fit_label} onChange={(fit_label) => setSelected({ ...selected, fit_label })} options={[
+                      { value: "fit", label: "Fit" },
+                      { value: "not_fit", label: "Not a fit" },
+                      { value: "uncertain", label: "Uncertain" },
+                    ]} />
+                  </div>
+
+                  <div>
+                    <p className="mb-3 text-sm font-medium">2. Commercial achievability at the time</p>
+                    <SegmentedChoice value={selected.achievability_label} onChange={(achievability_label) => setSelected({ ...selected, achievability_label })} options={[
+                      { value: "high", label: "High" },
+                      { value: "medium", label: "Medium" },
+                      { value: "low", label: "Low" },
+                      { value: "uncertain", label: "Uncertain" },
+                    ]} />
+                  </div>
+
+                  <div>
+                    <p className="mb-3 text-sm font-medium">3. Would you pursue this opportunity today?</p>
+                    <SegmentedChoice value={selected.pursue_today} onChange={(pursue_today) => setSelected({ ...selected, pursue_today })} options={[
+                      { value: "yes", label: "Yes" },
+                      { value: "no", label: "No" },
+                      { value: "uncertain", label: "Uncertain" },
+                    ]} />
+                  </div>
+
+                  <div className="grid gap-4 border-t border-zinc-900 pt-6 md:grid-cols-2">
+                    <label className="text-sm text-zinc-400">Original decision date
+                      <input type="date" value={dateValue(selected.decision_at)} onChange={(event) => setSelected({ ...selected, decision_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200" />
+                    </label>
+                    <label className="text-sm text-zinc-400">Evidence cutoff
+                      <input type="date" value={dateValue(selected.evidence_cutoff_at)} onChange={(event) => setSelected({ ...selected, evidence_cutoff_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200" />
+                    </label>
+                    <label className="text-sm text-zinc-400">Point-in-time reliability
+                      <select value={selected.point_in_time_reliability} onChange={(event) => setSelected({ ...selected, point_in_time_reliability: event.target.value as GoldenRecord["point_in_time_reliability"] })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                        <option value="unusable">Unusable</option><option value="partial">Partial</option><option value="strong">Strong</option>
+                      </select>
+                    </label>
+                    <label className="text-sm text-zinc-400">Decisive information publicly knowable?
+                      <select value={selected.decisive_information_publicly_knowable === null ? "unknown" : String(selected.decisive_information_publicly_knowable)} onChange={(event) => setSelected({ ...selected, decisive_information_publicly_knowable: event.target.value === "unknown" ? null : event.target.value === "true" })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                        <option value="unknown">Unknown</option><option value="true">Yes</option><option value="false">No</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {selected.fit_label !== "uncertain" && selected.achievability_label !== "uncertain" ? (
+                    <div className="space-y-4 border-t border-zinc-900 pt-6">
+                      <div className="flex items-center gap-2 text-sm font-medium"><Check className="h-4 w-4 text-emerald-400" /> Fit judgment captured. Now record the outcome.</div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="text-sm text-zinc-400">Final outcome
+                          <select value={selected.final_outcome} onChange={(event) => setSelected({ ...selected, final_outcome: event.target.value as GoldenRecord["final_outcome"], label_order_fit_before_outcome: true })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                            {(["signed", "signed_underperformed", "non_signing", "onlyfans_rejected", "stalled", "unresolved"] as const).map((value) => <option key={value} value={value}>{titleize(value)}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-sm text-zinc-400">Primary reason
+                          <select value={selected.primary_reason} onChange={(event) => setSelected({ ...selected, primary_reason: event.target.value })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                            {(["fit", "price_economics", "terms", "timing", "interest", "representation", "eligibility", "brand_risk", "performance", "reach", "other", "unknown"]).map((value) => <option key={value} value={value}>{titleize(value)}</option>)}
+                          </select>
+                        </label>
+                      </div>
+                      <label className="block text-sm text-zinc-400">One-line explanation
+                        <textarea value={selected.explanation || ""} onChange={(event) => setSelected({ ...selected, explanation: event.target.value })} rows={3} placeholder="Why it worked or did not work, without rewriting the past from hindsight." className="mt-2 w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 outline-none focus:border-zinc-600" />
+                      </label>
+                      <label className="block text-sm text-zinc-400">Supporting internal note or record
+                        <input value={selected.internal_record_reference || ""} onChange={(event) => setSelected({ ...selected, internal_record_reference: event.target.value })} placeholder="CRM note, shared document, email thread, or deal record reference" className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 outline-none focus:border-zinc-600" />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-500">Choose fit and achievability before reviewing the outcome fields.</div>
+                  )}
+
+                  <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-900 pt-6">
+                    <button disabled={working} onClick={() => void saveSelected(false)} className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 disabled:opacity-40">Save draft</button>
+                    <button disabled={working || !selectedCanComplete} onClick={() => void saveSelected(true)} className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">Complete label</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}

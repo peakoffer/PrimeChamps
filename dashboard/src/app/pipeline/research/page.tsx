@@ -799,6 +799,12 @@ function ResearchStageContent() {
         </div>
         <div className="pc-header-actions">
           <Link
+            href="/pipeline/research/benchmark"
+            className="pc-button-secondary"
+          >
+            Golden benchmark
+          </Link>
+          <Link
             href="/pipeline/research/intelligence"
             className="pc-button-secondary"
           >
@@ -935,7 +941,7 @@ function ResearchStageContent() {
           <div>
             <div className="flex items-center gap-2">
               <ShieldCheck aria-hidden="true" className="h-4 w-4 text-brand-blue" />
-              <h2 className="font-semibold text-brand-ink">Test the research rules</h2>
+              <h2 className="font-semibold text-brand-ink">Synthetic safety regressions</h2>
               {benchmarkSummary?.passRate !== null && benchmarkSummary?.passRate !== undefined ? (
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${benchmarkSummary.passRate === 100 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
                   {benchmarkSummary.passRate}% passing
@@ -943,7 +949,7 @@ function ResearchStageContent() {
               ) : null}
             </div>
             <p className="mt-1 text-sm leading-6 text-brand-ink/60">
-              Replay saved example athletes to confirm adults are handled correctly, minors stay blocked, and weak candidates cannot enter Approval.
+              Confirm deterministic safety behavior only. These examples are not evidence of real-world precision or recall; use the Golden benchmark for that.
             </p>
             <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.04em] text-brand-ink/55">
               {benchmarkUnavailable

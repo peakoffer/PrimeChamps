@@ -9,6 +9,8 @@ export type InstagramTimestampedItem = {
 export type ScrapedInstagramPost = InstagramTimestampedItem & {
   id?: string;
   shortCode?: string;
+  ownerUsername?: string;
+  takenAtTimestamp?: string | number;
   url?: string;
   displayUrl?: string;
   imageUrl?: string;

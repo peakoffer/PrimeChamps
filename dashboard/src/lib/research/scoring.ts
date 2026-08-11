@@ -1,4 +1,4 @@
-export const RESEARCH_PROMPT_VERSION = "research-v5-thesis-momentum";
+export const RESEARCH_PROMPT_VERSION = "research-v7-v2-separate-judgments";
 export const DEFAULT_RESEARCH_OBJECTIVE = "onlyfans_creator" as const;
 
 export type ResearchObjective = typeof DEFAULT_RESEARCH_OBJECTIVE;

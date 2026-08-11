@@ -7,6 +7,7 @@ import {
   RESEARCH_PROMPT_VERSION,
   resolveResearchDisposition,
 } from "@/lib/research/scoring";
+import { launchResearchEvaluations, normalizeEvaluationSports } from "@/lib/research/evaluation-runs";
 
 const VALID_EXPECTED_DISPOSITIONS = new Set(["approval", "held", "blocked", "rejected"]);
 
@@ -89,7 +90,26 @@ export async function POST(request: NextRequest) {
     const user = await requireAuth();
     const admin = createAdminClient();
     const body = await request.json() as Record<string, unknown>;
-    const action = body.action === "seed" || body.action === "run" ? body.action : "create";
+    const action = body.action === "seed" || body.action === "run" || body.action === "live"
+      ? body.action
+      : "create";
+
+    if (action === "live") {
+      if (user.role !== "owner" && user.role !== "admin") {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const sports = normalizeEvaluationSports(Array.isArray(body.sports) ? body.sports : [body.sport]);
+      if (sports.length === 0) {
+        return NextResponse.json({ error: "Provide at least one sport" }, { status: 400 });
+      }
+      const result = await launchResearchEvaluations({
+        organizationId: user.organizationId,
+        requestedByUserId: user.id,
+        sports,
+        marketOverride: typeof body.marketOverride === "string" ? body.marketOverride : undefined,
+      });
+      return NextResponse.json({ ok: result.failed.length === 0, ...result }, { status: result.started.length > 0 ? 202 : 500 });
+    }
 
     if (action === "seed") {
       const baselineCases = [
@@ -97,7 +117,7 @@ export async function POST(request: NextRequest) {
           name: "Strong verified adult reaches Approval",
           sport: "multi-sport",
           candidate_snapshot: {
-            score_breakdown: { professional_legitimacy: 90, audience_fit: 80, brand_fit: 88, momentum: 82, accessibility: 75, evidence_quality: 95 },
+            score_breakdown: { momentum: 82, brand_fit: 88, audience_fit: 80, accessibility: 75, thesis_fit: 90 },
             age_verified: true,
             is_minor: false,
           },
@@ -110,7 +130,7 @@ export async function POST(request: NextRequest) {
           name: "Minor is always blocked",
           sport: "multi-sport",
           candidate_snapshot: {
-            score_breakdown: { professional_legitimacy: 95, audience_fit: 95, brand_fit: 95, momentum: 95, accessibility: 95, evidence_quality: 95 },
+            score_breakdown: { momentum: 95, brand_fit: 95, audience_fit: 95, accessibility: 95, thesis_fit: 95 },
             age_verified: true,
             is_minor: true,
             reasoning: "Source confirms this athlete is under 18.",
@@ -124,7 +144,7 @@ export async function POST(request: NextRequest) {
           name: "Unknown age remains held",
           sport: "multi-sport",
           candidate_snapshot: {
-            score_breakdown: { professional_legitimacy: 90, audience_fit: 85, brand_fit: 90, momentum: 80, accessibility: 80, evidence_quality: 75 },
+            score_breakdown: { momentum: 80, brand_fit: 90, audience_fit: 85, accessibility: 80, thesis_fit: 85 },
             age_verified: false,
             is_minor: false,
           },
@@ -137,7 +157,7 @@ export async function POST(request: NextRequest) {
           name: "Weak fit does not reach Approval",
           sport: "multi-sport",
           candidate_snapshot: {
-            score_breakdown: { professional_legitimacy: 55, audience_fit: 35, brand_fit: 40, momentum: 35, accessibility: 45, evidence_quality: 55 },
+            score_breakdown: { momentum: 35, brand_fit: 40, audience_fit: 35, accessibility: 45, thesis_fit: 55 },
             age_verified: true,
             is_minor: false,
           },

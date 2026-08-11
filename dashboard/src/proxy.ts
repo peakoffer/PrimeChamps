@@ -16,6 +16,7 @@ const PUBLIC_ROUTES = [
   "/api/auth/bootstrap/status",
   "/api/email/webhook",
   "/api/internal/website-email",
+  "/api/internal/research-evaluations",
   "/api/webhooks/instagram",
   "/api/webhooks/microsoft",
 ];
