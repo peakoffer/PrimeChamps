@@ -8,6 +8,7 @@ import { buildResearchV2Score, stableEvidenceSetHash } from "@/lib/research/v2-s
 import {
   benchmarkAdultEligibilityGate,
   benchmarkCaseReadiness,
+  benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
   estimateBenchmarkCostMicrousd,
@@ -533,7 +534,9 @@ export async function startBenchmarkRun(input: {
       claims: evidenceRows.claims.filter((claim) => claim.golden_record_id === record.id),
     });
     const readiness = benchmarkCaseReadiness({ record, selection });
-    return readiness.ready ? [] : [{ id: record.id, athlete: record.athlete_name, reasons: readiness.reasons }];
+    const evidenceReadiness = benchmarkEvidenceFreezeReadiness({ record, fitLabel: record.fit_label, selection });
+    const reasons = [...readiness.reasons, ...evidenceReadiness.reasons];
+    return reasons.length === 0 ? [] : [{ id: record.id, athlete: record.athlete_name, reasons }];
   });
   if (readinessFailures.length) {
     const preview = readinessFailures.slice(0, 8)
@@ -721,7 +724,9 @@ async function processBenchmarkCase(input: {
   const evidenceRows = await loadEvidence(admin, run.organization_id, [record.id]);
   const selection = selectLeakageSafeBenchmarkEvidence({ record, sources: evidenceRows.sources, claims: evidenceRows.claims });
   const readiness = benchmarkCaseReadiness({ record, selection });
-  if (!readiness.ready) throw new Error(`${record.athlete_name} is no longer benchmark-ready: ${readiness.reasons.join(", ")}`);
+  const evidenceReadiness = benchmarkEvidenceFreezeReadiness({ record, fitLabel: record.fit_label, selection });
+  const readinessReasons = [...readiness.reasons, ...evidenceReadiness.reasons];
+  if (readinessReasons.length) throw new Error(`${record.athlete_name} is no longer benchmark-ready: ${readinessReasons.join(", ")}`);
   const identityGate = benchmarkIdentityGate(record, selection.evidence);
   const adultGate = benchmarkAdultEligibilityGate(record, selection.evidence);
   const evidenceHash = stableEvidenceSetHash(selection.evidence.map((item) => ({

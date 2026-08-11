@@ -37,6 +37,7 @@ import {
 import {
   benchmarkAdultEligibilityGate,
   benchmarkCaseReadiness,
+  benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
   estimateBenchmarkCostMicrousd,
@@ -478,7 +479,18 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.deepEqual(benchmarkIdentityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.equal(benchmarkCaseReadiness({ record: BENCHMARK_CASE, selection }).ready, true);
+  assert.equal(benchmarkEvidenceFreezeReadiness({
+    record: BENCHMARK_CASE,
+    fitLabel: "fit",
+    selection,
+  }).ready, true);
   assert.equal(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence.filter((item) => item.sourceId !== "age-b")).passed, false);
+  const missingAge = { ...selection, evidence: selection.evidence.filter((item) => item.sourceId !== "age-b") };
+  assert.ok(benchmarkEvidenceFreezeReadiness({
+    record: BENCHMARK_CASE,
+    fitLabel: "fit",
+    selection: missingAge,
+  }).reasons.includes("fit record lacks two-source 21+ corroboration"));
 });
 
 test("benchmark prompts are constructed from a safe whitelist and never expose labels or outcomes", () => {

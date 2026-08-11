@@ -129,7 +129,7 @@ export function selectLeakageSafeBenchmarkEvidence(input: {
     const sourceEvidenceTime = source
       ? validTimestamp(source.historical_as_of) ?? validTimestamp(source.published_at)
       : null;
-    const claimEvidenceTime = validTimestamp(claim.effective_at) ?? sourceEvidenceTime;
+    const claimEffectiveTime = validTimestamp(claim.effective_at);
     if (!cutoff) reason = "missing_evidence_cutoff";
     else if (!source || source.golden_record_id !== record.id || claim.golden_record_id !== record.id) reason = "wrong_record";
     else if (source.retrieval_status !== "retrieved") reason = "source_not_retrieved";
@@ -138,10 +138,10 @@ export function selectLeakageSafeBenchmarkEvidence(input: {
     else if (source.source_type === "internal_record" || BENCHMARK_OUTCOME_PROVIDERS.has(source.provider.toLowerCase())) reason = "outcome_provider_excluded";
     else if (BENCHMARK_OUTCOME_CLAIM_TYPES.has(claim.claim_type.toLowerCase())) reason = "outcome_claim_excluded";
     else if (!isWebUrl(source.canonical_url)) reason = "invalid_source_url";
-    else if (!claimEvidenceTime) reason = "missing_point_in_time_date";
-    else if (claimEvidenceTime > cutoff) reason = "after_evidence_cutoff";
+    else if (!sourceEvidenceTime) reason = "missing_point_in_time_source_date";
+    else if (sourceEvidenceTime > cutoff || (claimEffectiveTime !== null && claimEffectiveTime > cutoff)) reason = "after_evidence_cutoff";
 
-    if (reason || !source || !claimEvidenceTime) {
+    if (reason || !source || !sourceEvidenceTime) {
       rejected.push({ claimId: claim.id, reason: reason || "invalid_evidence" });
       continue;
     }
@@ -156,7 +156,7 @@ export function selectLeakageSafeBenchmarkEvidence(input: {
       claimType: claim.claim_type.trim().toLowerCase(),
       claim: claim.claim_text.trim().slice(0, 600),
       excerpt: (claim.source_excerpt || "").trim().slice(0, 800),
-      effectiveAt: new Date(claimEvidenceTime).toISOString(),
+      effectiveAt: new Date(claimEffectiveTime ?? sourceEvidenceTime).toISOString(),
       independenceGroup: normalizedDomain(claim.independence_group || domain),
       material: claim.material,
       structuredValue: claim.structured_value && typeof claim.structured_value === "object"
@@ -269,6 +269,23 @@ export function benchmarkCaseReadiness(input: {
   if (selection.evidence.length === 0) reasons.push("no leakage-safe evidence exists before the cutoff");
   if (!selection.pointInTimeCompliant) reasons.push("post-cutoff evidence was detected");
   return { ready: reasons.length === 0, reasons };
+}
+
+export function benchmarkEvidenceFreezeReadiness(input: {
+  record: BenchmarkGoldenCase;
+  fitLabel: "fit" | "not_fit";
+  selection: BenchmarkEvidenceSelection;
+}) {
+  const identity = benchmarkIdentityGate(input.record, input.selection.evidence);
+  const adult = benchmarkAdultEligibilityGate(input.record, input.selection.evidence);
+  const domains = new Set(input.selection.evidence.map((item) => item.independenceGroup));
+  const reasons: string[] = [];
+  if (!input.selection.pointInTimeCompliant) reasons.push("point-in-time evidence is unsafe");
+  if (input.selection.evidence.length < 4) reasons.push("fewer than four supported public claims exist before the cutoff");
+  if (domains.size < 2) reasons.push("fewer than two independent public sources exist");
+  if (!identity.passed) reasons.push("two-source exact-identity evidence is missing");
+  if (input.fitLabel === "fit" && !adult.passed) reasons.push("fit record lacks two-source 21+ corroboration");
+  return { ready: reasons.length === 0, reasons, identity, adult, independentSources: domains.size };
 }
 
 export function buildBenchmarkResearcherPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {

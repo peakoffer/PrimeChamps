@@ -52,8 +52,44 @@ export async function PATCH(
 
     const outcomeWasHidden = current.label_order_fit_before_outcome !== true;
     const lockFitAssessment = body.lockFitAssessment === true;
-    if (lockFitAssessment && (body.fitLabel === "uncertain" || body.achievabilityLabel === "uncertain")) {
-      return NextResponse.json({ error: "Choose fit and achievability before revealing the historical outcome" }, { status: 400 });
+    const requestedPreOutcome = {
+      fitLabel: body.fitLabel ?? current.fit_label,
+      achievabilityLabel: body.achievabilityLabel ?? current.achievability_label,
+      pursueToday: body.pursueToday ?? current.pursue_today,
+      decisionAt: body.decisionAt ?? current.decision_at,
+      evidenceCutoffAt: body.evidenceCutoffAt ?? current.evidence_cutoff_at,
+      decisiveInformationPubliclyKnowable: body.decisiveInformationPubliclyKnowable ?? current.decisive_information_publicly_knowable,
+      pointInTimeReliability: body.pointInTimeReliability ?? current.point_in_time_reliability,
+    };
+    if (lockFitAssessment) {
+      const missing: string[] = [];
+      if (requestedPreOutcome.fitLabel === "uncertain") missing.push("fit");
+      if (requestedPreOutcome.achievabilityLabel === "uncertain") missing.push("achievability");
+      if (!requestedPreOutcome.decisionAt) missing.push("decision date");
+      if (!requestedPreOutcome.evidenceCutoffAt) missing.push("evidence cutoff");
+      if (typeof requestedPreOutcome.decisiveInformationPubliclyKnowable !== "boolean") missing.push("public knowability");
+      if (!['strong', 'partial'].includes(String(requestedPreOutcome.pointInTimeReliability))) missing.push("point-in-time reliability");
+      if (missing.length) {
+        return NextResponse.json({ error: `Complete ${missing.join(", ")} before revealing the historical outcome` }, { status: 400 });
+      }
+    }
+    if (!outcomeWasHidden) {
+      const immutableFields: Array<[string, unknown, unknown]> = [
+        ["fit", body.fitLabel, current.fit_label],
+        ["achievability", body.achievabilityLabel, current.achievability_label],
+        ["pursue-today", body.pursueToday, current.pursue_today],
+        ["decision date", body.decisionAt, current.decision_at],
+        ["evidence cutoff", body.evidenceCutoffAt, current.evidence_cutoff_at],
+        ["public knowability", body.decisiveInformationPubliclyKnowable, current.decisive_information_publicly_knowable],
+        ["point-in-time reliability", body.pointInTimeReliability, current.point_in_time_reliability],
+      ];
+      const changed = immutableFields.filter(([, requested, stored]) => requested !== undefined && requested !== stored)
+        .map(([label]) => label);
+      if (changed.length) {
+        return NextResponse.json({
+          error: `The blind fit judgment is locked after outcome reveal and cannot be rewritten (${changed.join(", ")}). Create a documented replacement record for a genuine correction.`,
+        }, { status: 409 });
+      }
     }
     if (body.complete === true && outcomeWasHidden && !lockFitAssessment) {
       return NextResponse.json({ error: "Lock the fit assessment before completing the historical outcome label" }, { status: 409 });

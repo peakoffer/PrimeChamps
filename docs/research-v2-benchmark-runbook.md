@@ -20,6 +20,8 @@ A cohort can be frozen only after it contains at least:
 
 Historical signing or rejection outcomes are not fit labels. Challenge cases mined from earlier model results remain development-only until independently labeled by a human.
 
+For bulk labeling, download `/api/research/golden-records?format=blind-labeling-csv`. The worksheet deliberately omits every existing fit label and historical outcome. A reviewer completes only fit, achievability, pursue-today, dates, public knowability, and point-in-time reliability, then marks `blind_review_completed=true`. Importing the sheet permanently locks those fields before the stored outcome becomes visible. Uncompleted rows are ignored, so the worksheet can be returned in batches.
+
 ## Evidence gate
 
 Only claims meeting every condition below enter a model prompt:
@@ -32,6 +34,8 @@ Only claims meeting every condition below enter a model prompt:
 6. The claim is not a historical fit label, outcome, primary reason, commercial outcome, or golden label.
 
 Post-cutoff and private evidence may remain stored for auditability, but it is rejected before prompt construction.
+
+A cohort cannot be frozen on labels alone. Every record must also contain at least four supported pre-cutoff public claims from two independent sources and two-source exact-identity corroboration. Positive fit records additionally require two independent sources proving the athlete was at least 21 by the cutoff. This prevents an empty evidence packet from becoming immutable in the held-out set.
 
 ## Execution sequence
 

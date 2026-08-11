@@ -11,6 +11,13 @@ import {
   stratifiedSample,
   summarizeGoldenRecords,
 } from "@/lib/research/v2";
+import {
+  benchmarkEvidenceFreezeReadiness,
+  selectLeakageSafeBenchmarkEvidence,
+  type BenchmarkEvidenceClaimRow,
+  type BenchmarkEvidenceSourceRow,
+  type BenchmarkGoldenCase,
+} from "@/lib/research/benchmark-runner-support";
 
 const CSV_COLUMNS = [
   "athlete_name",
@@ -32,10 +39,30 @@ const CSV_COLUMNS = [
   "stratification_tags",
 ];
 
+const BLIND_LABELING_COLUMNS = [
+  "record_id",
+  "athlete_name",
+  "sport",
+  "decision_at",
+  "evidence_cutoff_at",
+  "fit_label",
+  "achievability_label",
+  "pursue_today",
+  "decisive_information_publicly_knowable",
+  "point_in_time_reliability",
+  "blind_review_completed",
+];
+
+function csvCell(value: unknown) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth();
-    if (request.nextUrl.searchParams.get("format") === "csv-template") {
+    const format = request.nextUrl.searchParams.get("format");
+    if (format === "csv-template") {
       return new NextResponse(`${CSV_COLUMNS.join(",")}\n`, {
         headers: {
           "content-type": "text/csv; charset=utf-8",
@@ -58,6 +85,39 @@ export async function GET(request: NextRequest) {
       (!split || !["development", "held_out", "excluded"].includes(split) || record.benchmark_split === split)
       && (!label || !["fit", "not_fit", "uncertain"].includes(label) || record.fit_label === label)
     );
+    if (format === "blind-labeling-csv") {
+      if (user.role !== "owner" && user.role !== "admin") {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const reviewRows = allRecords.filter((record) =>
+        record.benchmark_split === "excluded" && record.label_order_fit_before_outcome !== true
+      );
+      const csv = [
+        BLIND_LABELING_COLUMNS.join(","),
+        ...reviewRows.map((record) => [
+          record.id,
+          record.athlete_name,
+          record.sport,
+          record.decision_at,
+          record.evidence_cutoff_at,
+          "",
+          "",
+          "",
+          "",
+          ["strong", "partial"].includes(String(record.point_in_time_reliability))
+            ? record.point_in_time_reliability
+            : "",
+          "",
+        ].map(csvCell).join(",")),
+      ].join("\n");
+      return new NextResponse(`${csv}\n`, {
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": "attachment; filename=prime-champs-blind-fit-labeling.csv",
+          "cache-control": "private, no-store",
+        },
+      });
+    }
     return NextResponse.json({
       records: filteredRecords.map(maskGoldenRecordForBlindLabeling),
       summary: summarizeGoldenRecords(allRecords),
@@ -72,7 +132,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
     const body = await request.json() as Record<string, unknown>;
-    const action = body.action === "seed_historical" || body.action === "seed_challenge_set" || body.action === "bulk_import" || body.action === "assign_splits"
+    const action = body.action === "seed_historical" || body.action === "seed_challenge_set" || body.action === "bulk_import" || body.action === "bulk_lock_fit" || body.action === "assign_splits"
       ? body.action
       : "create";
     const admin = createAdminClient();
@@ -80,7 +140,7 @@ export async function POST(request: NextRequest) {
     if (action === "assign_splits") {
       const { data: candidates, error: readyError } = await admin
         .from("research_golden_records")
-        .select("id,sport,fit_label,achievability_label,final_outcome,point_in_time_reliability,label_order_fit_before_outcome,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,labeled_at,benchmark_split,stratification_tags")
+        .select("id,athlete_name,sport,fit_label,achievability_label,final_outcome,point_in_time_reliability,label_order_fit_before_outcome,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,labeled_at,benchmark_split,stratification_tags")
         .eq("organization_id", user.organizationId)
         .eq("benchmark_split", "excluded")
         .order("id", { ascending: true });
@@ -107,6 +167,37 @@ export async function POST(request: NextRequest) {
       if (heldOutEligible("fit") < 8 || heldOutEligible("not_fit") < 8) {
         return NextResponse.json({
           error: "A locked held-out set requires at least eight independently sourced fit and eight independently sourced not-fit labels. Development-only cases cannot satisfy this gate.",
+        }, { status: 409 });
+      }
+      const readyIds = ready.map((record) => record.id);
+      const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
+        admin.from("research_evidence_sources").select(
+          "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
+        ).eq("organization_id", user.organizationId).in("golden_record_id", readyIds),
+        admin.from("research_evidence_claims").select(
+          "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
+        ).eq("organization_id", user.organizationId).in("golden_record_id", readyIds),
+      ]);
+      if (sourceError) throw sourceError;
+      if (claimError) throw claimError;
+      const evidenceFailures = ready.flatMap((record) => {
+        const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
+        const selection = selectLeakageSafeBenchmarkEvidence({
+          record: benchmarkRecord,
+          sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
+          claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
+        });
+        const evidenceReadiness = benchmarkEvidenceFreezeReadiness({
+          record: benchmarkRecord,
+          fitLabel: record.fit_label,
+          selection,
+        });
+        return evidenceReadiness.ready ? [] : [{ athlete: (record as { athlete_name?: string }).athlete_name || record.id, reasons: evidenceReadiness.reasons }];
+      });
+      if (evidenceFailures.length) {
+        return NextResponse.json({
+          error: `The cohort cannot be frozen until every record has a leakage-safe evidence packet. ${evidenceFailures.length}/${ready.length} fail the evidence gate.`,
+          examples: evidenceFailures.slice(0, 10),
         }, { status: 409 });
       }
       const assignedAt = new Date().toISOString();
@@ -154,6 +245,81 @@ export async function POST(request: NextRequest) {
         development: assignments.filter((assignment) => assignment.split === "development").length,
         heldOut: assignments.filter((assignment) => assignment.split === "held_out").length,
       });
+    }
+
+    if (action === "bulk_lock_fit") {
+      const rows = Array.isArray(body.records) ? body.records.slice(0, 200) : [];
+      if (!rows.length) return NextResponse.json({ error: "Provide at least one completed blind-label row" }, { status: 400 });
+      const parsedRows = rows.map((value, index) => {
+        if (!value || typeof value !== "object") throw new Error(`Row ${index + 1} is invalid`);
+        const row = value as Record<string, unknown>;
+        const id = typeof row.recordId === "string" ? row.recordId.trim() : "";
+        const fitLabel = row.fitLabel === "fit" || row.fitLabel === "not_fit" ? row.fitLabel : null;
+        const achievabilityLabel = ["high", "medium", "low"].includes(String(row.achievabilityLabel))
+          ? row.achievabilityLabel as "high" | "medium" | "low" : null;
+        const pursueToday = ["yes", "no", "uncertain"].includes(String(row.pursueToday))
+          ? row.pursueToday as "yes" | "no" | "uncertain" : null;
+        const decisionAt = typeof row.decisionAt === "string" && Number.isFinite(Date.parse(row.decisionAt))
+          ? new Date(row.decisionAt).toISOString() : null;
+        const evidenceCutoffAt = typeof row.evidenceCutoffAt === "string" && Number.isFinite(Date.parse(row.evidenceCutoffAt))
+          ? new Date(row.evidenceCutoffAt).toISOString() : null;
+        const pointInTimeReliability = row.pointInTimeReliability === "strong" || row.pointInTimeReliability === "partial"
+          ? row.pointInTimeReliability : null;
+        const publicKnowability = typeof row.decisiveInformationPubliclyKnowable === "boolean"
+          ? row.decisiveInformationPubliclyKnowable : null;
+        const missing = [
+          !id && "record ID", !fitLabel && "fit", !achievabilityLabel && "achievability",
+          !pursueToday && "pursue today", !decisionAt && "decision date", !evidenceCutoffAt && "evidence cutoff",
+          !pointInTimeReliability && "point-in-time reliability",
+          publicKnowability === null && "public knowability",
+          row.blindReviewCompleted !== true && "blind-review confirmation",
+        ].filter(Boolean);
+        if (missing.length) throw new Error(`Row ${index + 1} is incomplete: ${missing.join(", ")}`);
+        if (Date.parse(evidenceCutoffAt!) > Date.parse(decisionAt!)) {
+          throw new Error(`Row ${index + 1} has evidence after the original decision`);
+        }
+        return { id, fitLabel: fitLabel!, achievabilityLabel: achievabilityLabel!, pursueToday: pursueToday!, decisionAt: decisionAt!, evidenceCutoffAt: evidenceCutoffAt!, pointInTimeReliability: pointInTimeReliability!, publicKnowability };
+      });
+      if (new Set(parsedRows.map((row) => row.id)).size !== parsedRows.length) {
+        return NextResponse.json({ error: "The blind-label import contains duplicate record IDs" }, { status: 400 });
+      }
+      const ids = parsedRows.map((row) => row.id);
+      const { data: currentRows, error: currentError } = await admin.from("research_golden_records")
+        .select("id,benchmark_split,label_order_fit_before_outcome,stratification_tags")
+        .eq("organization_id", user.organizationId).in("id", ids);
+      if (currentError) throw currentError;
+      const currentById = new Map((currentRows || []).map((record) => [record.id, record]));
+      for (const row of parsedRows) {
+        const current = currentById.get(row.id);
+        if (!current) throw new Error(`Record ${row.id} was not found in this organization`);
+        if (current.benchmark_split !== "excluded" || current.label_order_fit_before_outcome === true) {
+          throw new Error(`Record ${row.id} is already locked or assigned and cannot be overwritten`);
+        }
+      }
+      const labeledAt = new Date().toISOString();
+      await Promise.all(parsedRows.map(async (row) => {
+        const current = currentById.get(row.id)!;
+        const tags = Array.from(new Set([...(current.stratification_tags || []), "blind_fit_bulk_labeled"]));
+        const { data: updated, error } = await admin.from("research_golden_records").update({
+          fit_label: row.fitLabel,
+          achievability_label: row.achievabilityLabel,
+          pursue_today: row.pursueToday,
+          decision_at: row.decisionAt,
+          evidence_cutoff_at: row.evidenceCutoffAt,
+          decisive_information_publicly_knowable: row.publicKnowability,
+          point_in_time_reliability: row.pointInTimeReliability,
+          label_order_fit_before_outcome: true,
+          labeled_by_user_id: user.id,
+          labeled_at: labeledAt,
+          exclusion_reason: "Blind fit judgment locked; leakage-safe public evidence packet still required",
+          stratification_tags: tags,
+        }).eq("organization_id", user.organizationId).eq("id", row.id)
+          .eq("benchmark_split", "excluded").eq("label_order_fit_before_outcome", false)
+          .select("id").maybeSingle();
+        if (error) throw error;
+        if (!updated) throw new Error(`Record ${row.id} was locked by another reviewer; reload the worksheet`);
+      }));
+      return NextResponse.json({ ok: true, locked: parsedRows.length });
     }
 
     if (action === "seed_historical") {

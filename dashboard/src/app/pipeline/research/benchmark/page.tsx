@@ -155,10 +155,12 @@ function SegmentedChoice<T extends string>({
   value,
   options,
   onChange,
+  disabled = false,
 }: {
   value: T;
   options: Array<{ value: T; label: string }>;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="grid gap-2 sm:grid-cols-3">
@@ -166,8 +168,9 @@ function SegmentedChoice<T extends string>({
         <button
           key={option.value}
           type="button"
+          disabled={disabled}
           onClick={() => onChange(option.value)}
-          className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+          className={`rounded-lg border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
             value === option.value
               ? "border-zinc-200 bg-zinc-100 text-zinc-950"
               : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
@@ -296,6 +299,10 @@ export default function ResearchBenchmarkPage() {
           fitLabel: selected.fit_label,
           achievabilityLabel: selected.achievability_label,
           pursueToday: selected.pursue_today,
+          decisionAt: selected.decision_at,
+          evidenceCutoffAt: selected.evidence_cutoff_at,
+          decisiveInformationPubliclyKnowable: selected.decisive_information_publicly_knowable,
+          pointInTimeReliability: selected.point_in_time_reliability,
           lockFitAssessment: true,
         }),
       });
@@ -405,7 +412,52 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const importBlindLabels = async (file: File) => {
+    setWorking(true);
+    setMessage("");
+    try {
+      const rows = parseCsv(await file.text());
+      const recordsToLock = rows.filter((row) =>
+        row.record_id && csvBoolean(row.blind_review_completed || "") === true
+      ).map((row) => ({
+        recordId: row.record_id,
+        fitLabel: row.fit_label,
+        achievabilityLabel: row.achievability_label,
+        pursueToday: row.pursue_today,
+        decisionAt: row.decision_at,
+        evidenceCutoffAt: row.evidence_cutoff_at,
+        decisiveInformationPubliclyKnowable: csvBoolean(row.decisive_information_publicly_knowable || ""),
+        pointInTimeReliability: row.point_in_time_reliability,
+        blindReviewCompleted: true,
+      }));
+      if (!recordsToLock.length) throw new Error("Mark at least one completed row with blind_review_completed=true");
+      const response = await fetch("/api/research/golden-records", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "bulk_lock_fit", records: recordsToLock }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Blind-label import failed");
+      setMessage(`Locked ${payload.locked} blind fit judgments. Historical outcomes are now visible, but benchmark evidence packets are still required.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Blind-label import failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const selectedLocked = Boolean(selected?.held_out_locked_at && !selected?.held_out_revealed_at);
+  const fitJudgmentLocked = selected?.label_order_fit_before_outcome === true;
+  const selectedCanLockFit = Boolean(selected
+    && selected.outcome_masked
+    && selected.fit_label !== "uncertain"
+    && selected.achievability_label !== "uncertain"
+    && selected.decision_at
+    && selected.evidence_cutoff_at
+    && selected.point_in_time_reliability !== "unusable"
+    && selected.decisive_information_publicly_knowable !== null
+  );
   const selectedCanComplete = Boolean(selected
     && !selected.outcome_masked
     && selected.label_order_fit_before_outcome
@@ -466,7 +518,7 @@ export default function ResearchBenchmarkPage() {
             { label: "Historical ledger", value: `${summary.historicalMailboxCount} / 100`, detail: `${summary.highConfidenceLabels} high · ${summary.mediumConfidenceLabels} medium confidence` },
             { label: "Fit coverage", value: `${summary.fit} fit · ${summary.notFit} not fit`, detail: `${summary.uncertain} uncertain · ${summary.developmentChallengeCount} challenge drafts` },
             { label: "Excluded risks", value: `${summary.censoredOutcomes} censored`, detail: `${summary.labelConflicts} outcome conflicts · ${summary.needsSportEnrichment} need sport enrichment` },
-            { label: "Benchmark-ready", value: summary.usable, detail: `${summary.readyFit} fit + ${summary.readyNotFit} not fit ready · ${summary.lockedHeldOut} locked` },
+            { label: "Blind labels ready", value: summary.readyForSplit, detail: `${summary.readyFit} fit + ${summary.readyNotFit} not fit · evidence gate runs before freeze` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{metric.label}</p>
@@ -478,9 +530,22 @@ export default function ResearchBenchmarkPage() {
 
         <div className="mb-6 flex flex-col gap-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-4 text-sm text-amber-100/80 sm:flex-row sm:items-center sm:justify-between">
           <p><strong className="font-medium text-amber-100">Historical outcomes stay hidden until fit and achievability are locked.</strong> A cohort needs 40 fit and 40 not-fit records, including at least eight independent examples of each label for the immutable 20% held-out set.</p>
-          <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
-            Freeze benchmark cohort
-          </button>
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <Link href="/api/research/golden-records?format=blind-labeling-csv" className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100">
+              Download blind worksheet
+            </Link>
+            <label className={`whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 ${working ? "pointer-events-none opacity-40" : "cursor-pointer"}`}>
+              Import blind labels
+              <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importBlindLabels(file);
+                event.currentTarget.value = "";
+              }} />
+            </label>
+            <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+              Freeze benchmark cohort
+            </button>
+          </div>
         </div>
 
         {showNew && (
@@ -551,7 +616,7 @@ export default function ResearchBenchmarkPage() {
                 <fieldset disabled={selectedLocked} className="space-y-7 disabled:opacity-70">
                   <div>
                     <p className="mb-3 text-sm font-medium">1. OnlyFans fit at the time</p>
-                    <SegmentedChoice value={selected.fit_label} onChange={(fit_label) => setSelected({ ...selected, fit_label })} options={[
+                    <SegmentedChoice disabled={fitJudgmentLocked} value={selected.fit_label} onChange={(fit_label) => setSelected({ ...selected, fit_label })} options={[
                       { value: "fit", label: "Fit" },
                       { value: "not_fit", label: "Not a fit" },
                       { value: "uncertain", label: "Uncertain" },
@@ -560,7 +625,7 @@ export default function ResearchBenchmarkPage() {
 
                   <div>
                     <p className="mb-3 text-sm font-medium">2. Commercial achievability at the time</p>
-                    <SegmentedChoice value={selected.achievability_label} onChange={(achievability_label) => setSelected({ ...selected, achievability_label })} options={[
+                    <SegmentedChoice disabled={fitJudgmentLocked} value={selected.achievability_label} onChange={(achievability_label) => setSelected({ ...selected, achievability_label })} options={[
                       { value: "high", label: "High" },
                       { value: "medium", label: "Medium" },
                       { value: "low", label: "Low" },
@@ -570,7 +635,7 @@ export default function ResearchBenchmarkPage() {
 
                   <div>
                     <p className="mb-3 text-sm font-medium">3. Would you pursue this opportunity today?</p>
-                    <SegmentedChoice value={selected.pursue_today} onChange={(pursue_today) => setSelected({ ...selected, pursue_today })} options={[
+                    <SegmentedChoice disabled={fitJudgmentLocked} value={selected.pursue_today} onChange={(pursue_today) => setSelected({ ...selected, pursue_today })} options={[
                       { value: "yes", label: "Yes" },
                       { value: "no", label: "No" },
                       { value: "uncertain", label: "Uncertain" },
@@ -579,33 +644,33 @@ export default function ResearchBenchmarkPage() {
 
                   <div className="grid gap-4 border-t border-zinc-900 pt-6 md:grid-cols-2">
                     <label className="text-sm text-zinc-400">Original decision date
-                      <input type="date" value={dateValue(selected.decision_at)} onChange={(event) => setSelected({ ...selected, decision_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200" />
+                      <input disabled={fitJudgmentLocked} type="date" value={dateValue(selected.decision_at)} onChange={(event) => setSelected({ ...selected, decision_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60" />
                     </label>
                     <label className="text-sm text-zinc-400">Evidence cutoff
-                      <input type="date" value={dateValue(selected.evidence_cutoff_at)} onChange={(event) => setSelected({ ...selected, evidence_cutoff_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200" />
+                      <input disabled={fitJudgmentLocked} type="date" value={dateValue(selected.evidence_cutoff_at)} onChange={(event) => setSelected({ ...selected, evidence_cutoff_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60" />
                     </label>
                     <label className="text-sm text-zinc-400">Point-in-time reliability
-                      <select value={selected.point_in_time_reliability} onChange={(event) => setSelected({ ...selected, point_in_time_reliability: event.target.value as GoldenRecord["point_in_time_reliability"] })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                      <select disabled={fitJudgmentLocked} value={selected.point_in_time_reliability} onChange={(event) => setSelected({ ...selected, point_in_time_reliability: event.target.value as GoldenRecord["point_in_time_reliability"] })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60">
                         <option value="unusable">Unusable</option><option value="partial">Partial</option><option value="strong">Strong</option>
                       </select>
                     </label>
                     <label className="text-sm text-zinc-400">Decisive information publicly knowable?
-                      <select value={selected.decisive_information_publicly_knowable === null ? "unknown" : String(selected.decisive_information_publicly_knowable)} onChange={(event) => setSelected({ ...selected, decisive_information_publicly_knowable: event.target.value === "unknown" ? null : event.target.value === "true" })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                      <select disabled={fitJudgmentLocked} value={selected.decisive_information_publicly_knowable === null ? "unknown" : String(selected.decisive_information_publicly_knowable)} onChange={(event) => setSelected({ ...selected, decisive_information_publicly_knowable: event.target.value === "unknown" ? null : event.target.value === "true" })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60">
                         <option value="unknown">Unknown</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </label>
                   </div>
 
                   {selected.outcome_masked ? (
-                    selected.fit_label !== "uncertain" && selected.achievability_label !== "uncertain" ? (
+                    selectedCanLockFit ? (
                       <div className="flex flex-col gap-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-4 text-sm text-blue-100/80 sm:flex-row sm:items-center sm:justify-between">
-                        <p><strong className="font-medium text-blue-100">Fit assessment is ready to lock.</strong> The historical outcome remains hidden until this step is committed.</p>
+                        <p><strong className="font-medium text-blue-100">Fit assessment is ready to lock.</strong> This permanently freezes the pre-outcome judgment before revealing the historical result.</p>
                         <button disabled={working} onClick={() => void lockFitAssessment()} className="whitespace-nowrap rounded-lg bg-blue-100 px-4 py-2 text-sm font-medium text-blue-950 disabled:opacity-40">
                           Lock fit and reveal outcome
                         </button>
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-500">Choose fit and achievability before the historical outcome can be revealed.</div>
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-500">Complete fit, achievability, dates, public knowability, and point-in-time reliability before the outcome can be revealed.</div>
                     )
                   ) : (
                     <div className="space-y-4 border-t border-zinc-900 pt-6">
