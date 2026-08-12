@@ -745,6 +745,9 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
+  assert.match(source, /BENCHMARK_GOLDEN_RECORD_SELECT = .*stratification_tags/);
+  assert.equal((source.match(/\.select\(BENCHMARK_GOLDEN_RECORD_SELECT\)/g) || []).length, 2,
+    "run start and checkpoint resume must load the same ground-truth fields");
 });
 
 test("benchmark sport enrichment associates only the exact quoted athlete query", () => {

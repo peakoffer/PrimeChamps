@@ -32,6 +32,7 @@ const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
 const MAX_COST_LIMIT_MICROUSD = 25_000_000;
 const MODEL_TIMEOUT_MS = 90_000;
+const BENCHMARK_GOLDEN_RECORD_SELECT = "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags";
 
 const RESEARCHER_SCHEMA = {
   type: "object",
@@ -535,9 +536,9 @@ export async function startBenchmarkRun(input: {
   const caseLimit = Math.max(2, Math.min(MAX_CASES_PER_RUN, Math.round(input.caseLimit || DEFAULT_CASES_PER_RUN)));
   const costLimitMicrousd = Math.max(50_000, Math.min(MAX_COST_LIMIT_MICROUSD,
     Math.round(input.costLimitMicrousd || DEFAULT_COST_LIMIT_MICROUSD)));
-  const { data: records, error: recordsError } = await admin.from("research_golden_records").select(
-    "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags"
-  ).eq("organization_id", input.organizationId).eq("benchmark_split", input.split).order("id", { ascending: true });
+  const { data: records, error: recordsError } = await admin.from("research_golden_records")
+    .select(BENCHMARK_GOLDEN_RECORD_SELECT)
+    .eq("organization_id", input.organizationId).eq("benchmark_split", input.split).order("id", { ascending: true });
   if (recordsError) throw recordsError;
   const typedRecords = (records || []) as Array<BenchmarkGoldenCase & {
     fit_label: "fit" | "not_fit";
@@ -1108,9 +1109,9 @@ export async function resumeBenchmarkRun(input: { organizationId: string; runId:
   const completeIds = new Set(existingRows.filter((row) => row.audit_id).map((row) => row.golden_record_id));
   const nextId = run.metrics.case_ids.find((id) => !completeIds.has(id));
   if (!nextId) return finalizeRun(admin, run);
-  const { data: record, error: recordError } = await admin.from("research_golden_records").select(
-    "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at"
-  ).eq("id", nextId).eq("organization_id", run.organization_id).single();
+  const { data: record, error: recordError } = await admin.from("research_golden_records")
+    .select(BENCHMARK_GOLDEN_RECORD_SELECT)
+    .eq("id", nextId).eq("organization_id", run.organization_id).single();
   if (recordError) throw recordError;
   const checkpoint = {
     ...run.metrics,
