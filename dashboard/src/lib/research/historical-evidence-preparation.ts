@@ -8,7 +8,7 @@ import {
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-development-signal-recovery-v2";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-signal-freshness-v4";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-current-athletic-relevance-v5";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -374,7 +374,7 @@ export function validatePreparedAgeEvidenceForSource(input: {
 }
 
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
-  athletic_momentum: /\b(?:ranked|ranking|champion|finalist|medalist|medal|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut)\b/i,
+  athletic_momentum: /\b(?:ranked|ranking|champion|finalist|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)\b/i,
   audience_signal: /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
   commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
 };

@@ -624,6 +624,16 @@ test("benchmark finalist gates require two independent identity and adult source
     ...recentMomentum,
     claimType: "candidate_evidence",
     title: "Example Athlete results, medals, and highlights",
+    claim: "Example Athlete results and profile.",
+    excerpt: "Example Athlete results and profile.",
+    effectiveAt: "2025-04-01T00:00:00.000Z",
+  }]).passed, true);
+  assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [{
+    ...recentMomentum,
+    claimType: "candidate_evidence",
+    title: "Example Athlete team profile",
+    claim: "Example Athlete is listed as a pro team rider.",
+    excerpt: "Example Athlete is listed as a pro team rider.",
     effectiveAt: "2025-04-01T00:00:00.000Z",
   }]).passed, true);
   assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [{
@@ -830,7 +840,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v16/);
+  assert.match(source, /research-v2-benchmark-runner-v17/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -1232,6 +1242,7 @@ test("generated material signals require explicit athlete-relevant language", ()
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "Navigation Rankings Record Book"), false);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "She won the national championship."), true);
+  assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "The athlete is listed as a pro team rider."), true);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "Main navigation Management Contact"), false);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "She signed with a management agency."), true);
   assert.equal(preparedMomentumEffectiveAt("She won the national championship in 2021.", "2026-05-10T00:00:00.000Z"), "2021-01-01T00:00:00.000Z");
