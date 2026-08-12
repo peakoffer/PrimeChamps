@@ -401,7 +401,11 @@ export default function ResearchBenchmarkPage() {
       const response = await fetch("/api/research/golden-records/enrich-sports", { method: "POST" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Sport enrichment failed");
-      setMessage(`Enriched ${payload.accepted} sports; ${payload.unresolved} remain unresolved. One Apify run was capped at $1.`);
+      const providerRan = Number(payload.providerUsage?.apifyRuns || 0) > 0;
+      setMessage(providerRan
+        ? `Enriched ${payload.accepted} sports; ${payload.unresolved} remain unresolved. One Apify run was capped at $1.`
+        : `${payload.unresolved} sports require a manual cross-identifier. No provider call or spend was started.`
+      );
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sport enrichment failed");

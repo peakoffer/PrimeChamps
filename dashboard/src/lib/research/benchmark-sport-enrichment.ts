@@ -218,8 +218,29 @@ export async function enrichBenchmarkSports(organizationId: string) {
     .order("athlete_name", { ascending: true })
     .limit(50);
   if (error) throw error;
-  const records = (data || []) as GoldenRecord[];
-  if (!records.length) return { requested: 0, accepted: 0, unresolved: 0, enriched: [], providerUsage: {} };
+  const requestedRecords = (data || []) as GoldenRecord[];
+  if (!requestedRecords.length) return { requested: 0, accepted: 0, unresolved: 0, enriched: [], providerUsage: {} };
+  const blockedRecords = requestedRecords.filter((record) =>
+    record.stratification_tags?.includes("sport_enrichment_identity_conflict")
+    || record.stratification_tags?.includes("sport_enrichment_public_search_exhausted")
+  );
+  const records = requestedRecords.filter((record) =>
+    !record.stratification_tags?.includes("sport_enrichment_identity_conflict")
+    && !record.stratification_tags?.includes("sport_enrichment_public_search_exhausted")
+  );
+  if (!records.length) {
+    return {
+      requested: requestedRecords.length,
+      accepted: 0,
+      unresolved: requestedRecords.length,
+      enriched: [],
+      failures: blockedRecords.map((record) => ({
+        name: record.athlete_name,
+        reason: "Public sport search is exhausted or identity-conflicted; a manual cross-identifier is required and no provider call was made.",
+      })),
+      providerUsage: { apifyRuns: 0, anthropicCalls: 0 },
+    };
+  }
 
   const pages = await runApifyActor<BenchmarkGooglePage>(
     process.env.APIFY_GOOGLE_SEARCH_ACTOR || "apify/google-search-scraper",
@@ -241,7 +262,13 @@ export async function enrichBenchmarkSports(organizationId: string) {
   const classified = await classifySports(records, sources);
   const byId = new Map(records.map((record) => [record.id, record]));
   const enriched: Array<{ name: string; sport: string; source: string }> = [];
-  const failures: Array<{ name: string; reason: string }> = [...classified.failures];
+  const failures: Array<{ name: string; reason: string }> = [
+    ...blockedRecords.map((record) => ({
+      name: record.athlete_name,
+      reason: "Public sport search is exhausted or identity-conflicted; a manual cross-identifier is required.",
+    })),
+    ...classified.failures,
+  ];
   const processed = new Set<string>();
 
   for (const classification of classified.classifications) {
@@ -276,11 +303,25 @@ export async function enrichBenchmarkSports(organizationId: string) {
       });
     }
   }
+  const enrichedNames = new Set(enriched.map((item) => item.name));
+  await Promise.all(records.filter((record) => !enrichedNames.has(record.athlete_name)).map(async (record) => {
+    const tags = Array.from(new Set([
+      ...(record.stratification_tags || []),
+      "sport_enrichment_public_search_exhausted",
+    ]));
+    const { error: exhaustionError } = await admin.from("research_golden_records").update({
+      stratification_tags: tags,
+    }).eq("organization_id", organizationId).eq("id", record.id).eq("sport", "Needs enrichment");
+    if (exhaustionError) failures.push({
+      name: record.athlete_name,
+      reason: `Could not persist search-exhaustion checkpoint: ${exhaustionError.message.slice(0, 180)}`,
+    });
+  }));
   return {
-    requested: records.length,
+    requested: requestedRecords.length,
     googlePages: pages.length,
     accepted: enriched.length,
-    unresolved: records.length - enriched.length,
+    unresolved: requestedRecords.length - enriched.length,
     enriched,
     failures,
     providerUsage: {

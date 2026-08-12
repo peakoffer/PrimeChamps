@@ -319,7 +319,11 @@ export function summarizeGoldenRecords(records: Array<Record<string, unknown>>) 
     labelConflicts: records.filter((record) => hasTag(record, "historical_label_conflict")).length,
     highConfidenceLabels: records.filter((record) => hasTag(record, "label_confidence_high")).length,
     mediumConfidenceLabels: records.filter((record) => hasTag(record, "label_confidence_medium")).length,
-    needsSportEnrichment: records.filter((record) => record.sport === "Needs enrichment").length,
+    needsSportEnrichment: records.filter((record) =>
+      record.sport === "Needs enrichment"
+      && !hasTag(record, "sport_enrichment_identity_conflict")
+      && !hasTag(record, "sport_enrichment_public_search_exhausted")
+    ).length,
     lockedHeldOut: records.filter((record) => record.benchmark_split === "held_out" && Boolean(record.held_out_locked_at)).length,
     revealedHeldOut: records.filter((record) => record.benchmark_split === "held_out" && Boolean(record.held_out_revealed_at)).length,
     developmentChallengeCount: records.filter((record) => hasTag(record, "model_mined_challenge_case")).length,
