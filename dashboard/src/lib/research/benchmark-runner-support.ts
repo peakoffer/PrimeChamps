@@ -336,9 +336,12 @@ Evidence cutoff: ${record.evidence_cutoff_at}
 SCORING
 - Every score uses the 0-100 numeric scale, never fractions from 0 to 1.
 - OnlyFans fit measures evidence-backed creator/audience opportunity, not appearance.
-- Commercial achievability measures realistic access, representation, economics, geography, and closeability.
+- Commercial achievability is a pre-outreach probability judgment based on public proxies: career tier, audience scale, creator behavior, prior partnerships, representation or public business access, geography, and likely economics.
 - Research confidence measures identity, corroborated 21+ eligibility, evidence freshness, source independence, and completeness.
 - A candidate cannot be recommended above 80 with unresolved identity, missing two-source 21+ corroboration, unsupported material claims, or critical commercial gaps.
+- Do not require public evidence that the athlete wants OnlyFans or adult content. That is not normally knowable before outreach; its absence is neutral and must not be listed as a critical gap.
+- Missing representation or a public business contact lowers achievability only when the rest of the public proxy evidence is insufficient; it is not an automatic blocker.
+- A strong pre-outreach fit may be supported by verified-adult status, current athletic momentum, a meaningful personal audience, creator-led content, and realistic career-tier accessibility without any platform-specific signal.
 - Cite evidence using only the supplied E-numbers. If evidence is missing, return a lower score and list the gap.
 - Put absent evidence and unanswered questions only in critical_gaps. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
 - Keep reasoning under 120 words and return no more than six material claims and five critical gaps.
