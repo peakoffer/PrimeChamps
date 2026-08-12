@@ -32,6 +32,11 @@ export type GoldenReason = typeof GOLDEN_REASONS[number];
 export type GoldenSplit = typeof GOLDEN_SPLITS[number];
 export type PointInTimeReliability = typeof POINT_IN_TIME_RELIABILITY[number];
 
+export function hasOutcomeGroundTruth(record: Record<string, unknown>) {
+  return Array.isArray(record.stratification_tags)
+    && record.stratification_tags.includes("dylan_outcome_ground_truth");
+}
+
 export type GoldenRecordInput = {
   athleteId?: string | null;
   athleteName: string;
@@ -147,14 +152,15 @@ export function goldenRecordToRow(record: GoldenRecordInput) {
 }
 
 export function isGoldenRecordReadyForSplit(record: Record<string, unknown>) {
+  const outcomeGroundTruth = hasOutcomeGroundTruth(record);
   return record.benchmark_split === "excluded"
     && record.fit_label !== "uncertain"
     && record.achievability_label !== "uncertain"
     && record.point_in_time_reliability !== "unusable"
-    && record.label_order_fit_before_outcome === true
+    && (record.label_order_fit_before_outcome === true || outcomeGroundTruth)
     && Boolean(record.decision_at)
     && Boolean(record.evidence_cutoff_at)
-    && typeof record.decisive_information_publicly_knowable === "boolean"
+    && (typeof record.decisive_information_publicly_knowable === "boolean" || outcomeGroundTruth)
     && Boolean(record.labeled_at);
 }
 
@@ -165,7 +171,7 @@ export function maskGoldenRecordForBlindLabeling(record: Record<string, unknown>
 } {
   const labelConflict = Array.isArray(record.stratification_tags)
     && record.stratification_tags.includes("historical_label_conflict");
-  if (record.label_order_fit_before_outcome === true) {
+  if (record.label_order_fit_before_outcome === true || hasOutcomeGroundTruth(record)) {
     return {
       ...record,
       outcome_masked: false,

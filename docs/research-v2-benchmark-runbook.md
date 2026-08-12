@@ -10,17 +10,17 @@ The benchmark is intentionally fail-closed. Returning no run is correct when lab
 
 A cohort can be frozen only after it contains at least:
 
-- 40 independently labeled `fit` records;
-- 40 independently labeled `not_fit` records;
+- 40 authoritative positive records;
+- 40 authoritative negative records;
 - an achievability label (`high`, `medium`, or `low`) for every record;
 - the original decision date and evidence cutoff;
-- a fit assessment locked before the historical outcome was reviewed;
-- a public-knowability decision and `strong` or `partial` point-in-time reliability;
+- either Dylan's outcome-derived source label or a fit assessment locked before the historical outcome was reviewed;
+- `strong` or `partial` source reliability; future non-Dylan labels also require a public-knowability decision;
 - at least eight non-development-only examples of each fit label for the held-out split.
 
-Historical signing or rejection outcomes are not fit labels. Challenge cases mined from earlier model results remain development-only until independently labeled by a human.
+Dylan's 100-opportunity workbook is the source of truth for the core benchmark. `Signed` and `Approved but Did Not Sign` are positive; `Rejected` and `Stalled` are negative. This produces 44 positives and 56 negatives. The raw outcome is never included in a Researcher or Auditor prompt. The model sees only independently retrieved public evidence from on or before the decision cutoff, and its prediction is compared with Dylan's label afterward.
 
-For bulk labeling, download `/api/research/golden-records?format=blind-labeling-csv`. The worksheet deliberately omits every existing fit label and historical outcome. A reviewer completes only fit, achievability, pursue-today, dates, public knowability, and point-in-time reliability, then marks `blind_review_completed=true`. Importing the sheet permanently locks those fields before the stored outcome becomes visible. Uncompleted rows are ignored, so the worksheet can be returned in batches.
+The blind-label worksheet remains available only for future records that do not come from Dylan's authoritative source. It is not required to relabel the 100-case benchmark.
 
 ## Evidence gate
 
@@ -111,4 +111,4 @@ No metric is considered passed when its denominator is zero. Fewer than ten reco
 
 ## Current data status (2026-08-11)
 
-The production database currently has 192 excluded draft records, 108 provisional fit labels, three provisional not-fit labels, no completed achievability labels, no frozen cohort, and no benchmark-eligible point-in-time evidence. Model evaluation must remain at $0 until the independent labels and dated public evidence are completed.
+Dylan's source supplies a complete 100-case outcome benchmark: 44 positive and 56 negative. Those labels, achievability classes, decision cutoffs, pursue decisions, and source confidence are derived deterministically from the workbook. The remaining gate is leakage-safe public evidence from on or before each decision date; the 92 legacy drafts are not benchmark truth.

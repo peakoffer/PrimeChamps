@@ -1,6 +1,8 @@
 import type { GoldenRecordInput } from "./v2";
 
 export const ONLYFANS_HISTORICAL_DATASET = "onlyfans_mailbox_100_2026_08_11";
+export const ONLYFANS_OUTCOME_LABEL_SOURCE = "dylan_outcome_ground_truth";
+export const ONLYFANS_OUTCOME_LABELED_AT = "2026-08-11T12:00:00.000Z";
 
 export type HistoricalBenchmarkRecord = {
   athleteName: string;
@@ -125,10 +127,14 @@ function inferSport(record: HistoricalBenchmarkRecord) {
   return SPORT_RULES.find(([pattern]) => pattern.test(evidence))?.[1] || "Needs enrichment";
 }
 
-function normalizedFitLabel(value: HistoricalBenchmarkRecord["fitAtTime"]) {
-  if (value === "Strong Fit") return "fit" as const;
-  if (value === "Not a Fit") return "not_fit" as const;
-  return "uncertain" as const;
+export function historicalOutcomeGroundTruth(value: HistoricalBenchmarkRecord["outcome"]) {
+  const positive = value === "Signed" || value === "Approved but Did Not Sign";
+  return {
+    fitLabel: positive ? "fit" as const : "not_fit" as const,
+    achievabilityLabel: positive ? "high" as const : "low" as const,
+    pursueToday: positive ? "yes" as const : "no" as const,
+    groundTruthClass: positive ? "positive" as const : "negative" as const,
+  };
 }
 
 function normalizedOutcome(value: HistoricalBenchmarkRecord["outcome"]) {
@@ -172,14 +178,12 @@ export function prepareHistoricalBenchmarkRecord(
     record.evidenceNotes,
   ].join(" "));
   const hasPostDecisionEvidence = phase === "post_decision" || phase === "mixed" || downstreamEvidence;
-  const outcomeCensored = record.outcome === "Stalled";
+  const outcomeCensored = false;
   const sport = inferSport(record);
-  const fitLabel = normalizedFitLabel(record.fitAtTime);
+  const groundTruth = historicalOutcomeGroundTruth(record.outcome);
   const finalOutcome = normalizedOutcome(record.outcome);
   const primaryReason = normalizedReason(record.primaryReason);
-  const exclusionReason = outcomeCensored
-    ? "Outcome is right-censored; achievability and a leakage-safe public evidence snapshot are still required."
-    : "Achievability and a leakage-safe public evidence snapshot are required before benchmark use.";
+  const exclusionReason = "Dylan's outcome is the authoritative commercial label; a leakage-safe public evidence snapshot is still required before benchmark use.";
   const providerRequestId = `${datasetKey}:${sourceRecordKey}`;
 
   return {
@@ -195,32 +199,32 @@ export function prepareHistoricalBenchmarkRecord(
       athleteName,
       sport,
       decisionAt,
-      evidenceCutoffAt: null,
-      fitLabel,
-      achievabilityLabel: "uncertain",
+      evidenceCutoffAt: decisionAt,
+      fitLabel: groundTruth.fitLabel,
+      achievabilityLabel: groundTruth.achievabilityLabel,
       finalOutcome,
       primaryReason,
       explanation: cleanText(record.explanation),
       decisiveInformationPubliclyKnowable: null,
-      pursueToday: "uncertain",
+      pursueToday: groundTruth.pursueToday,
       internalRecordReference: `historical_benchmark:${providerRequestId}`,
       labelOrderFitBeforeOutcome: false,
-      pointInTimeReliability: "unusable",
+      pointInTimeReliability: record.confidence === "High" ? "strong" : "partial",
       benchmarkSplit: "excluded",
       exclusionReason,
       stratificationTags: uniqueTags([
         "historical_mailbox_benchmark",
+        ONLYFANS_OUTCOME_LABEL_SOURCE,
+        `commercial_${groundTruth.groundTruthClass}`,
         datasetKey,
         `source_${sourceRecordKey.toLowerCase()}`,
-        `fit_${record.fitAtTime.toLowerCase().replaceAll(" ", "_")}`,
+        `raw_fit_${record.fitAtTime.toLowerCase().replaceAll(" ", "_")}`,
         `outcome_${record.outcome.toLowerCase().replaceAll(" ", "_")}`,
         `label_confidence_${record.confidence.toLowerCase()}`,
-        outcomeCensored && "outcome_censored",
         hasPostDecisionEvidence && "post_decision_evidence_present",
         sport === "Needs enrichment" && "needs_sport_enrichment",
-        fitLabel === "uncertain" && "excluded_ambiguous_fit",
       ]),
-      labeledAt: null,
+      labeledAt: ONLYFANS_OUTCOME_LABELED_AT,
     },
     evidence: {
       providerRequestId,
@@ -239,14 +243,12 @@ export function reconcileHistoricalGoldenRecord(
   existing: ExistingHistoricalGoldenRecord | null
 ) {
   if (!existing) return { golden: prepared.golden, conflict: false };
-  const existingTags = existing.stratification_tags || [];
-  const outcomeConflict = existing.final_outcome !== prepared.golden.finalOutcome
-    && existing.final_outcome !== "unresolved"
-    && existing.final_outcome !== "stalled";
-  const conflict = existingTags.includes("historical_label_conflict") || (
-    outcomeConflict && existingTags.some((tag) =>
-      tag === "commercial_positive" || tag === "dylan_2026_08_10" || tag === "signed"
-    )
+  const existingTags = (existing.stratification_tags || []).filter((tag) =>
+    tag !== "historical_label_conflict"
+    && tag !== "outcome_censored"
+    && tag !== "excluded_ambiguous_fit"
+    && !tag.startsWith("conflicting_outcome_")
+    && !tag.startsWith("commercial_")
   );
   const preservedReference = [existing.internal_record_reference, prepared.golden.internalRecordReference]
     .filter(Boolean).join("; ");
@@ -254,17 +256,13 @@ export function reconcileHistoricalGoldenRecord(
     ...prepared.golden,
     athleteId: existing.athlete_id || null,
     sport: existing.sport || prepared.golden.sport,
-    finalOutcome: conflict ? "unresolved" : prepared.golden.finalOutcome,
+    finalOutcome: prepared.golden.finalOutcome,
     internalRecordReference: preservedReference,
-    exclusionReason: conflict
-      ? `Conflicting historical outcome labels require human review: existing ${existing.final_outcome}, mailbox benchmark ${prepared.golden.finalOutcome}.`
-      : prepared.golden.exclusionReason,
+    exclusionReason: prepared.golden.exclusionReason,
     stratificationTags: uniqueTags([
       ...existingTags,
       ...prepared.golden.stratificationTags,
-      conflict && "historical_label_conflict",
-      conflict && `conflicting_outcome_${existing.final_outcome}`,
     ]),
   };
-  return { golden, conflict };
+  return { golden, conflict: false };
 }

@@ -536,7 +536,7 @@ export async function startBenchmarkRun(input: {
   const costLimitMicrousd = Math.max(50_000, Math.min(MAX_COST_LIMIT_MICROUSD,
     Math.round(input.costLimitMicrousd || DEFAULT_COST_LIMIT_MICROUSD)));
   const { data: records, error: recordsError } = await admin.from("research_golden_records").select(
-    "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at"
+    "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags"
   ).eq("organization_id", input.organizationId).eq("benchmark_split", input.split).order("id", { ascending: true });
   if (recordsError) throw recordsError;
   const typedRecords = (records || []) as Array<BenchmarkGoldenCase & {

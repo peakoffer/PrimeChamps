@@ -70,14 +70,16 @@ function normalizeName(value: string) {
 
 function validatePreparationRecord(record: Record<string, unknown>): asserts record is Record<string, unknown> & EvidencePreparationRecord {
   const validTimestamp = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
+  const outcomeGroundTruth = Array.isArray(record.stratification_tags)
+    && record.stratification_tags.includes("dylan_outcome_ground_truth");
   if (record.benchmark_split !== "excluded") throw new FatalError(`Record ${record.id} is already assigned to a benchmark cohort`);
-  if (record.label_order_fit_before_outcome !== true || !record.labeled_at) throw new FatalError(`Record ${record.id} does not have a locked blind fit label`);
+  if ((record.label_order_fit_before_outcome !== true && !outcomeGroundTruth) || !record.labeled_at) throw new FatalError(`Record ${record.id} does not have an authoritative ground-truth label`);
   if (record.fit_label !== "fit" && record.fit_label !== "not_fit") throw new FatalError(`Record ${record.id} has no binary fit label`);
   if (!['high', 'medium', 'low'].includes(String(record.achievability_label))) throw new FatalError(`Record ${record.id} has no achievability label`);
   if (!validTimestamp(record.decision_at) || !validTimestamp(record.evidence_cutoff_at)) throw new FatalError(`Record ${record.id} lacks valid decision and evidence-cutoff dates`);
   if (Date.parse(String(record.evidence_cutoff_at)) > Date.parse(String(record.decision_at))) throw new FatalError(`Record ${record.id} has an evidence cutoff after its decision`);
   if (record.point_in_time_reliability !== "strong" && record.point_in_time_reliability !== "partial") throw new FatalError(`Record ${record.id} is not point-in-time reliable`);
-  if (typeof record.decisive_information_publicly_knowable !== "boolean") throw new FatalError(`Record ${record.id} lacks a public-knowability judgment`);
+  if (typeof record.decisive_information_publicly_knowable !== "boolean" && !outcomeGroundTruth) throw new FatalError(`Record ${record.id} lacks a public-knowability judgment`);
   if (record.held_out_locked_at && !record.held_out_revealed_at) throw new FatalError(`Record ${record.id} is an unrevealed held-out case`);
 }
 
@@ -95,7 +97,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   }
   const admin = createAdminClient({ disableRealtime: true });
   const { data, error } = await admin.from("research_golden_records")
-    .select("id,athlete_name,sport,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,label_order_fit_before_outcome,point_in_time_reliability,benchmark_split,labeled_at,held_out_locked_at,held_out_revealed_at")
+    .select("id,athlete_name,sport,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,label_order_fit_before_outcome,point_in_time_reliability,benchmark_split,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
     .eq("organization_id", input.organizationId)
     .in("id", input.recordIds);
   if (error) throw error;

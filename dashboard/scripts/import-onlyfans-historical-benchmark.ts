@@ -26,9 +26,11 @@ const argumentsList = process.argv.slice(2);
 const apply = argumentsList.includes("--apply");
 const inputFlag = argumentsList.indexOf("--input");
 const inputPath = inputFlag >= 0 ? argumentsList[inputFlag + 1] : "";
+const backupFlag = argumentsList.indexOf("--backup");
+const backupPath = backupFlag >= 0 ? argumentsList[backupFlag + 1] : "";
 
-if (!inputPath) {
-  throw new Error("Usage: node --experimental-strip-types scripts/import-onlyfans-historical-benchmark.ts --input /absolute/path/records.json [--apply]");
+if (!inputPath || (apply && !backupPath)) {
+  throw new Error("Usage: node --experimental-strip-types scripts/import-onlyfans-historical-benchmark.ts --input /absolute/path/records.json [--apply --backup /absolute/path/pre-import-backup.json]");
 }
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local"), override: false });
@@ -102,13 +104,39 @@ const planned: PlannedImport[] = records.map((record) => {
   };
 });
 
+const { data: storedRows, error: storedRowsError } = await admin.from("research_golden_records")
+  .select("fit_label,achievability_label,final_outcome,pursue_today,decision_at,evidence_cutoff_at,point_in_time_reliability,label_order_fit_before_outcome,stratification_tags")
+  .eq("organization_id", organizationId)
+  .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
+  .limit(200);
+if (storedRowsError) throw storedRowsError;
+const storedVerification = {
+  records: (storedRows || []).length,
+  fit: (storedRows || []).filter((record) => record.fit_label === "fit").length,
+  notFit: (storedRows || []).filter((record) => record.fit_label === "not_fit").length,
+  highAchievability: (storedRows || []).filter((record) => record.achievability_label === "high").length,
+  lowAchievability: (storedRows || []).filter((record) => record.achievability_label === "low").length,
+  pursueYes: (storedRows || []).filter((record) => record.pursue_today === "yes").length,
+  pursueNo: (storedRows || []).filter((record) => record.pursue_today === "no").length,
+  signed: (storedRows || []).filter((record) => record.final_outcome === "signed").length,
+  approvedButDidNotSign: (storedRows || []).filter((record) => record.final_outcome === "non_signing").length,
+  rejected: (storedRows || []).filter((record) => record.final_outcome === "onlyfans_rejected").length,
+  stalled: (storedRows || []).filter((record) => record.final_outcome === "stalled").length,
+  completeDates: (storedRows || []).filter((record) => record.decision_at && record.evidence_cutoff_at).length,
+  strongReliability: (storedRows || []).filter((record) => record.point_in_time_reliability === "strong").length,
+  partialReliability: (storedRows || []).filter((record) => record.point_in_time_reliability === "partial").length,
+  outcomeGroundTruth: (storedRows || []).filter((record) => record.stratification_tags?.includes("dylan_outcome_ground_truth")).length,
+  staleConflicts: (storedRows || []).filter((record) => record.stratification_tags?.includes("historical_label_conflict")).length,
+};
+
 const summary = {
   mode: apply ? "apply" : "dry_run",
   dataset: ONLYFANS_HISTORICAL_DATASET,
   records: planned.length,
   creates: planned.filter((item) => !item.existing).length,
   updates: planned.filter((item) => item.existing).length,
-  updateMatches: planned.filter((item) => item.existing).map((item) => ({
+  updateMatchCount: planned.filter((item) => item.existing).length,
+  updateMatchesPreview: planned.filter((item) => item.existing).slice(0, 10).map((item) => ({
     source: item.golden.athleteName,
     existing: item.existing!.athlete_name,
     existingId: item.existing!.id,
@@ -130,12 +158,37 @@ const summary = {
     sport,
     planned.filter((item) => item.golden.sport === sport).length,
   ])),
+  currentStoredDataset: {
+    records: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET)).length,
+    fit: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.fit_label === "fit").length,
+    notFit: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.fit_label === "not_fit").length,
+    uncertain: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.fit_label === "uncertain").length,
+    conflicts: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.stratification_tags?.includes("historical_label_conflict")).length,
+    outcomeGroundTruth: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.stratification_tags?.includes("dylan_outcome_ground_truth")).length,
+  },
+  storedVerification,
 };
 
 if (!apply) {
   console.log(JSON.stringify(summary, null, 2));
   process.exit(0);
 }
+
+const existingIds = planned.flatMap((item) => item.existing ? [item.existing.id] : []);
+const { data: backupRows, error: backupError } = await admin.from("research_golden_records")
+  .select("*")
+  .eq("organization_id", organizationId)
+  .in("id", existingIds);
+if (backupError) throw backupError;
+if ((backupRows || []).length !== existingIds.length) {
+  throw new Error(`Pre-import backup resolved ${(backupRows || []).length} of ${existingIds.length} existing records`);
+}
+await fs.mkdir(path.dirname(path.resolve(backupPath)), { recursive: true });
+await fs.writeFile(path.resolve(backupPath), JSON.stringify({
+  createdAt: new Date().toISOString(),
+  dataset: ONLYFANS_HISTORICAL_DATASET,
+  records: backupRows,
+}, null, 2));
 
 const goldenIds = new Map<string, string>();
 for (const item of planned.filter((candidate) => candidate.existing)) {

@@ -33,24 +33,23 @@ Priority is calculated deterministically from 45% fit, 35% achievability, and 20
 
 ## Golden benchmark
 
-The initial benchmark is approximately 80 records:
+The initial benchmark is Dylan's 100-case source ledger:
 
-- 40 positive examples, stratified across sport, audience size, career stage, representation, and outcome quality.
-- 40 commercial negatives. These usually appear as early non-progressions rather than formal rejections: poor content or creator fit, unrealistic athlete economics, or under-21 partnership ineligibility. Later-stage non-signings, OnlyFans passes, stalled opportunities, and signed opportunities that underperformed also qualify.
+- 44 positive examples: 41 signed and three approved but did not sign.
+- 56 negative examples: 23 rejected and 33 stalled.
 
 “Negative” means the opportunity did not work commercially. It does not mean negative news about the athlete.
 
-For every record, label:
+For every record, preserve:
 
 - Original decision date and evidence cutoff.
-- Fit at that time.
-- Achievability at that time.
+- The outcome-derived positive/negative ground truth.
+- The original fit-at-the-time description as context only.
 - Final outcome and primary reason.
-- Whether decisive information was publicly knowable.
-- Whether Dylan would pursue the opportunity today.
+- The pre-decision public evidence available to the research model.
 - A short explanation and internal reference when available.
 
-Fit must be labeled before the outcome is reviewed whenever practical. Use `uncertain` rather than reconstructing a memory from hindsight. Records with unusable point-in-time evidence remain stored but excluded.
+For future records outside Dylan's ledger, fit must be labeled before the outcome is reviewed whenever practical. Use `uncertain` rather than reconstructing a memory from hindsight. Records with unusable point-in-time evidence remain stored but excluded.
 
 Completed examples are assigned automatically to a 75% development split and 25% held-out split within sport/fit/outcome strata. The operator does not choose the held-out examples during labeling.
 
@@ -125,10 +124,10 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 - V1 discovery, identity, eligibility, activity, scoring, and durable execution have been strengthened and retained.
 - The V2 schema is live in Supabase with server-only privileges and RLS enabled.
 - Dylan's 40-athlete commercial-positive deliverable was imported on 10 August 2026. Five records were merged with the original seed and 35 were added. All 40 are labeled `fit + signed`, linked to 14 existing athlete records, and remain safely excluded with `partial` point-in-time reliability because the dates and commercial reasons were reconstructed after the outcome.
-- Dylan's updated 100-opportunity mailbox benchmark is handled as a separate, idempotent historical ledger. `Strong Fit` maps to `fit`; `Not a Fit` maps to `not_fit`; `Possible Fit` and `Uncertain` remain `uncertain`. `Stalled` is explicitly right-censored, and evidence containing downstream signature, payment, contract, or sign-up information is tagged and excluded from scoring.
-- Reconciliation never silently overwrites contradictory labels from the earlier 40. Conflicting signed-versus-rejected/non-signing/stalled records are changed to `unresolved`, retain both internal evidence sources, and surface with `historical_label_conflict` for human review.
-- All 100 mailbox records remain excluded from development and held-out splits until achievability, public knowability, sport enrichment where needed, and a leakage-safe pre-decision public evidence snapshot are complete.
-- The controlled production import now contains all 100 rows, 100 dedicated mailbox evidence sources, and 300 normalized claims. No internal claim is eligible for scoring. Four contradictory outcomes are `unresolved`, all 33 stalled labels remain censored, and 38 records are explicitly queued for sport enrichment instead of receiving invented classifications.
+- Dylan's updated 100-opportunity mailbox benchmark is the authoritative outcome ledger. `Signed` and `Approved but Did Not Sign` map to positive; `Rejected` and `Stalled` map to negative. The resulting benchmark contains 44 positives and 56 negatives. The earlier `OnlyFans fit at the time` field is retained as source context but does not override the outcome label.
+- Reconciliation is source-authoritative and idempotent. Dylan's workbook replaces older contradictory seed labels while retaining the older internal reference for audit history; stale conflict and commercial-class tags are removed.
+- All 100 mailbox records remain excluded from development and held-out splits until sport enrichment where needed and a leakage-safe pre-decision public evidence snapshot are complete. No further subjective fit-labeling exercise is required.
+- The controlled production import contains all 100 rows, 100 dedicated mailbox evidence sources, and 300 normalized claims. No internal outcome claim is eligible for model scoring. The 33 stalled records are negative ground truth, not censored records, and 20 records remain queued for sport enrichment instead of receiving invented classifications.
 - Every delivered positive has one internal evidence source and three normalized claims: Dylan's fit label, the signed outcome, and the inferred commercial reason. That is 40 sources and 120 claims. None is eligible as point-in-time scoring evidence.
 - Thirty-five records from the original arbitrary historical seed remain `uncertain` and `excluded`; they are not training or benchmark truth.
 - The labeling screen and clean-split assignment are implemented.
@@ -142,9 +141,8 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 - Two social-first discovery experiments were rejected. Volleyball hashtag graph expansion returned 211 related accounts but was dominated by leagues, media, coaches, fans, and organizations. Broad Instagram keyword search returned 70 profiles and zero usable in-range public athlete profiles. Official sports-source discovery remains the primary candidate source.
 - A malformed Unicode code point caused one Anthropic scoring rejection; prompt inputs are now sanitized and covered by regression tests. Researcher and Auditor scoring calls are fixed at temperature zero for repeatable benchmark comparisons.
 - Discovery now stops when its evidence budget is met, reports every wave, caps paid identity enrichment at four candidates per requested finalist, and checks cancellation between enrichment batches.
-- Unit, lint, type, and production build checks pass. Existing repository lint warnings remain, but there are no errors. Thirty focused research tests cover the V2 gates and regressions.
-- The remaining positive-label gap is explicit achievability, pursue-today judgment, and an exact evidence cutoff or source archive for each of Dylan's 40. Approximate dates were preserved as text; the system did not manufacture exact timestamps.
-- The blocking negative-data gap is 40 real early non-progressions. Dylan identified the dominant failure taxonomy as poor content first, unrealistic economics second, and under-21 eligibility third. Existing CRM feedback cannot fill the gap: it contains 31 `not_athlete`, two `not_usa`, and one `unlikely_convert` record that is also not an athlete. Those are research/identity failures, not commercial negatives.
+- Unit, lint, type, and production build checks pass. Existing repository lint warnings remain, but there are no errors. Fifty-nine focused tests cover the research gates and regressions.
+- The 44/56 outcome split closes the positive/negative label-count gap. The remaining benchmark work is input-side: sport completion and dated public evidence available by the historical decision cutoff.
 - The OpenRouter credential is configured as a sensitive Preview and Production variable. The first production deployment created after the key was saved is ready. OpenRouter remains a separately versioned A/B lane, not invisible model routing. The measured identity experiment was rejected; scoring and blind audit remain pinned to the latest configured Anthropic Sonnet model.
 
 ## Next controlled sequence
@@ -159,10 +157,9 @@ If a scoring provider fails for every enriched candidate, the run retains its pa
 
 Completed-run re-score forks rebuild full dossiers from `research_candidates.raw_candidate`; the compact history summary is never treated as a scoring input.
 
-1. Resolve the explicit outcome conflicts surfaced by the 100-case mailbox ledger, then complete achievability, pursue-today, public knowability, sport, and point-in-time source/cutoff fields. Do not assign approximate reconstructions to a benchmark split.
-2. Add approximately 30–40 genuine hard negatives. The mailbox sample contains only three `Not a Fit` cases; `Possible Fit`, `Uncertain`, and right-censored `Stalled` records must not be relabeled as negatives.
-3. Automatically assign only completed, point-in-time-usable labels to development and held-out splits, then freeze the latest-Sonnet baseline. Determinism comes from pinned model/version metadata, strict schemas, deterministic score caps, and repeated benchmark measurement; newer Sonnet APIs may reject legacy sampling parameters.
-4. Add a cheap pre-score viability selector over a larger official-source pool. It should prioritize adult-verifiable, identity-confirmed athletes with public creator/commercial signals before expensive age research and scoring.
-5. Run the frozen baseline on the development split and fix its largest measured failure class one change at a time.
-6. Use OpenRouter only for explicit, versioned challenger experiments such as lower-cost extraction or summarization. Promote a model only when it beats the frozen baseline on quality, cost, and latency.
-7. Freeze the winning configuration, run the held-out split once, and then run evaluation-only sport requests until ten independently audited candidates pass. No records or outreach are created by these tests.
+1. Re-import Dylan's 100-case source with its deterministic 44-positive / 56-negative outcome mapping, then finish sport enrichment and leakage-safe public evidence packets.
+2. Automatically assign only evidence-ready outcome labels to development and held-out splits, then freeze the latest-Sonnet baseline. Determinism comes from pinned model/version metadata, strict schemas, deterministic score caps, and repeated benchmark measurement; newer Sonnet APIs may reject legacy sampling parameters.
+3. Add a cheap pre-score viability selector over a larger official-source pool. It should prioritize adult-verifiable, identity-confirmed athletes with public creator/commercial signals before expensive age research and scoring.
+4. Run the frozen baseline on the development split and fix its largest measured failure class one change at a time.
+5. Use OpenRouter only for explicit, versioned challenger experiments such as lower-cost extraction or summarization. Promote a model only when it beats the frozen baseline on quality, cost, and latency.
+6. Freeze the winning configuration, run the held-out split once, and then run evaluation-only sport requests until ten independently audited candidates pass. No records or outreach are created by these tests.

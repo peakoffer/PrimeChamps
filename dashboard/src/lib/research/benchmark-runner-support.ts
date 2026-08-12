@@ -258,11 +258,13 @@ export function benchmarkCaseReadiness(input: {
 }) {
   const { record, selection } = input;
   const reasons: string[] = [];
+  const outcomeGroundTruth = Array.isArray(record.stratification_tags)
+    && record.stratification_tags.includes("dylan_outcome_ground_truth");
   if (!record.evidence_cutoff_at || !validTimestamp(record.evidence_cutoff_at)) reasons.push("missing valid evidence cutoff");
   if (!record.decision_at || !validTimestamp(record.decision_at)) reasons.push("missing original decision date");
   if (!record.benchmark_cohort_version) reasons.push("missing frozen cohort version");
   if (record.point_in_time_reliability !== "strong" && record.point_in_time_reliability !== "partial") reasons.push("point-in-time evidence is unusable");
-  if (record.label_order_fit_before_outcome !== true) reasons.push("fit label was not locked before outcome review");
+  if (record.label_order_fit_before_outcome !== true && !outcomeGroundTruth) reasons.push("record lacks an authoritative ground-truth label");
   if (record.benchmark_split === "held_out" && (!record.held_out_locked_at || record.held_out_revealed_at)) {
     reasons.push("held-out record is not locked and unrevealed");
   }

@@ -5,6 +5,7 @@ import {
   assignGoldenRecordSplits,
   calculateBenchmarkMetrics,
   goldenAthleteKey,
+  isGoldenRecordReadyForSplit,
   maskGoldenRecordForBlindLabeling,
   parseGoldenRecordInput,
   stratifiedSample,
@@ -17,6 +18,7 @@ import {
 } from "../src/lib/research/v2-scoring.ts";
 import { sanitizeUnicodeForJson } from "../src/lib/research/text-safety.ts";
 import {
+  historicalOutcomeGroundTruth,
   historicalBenchmarkNamesMatch,
   prepareHistoricalBenchmarkRecord,
   reconcileHistoricalGoldenRecord,
@@ -150,31 +152,46 @@ test("golden record parsing prevents evidence from after the original decision",
   }), /Evidence cutoff cannot be after/);
 });
 
-test("historical mailbox records preserve censored outcomes and exclude post-decision evidence", () => {
+test("historical mailbox outcomes are the authoritative commercial ground truth", () => {
   const prepared = prepareHistoricalBenchmarkRecord(HISTORICAL_CASE);
-  assert.equal(prepared.golden.fitLabel, "fit");
-  assert.equal(prepared.golden.achievabilityLabel, "uncertain");
+  assert.equal(prepared.golden.fitLabel, "not_fit");
+  assert.equal(prepared.golden.achievabilityLabel, "low");
   assert.equal(prepared.golden.finalOutcome, "stalled");
   assert.equal(prepared.golden.benchmarkSplit, "excluded");
-  assert.equal(prepared.outcomeCensored, true);
+  assert.equal(prepared.golden.evidenceCutoffAt, prepared.golden.decisionAt);
+  assert.equal(prepared.golden.pursueToday, "no");
+  assert.equal(prepared.outcomeCensored, false);
   assert.equal(prepared.evidencePhase, "mixed");
   assert.equal(prepared.evidence.eligibleBeforeCutoff, false);
-  assert.ok(prepared.golden.stratificationTags.includes("outcome_censored"));
+  assert.ok(prepared.golden.stratificationTags.includes("dylan_outcome_ground_truth"));
+  assert.ok(prepared.golden.stratificationTags.includes("commercial_negative"));
   assert.ok(prepared.golden.stratificationTags.includes("post_decision_evidence_present"));
 });
 
-test("possible fit is not converted into a false negative", () => {
+test("raw fit descriptions never override Dylan's outcome label", () => {
   const prepared = prepareHistoricalBenchmarkRecord({
     ...HISTORICAL_CASE,
     fitAtTime: "Possible Fit",
     outcome: "Rejected",
     evidenceRef: "E02",
   });
-  assert.equal(prepared.golden.fitLabel, "uncertain");
-  assert.ok(prepared.golden.stratificationTags.includes("excluded_ambiguous_fit"));
+  assert.equal(prepared.golden.fitLabel, "not_fit");
+  assert.equal(prepared.golden.achievabilityLabel, "low");
+  assert.ok(prepared.golden.stratificationTags.includes("raw_fit_possible_fit"));
 });
 
-test("historical reconciliation preserves contradictory outcomes for human review", () => {
+test("historical outcome mapping produces 44 positive and 56 negative source labels", () => {
+  assert.deepEqual(historicalOutcomeGroundTruth("Signed"), {
+    fitLabel: "fit", achievabilityLabel: "high", pursueToday: "yes", groundTruthClass: "positive",
+  });
+  assert.deepEqual(historicalOutcomeGroundTruth("Approved but Did Not Sign"), {
+    fitLabel: "fit", achievabilityLabel: "high", pursueToday: "yes", groundTruthClass: "positive",
+  });
+  assert.equal(historicalOutcomeGroundTruth("Rejected").fitLabel, "not_fit");
+  assert.equal(historicalOutcomeGroundTruth("Stalled").fitLabel, "not_fit");
+});
+
+test("historical reconciliation makes Dylan's workbook authoritative", () => {
   const prepared = prepareHistoricalBenchmarkRecord({
     ...HISTORICAL_CASE,
     athleteName: "Furkan Areion (Calioglu)",
@@ -192,10 +209,11 @@ test("historical reconciliation preserves contradictory outcomes for human revie
     stratification_tags: ["commercial_positive", "signed", "dylan_2026_08_10"],
   });
   assert.equal(historicalBenchmarkNamesMatch("Furkan Areion", "Furkan Areion (Calioglu)"), true);
-  assert.equal(reconciled.conflict, true);
-  assert.equal(reconciled.golden.finalOutcome, "unresolved");
+  assert.equal(reconciled.conflict, false);
+  assert.equal(reconciled.golden.finalOutcome, "non_signing");
+  assert.equal(reconciled.golden.fitLabel, "fit");
   assert.equal(reconciled.golden.sport, "Motorcycle Racing");
-  assert.ok(reconciled.golden.stratificationTags.includes("historical_label_conflict"));
+  assert.equal(reconciled.golden.stratificationTags.includes("historical_label_conflict"), false);
 
   const idempotent = reconcileHistoricalGoldenRecord(prepared, {
     id: "existing",
@@ -203,12 +221,12 @@ test("historical reconciliation preserves contradictory outcomes for human revie
     athlete_id: null,
     sport: "Motorcycle Racing",
     fit_label: "uncertain",
-    final_outcome: "unresolved",
+    final_outcome: "non_signing",
     internal_record_reference: reconciled.golden.internalRecordReference,
     stratification_tags: reconciled.golden.stratificationTags,
   });
-  assert.equal(idempotent.conflict, true);
-  assert.equal(idempotent.golden.finalOutcome, "unresolved");
+  assert.equal(idempotent.conflict, false);
+  assert.equal(idempotent.golden.finalOutcome, "non_signing");
 });
 
 test("stratified sampling rotates through sports before taking deeper rows", () => {
@@ -315,6 +333,21 @@ test("benchmark summary separates provisional labels from benchmark-ready record
   assert.equal(summary.negativeRemaining, 39);
   assert.equal(summary.censoredOutcomes, 0);
   assert.equal(summary.labelConflicts, 0);
+});
+
+test("Dylan outcome records do not require a second blind-label exercise", () => {
+  assert.equal(isGoldenRecordReadyForSplit({
+    benchmark_split: "excluded",
+    fit_label: "not_fit",
+    achievability_label: "low",
+    point_in_time_reliability: "strong",
+    label_order_fit_before_outcome: false,
+    decision_at: "2026-01-01T12:00:00Z",
+    evidence_cutoff_at: "2026-01-01T12:00:00Z",
+    decisive_information_publicly_knowable: null,
+    labeled_at: "2026-08-11T12:00:00Z",
+    stratification_tags: ["dylan_outcome_ground_truth"],
+  }), true);
 });
 
 test("benchmark metrics reward precision rather than score volume", () => {

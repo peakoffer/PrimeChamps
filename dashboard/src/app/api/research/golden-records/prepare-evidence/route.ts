@@ -23,17 +23,19 @@ type GoldenPreparationCandidate = {
   labeled_at: string | null;
   held_out_locked_at: string | null;
   held_out_revealed_at: string | null;
+  stratification_tags: string[] | null;
 };
 
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
+  const outcomeGroundTruth = record.stratification_tags?.includes("dylan_outcome_ground_truth") === true;
   return record.benchmark_split === "excluded"
-    && record.label_order_fit_before_outcome === true
+    && (record.label_order_fit_before_outcome === true || outcomeGroundTruth)
     && (record.fit_label === "fit" || record.fit_label === "not_fit")
     && ["high", "medium", "low"].includes(record.achievability_label)
     && Boolean(record.decision_at && Number.isFinite(Date.parse(record.decision_at)))
     && Boolean(record.evidence_cutoff_at && Number.isFinite(Date.parse(record.evidence_cutoff_at)))
     && Date.parse(record.evidence_cutoff_at!) <= Date.parse(record.decision_at!)
-    && typeof record.decisive_information_publicly_knowable === "boolean"
+    && (typeof record.decisive_information_publicly_knowable === "boolean" || outcomeGroundTruth)
     && ["strong", "partial"].includes(record.point_in_time_reliability)
     && Boolean(record.labeled_at)
     && !(record.held_out_locked_at && !record.held_out_revealed_at);
@@ -45,7 +47,7 @@ export async function GET() {
     const admin = createAdminClient();
     const [{ data: candidates, error: candidateError }, { data: runs, error: runError }] = await Promise.all([
       admin.from("research_golden_records")
-        .select("id,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at")
+        .select("id,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
         .eq("organization_id", user.organizationId)
         .eq("benchmark_split", "excluded")
         .order("updated_at", { ascending: true }),
@@ -85,7 +87,7 @@ export async function POST(request: NextRequest) {
       : EVIDENCE_PREPARATION_LIMITS.maximumRecords;
     const maxApifyChargeUsd = normalizeEvidencePreparationBudget(body.maxApifyChargeUsd);
     const admin = createAdminClient();
-    let { data: active, error: activeError } = await admin.from("research_evidence_preparation_runs")
+    const { data: initialActive, error: activeError } = await admin.from("research_evidence_preparation_runs")
       .select("id,status,created_at")
       .eq("organization_id", user.organizationId)
       .in("status", ["queued", "running"])
@@ -93,6 +95,7 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle();
     if (activeError) throw activeError;
+    let active = initialActive;
     if (active && Date.now() - Date.parse(active.created_at) > 2 * 60 * 60 * 1_000) {
       const { error: staleError } = await admin.from("research_evidence_preparation_runs").update({
         status: "failed",
@@ -109,7 +112,7 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
     let query = admin.from("research_golden_records")
-      .select("id,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at")
+      .select("id,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
       .eq("organization_id", user.organizationId)
       .eq("benchmark_split", "excluded")
       .order("updated_at", { ascending: true });
@@ -119,7 +122,7 @@ export async function POST(request: NextRequest) {
     const eligible = ((data || []) as GoldenPreparationCandidate[]).filter(eligibleForEvidencePreparation);
     if (requestedIds.length && eligible.length !== requestedIds.length) {
       return NextResponse.json({
-        error: "Every selected record must have a locked blind fit label, complete dates, public-knowability judgment, and usable point-in-time reliability.",
+        error: "Every selected record must have authoritative ground truth, complete dates, and usable point-in-time reliability.",
         requested: requestedIds.length,
         eligible: eligible.length,
       }, { status: 409 });
@@ -127,7 +130,7 @@ export async function POST(request: NextRequest) {
     const selected = eligible.slice(0, requestedCount);
     if (!selected.length) {
       return NextResponse.json({
-        error: "No blind-labeled records are eligible for evidence preparation yet. Import and lock the human fit/achievability worksheet first; no provider call was started.",
+        error: "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
         eligible: 0,
         scoringTokensSpent: 0,
       }, { status: 409 });
