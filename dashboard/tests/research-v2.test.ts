@@ -777,6 +777,9 @@ test("benchmark sport enrichment uses Sonnet-compatible structured output schema
   assert.match(source, /confidence: \{ type: "integer" \}/);
   assert.doesNotMatch(source, /confidence: \{ type: "integer", (minimum|maximum)/);
   assert.match(source, /output_config: \{ effort: "low", format:/);
+  assert.match(source, /SPORT_CLASSIFICATION_BATCH_SIZE = 5/);
+  assert.match(source, /resolveAnthropicScoringModel\(\)/);
+  assert.match(source, /failures\.push\(\.\.\.batch\.map/);
 });
 
 test("Wayback selection uses the latest exact HTML capture no later than the evidence cutoff", () => {

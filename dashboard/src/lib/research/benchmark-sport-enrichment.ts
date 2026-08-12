@@ -1,6 +1,6 @@
 import "server-only";
 import { runApifyActor } from "@/lib/apify";
-import { LATEST_ANTHROPIC_MODELS } from "@/lib/ai/models";
+import { resolveAnthropicScoringModel } from "@/lib/ai/anthropic-models";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
@@ -20,9 +20,20 @@ type GoldenRecord = {
   stratification_tags: string[];
 };
 
-async function classifySports(records: GoldenRecord[], sources: Map<string, BenchmarkSearchResult[]>) {
+const SPORT_CLASSIFICATION_BATCH_SIZE = 5;
+
+function addUsage(total: Record<string, number>, usage: Record<string, number>) {
+  for (const [key, value] of Object.entries(usage)) {
+    if (Number.isFinite(value)) total[key] = (total[key] || 0) + value;
+  }
+}
+
+async function classifySportBatch(
+  records: GoldenRecord[],
+  sources: Map<string, BenchmarkSearchResult[]>,
+  model: string
+) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const model = LATEST_ANTHROPIC_MODELS.sonnet;
   if (!apiKey) throw new Error("Anthropic API key is not configured");
   const cases = records.map((record) => [
     `CASE ${record.id}`,
@@ -58,7 +69,7 @@ async function classifySports(records: GoldenRecord[], sources: Map<string, Benc
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model,
-      max_tokens: 8_000,
+      max_tokens: 4_000,
       output_config: { effort: "low", format: { type: "json_schema", schema } },
       messages: [{ role: "user", content: sanitizeUnicodeForJson(`Classify the sport of each named athlete using only the supplied Google results.
 
@@ -75,8 +86,36 @@ ${cases}`) }],
     usage?: Record<string, number>;
   };
   const text = (payload.content || []).map((block) => block.text || "").join("\n");
-  if (!text || payload.stop_reason === "max_tokens") throw new Error("Anthropic sport classification was incomplete");
-  return { classifications: (JSON.parse(text).records || []) as BenchmarkSportClassification[], usage: payload.usage || {}, model };
+  if (!text || payload.stop_reason === "max_tokens") {
+    throw new Error(`Anthropic sport classification was incomplete for ${records.length} checkpoint records`);
+  }
+  return {
+    classifications: (JSON.parse(text).records || []) as BenchmarkSportClassification[],
+    usage: payload.usage || {},
+  };
+}
+
+async function classifySports(records: GoldenRecord[], sources: Map<string, BenchmarkSearchResult[]>) {
+  const model = await resolveAnthropicScoringModel();
+  const classifications: BenchmarkSportClassification[] = [];
+  const failures: Array<{ name: string; reason: string }> = [];
+  const usage: Record<string, number> = {};
+  let calls = 0;
+
+  for (let index = 0; index < records.length; index += SPORT_CLASSIFICATION_BATCH_SIZE) {
+    const batch = records.slice(index, index + SPORT_CLASSIFICATION_BATCH_SIZE);
+    calls += 1;
+    try {
+      const result = await classifySportBatch(batch, sources, model);
+      classifications.push(...result.classifications);
+      addUsage(usage, result.usage);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.slice(0, 240) : "Classification checkpoint failed";
+      failures.push(...batch.map((record) => ({ name: record.athlete_name, reason })));
+    }
+  }
+
+  return { classifications, failures, usage, model, calls };
 }
 
 async function ensureSportProvenance(input: {
@@ -187,7 +226,7 @@ export async function enrichBenchmarkSports(organizationId: string) {
   const classified = await classifySports(records, sources);
   const byId = new Map(records.map((record) => [record.id, record]));
   const enriched: Array<{ name: string; sport: string; source: string }> = [];
-  const failures: Array<{ name: string; reason: string }> = [];
+  const failures: Array<{ name: string; reason: string }> = [...classified.failures];
   const processed = new Set<string>();
 
   for (const classification of classified.classifications) {
@@ -229,6 +268,12 @@ export async function enrichBenchmarkSports(organizationId: string) {
     unresolved: records.length - enriched.length,
     enriched,
     failures,
-    providerUsage: { apifyRuns: 1, apifyChargeCapUsd: 1, anthropicModel: classified.model, anthropicTokens: classified.usage },
+    providerUsage: {
+      apifyRuns: 1,
+      apifyChargeCapUsd: 1,
+      anthropicModel: classified.model,
+      anthropicCalls: classified.calls,
+      anthropicTokens: classified.usage,
+    },
   };
 }

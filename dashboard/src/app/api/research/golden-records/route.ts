@@ -81,7 +81,14 @@ export async function GET(request: NextRequest) {
       .order("updated_at", { ascending: false })
       .limit(500);
     if (error) throw error;
-    const allRecords = (data || []) as Array<Record<string, unknown>>;
+    const storedRecords = (data || []) as Array<Record<string, unknown>>;
+    const authoritativeRecords = storedRecords.filter((record) =>
+      Array.isArray(record.stratification_tags)
+      && record.stratification_tags.includes("dylan_outcome_ground_truth")
+    );
+    // Once Dylan's outcome ledger exists, it is the benchmark shown and
+    // summarized. Legacy challenge drafts remain stored for provenance only.
+    const allRecords = authoritativeRecords.length ? authoritativeRecords : storedRecords;
     const filteredRecords = allRecords.filter((record) =>
       (!split || !["development", "held_out", "excluded"].includes(split) || record.benchmark_split === split)
       && (!label || !["fit", "not_fit", "uncertain"].includes(label) || record.fit_label === label)
