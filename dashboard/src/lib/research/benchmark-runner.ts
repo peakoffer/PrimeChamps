@@ -25,15 +25,11 @@ import {
   type LeakageSafeBenchmarkEvidence,
 } from "@/lib/research/benchmark-runner-support";
 import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/research/benchmark-model-provider";
-import {
-  HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
-  HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
-} from "@/lib/research/historical-evidence-preparation";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v18";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v19";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -618,26 +614,10 @@ export async function startBenchmarkRun(input: {
   }
 
   const selected = balancedCaseSelection(typedRecords, Math.min(caseLimit, typedRecords.length));
-  const { data: preparationRuns, error: preparationError } = await admin.from("research_evidence_preparation_runs")
-    .select("record_ids,checkpoint")
-    .eq("organization_id", input.organizationId)
-    .eq("status", "completed")
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (preparationError) throw preparationError;
-  const signalPreparedIds = new Set((preparationRuns || []).flatMap((row) => {
-    const checkpoint = row.checkpoint as Record<string, unknown> | null;
-    return checkpoint?.preparation_mode === "signal_recovery"
-      && checkpoint?.query_plan_version === HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION
-      && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
-      && Array.isArray(row.record_ids)
-      ? row.record_ids.filter((id): id is string => typeof id === "string")
-      : [];
-  }));
-  const signalPreparationMissing = selected.filter((record) => !signalPreparedIds.has(record.id));
-  if (signalPreparationMissing.length) {
-    throw new Error(`Benchmark evidence preparation is incomplete (${signalPreparationMissing.length}/${selected.length} selected cases): run the current blind creator-signal recovery plan before scoring`);
-  }
+  // Execution is gated by the evidence itself, not by whether a particular
+  // provider workflow happened to run. This lets a validated historical
+  // snapshot satisfy the signal requirement while still rejecting empty or
+  // failed recovery runs.
   const evidenceRows = await loadEvidence(admin, input.organizationId, selected.map((record) => record.id));
   const readinessFailures = selected.flatMap((record) => {
     const selection = selectLeakageSafeBenchmarkEvidence({

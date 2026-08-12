@@ -1,4 +1,9 @@
 import type { GoldenRecordInput } from "./v2";
+import {
+  prepareHistoricalSocialSnapshot,
+  type HistoricalSocialSnapshotInput,
+  type PreparedHistoricalSocialSnapshot,
+} from "./historical-social-snapshot.ts";
 
 export const ONLYFANS_HISTORICAL_DATASET = "onlyfans_mailbox_100_2026_08_11";
 export const ONLYFANS_OUTCOME_LABEL_SOURCE = "dylan_outcome_ground_truth";
@@ -17,6 +22,7 @@ export type HistoricalBenchmarkRecord = {
   relevantDates: string;
   evidenceEstablishes: string;
   evidenceNotes: string;
+  socialSnapshot?: HistoricalSocialSnapshotInput | null;
 };
 
 export type ExistingHistoricalGoldenRecord = {
@@ -40,6 +46,7 @@ export type PreparedHistoricalBenchmarkRecord = {
   outcomeCensored: boolean;
   evidencePhase: "pre_decision" | "post_decision" | "mixed" | "unknown";
   hasPostDecisionEvidence: boolean;
+  socialSnapshot: PreparedHistoricalSocialSnapshot | null;
   evidence: {
     providerRequestId: string;
     canonicalUrl: string;
@@ -179,7 +186,12 @@ export function prepareHistoricalBenchmarkRecord(
   ].join(" "));
   const hasPostDecisionEvidence = phase === "post_decision" || phase === "mixed" || downstreamEvidence;
   const outcomeCensored = false;
-  const sport = inferSport(record);
+  const socialSnapshot = prepareHistoricalSocialSnapshot({
+    athleteName,
+    decisionDate: record.decisionDate,
+    snapshot: record.socialSnapshot,
+  });
+  const sport = socialSnapshot?.sport || inferSport(record);
   const groundTruth = historicalOutcomeGroundTruth(record.outcome);
   const finalOutcome = normalizedOutcome(record.outcome);
   const primaryReason = normalizedReason(record.primaryReason);
@@ -195,6 +207,7 @@ export function prepareHistoricalBenchmarkRecord(
     outcomeCensored,
     evidencePhase: phase,
     hasPostDecisionEvidence,
+    socialSnapshot,
     golden: {
       athleteName,
       sport,

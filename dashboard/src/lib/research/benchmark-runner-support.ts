@@ -108,6 +108,8 @@ const MODEL_EVIDENCE_CAPS: Record<string, number> = {
   adult_eligibility: 2,
   athletic_momentum: 3,
   audience_signal: 2,
+  social_engagement_signal: 2,
+  creator_behavior_signal: 2,
   commercial_achievability_signal: 2,
   candidate_evidence: 2,
 };
@@ -346,6 +348,26 @@ export function benchmarkCurrentMomentumGate(
   return { passed: recent.length > 0, recentEvidenceCount: recent.length, freshestAt };
 }
 
+export function benchmarkCreatorPotentialGate(evidence: LeakageSafeBenchmarkEvidence[]) {
+  const audienceEvidence = evidence.filter((item) =>
+    item.claimType === "audience_signal"
+    || item.claimType === "social_engagement_signal"
+    || (item.claimType === "candidate_evidence"
+      && preparedEvidenceSignalSupported("audience_signal", `${item.title}\n${item.claim}\n${item.excerpt}`))
+  );
+  const creatorEvidence = evidence.filter((item) =>
+    item.claimType === "creator_behavior_signal"
+    || (item.claimType === "candidate_evidence"
+      && /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i
+        .test(`${item.title}\n${item.claim}\n${item.excerpt}`))
+  );
+  return {
+    passed: audienceEvidence.length > 0 && creatorEvidence.length > 0,
+    audienceEvidenceCount: audienceEvidence.length,
+    creatorEvidenceCount: creatorEvidence.length,
+  };
+}
+
 export function benchmarkCaseReadiness(input: {
   record: BenchmarkGoldenCase;
   selection: BenchmarkEvidenceSelection;
@@ -374,6 +396,7 @@ export function benchmarkEvidenceFreezeReadiness(input: {
 }) {
   const identity = benchmarkIdentityGate(input.record, input.selection.evidence);
   const adult = benchmarkAdultEligibilityGate(input.record, input.selection.evidence);
+  const creatorPotential = benchmarkCreatorPotentialGate(input.selection.evidence);
   const domains = new Set(input.selection.evidence.map((item) => item.independenceGroup));
   const reasons: string[] = [];
   if (!input.selection.pointInTimeCompliant) reasons.push("point-in-time evidence is unsafe");
@@ -381,7 +404,8 @@ export function benchmarkEvidenceFreezeReadiness(input: {
   if (domains.size < 2) reasons.push("fewer than two independent public sources exist");
   if (!identity.passed) reasons.push("two-source exact-identity evidence is missing");
   if (input.fitLabel === "fit" && !adult.passed) reasons.push("fit record lacks two-source 21+ corroboration");
-  return { ready: reasons.length === 0, reasons, identity, adult, independentSources: domains.size };
+  if (input.fitLabel === "fit" && !creatorPotential.passed) reasons.push("fit record lacks both audience and creator-behavior evidence");
+  return { ready: reasons.length === 0, reasons, identity, adult, creatorPotential, independentSources: domains.size };
 }
 
 export function summarizeBenchmarkEvidenceReadiness(entries: Array<{

@@ -41,6 +41,7 @@ import {
   benchmarkAdultEligibilityGate,
   benchmarkCaseReadiness,
   benchmarkCurrentMomentumGate,
+  benchmarkCreatorPotentialGate,
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
@@ -57,6 +58,7 @@ import {
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
 } from "../src/lib/research/benchmark-runner-support.ts";
+import { prepareHistoricalSocialSnapshot } from "../src/lib/research/historical-social-snapshot.ts";
 import {
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
@@ -236,6 +238,79 @@ test("historical reconciliation makes Dylan's workbook authoritative", () => {
   });
   assert.equal(idempotent.conflict, false);
   assert.equal(idempotent.golden.finalOutcome, "non_signing");
+});
+
+test("historical social snapshots require dated pre-decision provenance", () => {
+  const snapshot = prepareHistoricalSocialSnapshot({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    snapshot: {
+      sport: "Beach Volleyball",
+      instagramHandle: "@example.athlete",
+      instagramFollowerCount: "~122K",
+      instagramEngagementRatePercent: "3.1%",
+      averageEngagement: "3.8K",
+      creatorActivity: "Posted weekly training videos and tournament vlogs.",
+      sourceDate: "2026-04-20",
+      sourceEmailSubject: "Example Athlete partnership proposal",
+      sourceDocumentReference: "Example Athlete media kit.pdf",
+    },
+  });
+  assert.equal(snapshot?.instagramHandle, "example.athlete");
+  assert.equal(snapshot?.instagramFollowerCount, 122_000);
+  assert.equal(snapshot?.instagramFollowerCountApproximate, true);
+  assert.equal(snapshot?.instagramEngagementRatePercent, 3.1);
+  assert.equal(snapshot?.averageEngagement, 3_800);
+  assert.deepEqual(snapshot?.claims.map((claim) => claim.claimType), [
+    "athlete_profile", "audience_signal", "social_engagement_signal", "creator_behavior_signal",
+  ]);
+
+  assert.throws(() => prepareHistoricalSocialSnapshot({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    snapshot: {
+      instagramHandle: "example.athlete",
+      instagramFollowerCount: 122_000,
+      sourceDate: "2026-05-04",
+      sourceEmailSubject: "Future snapshot",
+      sourceDocumentReference: "future.pdf",
+    },
+  }), /after the decision date/);
+  assert.throws(() => prepareHistoricalSocialSnapshot({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    snapshot: {
+      instagramFollowerCount: 122_000,
+      sourceDate: "2026-04-20",
+      sourceEmailSubject: "Missing identity",
+      sourceDocumentReference: "snapshot.pdf",
+    },
+  }), /metrics require the Instagram handle/);
+});
+
+test("creator potential gate requires both audience and creator behavior", () => {
+  const evidence = [
+    {
+      sourceId: "audience-source", claimId: "audience-claim", sourceRef: "E1",
+      url: "https://instagram.com/example", domain: "instagram.com", title: "Example Athlete social snapshot",
+      claimType: "audience_signal", claim: "Example Athlete had 122,000 followers.", excerpt: "",
+      effectiveAt: "2026-04-20T12:00:00.000Z", independenceGroup: "instagram.com", material: true,
+      structuredValue: { follower_count: 122_000 },
+    },
+    {
+      sourceId: "creator-source", claimId: "creator-claim", sourceRef: "E2",
+      url: "https://youtube.com/example", domain: "youtube.com", title: "Example Athlete creator snapshot",
+      claimType: "creator_behavior_signal", claim: "Example Athlete posted weekly tournament vlogs.", excerpt: "",
+      effectiveAt: "2026-04-20T12:00:00.000Z", independenceGroup: "youtube.com", material: true,
+      structuredValue: { creator_activity: "weekly tournament vlogs" },
+    },
+  ];
+  assert.deepEqual(benchmarkCreatorPotentialGate(evidence), {
+    passed: true,
+    audienceEvidenceCount: 1,
+    creatorEvidenceCount: 1,
+  });
+  assert.equal(benchmarkCreatorPotentialGate(evidence.slice(0, 1)).passed, false);
 });
 
 test("stratified sampling rotates through sports before taking deeper rows", () => {
@@ -599,10 +674,24 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.deepEqual(benchmarkIdentityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.equal(benchmarkCaseReadiness({ record: BENCHMARK_CASE, selection }).ready, true);
+  const creatorReadySelection = {
+    ...selection,
+    evidence: [
+      ...selection.evidence,
+      {
+        ...selection.evidence[0], sourceId: "audience", claimId: "audience", sourceRef: "E5",
+        claimType: "audience_signal", claim: "Example Athlete had 122,000 followers.",
+      },
+      {
+        ...selection.evidence[1], sourceId: "creator", claimId: "creator", sourceRef: "E6",
+        claimType: "creator_behavior_signal", claim: "Example Athlete posted weekly tournament vlogs.",
+      },
+    ],
+  };
   assert.equal(benchmarkEvidenceFreezeReadiness({
     record: BENCHMARK_CASE,
     fitLabel: "fit",
-    selection,
+    selection: creatorReadySelection,
   }).ready, true);
   assert.equal(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence.filter((item) => item.sourceId !== "age-b")).passed, false);
   const recentMomentum = {
@@ -654,7 +743,7 @@ test("benchmark finalist gates require two independent identity and adult source
   const summary = summarizeBenchmarkEvidenceReadiness([{
     record: BENCHMARK_CASE,
     fitLabel: "fit",
-    selection,
+    selection: creatorReadySelection,
   }, {
     record: { ...BENCHMARK_CASE, id: "missing-evidence" },
     fitLabel: "not_fit",
@@ -663,7 +752,7 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.equal(summary.totalRecords, 2);
   assert.equal(summary.readyForFreeze, 1);
   assert.equal(summary.recordsWithAnySafeEvidence, 1);
-  assert.equal(summary.safeClaimCount, 4);
+  assert.equal(summary.safeClaimCount, 6);
   assert.equal(summary.blockerCounts["fewer than four supported public claims exist before the cutoff"], 1);
 });
 
@@ -840,7 +929,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v18/);
+  assert.match(source, /research-v2-benchmark-runner-v19/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -1290,8 +1379,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(workflow, /query_plan_version: input\.queryPlanVersion/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
-  assert.match(runner, /signalPreparedIds/);
-  assert.match(runner, /run the current blind creator-signal recovery plan before scoring/);
+  assert.doesNotMatch(runner, /signalPreparedIds/);
+  assert.match(runner, /Execution is gated by the evidence itself/);
   assert.match(runner, /held_out_revealed_at: completedAt/);
   assert.match(runner, /contains\("metrics", \{ cohort_version: cohortVersion \}\)/);
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);

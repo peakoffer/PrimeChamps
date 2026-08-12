@@ -148,6 +148,10 @@ const summary = {
   })),
   censored: planned.filter((item) => item.prepared.outcomeCensored).length,
   postDecisionEvidence: planned.filter((item) => item.prepared.hasPostDecisionEvidence).length,
+  historicalSocialSnapshots: planned.filter((item) => item.prepared.socialSnapshot).length,
+  historicalAudienceSnapshots: planned.filter((item) => item.prepared.socialSnapshot?.instagramFollowerCount != null).length,
+  historicalCreatorSnapshots: planned.filter((item) => item.prepared.socialSnapshot?.creatorActivity).length,
+  historicalSnapshotClaims: planned.reduce((total, item) => total + (item.prepared.socialSnapshot?.claims.length || 0), 0),
   fit: planned.filter((item) => item.golden.fitLabel === "fit").length,
   notFit: planned.filter((item) => item.golden.fitLabel === "not_fit").length,
   uncertainFit: planned.filter((item) => item.golden.fitLabel === "uncertain").length,
@@ -356,4 +360,121 @@ for (const claim of desiredClaims.filter((candidate) => claimIds.has(`${candidat
   if (error) throw error;
 }
 
-console.log(JSON.stringify({ ...summary, goldenRecordsWritten: goldenIds.size, evidenceSourcesWritten: sourceIds.size, claimsWritten: desiredClaims.length }, null, 2));
+const historicalSnapshotProvider = "onlyfans_historical_social_snapshot";
+const snapshotSources = planned.flatMap((item) => {
+  const snapshot = item.prepared.socialSnapshot;
+  if (!snapshot) return [];
+  const profiles = [
+    snapshot.instagramHandle && snapshot.instagramProfileUrl ? {
+      platform: "instagram", handle: snapshot.instagramHandle, url: snapshot.instagramProfileUrl,
+      domain: "instagram.com",
+    } : null,
+    snapshot.tiktokHandle && snapshot.tiktokProfileUrl ? {
+      platform: "tiktok", handle: snapshot.tiktokHandle, url: snapshot.tiktokProfileUrl,
+      domain: "tiktok.com",
+    } : null,
+  ].filter((profile): profile is NonNullable<typeof profile> => Boolean(profile));
+  return profiles.map((profile) => ({ item, snapshot, profile }));
+});
+
+const snapshotSourceIds = new Map<string, string>();
+for (const entry of snapshotSources) {
+  const providerRequestId = `${entry.item.prepared.datasetKey}:${entry.item.prepared.sourceRecordKey}:historical-social:${entry.profile.platform}`;
+  const sourceRow = {
+    organization_id: organizationId,
+    golden_record_id: goldenIds.get(entry.item.prepared.sourceRecordKey),
+    canonical_url: entry.profile.url,
+    domain: entry.profile.domain,
+    title: `${entry.item.golden.athleteName} ${entry.profile.platform} snapshot (${entry.snapshot.sourceDate})`,
+    publisher: "Contemporaneous OnlyFans partnership materials",
+    source_type: "archive",
+    provider: historicalSnapshotProvider,
+    provider_request_id: providerRequestId,
+    published_at: entry.snapshot.sourceTimestamp,
+    historical_as_of: entry.snapshot.sourceTimestamp,
+    retrieval_status: "retrieved",
+    eligible_before_cutoff: true,
+    exclusion_reason: null,
+    metadata: {
+      dataset_key: entry.item.prepared.datasetKey,
+      source_record_key: entry.item.prepared.sourceRecordKey,
+      platform: entry.profile.platform,
+      handle: entry.profile.handle,
+      snapshot_date: entry.snapshot.sourceDate,
+      source_email_subject: entry.snapshot.sourceEmailSubject,
+      source_document_reference: entry.snapshot.sourceDocumentReference,
+      provenance_boundary: "Pre-decision public social/profile facts preserved in contemporaneous mailbox materials; outcome fields excluded.",
+    },
+  };
+  const { data: existingSource, error: existingSourceError } = await admin.from("research_evidence_sources")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("provider", historicalSnapshotProvider)
+    .eq("provider_request_id", providerRequestId)
+    .maybeSingle();
+  if (existingSourceError) throw existingSourceError;
+  if (existingSource?.id) {
+    const { error } = await admin.from("research_evidence_sources").update(sourceRow)
+      .eq("id", existingSource.id).eq("organization_id", organizationId);
+    if (error) throw error;
+    snapshotSourceIds.set(providerRequestId, existingSource.id);
+  } else {
+    const { data, error } = await admin.from("research_evidence_sources").insert(sourceRow).select("id").single();
+    if (error) throw error;
+    snapshotSourceIds.set(providerRequestId, data.id);
+  }
+}
+
+let snapshotClaimsWritten = 0;
+for (const item of planned) {
+  const snapshot = item.prepared.socialSnapshot;
+  if (!snapshot) continue;
+  for (const claim of snapshot.claims) {
+    const platform = claim.structuredValue.platform === "tiktok" ? "tiktok"
+      : snapshot.instagramHandle ? "instagram" : "tiktok";
+    const providerRequestId = `${item.prepared.datasetKey}:${item.prepared.sourceRecordKey}:historical-social:${platform}`;
+    const evidenceSourceId = snapshotSourceIds.get(providerRequestId);
+    // A sport-only enrichment can improve stratification without becoming
+    // model evidence. Every scoring claim must have a captured public profile.
+    if (!evidenceSourceId) continue;
+    const claimRow = {
+      organization_id: organizationId,
+      evidence_source_id: evidenceSourceId,
+      golden_record_id: goldenIds.get(item.prepared.sourceRecordKey),
+      claim_type: claim.claimType,
+      claim_text: claim.claimText,
+      structured_value: claim.structuredValue,
+      source_excerpt: `${claim.claimText} Source: ${snapshot.sourceDocumentReference}; email: ${snapshot.sourceEmailSubject}.`,
+      effective_at: snapshot.sourceTimestamp,
+      support_status: "supported",
+      extraction_confidence: 95,
+      independence_group: platform === "instagram" ? "instagram.com" : "tiktok.com",
+      material: claim.material,
+      eligible_for_scoring: claim.eligibleForScoring,
+      exclusion_reason: claim.eligibleForScoring ? null : "Internal age evidence is a discovery hint only; two independent public sources remain required.",
+      verified_at: new Date().toISOString(),
+    };
+    const { data: existingClaim, error: existingClaimError } = await admin.from("research_evidence_claims")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("golden_record_id", goldenIds.get(item.prepared.sourceRecordKey)!)
+      .eq("evidence_source_id", evidenceSourceId)
+      .eq("claim_type", claim.claimType)
+      .maybeSingle();
+    if (existingClaimError) throw existingClaimError;
+    const { error } = existingClaim?.id
+      ? await admin.from("research_evidence_claims").update(claimRow).eq("id", existingClaim.id)
+      : await admin.from("research_evidence_claims").insert(claimRow);
+    if (error) throw error;
+    snapshotClaimsWritten += 1;
+  }
+}
+
+console.log(JSON.stringify({
+  ...summary,
+  goldenRecordsWritten: goldenIds.size,
+  evidenceSourcesWritten: sourceIds.size + snapshotSourceIds.size,
+  claimsWritten: desiredClaims.length + snapshotClaimsWritten,
+  historicalSnapshotSourcesWritten: snapshotSourceIds.size,
+  historicalSnapshotClaimsWritten: snapshotClaimsWritten,
+}, null, 2));
