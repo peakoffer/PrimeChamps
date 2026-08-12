@@ -221,6 +221,11 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
     birthYear: 2003,
     precision: "birth_date",
   });
+  assert.deepEqual(parseAgeEvidence("Age: 1986 • Jan 03", now), {
+    age: 40,
+    birthYear: 1986,
+    precision: "birth_date",
+  });
   assert.equal(parseAgeEvidence("born 2005", now)?.age, 20);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", "Kendall Kipp player profile. Date of birth: 12/12/2000."), true);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", `Kendall Kipp appears in a roster. ${"Other roster details ".repeat(20)} Age: 21.`), false);

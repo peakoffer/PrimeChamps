@@ -854,7 +854,7 @@ test("archived evidence extraction requires exact identity and sport and preserv
     mimeType: "text/html",
     archivedUrl: `https://web.archive.org/web/20240501010101id_/${candidate.url}`,
   };
-  const html = `<!doctype html><html><head><title>Jane Doe | Volleyball Roster</title><script type="application/ld+json">{"datePublished":"2023-09-01"}</script></head><body><main><h1>Jane Doe</h1><p>Jane Doe was born January 15, 2000 and is a volleyball outside hitter. The nationally ranked rookie won a conference championship and shares training content on Instagram.</p></main></body></html>`;
+  const html = `<!doctype html><html><head><title>Jane Doe | Volleyball Roster</title><script type="application/ld+json">{"datePublished":"2023-09-01"}</script></head><body><main><h1>Jane Doe</h1><p>Jane Doe was born January 15, 2000 and is a volleyball outside hitter. The nationally ranked rookie won a conference championship and is a content creator with 100,000 Instagram followers.</p></main></body></html>`;
   const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
 
   assert.equal(prepared.rejectionReason, null);
@@ -892,6 +892,25 @@ test("archived evidence extraction requires exact identity and sport and preserv
   });
   assert.equal(wrongSport.evidence, null);
   assert.equal(wrongSport.rejectionReason, "archived_page_does_not_support_requested_sport");
+
+  const navigationOnlySignals = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: "<html><title>Jane Doe volleyball profile</title><body><nav>Skip to main content Rankings Record Book Instagram YouTube</nav><main><h1>Jane Doe</h1><p>Jane Doe is a volleyball athlete with a public player biography and team profile.</p></main></body></html>",
+  });
+  assert.equal(navigationOnlySignals.rejectionReason, null);
+  assert.ok(!navigationOnlySignals.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
+  assert.ok(!navigationOnlySignals.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const officialCompactDob = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Nick Ponzio", sport: "Track & Field" },
+    candidate: { ...candidate, title: "World Athletics shot put list", url: "https://worldathletics.org/records/shot-put" },
+    capture: { ...capture, originalUrl: "https://worldathletics.org/records/shot-put" },
+    html: "<html><title>World Athletics shot put list</title><body><main>Nick Ponzio 04 JAN 1995 ITA Shot Put Track and Field senior ranking.</main></body></html>",
+  });
+  const officialAge = officialCompactDob.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(officialAge?.structuredValue.birth_date, "1995-01-04");
 });
 
 test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {
@@ -910,6 +929,7 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   });
   assert.ok(broadSportQueries.every((query) => query.includes("(MMA OR UFC OR boxing OR kickboxing OR fighter)")));
   assert.ok(broadSportQueries.every((query) => !query.includes('"Combat Sports"')));
+  assert.ok(queries[1].includes('("date of birth" OR birthday OR born OR age)'));
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
   assert.equal(normalizeEvidencePreparationBudget(undefined), 0.75);
@@ -939,6 +959,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
   assert.match(workflow, /scoringTokensSpent: 0/);
   assert.match(workflow, /provider: "internet_archive_wayback"/);
+  assert.match(workflow, /from\("research_evidence_claims"\)\.delete\(\)/);
   for (const forbiddenTable of ["athletes", "research_candidates", "pipeline_athletes", "messages", "outreach_touchpoints", "channel_messages"]) {
     assert.ok(!workflow.includes(`from("${forbiddenTable}")`), `evidence workflow must not touch ${forbiddenTable}`);
     assert.ok(!route.includes(`from("${forbiddenTable}")`), `evidence route must not touch ${forbiddenTable}`);
@@ -947,7 +968,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /no provider call was started/);
   assert.match(route, /reuseProviderRunId/);
   assert.match(route, /latestSameRecordRun\?\.status === "failed"/);
+  assert.match(route, /latestSummary\?\.providerRunId/);
+  assert.match(route, /completedForCurrentExtraction/);
+  assert.match(route, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(route, /query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION/);
+  assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(workflow, /query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION/);
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);

@@ -4,6 +4,7 @@ import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
   normalizeEvidencePreparationBudget,
 } from "@/lib/research/historical-evidence-preparation";
@@ -59,13 +60,23 @@ export async function GET() {
         .select("id,workflow_run_id,status,record_ids,max_apify_charge_microusd,actual_apify_cost_microusd,records_processed,records_ready,safe_source_count,safe_claim_count,checkpoint,summary,error_message,started_at,completed_at,created_at")
         .eq("organization_id", user.organizationId)
         .order("created_at", { ascending: false })
-        .limit(10),
+        .limit(50),
     ]);
     if (candidateError) throw candidateError;
     if (runError) throw runError;
     const eligible = ((candidates || []) as GoldenPreparationCandidate[]).filter(eligibleForEvidencePreparation);
+    const completedForCurrentExtraction = new Set((runs || []).flatMap((run) => {
+      const checkpoint = run.checkpoint as Record<string, unknown> | null;
+      return run.status === "completed"
+        && checkpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
+        && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
+        && Array.isArray(run.record_ids)
+        ? run.record_ids.filter((id): id is string => typeof id === "string")
+        : [];
+    }));
     return NextResponse.json({
-      eligibleRecordCount: eligible.length,
+      eligibleRecordCount: eligible.filter((record) => !completedForCurrentExtraction.has(record.id)).length,
+      totalEligibleRecordCount: eligible.length,
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
       defaultMaxApifyChargeUsd: EVIDENCE_PREPARATION_LIMITS.defaultMaxApifyChargeUsd,
       scoringTokensSpentByPreparation: 0,
@@ -131,11 +142,31 @@ export async function POST(request: NextRequest) {
         eligible: eligible.length,
       }, { status: 409 });
     }
-    const selected = eligible.slice(0, requestedCount);
+    const { data: recentRuns, error: recentRunError } = await admin.from("research_evidence_preparation_runs")
+      .select("status,record_ids,actual_apify_cost_microusd,checkpoint,summary,created_at")
+      .eq("organization_id", user.organizationId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (recentRunError) throw recentRunError;
+    const completedForCurrentExtraction = new Set((recentRuns || []).flatMap((run) => {
+      const checkpoint = run.checkpoint as Record<string, unknown> | null;
+      return run.status === "completed"
+        && checkpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
+        && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
+        && Array.isArray(run.record_ids)
+        ? run.record_ids.filter((id): id is string => typeof id === "string")
+        : [];
+    }));
+    const selected = (requestedIds.length
+      ? eligible
+      : eligible.filter((record) => !completedForCurrentExtraction.has(record.id))
+    ).slice(0, requestedCount);
     if (!selected.length) {
       return NextResponse.json({
-        error: "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
-        eligible: 0,
+        error: eligible.length
+          ? "Every eligible record has completed the current evidence-extraction version; no provider call was started."
+          : "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
+        eligible: eligible.length,
         scoringTokensSpent: 0,
       }, { status: 409 });
     }
@@ -143,28 +174,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "APIFY_API_KEY is not configured; no provider call was started." }, { status: 503 });
     }
     const recordIds = selected.map((record) => record.id);
-    const { data: recentRuns, error: recentRunError } = await admin.from("research_evidence_preparation_runs")
-      .select("status,record_ids,actual_apify_cost_microusd,checkpoint,created_at")
-      .eq("organization_id", user.organizationId)
-      .order("created_at", { ascending: false })
-      .limit(20);
-    if (recentRunError) throw recentRunError;
     const sameRecordIds = (left: unknown, right: string[]) => Array.isArray(left)
       && left.length === right.length
       && left.every((value, index) => value === right[index]);
     const latestSameRecordRun = (recentRuns || []).find((run) => sameRecordIds(run.record_ids, recordIds));
     const latestCheckpoint = latestSameRecordRun?.checkpoint as Record<string, unknown> | null | undefined;
-    const reusableRun = latestSameRecordRun?.status === "failed"
+    const latestSummary = latestSameRecordRun?.summary as Record<string, unknown> | null | undefined;
+    const latestProviderRunId = typeof latestCheckpoint?.provider_run_id === "string"
+      ? latestCheckpoint.provider_run_id
+      : typeof latestSummary?.providerRunId === "string" ? latestSummary.providerRunId : undefined;
+    const reusableRun = (latestSameRecordRun?.status === "failed"
+      || latestCheckpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION)
       && latestCheckpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
-      && typeof latestCheckpoint?.provider_run_id === "string"
-      && latestCheckpoint.provider_run_id.length > 0
-      && typeof latestSameRecordRun.actual_apify_cost_microusd === "number"
+      && typeof latestProviderRunId === "string"
+      && latestProviderRunId.length > 0
+      && typeof latestSameRecordRun?.actual_apify_cost_microusd === "number"
       ? latestSameRecordRun
       : undefined;
-    const reusableCheckpoint = reusableRun?.checkpoint as Record<string, unknown> | null | undefined;
-    const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
-      ? reusableCheckpoint.provider_run_id
-      : undefined;
+    const reuseProviderRunId = reusableRun ? latestProviderRunId : undefined;
     const { data: preparationRun, error: insertError } = await admin.from("research_evidence_preparation_runs").insert({
       organization_id: user.organizationId,
       requested_by_user_id: user.id,
@@ -173,6 +200,7 @@ export async function POST(request: NextRequest) {
       max_apify_charge_microusd: Math.round(maxApifyChargeUsd * 1_000_000),
       checkpoint: {
         phase: "queued",
+        extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
         query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
         evaluation_only: true,
         scoring_tokens_spent: 0,

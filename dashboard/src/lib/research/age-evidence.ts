@@ -48,6 +48,16 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
+  const yearFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|age)\s*[:\-]?\s*(\d{4})\s*(?:[-/•]|\s)\s*([A-Za-z]+|\d{1,2})\s*(?:[-/•]|\s)\s*(\d{1,2})\b/i);
+  if (yearFirst) {
+    const year = Number(yearFirst[1]);
+    const month = /^\d+$/.test(yearFirst[2]) ? Number(yearFirst[2]) : MONTHS[yearFirst[2].toLowerCase()];
+    const day = Number(yearFirst[3]);
+    if (month && month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1970) {
+      return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
+    }
+  }
+
   const stated = text.match(/\b(?:age|aged)\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
   const statedAge = Number(stated?.[1] || stated?.[2]);
   if (Number.isFinite(statedAge) && statedAge >= 10 && statedAge <= 80) {

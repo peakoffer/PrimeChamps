@@ -3,6 +3,7 @@ import { readApifyRunDatasetWithUsage, runApifyActorWithUsage } from "@/lib/apif
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
   buildHistoricalEvidenceQueries,
   dedupeHistoricalSearchCandidates,
@@ -315,6 +316,12 @@ async function persistPreparedRecordEvidence(input: {
       exclusion_reason: null,
       verified_at: verifiedAt,
     }));
+    const { error: staleClaimError } = await admin.from("research_evidence_claims").delete()
+      .eq("organization_id", input.organizationId)
+      .eq("evidence_source_id", source.id)
+      .eq("golden_record_id", input.record.id)
+      .eq("eligible_for_scoring", true);
+    if (staleClaimError) throw staleClaimError;
     if (claimRows.length) {
       const { error: claimError } = await admin.from("research_evidence_claims").upsert(claimRows, {
         onConflict: "organization_id,evidence_source_id,golden_record_id,claim_type",
@@ -388,6 +395,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         actual_apify_cost_microusd: discovery.actualApifyCostMicrousd,
         checkpoint: {
           phase: "archive_retrieval",
+          extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
           query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
           provider_run_id: discovery.providerRunId,
           discovery_reused: discovery.discoveryReused,
@@ -440,6 +448,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           safe_claim_count: results.reduce((sum, result) => sum + result.safeClaims, 0),
           checkpoint: {
             phase: "record_persisted",
+            extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
             query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
             last_record_id: record.id,
             processed_record_ids: results.map((result) => result.recordId),
@@ -469,7 +478,9 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         safe_claim_count: results.reduce((sum, result) => sum + result.safeClaims, 0),
         checkpoint: {
           phase: "completed",
+          extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
           query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+          provider_run_id: discovery.providerRunId,
           processed_record_ids: results.map((result) => result.recordId),
           scoring_tokens_spent: 0,
         },

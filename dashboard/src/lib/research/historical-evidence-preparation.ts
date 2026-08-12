@@ -5,7 +5,8 @@ import {
   benchmarkSourceSupportsSport,
 } from "./benchmark-sport-validation.ts";
 
-export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-v2";
+export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-precise-signals-v1";
 
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
@@ -238,7 +239,9 @@ function evidenceExcerpt(name: string, text: string) {
 
 function extractBirthDate(text: string) {
   const match = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\b/i);
-  if (!match) return null;
+  if (!match) return text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|age)\s*[:\-]?\s*(\d{4})\s*(?:[-/•]|\s)\s*([A-Za-z]+|\d{1,2})\s*(?:[-/•]|\s)\s*(\d{1,2})\b/i)
+    ? normalizeYearFirstBirthDate(text)
+    : null;
   const months: Record<string, number> = {
     jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
     may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
@@ -252,6 +255,33 @@ function extractBirthDate(text: string) {
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return date.toISOString().slice(0, 10);
+}
+
+function normalizeYearFirstBirthDate(text: string) {
+  const match = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|age)\s*[:\-]?\s*(\d{4})\s*(?:[-/•]|\s)\s*([A-Za-z]+|\d{1,2})\s*(?:[-/•]|\s)\s*(\d{1,2})\b/i);
+  if (!match) return null;
+  const monthNames: Record<string, number> = {
+    jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+    may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+    sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
+    dec: 12, december: 12,
+  };
+  const year = Number(match[1]);
+  const month = /^\d+$/.test(match[2]) ? Number(match[2]) : monthNames[match[2].toLowerCase()];
+  const day = Number(match[3]);
+  if (!month || month < 1 || month > 12 || day < 1 || day > 31 || year < 1970) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function extractOfficialCompactBirthDate(name: string, text: string, domain: string) {
+  if (!["worldathletics.org", "worldaquatics.com", "olympics.com"].includes(domain)) return null;
+  const escapedName = name.trim().split(/\s+/).map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  const match = text.match(new RegExp(`\\b${escapedName}\\s+(\\d{1,2})\\s+([A-Za-z]{3,9})\\s+(\\d{4})\\b`, "i"));
+  if (!match) return null;
+  const normalized = normalizeYearFirstBirthDate(`Date of birth: ${match[3]} ${match[2]} ${match[1]}`);
+  return normalized ? { birthDate: normalized, evidence: match[0].slice(0, 500) } : null;
 }
 
 function hasSignal(text: string, pattern: RegExp) {
@@ -308,9 +338,13 @@ export function extractPreparedArchivedEvidence(input: {
     },
   ];
   const attributableAge = parseAgeEvidenceForAthlete(record.athlete_name, attributable, new Date(capture.capturedAt));
-  if (attributableAge) {
-    const ageExcerpt = attributableAge.evidence.slice(0, 1_000);
-    const birthDate = attributableAge.parsed.precision === "birth_date" ? extractBirthDate(ageExcerpt) : null;
+  const officialCompactBirthDate = attributableAge
+    ? null
+    : extractOfficialCompactBirthDate(record.athlete_name, attributable, domain);
+  if (attributableAge || officialCompactBirthDate) {
+    const ageExcerpt = (attributableAge?.evidence || officialCompactBirthDate?.evidence || "").slice(0, 1_000);
+    const birthDate = officialCompactBirthDate?.birthDate
+      || (attributableAge?.parsed.precision === "birth_date" ? extractBirthDate(ageExcerpt) : null);
     claims.push({
       claimType: "adult_eligibility",
       claimText: birthDate
@@ -318,24 +352,24 @@ export function extractPreparedArchivedEvidence(input: {
         : `${record.athlete_name} has attributable public age evidence in this archived source.`,
       structuredValue: {
         ...(birthDate ? { birth_date: birthDate } : {}),
-        birth_year: attributableAge.parsed.birthYear,
-        age: attributableAge.parsed.age,
-        precision: attributableAge.parsed.precision,
+        birth_year: birthDate ? Number(birthDate.slice(0, 4)) : attributableAge?.parsed.birthYear,
+        age: attributableAge?.parsed.age,
+        precision: birthDate ? "birth_date" : attributableAge?.parsed.precision,
         age_as_of: capture.capturedAt,
       },
       sourceExcerpt: ageExcerpt,
       effectiveAt,
-      extractionConfidence: birthDate ? 99 : attributableAge.parsed.precision === "stated_age" ? 94 : 90,
+      extractionConfidence: birthDate ? 99 : attributableAge?.parsed.precision === "stated_age" ? 94 : 90,
       material: true,
     });
   }
-  if (hasSignal(excerpt, /\b(?:rank(?:ed|ing)|champion|finalist|medal|won|winner|victory|record|qualif(?:y|ied)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa)\b/i)) {
+  if (hasSignal(excerpt, /\b(?:ranked|ranking|champion|finalist|medalist|medal|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut)\b/i)) {
     claims.push({
       claimType: "athletic_momentum", claimText: excerpt.slice(0, 600), structuredValue: { signal: "competitive_momentum" },
       sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 90, material: true,
     });
   }
-  if (hasSignal(excerpt, /\b(?:instagram|tiktok|youtube|social media|followers|subscriber|creator|content|audience)\b/i)) {
+  if (hasSignal(excerpt, /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i)) {
     claims.push({
       claimType: "audience_signal", claimText: excerpt.slice(0, 600), structuredValue: { signal: "public_audience_or_creator_presence" },
       sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 88, material: true,
@@ -386,7 +420,7 @@ export function buildHistoricalEvidenceQueries(record: Pick<EvidencePreparationR
   const sportExpression = broadSportExpressions[record.sport] || `"${record.sport}"`;
   return [
     `"${record.athlete_name}" ${sportExpression} athlete profile biography ${excludeSocial} before:${before}`,
-    `"${record.athlete_name}" ${sportExpression} born age date of birth roster ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthday OR born OR age) (profile OR bio OR roster) ${excludeSocial} before:${before}`,
     `"${record.athlete_name}" ${sportExpression} results championship ranking interview ${excludeSocial} before:${before}`,
   ];
 }
