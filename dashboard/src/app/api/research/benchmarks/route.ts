@@ -105,6 +105,7 @@ export async function GET() {
         heldOut,
         canRunDevelopment: development.fit > 0 && development.notFit > 0,
         canRunHeldOut: heldOut.fit > 0 && heldOut.notFit > 0,
+        heldOutEvaluationEnabled: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true",
         strictTargetReady: development.fit + heldOut.fit >= 40 && development.notFit + heldOut.notFit >= 40,
       },
     });

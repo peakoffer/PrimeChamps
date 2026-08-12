@@ -122,6 +122,7 @@ type BenchmarkReadiness = {
   heldOut: { total: number; fit: number; notFit: number };
   canRunDevelopment: boolean;
   canRunHeldOut: boolean;
+  heldOutEvaluationEnabled: boolean;
   strictTargetReady: boolean;
 };
 
@@ -130,6 +131,7 @@ const INITIAL_BENCHMARK_READINESS: BenchmarkReadiness = {
   heldOut: { total: 0, fit: 0, notFit: 0 },
   canRunDevelopment: false,
   canRunHeldOut: false,
+  heldOutEvaluationEnabled: false,
   strictTargetReady: false,
 };
 
@@ -343,9 +345,14 @@ export default function ResearchBenchmarkPage() {
   const activeEvidenceRun = evidencePreparationRuns.find((run) => run.status === "queued" || run.status === "running");
   const latestEvidenceRun = evidencePreparationRuns[0];
   const latestDevelopmentRun = benchmarkRuns.find((run) => run.benchmark_split === "development");
+  const latestHeldOutRun = benchmarkRuns.find((run) => run.benchmark_split === "held_out");
   const activeDevelopmentRun = latestDevelopmentRun
     && ["queued", "running", "failed"].includes(latestDevelopmentRun.status)
     ? latestDevelopmentRun
+    : undefined;
+  const activeHeldOutRun = latestHeldOutRun
+    && ["queued", "running", "failed"].includes(latestHeldOutRun.status)
+    ? latestHeldOutRun
     : undefined;
 
   useEffect(() => {
@@ -397,6 +404,55 @@ export default function ResearchBenchmarkPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Development checkpoint failed");
       await load();
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const startHeldOutRelease = async () => {
+    setWorking(true);
+    setMessage("Creating the one-time locked held-out release without spending model tokens…");
+    try {
+      const response = await fetch("/api/research/benchmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          split: "held_out",
+          caseLimit: benchmarkReadiness.heldOut.total,
+          costLimitMicrousd: 1_500_000,
+          baselineRunId: latestDevelopmentRun?.id || null,
+          changeDimension: "audit_rule",
+          changeDescription: "Frozen v17 one-time held-out release",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not create held-out release");
+      setMessage(`Locked held-out release created with ${payload.selectedCases} cases. Labels remain concealed until completion.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create held-out release");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const resumeHeldOutRelease = async (runId: string) => {
+    setWorking(true);
+    setMessage("Scoring and independently auditing one locked held-out case…");
+    try {
+      const response = await fetch("/api/research/benchmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "resume", runId }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not resume held-out release");
+      setMessage(payload.completed
+        ? "Held-out release completed. The one-time metrics are now revealed."
+        : `Held-out checkpoint saved: ${payload.completedCases}/${payload.totalCases}.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not resume held-out release");
     } finally {
       setWorking(false);
     }
@@ -847,6 +903,25 @@ export default function ResearchBenchmarkPage() {
                     </button>
                   )}
                 </>
+              )}
+              {benchmarkReadiness.heldOutEvaluationEnabled && (
+                activeHeldOutRun ? (
+                  <button
+                    disabled={working || activeHeldOutRun.status === "running"}
+                    onClick={() => void resumeHeldOutRelease(activeHeldOutRun.id)}
+                    className="rounded-lg border border-red-800 px-3 py-2 text-sm font-medium text-red-200 disabled:opacity-40"
+                  >
+                    {activeHeldOutRun.status === "failed" ? "Retry held-out checkpoint" : "Score next held-out case"}
+                  </button>
+                ) : !latestHeldOutRun && (
+                  <button
+                    disabled={working || !benchmarkReadiness.canRunHeldOut || latestDevelopmentRun?.status !== "completed"}
+                    onClick={() => void startHeldOutRelease()}
+                    className="rounded-lg border border-red-800 px-3 py-2 text-sm font-medium text-red-200 disabled:opacity-40"
+                  >
+                    Run one-time held-out release
+                  </button>
+                )
               )}
             </div>
           </div>
