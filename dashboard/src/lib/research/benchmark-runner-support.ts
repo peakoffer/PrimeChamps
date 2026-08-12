@@ -1,3 +1,8 @@
+import {
+  preparedEvidenceSignalSupported,
+  preparedMomentumEffectiveAt,
+} from "./historical-evidence-preparation.ts";
+
 export const BENCHMARK_OUTCOME_PROVIDERS = new Set([
   "gmail_mailbox_benchmark",
   "historical_mailbox_benchmark",
@@ -317,16 +322,27 @@ export function benchmarkCurrentMomentumGate(
   const threshold = new Date(cutoff);
   threshold.setUTCMonth(threshold.getUTCMonth() - Math.max(1, maximumAgeMonths));
   const recent = evidence.filter((item) => {
-    const effectiveAt = validTimestamp(item.effectiveAt);
-    return item.claimType === "athletic_momentum"
+    const signalText = `${item.title}\n${item.claim}\n${item.excerpt}`;
+    const supportsMomentum = item.claimType === "athletic_momentum"
+      || (item.claimType === "candidate_evidence"
+        && preparedEvidenceSignalSupported("athletic_momentum", signalText));
+    const datedSignal = item.claimType === "athletic_momentum"
+      ? item.effectiveAt
+      : preparedMomentumEffectiveAt(signalText, item.effectiveAt);
+    const effectiveAt = validTimestamp(datedSignal);
+    return supportsMomentum
       && effectiveAt !== null
       && effectiveAt <= cutoff
       && effectiveAt >= threshold.getTime()
       && evidenceNamesAthlete(record.athlete_name, item);
   });
-  const freshestAt = recent.reduce<string | null>((freshest, item) => (
-    !freshest || item.effectiveAt > freshest ? item.effectiveAt : freshest
-  ), null);
+  const freshestAt = recent.reduce<string | null>((freshest, item) => {
+    const signalText = `${item.title}\n${item.claim}\n${item.excerpt}`;
+    const effectiveAt = item.claimType === "athletic_momentum"
+      ? item.effectiveAt
+      : preparedMomentumEffectiveAt(signalText, item.effectiveAt);
+    return !freshest || effectiveAt > freshest ? effectiveAt : freshest;
+  }, null);
   return { passed: recent.length > 0, recentEvidenceCount: recent.length, freshestAt };
 }
 

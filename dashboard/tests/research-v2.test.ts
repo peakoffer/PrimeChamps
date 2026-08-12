@@ -620,6 +620,20 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [
     { ...recentMomentum, effectiveAt: "2022-04-01T00:00:00.000Z" },
   ]).passed, false);
+  assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [{
+    ...recentMomentum,
+    claimType: "candidate_evidence",
+    title: "Example Athlete results, medals, and highlights",
+    effectiveAt: "2025-04-01T00:00:00.000Z",
+  }]).passed, true);
+  assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [{
+    ...recentMomentum,
+    claimType: "candidate_evidence",
+    title: "Example Athlete profile",
+    claim: "Example Athlete won a Beach Volleyball championship in 2021.",
+    excerpt: "Example Athlete won a Beach Volleyball championship in 2021.",
+    effectiveAt: "2025-04-01T00:00:00.000Z",
+  }]).passed, false);
   const missingAge = { ...selection, evidence: selection.evidence.filter((item) => item.sourceId !== "age-b") };
   assert.ok(benchmarkEvidenceFreezeReadiness({
     record: BENCHMARK_CASE,
