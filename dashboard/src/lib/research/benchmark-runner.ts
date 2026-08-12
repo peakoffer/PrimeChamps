@@ -26,7 +26,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v4";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v5";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -434,7 +434,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 3,
+      version: 4,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -459,15 +459,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time athlete assessment using only supplied public evidence; labels and outcomes are withheld; every score uses the 0-100 scale.",
-      content_hash: "research-v2-benchmark-researcher-v3",
+      content: "Blind point-in-time athlete assessment using only supplied public evidence; labels and outcomes are withheld; every score uses the 0-100 scale; unsupported claims are distinct from missing-evidence gaps.",
+      content_hash: "research-v2-benchmark-researcher-v4",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
-      content: "Independent blind evidence audit before comparison with the Researcher assessment; every score uses the 0-100 scale and review findings stay concise.",
-      content_hash: "research-v2-benchmark-auditor-v3",
+      content: "Independent blind evidence audit before comparison with the Researcher assessment; every score uses the 0-100 scale; unsupported claims are distinct from missing-evidence gaps; review findings stay concise.",
+      content_hash: "research-v2-benchmark-auditor-v4",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -674,7 +674,7 @@ Evidence cutoff: ${record.evidence_cutoff_at}
 Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
-All three scores must use the 0-100 numeric scale, never fractions from 0 to 1.
+All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. List only affirmative factual assertions that lack supplied support in unsupported_claims. Put absent evidence or unanswered questions only in critical_gaps. Keep the summary under 120 words and return no more than five gaps or unsupported claims.
 Return the required JSON only.`;
 }
 
@@ -808,7 +808,7 @@ async function processBenchmarkCase(input: {
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
-      maximumOutputTokens: 1_400,
+      maximumOutputTokens: 1_600,
       ledger,
     });
     researcher = researcherCall.value;
@@ -883,7 +883,7 @@ async function processBenchmarkCase(input: {
       schema: BLIND_AUDITOR_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
-      maximumOutputTokens: 1_100,
+      maximumOutputTokens: 1_300,
       ledger,
     });
     blind = blindCall.value;
@@ -1032,7 +1032,7 @@ async function processBenchmarkCase(input: {
   const finalPredictionCorrect = correctedFitLabel === record.fit_label
     && correctedAchievabilityLabel === record.achievability_label
     && (corrected.priority > 80) === actualPriority;
-  const auditorCaught = researcherFailure && (verdict !== "pass" || finalPredictionCorrect);
+  const auditorCaught = researcherFailure && finalPredictionCorrect;
   const totalUsage = combinedUsage(researcherUsage, auditUsage);
   const totalCost = researcherUsage.costMicrousd + auditCostMicrousd;
   const finalHigh = corrected.priority > 80;
@@ -1077,7 +1077,12 @@ export async function resumeBenchmarkRun(input: { organizationId: string; runId:
   if (run.status === "completed") return { runId: run.id, completed: true, alreadyCompleted: true };
   if (run.status === "cancelled") throw new Error("Cancelled benchmark runs cannot be resumed");
   if (run.metrics.runner_version !== RUNNER_VERSION || !Array.isArray(run.metrics.case_ids)) {
-    throw new Error("This benchmark run does not have a compatible replay checkpoint");
+    const compatibilityError = "This benchmark run does not have a compatible replay checkpoint; start a fresh development smoke test";
+    await admin.from("research_benchmark_runs").update({
+      status: "failed",
+      metrics: { ...run.metrics, lease_id: null, lease_expires_at: null, last_error: compatibilityError },
+    }).eq("id", run.id).eq("organization_id", run.organization_id);
+    throw new Error(compatibilityError);
   }
   const nowDate = new Date();
   const now = nowDate.toISOString();
