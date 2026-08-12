@@ -257,6 +257,7 @@ export async function POST(request: NextRequest) {
       ? latestCheckpoint.provider_run_id
       : typeof latestSummary?.providerRunId === "string" ? latestSummary.providerRunId : undefined;
     const reusableRun = (latestSameRecordRun?.status === "failed"
+      || latestSameRecordRun?.status === "cancelled"
       || latestCheckpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION)
       && latestCheckpoint?.query_plan_version === queryPlanVersion
       && typeof latestProviderRunId === "string"

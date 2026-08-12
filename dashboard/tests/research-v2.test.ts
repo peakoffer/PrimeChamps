@@ -1086,6 +1086,12 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     { query: "q", title: "D", url: "https://two.example/d", snippet: "", position: 6 },
   ]);
   assert.deepEqual(deduped.map((item) => item.title), ["A", "B", "D"]);
+  const agePrioritized = dedupeHistoricalSearchCandidates([
+    { query: "q", title: "Generic profile", url: "https://athletes.example/nick", snippet: "", position: 1 },
+    { query: "q", title: "Wikipedia", url: "https://en.wikipedia.org/wiki/Nick_Ponzio", snippet: "", position: 5 },
+    { query: "q", title: "World Athletics", url: "https://worldathletics.org/athletes/nick-ponzio", snippet: "", position: 4 },
+  ], { preferAuthoritativeAgeSources: true });
+  assert.deepEqual(agePrioritized.slice(0, 2).map((item) => item.title), ["World Athletics", "Wikipedia"]);
 });
 
 test("generated material signals require explicit athlete-relevant language", () => {
@@ -1105,7 +1111,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /"use step"/);
   assert.match(workflow, /discoverHistoricalEvidence\.maxRetries = 0/);
   assert.match(workflow, /retrieveArchivedEvidenceCandidate\.maxRetries = 0/);
-  assert.match(workflow, /await sleep\(`\$\{20 \* \(attempt \+ 1\)\}s`\)/);
+  assert.match(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
+  assert.match(workflow, /Internet Archive stayed rate limited after one bounded retry/);
   assert.match(workflow, /readApifyRunDatasetWithUsage/);
   assert.match(workflow, /maxTotalChargeUsd: input\.maxApifyChargeUsd/);
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
@@ -1121,6 +1128,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /no provider call was started/);
   assert.match(route, /reuseProviderRunId/);
   assert.match(route, /latestSameRecordRun\?\.status === "failed"/);
+  assert.match(route, /latestSameRecordRun\?\.status === "cancelled"/);
   assert.match(route, /latestSummary\?\.providerRunId/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);

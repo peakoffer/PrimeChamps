@@ -182,7 +182,9 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     records,
     candidatesByRecord: Object.fromEntries(records.map((record) => [
       record.id,
-      dedupeHistoricalSearchCandidates(grouped.get(record.id) || []),
+      dedupeHistoricalSearchCandidates(grouped.get(record.id) || [], {
+        preferAuthoritativeAgeSources: input.preparationMode === "age_recovery",
+      }),
     ])),
     providerRunId: provider.usage.runId,
     actualApifyCostMicrousd: discoveryReused ? 0 : sourceApifyCostMicrousd,
@@ -462,10 +464,16 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         .slice(0, EVIDENCE_PREPARATION_LIMITS.archiveUrlsPerRecord);
       for (const candidate of candidates) {
         let archiveResult: Awaited<ReturnType<typeof retrieveArchivedEvidenceCandidate>> | null = null;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
           archiveResult = await retrieveArchivedEvidenceCandidate({ record, candidate });
           if (!archiveResult.rateLimited) break;
-          if (attempt < 2) await sleep(`${20 * (attempt + 1)}s`);
+          if (attempt < 1) await sleep("20s");
+        }
+        if (archiveResult?.rateLimited) {
+          throw new RetryableError(
+            "Internet Archive stayed rate limited after one bounded retry; stop and replay the saved discovery run after cooldown",
+            { retryAfter: "10m" }
+          );
         }
         if (archiveResult?.evidence) {
           evidence.push(archiveResult.evidence);

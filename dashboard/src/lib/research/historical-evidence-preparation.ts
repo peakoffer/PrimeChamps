@@ -543,13 +543,27 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
 const HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS = new Set([
   "facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com",
 ]);
+const AUTHORITATIVE_AGE_SOURCE_DOMAINS = new Set([
+  "wikipedia.org", "olympedia.org", "paralympic.org", "teamusa.com",
+  "worldathletics.org", "espn.com", "tapology.com", "sherdog.com",
+]);
 
-export function dedupeHistoricalSearchCandidates(candidates: HistoricalSearchCandidate[]) {
+export function dedupeHistoricalSearchCandidates(
+  candidates: HistoricalSearchCandidate[],
+  options: { preferAuthoritativeAgeSources?: boolean } = {}
+) {
   const seenUrls = new Set<string>();
   const seenDomains = new Map<string, number>();
   return candidates
     .filter((candidate) => isPublicHttpUrl(candidate.url))
-    .sort((left, right) => (left.position ?? 999) - (right.position ?? 999) || left.url.localeCompare(right.url))
+    .sort((left, right) => {
+      if (options.preferAuthoritativeAgeSources) {
+        const leftPriority = AUTHORITATIVE_AGE_SOURCE_DOMAINS.has(benchmarkSourceDomain(left.url)) ? 0 : 1;
+        const rightPriority = AUTHORITATIVE_AGE_SOURCE_DOMAINS.has(benchmarkSourceDomain(right.url)) ? 0 : 1;
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      }
+      return (left.position ?? 999) - (right.position ?? 999) || left.url.localeCompare(right.url);
+    })
     .filter((candidate) => {
       const normalized = normalizedUrlForComparison(candidate.url);
       const domain = benchmarkSourceDomain(candidate.url);
