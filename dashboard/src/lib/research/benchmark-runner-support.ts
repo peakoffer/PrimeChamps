@@ -396,6 +396,7 @@ export function benchmarkEvidenceFreezeReadiness(input: {
 }) {
   const identity = benchmarkIdentityGate(input.record, input.selection.evidence);
   const adult = benchmarkAdultEligibilityGate(input.record, input.selection.evidence);
+  const momentum = benchmarkCurrentMomentumGate(input.record, input.selection.evidence);
   const creatorPotential = benchmarkCreatorPotentialGate(input.selection.evidence);
   const domains = new Set(input.selection.evidence.map((item) => item.independenceGroup));
   const reasons: string[] = [];
@@ -404,8 +405,9 @@ export function benchmarkEvidenceFreezeReadiness(input: {
   if (domains.size < 2) reasons.push("fewer than two independent public sources exist");
   if (!identity.passed) reasons.push("two-source exact-identity evidence is missing");
   if (input.fitLabel === "fit" && !adult.passed) reasons.push("fit record lacks two-source 21+ corroboration");
+  if (input.fitLabel === "fit" && !momentum.passed) reasons.push("fit record lacks source-backed current athletic momentum");
   if (input.fitLabel === "fit" && !creatorPotential.passed) reasons.push("fit record lacks both audience and creator-behavior evidence");
-  return { ready: reasons.length === 0, reasons, identity, adult, creatorPotential, independentSources: domains.size };
+  return { ready: reasons.length === 0, reasons, identity, adult, momentum, creatorPotential, independentSources: domains.size };
 }
 
 export function summarizeBenchmarkEvidenceReadiness(entries: Array<{

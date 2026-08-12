@@ -6,6 +6,7 @@ import { calculateBenchmarkMetrics, stratifiedSample, type BenchmarkCaseResult }
 import { buildResearchV2Score, stableEvidenceSetHash } from "@/lib/research/v2-scoring";
 import {
   benchmarkAdultEligibilityGate,
+  benchmarkCreatorPotentialGate,
   benchmarkCurrentMomentumGate,
   benchmarkCaseReadiness,
   benchmarkEvidenceFreezeReadiness,
@@ -29,7 +30,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v19";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v20";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -848,6 +849,7 @@ async function processBenchmarkCase(input: {
   const identityGate = benchmarkIdentityGate(record, selection.evidence);
   const adultGate = benchmarkAdultEligibilityGate(record, selection.evidence);
   const momentumGate = benchmarkCurrentMomentumGate(record, selection.evidence);
+  const creatorPotentialGate = benchmarkCreatorPotentialGate(selection.evidence);
   const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
   const evidenceHash = stableEvidenceSetHash(modelEvidence.map((item) => ({
     url: item.url,
@@ -988,15 +990,25 @@ async function processBenchmarkCase(input: {
   const criticalReviewFindings = reviewFindings
     .filter((finding) => finding.severity === "critical")
     .map((finding) => finding.details);
+  const proposedCorrected = buildResearchV2Score({
+    onlyfansFit: bounded(review.corrected_fit_score),
+    commercialAchievability: bounded(review.corrected_achievability_score),
+    researchConfidence: bounded(review.corrected_confidence_score),
+    hasCriticalGap: false,
+    unsupportedMaterialClaims: unsupportedCount,
+  });
+  const proposedFinalist = proposedCorrected.priority > 80;
   const criticalGaps = [
     ...(review.verdict === "fail" ? (blind.critical_gaps || []) : []),
     ...criticalReviewFindings,
-    ...(!momentumGate.passed ? ["No source-backed athletic momentum was verified within 24 months of the evidence cutoff."] : []),
+    ...(proposedFinalist && (!adultGate.passed || !researcher.adult_eligibility_verified || !blind.eligibility_passed)
+      ? ["Two-source 21+ eligibility was not verified consistently by the researcher and auditor."] : []),
+    ...(proposedFinalist && !momentumGate.passed ? ["No source-backed athletic momentum was verified within 24 months of the evidence cutoff."] : []),
+    ...(proposedFinalist && !creatorPotentialGate.passed ? ["Both audience and creator-behavior evidence are required for a finalist."] : []),
+    ...(proposedFinalist && !blind.commercial_constraints_complete ? ["Commercial achievability constraints are incomplete."] : []),
   ];
-  const forcedFailure = !identityGate.passed || !adultGate.passed
-    || !momentumGate.passed
-    || !researcher.identity_confirmed || !researcher.adult_eligibility_verified
-    || !blind.identity_passed || !blind.eligibility_passed || !blind.source_verification_passed
+  const forcedFailure = !identityGate.passed || !researcher.identity_confirmed || !blind.identity_passed
+    || !blind.source_verification_passed
     || citationQuality.sourceVerificationRate < 1 || unsupportedCount > 0 || criticalGaps.length > 0;
   const verdict: "pass" | "corrected" | "fail" = forcedFailure ? "fail" : review.verdict;
   const corrected = buildResearchV2Score({
@@ -1025,7 +1037,7 @@ async function processBenchmarkCase(input: {
     prompt_version_id: artifacts.auditorPromptVersionId,
     model_version_id: artifacts.auditorModelVersionId,
     evidence_set_hash: evidenceHash,
-    assessment: { benchmark_run_id: run.id, blind, review, deterministic_gates: { identityGate, adultGate, momentumGate }, forced_failure: forcedFailure },
+    assessment: { benchmark_run_id: run.id, blind, review, deterministic_gates: { identityGate, adultGate, momentumGate, creatorPotentialGate }, proposed_finalist: proposedFinalist, forced_failure: forcedFailure },
     unsourced_claim_count: unsupportedCount,
     critical_gap_count: criticalGaps.length,
     is_final: false,
@@ -1073,8 +1085,10 @@ async function processBenchmarkCase(input: {
   const findings = [
     ...reviewFindings,
     ...(!identityGate.passed ? [{ failure_type: "wrong_entity", severity: "critical" as const, details: "Two-source identity corroboration was not established before the cutoff.", proposed_fix: "Add two independent exact-name sport identity sources from before the cutoff." }] : []),
-    ...(!adultGate.passed ? [{ failure_type: "unverified_eligibility", severity: "critical" as const, details: "Corroborated 21+ eligibility was not established before the cutoff.", proposed_fix: "Add two independent dated birth or age sources from before the cutoff." }] : []),
-    ...(!momentumGate.passed ? [{ failure_type: "stale_information", severity: "critical" as const, details: "No source-backed athletic momentum was verified within 24 months of the cutoff.", proposed_fix: "Add a dated result, ranking, signing, roster promotion, or comparable current source." }] : []),
+    ...(!adultGate.passed ? [{ failure_type: "unverified_eligibility", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "Corroborated 21+ eligibility was not established before the cutoff.", proposed_fix: "Add two independent dated birth or age sources from before the cutoff before treating this case as a finalist." }] : []),
+    ...(!momentumGate.passed ? [{ failure_type: "stale_information", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "No source-backed athletic momentum was verified within 24 months of the cutoff.", proposed_fix: "Add a dated result, ranking, signing, roster promotion, or comparable current source before treating this case as a finalist." }] : []),
+    ...(!creatorPotentialGate.passed ? [{ failure_type: "missing_source", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "The evidence does not establish both audience and creator behavior.", proposed_fix: "Add a dated audience snapshot and creator-behavior source before treating this case as a finalist." }] : []),
+    ...(!blind.commercial_constraints_complete ? [{ failure_type: "achievability_error", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "Commercial achievability constraints are incomplete.", proposed_fix: "Resolve career-tier accessibility and likely economics before treating this case as a finalist." }] : []),
   ];
   if (findings.length) {
     const { error } = await admin.from("research_audit_findings").insert(findings.map((finding) => ({
@@ -1102,7 +1116,10 @@ async function processBenchmarkCase(input: {
   const actualPriority = record.fit_label === "fit" && record.achievability_label !== "low";
   const researcherFailure = researcherFitLabel !== record.fit_label
     || researcherAchievabilityLabel !== record.achievability_label
-    || (researcherScoring.priority > 80 && (!identityGate.passed || !adultGate.passed || !momentumGate.passed || citationQuality.unsupportedClaimCount > 0));
+    || (researcherScoring.priority > 80 && (
+      !identityGate.passed || !adultGate.passed || !momentumGate.passed || !creatorPotentialGate.passed
+      || !blind.commercial_constraints_complete || citationQuality.unsupportedClaimCount > 0
+    ));
   const finalPredictionCorrect = correctedFitLabel === record.fit_label
     && correctedAchievabilityLabel === record.achievability_label;
   const auditorCaught = researcherFailure && finalPredictionCorrect;

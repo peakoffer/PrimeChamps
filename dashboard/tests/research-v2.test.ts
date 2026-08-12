@@ -686,6 +686,11 @@ test("benchmark finalist gates require two independent identity and adult source
         ...selection.evidence[1], sourceId: "creator", claimId: "creator", sourceRef: "E6",
         claimType: "creator_behavior_signal", claim: "Example Athlete posted weekly tournament vlogs.",
       },
+      {
+        ...selection.evidence[0], sourceId: "momentum", claimId: "momentum", sourceRef: "E7",
+        claimType: "athletic_momentum", claim: "Example Athlete won a Beach Volleyball event.",
+        effectiveAt: "2025-04-01T00:00:00.000Z",
+      },
     ],
   };
   assert.equal(benchmarkEvidenceFreezeReadiness({
@@ -752,7 +757,7 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.equal(summary.totalRecords, 2);
   assert.equal(summary.readyForFreeze, 1);
   assert.equal(summary.recordsWithAnySafeEvidence, 1);
-  assert.equal(summary.safeClaimCount, 6);
+  assert.equal(summary.safeClaimCount, 7);
   assert.equal(summary.blockerCounts["fewer than four supported public claims exist before the cutoff"], 1);
 });
 
@@ -929,7 +934,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v19/);
+  assert.match(source, /research-v2-benchmark-runner-v20/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
