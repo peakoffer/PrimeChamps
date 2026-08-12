@@ -69,6 +69,66 @@ type EvidencePreparationRun = {
   created_at: string;
 };
 
+type BenchmarkMetrics = {
+  cases: number;
+  precisionAbove80: number | null;
+  recallStrongFit: number | null;
+  fitAccuracy: number | null;
+  achievabilityAccuracy: number | null;
+  sourceVerificationRate: number | null;
+  finalistIdentityAccuracy: number | null;
+  finalistEligibilityVerificationRate: number | null;
+  finalistZeroUnsupportedClaimRate: number | null;
+  pointInTimeComplianceRate: number | null;
+  unsupportedClaimRate: number | null;
+  auditorCatchRate: number | null;
+  totalCostMicrousd: number;
+  priorityCounts: {
+    predicted: number;
+    truePositive: number;
+    falsePositive: number;
+    trueNegative: number;
+  };
+};
+
+type BenchmarkRun = {
+  id: string;
+  name: string;
+  benchmark_split: "development" | "held_out";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  result_count: number;
+  total_cost_microusd: number;
+  input_tokens: number;
+  output_tokens: number;
+  created_at: string;
+  completed_at: string | null;
+  metrics: {
+    case_ids?: string[];
+    completed_ids?: string[];
+    provider?: string;
+    model?: string;
+    no_outreach?: boolean;
+    last_error?: string | null;
+  };
+  calculated_metrics: BenchmarkMetrics | null;
+};
+
+type BenchmarkReadiness = {
+  development: { total: number; fit: number; notFit: number };
+  heldOut: { total: number; fit: number; notFit: number };
+  canRunDevelopment: boolean;
+  canRunHeldOut: boolean;
+  strictTargetReady: boolean;
+};
+
+const INITIAL_BENCHMARK_READINESS: BenchmarkReadiness = {
+  development: { total: 0, fit: 0, notFit: 0 },
+  heldOut: { total: 0, fit: 0, notFit: 0 },
+  canRunDevelopment: false,
+  canRunHeldOut: false,
+  strictTargetReady: false,
+};
+
 type BenchmarkSummary = {
   total: number;
   usable: number;
@@ -147,6 +207,10 @@ function titleize(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function percent(value: number | null | undefined) {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "—";
+}
+
 function parseCsv(text: string) {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -222,6 +286,8 @@ export default function ResearchBenchmarkPage() {
   const [summary, setSummary] = useState(INITIAL_SUMMARY);
   const [evidenceSummary, setEvidenceSummary] = useState(INITIAL_EVIDENCE_SUMMARY);
   const [evidencePreparationRuns, setEvidencePreparationRuns] = useState<EvidencePreparationRun[]>([]);
+  const [benchmarkRuns, setBenchmarkRuns] = useState<BenchmarkRun[]>([]);
+  const [benchmarkReadiness, setBenchmarkReadiness] = useState(INITIAL_BENCHMARK_READINESS);
   const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
   const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
@@ -236,19 +302,25 @@ export default function ResearchBenchmarkPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, preparationResponse] = await Promise.all([
+      const [response, preparationResponse, benchmarkResponse] = await Promise.all([
         fetch("/api/research/golden-records", { cache: "no-store" }),
         fetch("/api/research/golden-records/prepare-evidence", { cache: "no-store" }),
+        fetch("/api/research/benchmarks", { cache: "no-store" }),
       ]);
-      const [payload, preparationPayload] = await Promise.all([response.json(), preparationResponse.json()]);
+      const [payload, preparationPayload, benchmarkPayload] = await Promise.all([
+        response.json(), preparationResponse.json(), benchmarkResponse.json(),
+      ]);
       if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
       if (!preparationResponse.ok) throw new Error(preparationPayload.error || "Could not load evidence preparation");
+      if (!benchmarkResponse.ok) throw new Error(benchmarkPayload.error || "Could not load benchmark runs");
       setRecords(payload.records || []);
       setSummary(payload.summary || INITIAL_SUMMARY);
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
       setEvidencePreparationRuns(preparationPayload.runs || []);
       setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
+      setBenchmarkRuns(benchmarkPayload.runs || []);
+      setBenchmarkReadiness(benchmarkPayload.readiness || INITIAL_BENCHMARK_READINESS);
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
@@ -264,12 +336,64 @@ export default function ResearchBenchmarkPage() {
 
   const activeEvidenceRun = evidencePreparationRuns.find((run) => run.status === "queued" || run.status === "running");
   const latestEvidenceRun = evidencePreparationRuns[0];
+  const latestDevelopmentRun = benchmarkRuns.find((run) => run.benchmark_split === "development");
+  const activeDevelopmentRun = benchmarkRuns.find((run) =>
+    run.benchmark_split === "development" && ["queued", "running", "failed"].includes(run.status)
+  );
 
   useEffect(() => {
     if (!activeEvidenceRun) return;
     const timer = window.setInterval(() => { void load(); }, 5_000);
     return () => window.clearInterval(timer);
   }, [activeEvidenceRun, load]);
+
+  const startDevelopmentBenchmark = async () => {
+    setWorking(true);
+    setMessage("Creating a four-case development smoke test without spending model tokens…");
+    try {
+      const response = await fetch("/api/research/benchmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          split: "development",
+          caseLimit: 4,
+          costLimitMicrousd: 500_000,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not create development benchmark");
+      setMessage(`Development smoke test created with ${payload.selectedCases} balanced cases. No model tokens spent yet.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create development benchmark");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const resumeDevelopmentBenchmark = async (runId: string) => {
+    setWorking(true);
+    setMessage("Scoring and independently auditing one development case…");
+    try {
+      const response = await fetch("/api/research/benchmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "resume", runId }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Development checkpoint failed");
+      setMessage(payload.completed
+        ? "Development smoke test completed. Review the measured results before expanding the run."
+        : `Audited ${payload.completedCases} of ${payload.totalCases} development cases. Checkpoint saved.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Development checkpoint failed");
+      await load();
+    } finally {
+      setWorking(false);
+    }
+  };
 
   const visibleRecords = useMemo(() => records.filter((record) => {
     if (filter === "needs_label") return record.fit_label === "uncertain" || record.achievability_label === "uncertain";
@@ -646,6 +770,64 @@ export default function ResearchBenchmarkPage() {
             {latestEvidenceRun.error_message && <span className="w-full text-red-300/80">{latestEvidenceRun.error_message}</span>}
           </div>
         )}
+
+        <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">Development evaluation</p>
+              <h2 className="mt-2 text-base font-medium text-zinc-100">Latest Sonnet · four balanced cases · $0.50 hard ceiling</h2>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                {benchmarkReadiness.development.fit} positive + {benchmarkReadiness.development.notFit} negative development cases are frozen. The {benchmarkReadiness.heldOut.total}-case held-out set remains locked and cannot run from this screen.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activeDevelopmentRun ? (
+                <button disabled={working || activeDevelopmentRun.status === "running"} onClick={() => void resumeDevelopmentBenchmark(activeDevelopmentRun.id)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                  {activeDevelopmentRun.status === "failed" ? "Retry saved checkpoint" : "Score next case"}
+                </button>
+              ) : (
+                <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                  Start four-case smoke test
+                </button>
+              )}
+            </div>
+          </div>
+
+          {latestDevelopmentRun && (
+            <div className="mt-4 grid gap-3 border-t border-zinc-900 pt-4 sm:grid-cols-2 lg:grid-cols-6">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Status</p>
+                <p className="mt-1 text-sm text-zinc-300">{titleize(latestDevelopmentRun.status)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Progress</p>
+                <p className="mt-1 text-sm text-zinc-300">{latestDevelopmentRun.result_count} / {latestDevelopmentRun.metrics.case_ids?.length || 0}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Precision &gt;80</p>
+                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.precisionAbove80)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Fit accuracy</p>
+                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.fitAccuracy)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Audit catch</p>
+                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.auditorCatchRate)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Spend</p>
+                <p className="mt-1 text-sm text-zinc-300">${(latestDevelopmentRun.total_cost_microusd / 1_000_000).toFixed(3)}</p>
+              </div>
+              <p className="sm:col-span-2 lg:col-span-6 text-xs text-zinc-600">
+                {latestDevelopmentRun.metrics.provider && latestDevelopmentRun.metrics.model
+                  ? `${titleize(latestDevelopmentRun.metrics.provider)} · ${latestDevelopmentRun.metrics.model}`
+                  : "Model resolves when the run is created."}
+                {latestDevelopmentRun.metrics.last_error ? ` · ${latestDevelopmentRun.metrics.last_error}` : ""}
+              </p>
+            </div>
+          )}
+        </section>
 
         {showNew && (
           <section className="mb-6 grid gap-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4 sm:grid-cols-[1fr_1fr_auto_auto]">
