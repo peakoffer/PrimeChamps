@@ -61,6 +61,7 @@ import {
   extractPreparedArchivedEvidence,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
+  preparedEvidenceSignalSupported,
   selectWaybackCapture,
   waybackCdxUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
@@ -945,6 +946,15 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   assert.deepEqual(deduped.map((item) => item.title), ["A", "B", "D"]);
 });
 
+test("generated material signals require explicit athlete-relevant language", () => {
+  assert.equal(preparedEvidenceSignalSupported("audience_signal", "Skip to main content Instagram YouTube"), false);
+  assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);
+  assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "Navigation Rankings Record Book"), false);
+  assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "She won the national championship."), true);
+  assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "Main navigation Management Contact"), false);
+  assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "She signed with a management agency."), true);
+});
+
 test("evidence preparation is durable, replay-safe, zero-scoring, and isolated from outreach", () => {
   const workflow = readFileSync(new URL("../src/workflows/benchmark-evidence.ts", import.meta.url), "utf8");
   const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
@@ -960,6 +970,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /scoringTokensSpent: 0/);
   assert.match(workflow, /provider: "internet_archive_wayback"/);
   assert.match(workflow, /from\("research_evidence_claims"\)\.delete\(\)/);
+  assert.match(workflow, /reconcilePreparedSignalClaims/);
   for (const forbiddenTable of ["athletes", "research_candidates", "pipeline_athletes", "messages", "outreach_touchpoints", "channel_messages"]) {
     assert.ok(!workflow.includes(`from("${forbiddenTable}")`), `evidence workflow must not touch ${forbiddenTable}`);
     assert.ok(!route.includes(`from("${forbiddenTable}")`), `evidence route must not touch ${forbiddenTable}`);

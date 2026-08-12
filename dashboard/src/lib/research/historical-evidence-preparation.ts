@@ -284,8 +284,15 @@ function extractOfficialCompactBirthDate(name: string, text: string, domain: str
   return normalized ? { birthDate: normalized, evidence: match[0].slice(0, 500) } : null;
 }
 
-function hasSignal(text: string, pattern: RegExp) {
-  return pattern.test(text);
+const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
+  athletic_momentum: /\b(?:ranked|ranking|champion|finalist|medalist|medal|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut)\b/i,
+  audience_signal: /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
+  commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal)\b/i,
+};
+
+export function preparedEvidenceSignalSupported(claimType: string, sourceExcerpt: string) {
+  const pattern = PREPARED_EVIDENCE_SIGNAL_PATTERNS[claimType];
+  return Boolean(pattern && pattern.test(sourceExcerpt));
 }
 
 export function extractPreparedArchivedEvidence(input: {
@@ -363,19 +370,19 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     });
   }
-  if (hasSignal(excerpt, /\b(?:ranked|ranking|champion|finalist|medalist|medal|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut)\b/i)) {
+  if (preparedEvidenceSignalSupported("athletic_momentum", excerpt)) {
     claims.push({
       claimType: "athletic_momentum", claimText: excerpt.slice(0, 600), structuredValue: { signal: "competitive_momentum" },
       sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 90, material: true,
     });
   }
-  if (hasSignal(excerpt, /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i)) {
+  if (preparedEvidenceSignalSupported("audience_signal", excerpt)) {
     claims.push({
       claimType: "audience_signal", claimText: excerpt.slice(0, 600), structuredValue: { signal: "public_audience_or_creator_presence" },
       sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 88, material: true,
     });
   }
-  if (hasSignal(excerpt, /\b(?:agent|agency|management|represented|sponsor|partnership|endorsement|contract|nil deal|brand deal)\b/i)) {
+  if (preparedEvidenceSignalSupported("commercial_achievability_signal", excerpt)) {
     claims.push({
       claimType: "commercial_achievability_signal", claimText: excerpt.slice(0, 600), structuredValue: { signal: "public_commercial_context" },
       sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 86, material: true,

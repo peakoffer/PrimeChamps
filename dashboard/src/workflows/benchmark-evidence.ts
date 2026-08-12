@@ -8,6 +8,7 @@ import {
   buildHistoricalEvidenceQueries,
   dedupeHistoricalSearchCandidates,
   extractPreparedArchivedEvidence,
+  preparedEvidenceSignalSupported,
   selectWaybackCapture,
   waybackCdxUrl,
   type EvidencePreparationRecord,
@@ -53,6 +54,12 @@ type DiscoveryBatch = {
   sourceApifyCostMicrousd: number | null;
   discoveryReused: boolean;
   chargedEventCounts: Record<string, number>;
+};
+
+type StoredPreparedSignalClaim = {
+  id: string;
+  claim_type: string;
+  source_excerpt: string | null;
 };
 
 function cleanText(value: unknown, maximum = 700) {
@@ -179,6 +186,36 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   };
 }
 discoverHistoricalEvidence.maxRetries = 0;
+
+async function reconcilePreparedSignalClaims(input: {
+  organizationId: string;
+  recordIds: string[];
+}) {
+  "use step";
+
+  const admin = createAdminClient({ disableRealtime: true });
+  const { data, error } = await admin.from("research_evidence_claims")
+    .select("id,claim_type,source_excerpt,research_evidence_sources!inner(provider)")
+    .eq("organization_id", input.organizationId)
+    .in("golden_record_id", input.recordIds)
+    .in("claim_type", ["athletic_momentum", "audience_signal", "commercial_achievability_signal"])
+    .eq("eligible_for_scoring", true)
+    .eq("research_evidence_sources.provider", "internet_archive_wayback");
+  if (error) throw error;
+  const unsupportedIds = ((data || []) as unknown as StoredPreparedSignalClaim[])
+    .filter((claim) => !preparedEvidenceSignalSupported(claim.claim_type, claim.source_excerpt || ""))
+    .map((claim) => claim.id);
+  for (let index = 0; index < unsupportedIds.length; index += 100) {
+    const { error: updateError } = await admin.from("research_evidence_claims").update({
+      support_status: "unsupported",
+      eligible_for_scoring: false,
+      exclusion_reason: `Generated signal did not satisfy ${HISTORICAL_EVIDENCE_EXTRACTION_VERSION}.`,
+    }).eq("organization_id", input.organizationId).in("id", unsupportedIds.slice(index, index + 100));
+    if (updateError) throw updateError;
+  }
+  return { excludedUnsupportedSignals: unsupportedIds.length };
+}
+reconcilePreparedSignalClaims.maxRetries = 2;
 
 async function fetchJson(url: string) {
   const response = await fetch(url, {
@@ -388,6 +425,10 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       patch: { status: "running", error_message: null },
     });
     const discovery = await discoverHistoricalEvidence(input);
+    const signalReconciliation = await reconcilePreparedSignalClaims({
+      organizationId: input.organizationId,
+      recordIds: input.recordIds,
+    });
     await updatePreparationRun({
       preparationRunId: input.preparationRunId,
       organizationId: input.organizationId,
@@ -465,6 +506,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       actualApifyCostMicrousd: discovery.actualApifyCostMicrousd,
       sourceApifyCostMicrousd: discovery.sourceApifyCostMicrousd,
       scoringTokensSpent: 0,
+      excludedUnsupportedSignals: signalReconciliation.excludedUnsupportedSignals,
       records: results,
     };
     await updatePreparationRun({
