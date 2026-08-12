@@ -6,8 +6,8 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-age-recovery-v1";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-precise-signals-age-v2";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-athlete-centered-age-v3";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery";
 
@@ -366,7 +366,16 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     },
   ];
-  const attributableAge = parseAgeEvidenceForAthlete(record.athlete_name, attributable, new Date(capture.capturedAt));
+  const titleNamesAthlete = benchmarkSourceNamesAthlete(record.athlete_name, title);
+  // A page centered on the athlete can have normal profile chrome between the
+  // name and age field. On a generic or third-party page, keep the window much
+  // tighter so a teammate mention cannot inherit the subject's age.
+  const attributableAge = parseAgeEvidenceForAthlete(
+    record.athlete_name,
+    attributable,
+    new Date(capture.capturedAt),
+    titleNamesAthlete ? 220 : 110
+  );
   const officialCompactBirthDate = attributableAge
     ? null
     : extractOfficialCompactBirthDate(record.athlete_name, attributable, domain);
@@ -466,7 +475,7 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
     || `"${record.sport}"`;
   return [
     `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthdate OR birthday OR DOB) ${excludeSocial} before:${before}`,
-    `"${record.athlete_name}" ${sportExpression} (born OR "born in" OR age) (profile OR bio OR roster) ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" (born OR "date of birth" OR age) (site:wikipedia.org OR site:olympedia.org OR site:paralympic.org OR site:teamusa.com OR site:worldathletics.org OR site:espn.com OR site:tapology.com OR site:sherdog.com) before:${before}`,
     `"${record.athlete_name}" ${sportExpression} ("player profile" OR "athlete bio") (birth OR age) ${excludeSocial} before:${before}`,
   ];
 }

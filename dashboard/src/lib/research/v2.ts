@@ -37,6 +37,17 @@ export function hasOutcomeGroundTruth(record: Record<string, unknown>) {
     && record.stratification_tags.includes("dylan_outcome_ground_truth");
 }
 
+export function hasResolvedGoldenRecordSport(record: Record<string, unknown>) {
+  const sport = typeof record.sport === "string" ? record.sport.trim().toLowerCase() : "";
+  const unresolvedTag = Array.isArray(record.stratification_tags)
+    && record.stratification_tags.some((tag) => tag === "needs_sport_enrichment"
+      || tag === "sport_enrichment_identity_conflict"
+      || tag === "sport_enrichment_public_search_exhausted");
+  return Boolean(sport)
+    && !["needs enrichment", "unknown", "unresolved"].includes(sport)
+    && !unresolvedTag;
+}
+
 export type GoldenRecordInput = {
   athleteId?: string | null;
   athleteName: string;
@@ -154,6 +165,7 @@ export function goldenRecordToRow(record: GoldenRecordInput) {
 export function isGoldenRecordReadyForSplit(record: Record<string, unknown>) {
   const outcomeGroundTruth = hasOutcomeGroundTruth(record);
   return record.benchmark_split === "excluded"
+    && hasResolvedGoldenRecordSport(record)
     && record.fit_label !== "uncertain"
     && record.achievability_label !== "uncertain"
     && record.point_in_time_reliability !== "unusable"
@@ -219,7 +231,8 @@ function stableBenchmarkHash(value: string) {
 export function assignGoldenRecordSplits(
   records: GoldenSplitCandidate[],
   cohortVersion: string,
-  heldOutRatio = 0.2
+  heldOutRatio = 0.2,
+  minimumHeldOutPerLabel = 8
 ) {
   const assignments: Array<{ id: string; split: "development" | "held_out" }> = [];
   for (const fitLabel of ["fit", "not_fit"] as const) {
@@ -227,8 +240,10 @@ export function assignGoldenRecordSplits(
     const heldOutEligible = labelRecords.filter((record) =>
       !record.stratification_tags?.includes("development_only")
     );
-    const desiredHeldOut = labelRecords.length >= 5
-      ? Math.max(1, Math.floor(labelRecords.length * heldOutRatio))
+    const desiredHeldOut = labelRecords.length >= minimumHeldOutPerLabel * 2
+      ? Math.max(minimumHeldOutPerLabel, Math.floor(labelRecords.length * heldOutRatio))
+      : labelRecords.length >= 5
+        ? Math.max(1, Math.floor(labelRecords.length * heldOutRatio))
       : 0;
     const orderedEligible = heldOutEligible
       .map((record) => ({

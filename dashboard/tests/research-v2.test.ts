@@ -305,6 +305,21 @@ test("benchmark splits are deterministic, balanced, and never hold out developme
   assert.equal(first.filter((item) => item.split === "held_out" && Number(item.id.split("-").at(-1)) < 10).length, 0);
 });
 
+test("a minimum viable balanced cohort locks eight cases per label", () => {
+  const records = ["fit", "not_fit"].flatMap((fitLabel) =>
+    Array.from({ length: 16 }, (_, index) => ({
+      id: `${fitLabel}-minimum-${index}`,
+      fit_label: fitLabel as "fit" | "not_fit",
+      sport: ["surfing", "tennis", "bmx", "boxing"][index % 4],
+      final_outcome: index % 2 ? "signed" : "stalled",
+      stratification_tags: [],
+    }))
+  );
+  const assignments = assignGoldenRecordSplits(records, "minimum-cohort-v1");
+  assert.equal(assignments.filter((item) => item.split === "held_out" && item.id.startsWith("fit-")).length, 8);
+  assert.equal(assignments.filter((item) => item.split === "held_out" && item.id.startsWith("not_fit-")).length, 8);
+});
+
 test("benchmark summary separates provisional labels from benchmark-ready records", () => {
   const summary = summarizeGoldenRecords([
     {
@@ -346,6 +361,7 @@ test("benchmark summary separates provisional labels from benchmark-ready record
 test("Dylan outcome records do not require a second blind-label exercise", () => {
   assert.equal(isGoldenRecordReadyForSplit({
     benchmark_split: "excluded",
+    sport: "Surfing",
     fit_label: "not_fit",
     achievability_label: "low",
     point_in_time_reliability: "strong",
@@ -356,6 +372,22 @@ test("Dylan outcome records do not require a second blind-label exercise", () =>
     labeled_at: "2026-08-11T12:00:00Z",
     stratification_tags: ["dylan_outcome_ground_truth"],
   }), true);
+});
+
+test("sport-unresolved Dylan records stay quarantined from split assignment", () => {
+  assert.equal(isGoldenRecordReadyForSplit({
+    benchmark_split: "excluded",
+    sport: "Needs enrichment",
+    fit_label: "fit",
+    achievability_label: "high",
+    point_in_time_reliability: "strong",
+    label_order_fit_before_outcome: false,
+    decision_at: "2026-01-01T12:00:00Z",
+    evidence_cutoff_at: "2026-01-01T12:00:00Z",
+    decisive_information_publicly_knowable: null,
+    labeled_at: "2026-08-11T12:00:00Z",
+    stratification_tags: ["dylan_outcome_ground_truth", "needs_sport_enrichment"],
+  }), false);
 });
 
 test("benchmark metrics reward precision rather than score volume", () => {
@@ -931,6 +963,15 @@ test("archived evidence extraction requires exact identity and sport and preserv
     html: "<html><title>Rita Arnaus kitesurfing profile</title><body><main>Rita Arnaus is a professional kitesurfing athlete who began kitesurfing aged 15 and later won a championship.</main></body></html>",
   });
   assert.ok(!historicalAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
+
+  const teammateAgeMention = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Lola Gallardo", sport: "Soccer" },
+    candidate: { ...candidate, title: "Ludmila Silva - Age, Family, Bio", url: "https://www.famousbirthdays.com/people/ludmila-silva.html" },
+    capture: { ...capture, originalUrl: "https://www.famousbirthdays.com/people/ludmila-silva.html" },
+    html: "<html><title>Ludmila Silva - Age, Family, Bio</title><body><main>Ludmila Silva is a soccer player. She and Lola Gallardo played together for Atletico Madrid. Popularity Most Popular First Name Ludmila Soccer Player Ludmila Silva Is A Member Of 31 Year Olds.</main></body></html>",
+  });
+  assert.equal(teammateAgeMention.rejectionReason, null);
+  assert.ok(!teammateAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
 });
 
 test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {
@@ -958,6 +999,7 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   assert.equal(ageRecovery.length, 3);
   assert.ok(ageRecovery.every((query) => /birth|born|age/i.test(query)));
   assert.ok(ageRecovery.every((query) => query.includes("before:2024-06-01")));
+  assert.ok(ageRecovery.some((query) => query.includes("site:wikipedia.org") && query.includes("site:worldathletics.org")));
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
   assert.equal(normalizeEvidencePreparationBudget(undefined), 0.75);

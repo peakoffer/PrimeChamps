@@ -54,6 +54,41 @@ const BLIND_LABELING_COLUMNS = [
   "blind_review_completed",
 ];
 
+const EVIDENCE_SOURCE_SELECT = "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason";
+const EVIDENCE_CLAIM_SELECT = "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason";
+
+function chunkRecordIds(recordIds: string[], size = 20) {
+  const chunks: string[][] = [];
+  for (let index = 0; index < recordIds.length; index += size) chunks.push(recordIds.slice(index, index + size));
+  return chunks;
+}
+
+async function loadBenchmarkEvidenceRows(input: {
+  admin: ReturnType<typeof createAdminClient>;
+  organizationId: string;
+  recordIds: string[];
+}) {
+  if (!input.recordIds.length) return { sources: [] as BenchmarkEvidenceSourceRow[], claims: [] as BenchmarkEvidenceClaimRow[] };
+  const batches = await Promise.all(chunkRecordIds(input.recordIds).map(async (recordIds) => {
+    const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
+      input.admin.from("research_evidence_sources").select(EVIDENCE_SOURCE_SELECT)
+        .eq("organization_id", input.organizationId).in("golden_record_id", recordIds).limit(1_000),
+      input.admin.from("research_evidence_claims").select(EVIDENCE_CLAIM_SELECT)
+        .eq("organization_id", input.organizationId).in("golden_record_id", recordIds).limit(1_000),
+    ]);
+    if (sourceError) throw sourceError;
+    if (claimError) throw claimError;
+    return {
+      sources: (sources || []) as BenchmarkEvidenceSourceRow[],
+      claims: (claims || []) as BenchmarkEvidenceClaimRow[],
+    };
+  }));
+  return {
+    sources: batches.flatMap((batch) => batch.sources),
+    claims: batches.flatMap((batch) => batch.claims),
+  };
+}
+
 function csvCell(value: unknown) {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -126,22 +161,12 @@ export async function GET(request: NextRequest) {
         },
       });
     }
-    const recordIds = allRecords.map((record) => String(record.id));
-    const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = recordIds.length
-      ? await Promise.all([
-        admin.from("research_evidence_sources").select(
-          "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
-        ).eq("organization_id", user.organizationId).in("golden_record_id", recordIds),
-        admin.from("research_evidence_claims").select(
-          "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
-        ).eq("organization_id", user.organizationId).in("golden_record_id", recordIds),
-      ])
-      : [{ data: [], error: null }, { data: [], error: null }];
-    if (sourceError) throw sourceError;
-    if (claimError) throw claimError;
-    const sourceRows = (sources || []) as BenchmarkEvidenceSourceRow[];
-    const claimRows = (claims || []) as BenchmarkEvidenceClaimRow[];
-    const evidenceEntries = allRecords.map((record) => {
+    const evidenceEligibleRecords = allRecords.filter((record) => isGoldenRecordReadyForSplit(record));
+    const recordIds = evidenceEligibleRecords.map((record) => String(record.id));
+    const { sources: sourceRows, claims: claimRows } = await loadBenchmarkEvidenceRows({
+      admin, organizationId: user.organizationId, recordIds,
+    });
+    const evidenceEntries = evidenceEligibleRecords.map((record) => {
       const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
       const selection = selectLeakageSafeBenchmarkEvidence({
         record: benchmarkRecord,
@@ -195,6 +220,7 @@ export async function POST(request: NextRequest) {
         isGoldenRecordReadyForSplit(record as Record<string, unknown>)
       ) as Array<{
         id: string;
+        athlete_name: string;
         sport: string;
         fit_label: "fit" | "not_fit";
         final_outcome: string;
@@ -202,53 +228,57 @@ export async function POST(request: NextRequest) {
       }>;
       const fitCount = ready.filter((record) => record.fit_label === "fit").length;
       const notFitCount = ready.filter((record) => record.fit_label === "not_fit").length;
-      const heldOutEligible = (label: "fit" | "not_fit") => ready.filter((record) =>
-        record.fit_label === label && !record.stratification_tags?.includes("development_only")
-      ).length;
       if (fitCount < 40 || notFitCount < 40) {
         return NextResponse.json({
-          error: `A clean cohort requires 40 complete fit and 40 complete not-fit labels. Ready now: ${fitCount} fit and ${notFitCount} not fit.`,
-        }, { status: 409 });
-      }
-      if (heldOutEligible("fit") < 8 || heldOutEligible("not_fit") < 8) {
-        return NextResponse.json({
-          error: "A locked held-out set requires at least eight independently sourced fit and eight independently sourced not-fit labels. Development-only cases cannot satisfy this gate.",
+          error: `A clean source pool requires 40 resolved-sport fit and 40 resolved-sport not-fit labels. Ready now: ${fitCount} fit and ${notFitCount} not fit.`,
         }, { status: 409 });
       }
       const readyIds = ready.map((record) => record.id);
-      const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
-        admin.from("research_evidence_sources").select(
-          "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
-        ).eq("organization_id", user.organizationId).in("golden_record_id", readyIds),
-        admin.from("research_evidence_claims").select(
-          "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
-        ).eq("organization_id", user.organizationId).in("golden_record_id", readyIds),
-      ]);
-      if (sourceError) throw sourceError;
-      if (claimError) throw claimError;
-      const evidenceFailures = ready.flatMap((record) => {
+      const { sources, claims } = await loadBenchmarkEvidenceRows({
+        admin, organizationId: user.organizationId, recordIds: readyIds,
+      });
+      const evidenceReady = ready.filter((record) => {
         const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
         const selection = selectLeakageSafeBenchmarkEvidence({
           record: benchmarkRecord,
-          sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
-          claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
+          sources: sources.filter((source) => source.golden_record_id === record.id),
+          claims: claims.filter((claim) => claim.golden_record_id === record.id),
         });
         const evidenceReadiness = benchmarkEvidenceFreezeReadiness({
           record: benchmarkRecord,
           fitLabel: record.fit_label,
           selection,
         });
-        return evidenceReadiness.ready ? [] : [{ athlete: (record as { athlete_name?: string }).athlete_name || record.id, reasons: evidenceReadiness.reasons }];
+        return evidenceReadiness.ready;
       });
-      if (evidenceFailures.length) {
+      const evidenceReadyFit = evidenceReady.filter((record) => record.fit_label === "fit");
+      const evidenceReadyNotFit = evidenceReady.filter((record) => record.fit_label === "not_fit");
+      const perLabel = Math.min(40, evidenceReadyFit.length, evidenceReadyNotFit.length);
+      if (perLabel < 16) {
         return NextResponse.json({
-          error: `The cohort cannot be frozen until every record has a leakage-safe evidence packet. ${evidenceFailures.length}/${ready.length} fail the evidence gate.`,
-          examples: evidenceFailures.slice(0, 10),
+          error: `The cohort needs at least 16 leakage-safe evidence packets per label so eight per label can remain locked held out. Ready now: ${evidenceReadyFit.length} fit and ${evidenceReadyNotFit.length} not fit.`,
+        }, { status: 409 });
+      }
+      const selectBalancedLabel = (records: typeof evidenceReadyFit) => stratifiedSample(
+        records,
+        perLabel,
+        (record) => `${record.sport}|${record.final_outcome}`
+      );
+      const cohortRecords = [
+        ...selectBalancedLabel(evidenceReadyFit),
+        ...selectBalancedLabel(evidenceReadyNotFit),
+      ];
+      const heldOutEligible = (label: "fit" | "not_fit") => cohortRecords.filter((record) =>
+        record.fit_label === label && !record.stratification_tags?.includes("development_only")
+      ).length;
+      if (heldOutEligible("fit") < 8 || heldOutEligible("not_fit") < 8) {
+        return NextResponse.json({
+          error: "A locked held-out set requires at least eight evidence-ready fit and eight evidence-ready not-fit cases that are not marked development-only.",
         }, { status: 409 });
       }
       const assignedAt = new Date().toISOString();
       const cohortVersion = `onlyfans-athlete-v1-${assignedAt.slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
-      const assignments = assignGoldenRecordSplits(ready, cohortVersion);
+      const assignments = assignGoldenRecordSplits(cohortRecords, cohortVersion);
       const developmentIds = assignments.filter((assignment) => assignment.split === "development").map((assignment) => assignment.id);
       const heldOutIds = assignments.filter((assignment) => assignment.split === "held_out").map((assignment) => assignment.id);
 
@@ -288,6 +318,8 @@ export async function POST(request: NextRequest) {
         ok: true,
         cohortVersion,
         assigned: assignments.length,
+        evidenceReadyPool: evidenceReady.length,
+        perLabel,
         development: assignments.filter((assignment) => assignment.split === "development").length,
         heldOut: assignments.filter((assignment) => assignment.split === "held_out").length,
       });

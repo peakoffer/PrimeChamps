@@ -92,7 +92,13 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
   // age at publication. Only accept an explicit age field or current-age phrase.
   const stated = text.match(/\bage\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
   const statedAge = Number(stated?.[1] || stated?.[2]);
-  if (Number.isFinite(statedAge) && statedAge >= 10 && statedAge <= 80) {
+  const statedContext = stated?.index === undefined
+    ? ""
+    : text.slice(Math.max(0, stated.index - 80), stated.index).toLowerCase();
+  const historicalAgeContext = /(?:since|when|while)\s+(?:she|he|they|the athlete)\s+(?:was|were)\s*$/.test(statedContext)
+    || /\b(?:began|started|learned|first)\b[^.!?]{0,55}\bat\s*$/.test(statedContext)
+    || (/\bat\s*$/.test(statedContext) && /^age\b/i.test(stated?.[0] || ""));
+  if (!historicalAgeContext && Number.isFinite(statedAge) && statedAge >= 10 && statedAge <= 80) {
     return {
       age: statedAge,
       birthYear: null,
@@ -118,7 +124,12 @@ export function ageEvidenceNamesAthlete(name: string, text: string) {
   return parseAgeEvidenceForAthlete(name, text) !== null;
 }
 
-export function parseAgeEvidenceForAthlete(name: string, text: string, now = new Date()) {
+export function parseAgeEvidenceForAthlete(
+  name: string,
+  text: string,
+  now = new Date(),
+  maximumDistanceAfterName = 220
+) {
   // Replace one character at a time so indexes stay aligned with the original
   // source text used to extract the evidence slice.
   const normalizedText = text.toLowerCase().replace(/[^a-z0-9]/g, " ");
@@ -137,7 +148,7 @@ export function parseAgeEvidenceForAthlete(name: string, text: string, now = new
     // Search only after the candidate's own name. This rejects snippets such
     // as "Vicky Savard ... age 28 ... Rebekah Allick", where the requested
     // athlete is nearby but the age clearly belongs to someone else.
-    const evidenceEnd = Math.min(text.length, surnameIndex + surname.length + 220);
+    const evidenceEnd = Math.min(text.length, surnameIndex + surname.length + maximumDistanceAfterName);
     const evidence = text.slice(surnameIndex + surname.length, evidenceEnd);
     const parsed = parseAgeEvidence(evidence, now);
     if (parsed) {
