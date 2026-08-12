@@ -9,6 +9,7 @@ import {
   benchmarkCaseReadiness,
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
+  BENCHMARK_PRE_OUTREACH_CALIBRATION,
   buildBenchmarkResearcherPrompt,
   estimateBenchmarkCostMicrousd,
   normalizeOpenRouterBenchmarkUsage,
@@ -26,7 +27,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v8";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v9";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -424,8 +425,8 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 2,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v2",
+    version: 3,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v3",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
@@ -434,7 +435,7 @@ async function ensureBenchmarkArtifacts(input: {
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v2",
+    definition_hash: "research-v2-benchmark-rubric-v3",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -455,7 +456,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 6,
+      version: 7,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -481,14 +482,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v6",
+      content_hash: "research-v2-benchmark-researcher-v7",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; platform willingness is not required or inferred; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-auditor-v6",
+      content_hash: "research-v2-benchmark-auditor-v7",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -693,6 +694,8 @@ function blindPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmark
 
 Independently determine whether the supplied public evidence establishes the exact athlete identity, corroborated 21+ eligibility, current athletic momentum at the cutoff, creator/audience opportunity, and realistic pre-outreach commercial accessibility. Missing evidence is a gap, not permission to infer. Do not infer adult-content willingness from appearance, identity, or sport. Do not require public evidence that the athlete wants OnlyFans or adult content; its absence is neutral and must not be listed as a critical gap. Judge achievability from public proxies such as career tier, audience, creator behavior, partnerships, representation or public business access, geography, and likely economics. Missing representation is not an automatic blocker when other accessibility proxies are strong.
 
+${BENCHMARK_PRE_OUTREACH_CALIBRATION}
+
 Candidate: ${record.athlete_name}
 Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
@@ -714,6 +717,7 @@ RESEARCHER PROPOSAL
 ${JSON.stringify(researcher)}
 
 Pass only when every material score and claim is supported. Correct a usable proposal when evidence supports different scores. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from public creator, audience, momentum, and accessibility proxies. Missing representation alone is not automatically critical.
+${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
 }
 
