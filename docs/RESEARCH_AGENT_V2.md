@@ -2,7 +2,7 @@
 
 ## Objective and safety boundary
 
-Return a small, evidence-backed set of athlete opportunities worth human review. A requested set is successful only when ten candidates pass every quality gate and have a corrected priority score above 80. Research never sends outreach, drafts, comments, or messages.
+Return up to ten evidence-backed athlete opportunities worth human review. A run is successful when every returned candidate passes every quality gate and has a corrected priority score above 80; returning fewer than ten is correct when the evidence does not support ten. Research never sends outreach, drafts, comments, or messages.
 
 The score is not ground truth. V2 is optimized against leakage-safe human labels and audited evidence; “ten above 80” is only the final output gate.
 
@@ -29,7 +29,7 @@ Every candidate is evaluated on four distinct questions:
 3. **Research confidence:** Is the identity, eligibility, evidence, freshness, and coverage strong enough to trust the assessment?
 4. **Overall priority:** Should Prime Champs invest human outreach effort?
 
-Priority is calculated deterministically from 45% fit, 35% achievability, and 20% confidence. A high value in one dimension cannot hide a weak one. Priority is capped below the finalist threshold when fit is below 80, achievability below 60, confidence below 80, a material claim is unsupported, or a critical gap remains.
+Priority is calculated deterministically from 45% fit, 35% achievability, and 20% confidence. A high value in one dimension cannot hide a weak one. Priority is capped below the finalist threshold when fit is below 80, achievability below 70, confidence below 80, a material claim is unsupported, or a critical gap remains. A Researcher proposal above 80 is held at 79 until the independent audit finishes.
 
 ## Golden benchmark
 
@@ -79,11 +79,14 @@ A candidate counts only when all are true:
 
 - Corrected overall priority is greater than 80.
 - Fit is at least 80.
-- Achievability is at least 60.
+- Achievability is at least 70.
 - Research confidence is at least 80.
 - The athlete and personal account are identity-confirmed.
 - Age 21+ is source-verified.
 - Instagram is public and recently active.
+- A meaningful audience meets the active minimum or the bounded exceptional-engagement rule.
+- Current athletic momentum and creator potential each have an exact dossier URL and matching source excerpt.
+- The blind Auditor independently confirms momentum, audience, creator potential, and complete commercial constraints.
 - Material claims pass source verification.
 - The independent audit passes or corrects the assessment.
 - No critical gap remains.
@@ -119,7 +122,18 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 | Evaluation | Internal Supabase harness and unit/CI regressions first | Smallest debuggable system with no new platform dependency | Braintrust for scaled comparisons; Langfuse for self-hosted tracing; Promptfoo for broader CI matrices |
 | Paid influencer data | No Modash contract now | The annual price is not justified before proving a measured data gap | Revisit with volume and coverage evidence |
 
-## Current implementation status — 11 August 2026
+## Current production checkpoint — 12 August 2026
+
+- Main commit `1763655` (`Require source-backed research finalists`) is deployed and READY as Vercel deployment `dpl_39DMEHCxpkkBkpS5RvCPrhMmfxEb` on `https://crm.prime-champs.com`.
+- Research prompt `research-v8-source-backed-finalist-gates` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
+- A proposed priority above 80 remains 79 until audit. The final score is the minimum of the Researcher dimensions, blind-Auditor dimensions, and review correction, followed by objective guardrails.
+- Finalists now require deterministic source matches for current momentum and creator behavior, a meaningful measured audience, commercial achievability of at least 70, complete commercial constraints, zero unsupported material claims, and an independent audit.
+- Evaluation mode is regression-checked to exit before athlete inserts and to suppress notifications. The research workflow contains no message, draft, or outreach-table writes.
+- Type checking, focused lint, 74 unit tests, and the Vercel production build pass. The live root redirects to login and the login page returns 200.
+- Dylan's 100 outcomes remain the source of truth: 41 signed plus three approved/non-signing positives; 23 rejected plus 33 stalled negatives. The pending enriched workbook is the next data dependency.
+- Bounded evaluation-only volleyball smoke run `6c898a22-c961-4612-8c5b-7dd14517c2a3` completed safely: 44 sourced, six admitted discoveries, four scored, and zero finalists. Its best score was 79, no blind audit was eligible, and it created zero live athletes or notifications. See `docs/RESEARCH_V2_CLAUDE_HANDOFF.md` for the full checkpoint and next actions.
+
+## Implementation history through 11 August 2026
 
 - V1 discovery, identity, eligibility, activity, scoring, and durable execution have been strengthened and retained.
 - The V2 schema is live in Supabase with server-only privileges and RLS enabled.
@@ -162,4 +176,4 @@ Completed-run re-score forks rebuild full dossiers from `research_candidates.raw
 3. Add a cheap pre-score viability selector over a larger official-source pool. It should prioritize adult-verifiable, identity-confirmed athletes with public creator/commercial signals before expensive age research and scoring.
 4. Run the frozen baseline on the development split and fix its largest measured failure class one change at a time.
 5. Use OpenRouter only for explicit, versioned challenger experiments such as lower-cost extraction or summarization. Promote a model only when it beats the frozen baseline on quality, cost, and latency.
-6. Freeze the winning configuration, run the held-out split once, and then run evaluation-only sport requests until ten independently audited candidates pass. No records or outreach are created by these tests.
+6. Freeze the winning configuration, run the held-out split once, and then run evaluation-only requests across sport archetypes. Return up to ten independently audited candidates per request; never manufacture ten when fewer qualify. No records or outreach are created by these tests.
