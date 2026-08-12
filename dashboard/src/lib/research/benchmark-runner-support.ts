@@ -107,6 +107,17 @@ const MODEL_EVIDENCE_CAPS: Record<string, number> = {
   candidate_evidence: 2,
 };
 
+function candidateEvidenceSignalPriority(item: LeakageSafeBenchmarkEvidence) {
+  if (item.claimType !== "candidate_evidence") return 0;
+  const text = `${item.title} ${item.claim} ${item.excerpt}`;
+  let score = 0;
+  if (/\b(?:followers|subscribers?|audience|influencer|content creator|social media following)\b/i.test(text)) score += 4;
+  if (/\b(?:sponsor(?:ed|ship)?|brand partner(?:ship)?|ambassador|endorsement|pro team|team rider|represented by|management|agency)\b/i.test(text)) score += 3;
+  if (/\b(?:interview|podcast|youtube|behind[- ]the[- ]scenes|training (?:video|content)|personality[- ]led)\b/i.test(text)) score += 2;
+  if (/\b(?:ranked|ranking|champion|finalist|medalist|won|winner|qualif(?:y|ied)|world cup|national team|pro debut)\b/i.test(text)) score += 1;
+  return score;
+}
+
 export function compactBenchmarkModelEvidence(evidence: LeakageSafeBenchmarkEvidence[]) {
   const typeOrder = Object.keys(MODEL_EVIDENCE_CAPS);
   const selected: LeakageSafeBenchmarkEvidence[] = [];
@@ -116,6 +127,7 @@ export function compactBenchmarkModelEvidence(evidence: LeakageSafeBenchmarkEvid
       const leftExactBirth = claimType === "adult_eligibility" && typeof left.structuredValue.birth_date === "string" ? 1 : 0;
       const rightExactBirth = claimType === "adult_eligibility" && typeof right.structuredValue.birth_date === "string" ? 1 : 0;
       return rightExactBirth - leftExactBirth
+        || candidateEvidenceSignalPriority(right) - candidateEvidenceSignalPriority(left)
         || right.effectiveAt.localeCompare(left.effectiveAt)
         || left.url.localeCompare(right.url);
     });

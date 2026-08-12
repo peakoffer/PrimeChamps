@@ -758,6 +758,22 @@ test("benchmark model dossiers keep the strongest bounded evidence per dimension
   assert.equal(compact.filter((item) => item.claimType === "sport_identity").length, 2);
   assert.equal(compact.filter((item) => item.claimType === "adult_eligibility").length, 2);
   assert.equal(compact.filter((item) => item.claimType === "athletic_momentum").length, 3);
+  const rankedCandidates = compactBenchmarkModelEvidence([
+    {
+      sourceId: "generic", claimId: "generic", sourceRef: "", url: "https://new.example/profile",
+      domain: "new.example", title: "Recent athlete profile", claimType: "candidate_evidence",
+      claim: "Athlete profile and biography.", excerpt: "A recent generic athlete biography.",
+      effectiveAt: "2026-01-01T00:00:00Z", independenceGroup: "new.example", material: true, structuredValue: {},
+    },
+    {
+      sourceId: "signal", claimId: "signal", sourceRef: "", url: "https://older.example/partnership",
+      domain: "older.example", title: "Athlete joins pro team", claimType: "candidate_evidence",
+      claim: "The athlete is a sponsored team rider with 80,000 followers and regular training videos.",
+      excerpt: "Sponsored pro team rider with 80,000 followers and behind-the-scenes training content.",
+      effectiveAt: "2025-01-01T00:00:00Z", independenceGroup: "older.example", material: true, structuredValue: {},
+    },
+  ]);
+  assert.equal(rankedCandidates[0].claimId, "signal");
 });
 
 test("benchmark execution is evaluation-only and cannot mutate outreach or live pipeline tables", () => {
