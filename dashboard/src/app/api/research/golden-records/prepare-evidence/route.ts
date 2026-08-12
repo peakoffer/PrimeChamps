@@ -12,6 +12,7 @@ export const maxDuration = 60;
 
 type GoldenPreparationCandidate = {
   id: string;
+  sport: string;
   benchmark_split: string;
   label_order_fit_before_outcome: boolean;
   fit_label: string;
@@ -29,6 +30,8 @@ type GoldenPreparationCandidate = {
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
   const outcomeGroundTruth = record.stratification_tags?.includes("dylan_outcome_ground_truth") === true;
   return record.benchmark_split === "excluded"
+    && record.sport !== "Needs enrichment"
+    && record.sport !== "Unknown"
     && (record.label_order_fit_before_outcome === true || outcomeGroundTruth)
     && (record.fit_label === "fit" || record.fit_label === "not_fit")
     && ["high", "medium", "low"].includes(record.achievability_label)
@@ -47,7 +50,7 @@ export async function GET() {
     const admin = createAdminClient();
     const [{ data: candidates, error: candidateError }, { data: runs, error: runError }] = await Promise.all([
       admin.from("research_golden_records")
-        .select("id,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+        .select("id,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
         .eq("organization_id", user.organizationId)
         .eq("benchmark_split", "excluded")
         .order("updated_at", { ascending: true }),
@@ -112,7 +115,7 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
     let query = admin.from("research_golden_records")
-      .select("id,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+      .select("id,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
       .eq("organization_id", user.organizationId)
       .eq("benchmark_split", "excluded")
       .order("updated_at", { ascending: true });

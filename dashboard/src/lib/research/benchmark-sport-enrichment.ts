@@ -77,7 +77,7 @@ Return one row per case. Copy the case ID and name exactly. Use Unknown unless t
 
 ${cases}`) }],
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(45_000),
   });
   if (!response.ok) throw new Error(`Anthropic sport classification failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
   const payload = await response.json() as {
@@ -102,17 +102,31 @@ async function classifySports(records: GoldenRecord[], sources: Map<string, Benc
   const usage: Record<string, number> = {};
   let calls = 0;
 
-  for (let index = 0; index < records.length; index += SPORT_CLASSIFICATION_BATCH_SIZE) {
-    const batch = records.slice(index, index + SPORT_CLASSIFICATION_BATCH_SIZE);
-    calls += 1;
+  const batches = Array.from(
+    { length: Math.ceil(records.length / SPORT_CLASSIFICATION_BATCH_SIZE) },
+    (_, index) => records.slice(
+      index * SPORT_CLASSIFICATION_BATCH_SIZE,
+      (index + 1) * SPORT_CLASSIFICATION_BATCH_SIZE
+    )
+  );
+  calls = batches.length;
+  const results = await Promise.all(batches.map(async (batch) => {
     try {
-      const result = await classifySportBatch(batch, sources, model);
-      classifications.push(...result.classifications);
-      addUsage(usage, result.usage);
+      return { batch, result: await classifySportBatch(batch, sources, model), error: null };
     } catch (error) {
-      const reason = error instanceof Error ? error.message.slice(0, 240) : "Classification checkpoint failed";
-      failures.push(...batch.map((record) => ({ name: record.athlete_name, reason })));
+      return { batch, result: null, error };
     }
+  }));
+  for (const checkpoint of results) {
+    if (checkpoint.result) {
+      classifications.push(...checkpoint.result.classifications);
+      addUsage(usage, checkpoint.result.usage);
+      continue;
+    }
+    const reason = checkpoint.error instanceof Error
+      ? checkpoint.error.message.slice(0, 240)
+      : "Classification checkpoint failed";
+    failures.push(...checkpoint.batch.map((record) => ({ name: record.athlete_name, reason })));
   }
 
   return { classifications, failures, usage, model, calls };
@@ -200,6 +214,7 @@ export async function enrichBenchmarkSports(organizationId: string) {
     .select("id,organization_id,athlete_name,evidence_cutoff_at,stratification_tags")
     .eq("organization_id", organizationId)
     .contains("stratification_tags", ["needs_sport_enrichment"])
+    .eq("sport", "Needs enrichment")
     .order("athlete_name", { ascending: true })
     .limit(50);
   if (error) throw error;

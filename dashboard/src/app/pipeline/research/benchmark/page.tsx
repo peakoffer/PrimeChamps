@@ -226,7 +226,7 @@ export default function ResearchBenchmarkPage() {
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [filter, setFilter] = useState<"all" | "needs_label" | "conflicts" | "ready" | "usable">("needs_label");
+  const [filter, setFilter] = useState<"all" | "needs_label" | "conflicts" | "ready" | "usable">("all");
   const [message, setMessage] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");

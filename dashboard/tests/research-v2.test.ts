@@ -214,6 +214,7 @@ test("historical reconciliation makes Dylan's workbook authoritative", () => {
   assert.equal(reconciled.golden.fitLabel, "fit");
   assert.equal(reconciled.golden.sport, "Motorcycle Racing");
   assert.equal(reconciled.golden.stratificationTags.includes("historical_label_conflict"), false);
+  assert.equal(reconciled.golden.stratificationTags.includes("needs_sport_enrichment"), false);
 
   const idempotent = reconcileHistoricalGoldenRecord(prepared, {
     id: "existing",
@@ -304,6 +305,7 @@ test("benchmark splits are deterministic, balanced, and never hold out developme
 test("benchmark summary separates provisional labels from benchmark-ready records", () => {
   const summary = summarizeGoldenRecords([
     {
+      sport: "Volleyball",
       fit_label: "fit",
       achievability_label: "uncertain",
       benchmark_split: "excluded",
@@ -312,8 +314,10 @@ test("benchmark summary separates provisional labels from benchmark-ready record
       evidence_cutoff_at: null,
       decisive_information_publicly_knowable: null,
       labeled_at: null,
+      stratification_tags: ["needs_sport_enrichment"],
     },
     {
+      sport: "Needs enrichment",
       fit_label: "not_fit",
       achievability_label: "low",
       benchmark_split: "development",
@@ -333,6 +337,7 @@ test("benchmark summary separates provisional labels from benchmark-ready record
   assert.equal(summary.negativeRemaining, 39);
   assert.equal(summary.censoredOutcomes, 0);
   assert.equal(summary.labelConflicts, 0);
+  assert.equal(summary.needsSportEnrichment, 1);
 });
 
 test("Dylan outcome records do not require a second blind-label exercise", () => {
@@ -779,7 +784,8 @@ test("benchmark sport enrichment uses Sonnet-compatible structured output schema
   assert.match(source, /output_config: \{ effort: "low", format:/);
   assert.match(source, /SPORT_CLASSIFICATION_BATCH_SIZE = 5/);
   assert.match(source, /resolveAnthropicScoringModel\(\)/);
-  assert.match(source, /failures\.push\(\.\.\.batch\.map/);
+  assert.match(source, /Promise\.all\(batches\.map/);
+  assert.match(source, /failures\.push\(\.\.\.checkpoint\.batch\.map/);
 });
 
 test("Wayback selection uses the latest exact HTML capture no later than the evidence cutoff", () => {

@@ -252,16 +252,20 @@ export function reconcileHistoricalGoldenRecord(
   );
   const preservedReference = [existing.internal_record_reference, prepared.golden.internalRecordReference]
     .filter(Boolean).join("; ");
+  const resolvedSport = existing.sport && existing.sport !== "Needs enrichment"
+    ? existing.sport
+    : prepared.golden.sport;
   const golden: GoldenRecordInput = {
     ...prepared.golden,
     athleteId: existing.athlete_id || null,
-    sport: existing.sport || prepared.golden.sport,
+    sport: resolvedSport,
     finalOutcome: prepared.golden.finalOutcome,
     internalRecordReference: preservedReference,
     exclusionReason: prepared.golden.exclusionReason,
     stratificationTags: uniqueTags([
-      ...existingTags,
-      ...prepared.golden.stratificationTags,
+      ...existingTags.filter((tag) => tag !== "needs_sport_enrichment"),
+      ...prepared.golden.stratificationTags.filter((tag) => tag !== "needs_sport_enrichment"),
+      resolvedSport === "Needs enrichment" && "needs_sport_enrichment",
     ]),
   };
   return { golden, conflict: false };
