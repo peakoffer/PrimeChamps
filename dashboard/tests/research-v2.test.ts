@@ -40,6 +40,7 @@ import {
 import {
   benchmarkAdultEligibilityGate,
   benchmarkCaseReadiness,
+  benchmarkCurrentMomentumGate,
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
@@ -64,6 +65,7 @@ import {
   extractPreparedArchivedEvidence,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
+  preparedMomentumEffectiveAt,
   preparedEvidenceSignalSupported,
   selectWaybackCapture,
   validatePreparedAgeEvidenceForSource,
@@ -477,6 +479,7 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     ...score,
     identityConfirmed: true,
     adultEligibilityVerified: true,
+    currentAthleticMomentumVerified: true,
     materialClaimsVerified: true,
     auditorVerdict: "pass",
     criticalGapCount: 0,
@@ -485,8 +488,18 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     ...score,
     identityConfirmed: true,
     adultEligibilityVerified: true,
+    currentAthleticMomentumVerified: true,
     materialClaimsVerified: true,
     auditorVerdict: "fail",
+    criticalGapCount: 0,
+  }), false);
+  assert.equal(passesResearchV2FinalGate({
+    ...score,
+    identityConfirmed: true,
+    adultEligibilityVerified: true,
+    currentAthleticMomentumVerified: false,
+    materialClaimsVerified: true,
+    auditorVerdict: "pass",
     criticalGapCount: 0,
   }), false);
 });
@@ -592,6 +605,21 @@ test("benchmark finalist gates require two independent identity and adult source
     selection,
   }).ready, true);
   assert.equal(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence.filter((item) => item.sourceId !== "age-b")).passed, false);
+  const recentMomentum = {
+    ...selection.evidence[0],
+    sourceId: "momentum-recent",
+    claimId: "momentum-recent",
+    sourceRef: "E99",
+    title: "Example Athlete wins Beach Volleyball event",
+    claimType: "athletic_momentum",
+    claim: "Example Athlete won a Beach Volleyball event.",
+    excerpt: "Example Athlete won a Beach Volleyball event.",
+    effectiveAt: "2025-04-01T00:00:00.000Z",
+  };
+  assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [...selection.evidence, recentMomentum]).passed, true);
+  assert.equal(benchmarkCurrentMomentumGate(BENCHMARK_CASE, [
+    { ...recentMomentum, effectiveAt: "2022-04-01T00:00:00.000Z" },
+  ]).passed, false);
   const missingAge = { ...selection, evidence: selection.evidence.filter((item) => item.sourceId !== "age-b") };
   assert.ok(benchmarkEvidenceFreezeReadiness({
     record: BENCHMARK_CASE,
@@ -788,7 +816,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v15/);
+  assert.match(source, /research-v2-benchmark-runner-v16/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -1192,6 +1220,8 @@ test("generated material signals require explicit athlete-relevant language", ()
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "She won the national championship."), true);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "Main navigation Management Contact"), false);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "She signed with a management agency."), true);
+  assert.equal(preparedMomentumEffectiveAt("She won the national championship in 2021.", "2026-05-10T00:00:00.000Z"), "2021-01-01T00:00:00.000Z");
+  assert.equal(preparedMomentumEffectiveAt("Current X Games medals and results", "2026-05-10T00:00:00.000Z"), "2026-05-10T00:00:00.000Z");
 });
 
 test("evidence preparation is durable, replay-safe, zero-scoring, and isolated from outreach", () => {

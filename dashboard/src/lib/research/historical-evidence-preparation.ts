@@ -8,7 +8,7 @@ import {
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-development-signal-recovery-v2";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-athlete-centered-age-v3";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-signal-freshness-v4";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -376,12 +376,27 @@ export function validatePreparedAgeEvidenceForSource(input: {
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
   athletic_momentum: /\b(?:ranked|ranking|champion|finalist|medalist|medal|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut)\b/i,
   audience_signal: /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
-  commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal)\b/i,
+  commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
 };
 
 export function preparedEvidenceSignalSupported(claimType: string, sourceExcerpt: string) {
   const pattern = PREPARED_EVIDENCE_SIGNAL_PATTERNS[claimType];
   return Boolean(pattern && pattern.test(sourceExcerpt));
+}
+
+export function preparedMomentumEffectiveAt(sourceExcerpt: string, fallbackEffectiveAt: string) {
+  const fallback = Date.parse(fallbackEffectiveAt);
+  if (!Number.isFinite(fallback)) return fallbackEffectiveAt;
+  const signalPattern = PREPARED_EVIDENCE_SIGNAL_PATTERNS.athletic_momentum;
+  const years = sourceExcerpt
+    .split(/\n|(?<=[.!?])\s+/)
+    .filter((segment) => signalPattern.test(segment))
+    .flatMap((segment) => Array.from(segment.matchAll(/\b((?:19|20)\d{2})\b/g), (match) => Number(match[1])))
+    .filter((year) => year <= new Date(fallback).getUTCFullYear());
+  if (!years.length) return new Date(fallback).toISOString();
+  const eventYear = Math.max(...years);
+  const eventStart = Date.UTC(eventYear, 0, 1);
+  return new Date(Math.min(eventStart, fallback)).toISOString();
 }
 
 export function extractPreparedArchivedEvidence(input: {
@@ -464,22 +479,23 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     });
   }
-  if (preparedEvidenceSignalSupported("athletic_momentum", excerpt)) {
+  const signalExcerpt = `${title}\n${excerpt}`.slice(0, 1_200);
+  if (preparedEvidenceSignalSupported("athletic_momentum", signalExcerpt)) {
     claims.push({
-      claimType: "athletic_momentum", claimText: excerpt.slice(0, 600), structuredValue: { signal: "competitive_momentum" },
-      sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 90, material: true,
+      claimType: "athletic_momentum", claimText: signalExcerpt.slice(0, 600), structuredValue: { signal: "competitive_momentum" },
+      sourceExcerpt: signalExcerpt, effectiveAt: preparedMomentumEffectiveAt(signalExcerpt, effectiveAt), extractionConfidence: 90, material: true,
     });
   }
-  if (preparedEvidenceSignalSupported("audience_signal", excerpt)) {
+  if (preparedEvidenceSignalSupported("audience_signal", signalExcerpt)) {
     claims.push({
-      claimType: "audience_signal", claimText: excerpt.slice(0, 600), structuredValue: { signal: "public_audience_or_creator_presence" },
-      sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 88, material: true,
+      claimType: "audience_signal", claimText: signalExcerpt.slice(0, 600), structuredValue: { signal: "public_audience_or_creator_presence" },
+      sourceExcerpt: signalExcerpt, effectiveAt, extractionConfidence: 88, material: true,
     });
   }
-  if (preparedEvidenceSignalSupported("commercial_achievability_signal", excerpt)) {
+  if (preparedEvidenceSignalSupported("commercial_achievability_signal", signalExcerpt)) {
     claims.push({
-      claimType: "commercial_achievability_signal", claimText: excerpt.slice(0, 600), structuredValue: { signal: "public_commercial_context" },
-      sourceExcerpt: excerpt, effectiveAt, extractionConfidence: 86, material: true,
+      claimType: "commercial_achievability_signal", claimText: signalExcerpt.slice(0, 600), structuredValue: { signal: "public_commercial_context" },
+      sourceExcerpt: signalExcerpt, effectiveAt, extractionConfidence: 86, material: true,
     });
   }
   return {

@@ -307,6 +307,29 @@ export function benchmarkAdultEligibilityGate(record: BenchmarkGoldenCase, evide
   return { passed: groups.size >= 2, independentSources: groups.size };
 }
 
+export function benchmarkCurrentMomentumGate(
+  record: BenchmarkGoldenCase,
+  evidence: LeakageSafeBenchmarkEvidence[],
+  maximumAgeMonths = 24
+) {
+  const cutoff = validTimestamp(record.evidence_cutoff_at);
+  if (!cutoff) return { passed: false, recentEvidenceCount: 0, freshestAt: null as string | null };
+  const threshold = new Date(cutoff);
+  threshold.setUTCMonth(threshold.getUTCMonth() - Math.max(1, maximumAgeMonths));
+  const recent = evidence.filter((item) => {
+    const effectiveAt = validTimestamp(item.effectiveAt);
+    return item.claimType === "athletic_momentum"
+      && effectiveAt !== null
+      && effectiveAt <= cutoff
+      && effectiveAt >= threshold.getTime()
+      && evidenceNamesAthlete(record.athlete_name, item);
+  });
+  const freshestAt = recent.reduce<string | null>((freshest, item) => (
+    !freshest || item.effectiveAt > freshest ? item.effectiveAt : freshest
+  ), null);
+  return { passed: recent.length > 0, recentEvidenceCount: recent.length, freshestAt };
+}
+
 export function benchmarkCaseReadiness(input: {
   record: BenchmarkGoldenCase;
   selection: BenchmarkEvidenceSelection;

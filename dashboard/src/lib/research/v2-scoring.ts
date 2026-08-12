@@ -50,6 +50,7 @@ export function buildResearchV2Score(input: Omit<Parameters<typeof calculateRese
 export function passesResearchV2FinalGate(input: ResearchV2Score & {
   identityConfirmed: boolean;
   adultEligibilityVerified: boolean;
+  currentAthleticMomentumVerified: boolean;
   materialClaimsVerified: boolean;
   auditorVerdict: "pass" | "corrected" | "fail";
   criticalGapCount: number;
@@ -60,6 +61,7 @@ export function passesResearchV2FinalGate(input: ResearchV2Score & {
     && input.researchConfidence >= 80
     && input.identityConfirmed
     && input.adultEligibilityVerified
+    && input.currentAthleticMomentumVerified
     && input.materialClaimsVerified
     && input.auditorVerdict !== "fail"
     && input.criticalGapCount === 0;
