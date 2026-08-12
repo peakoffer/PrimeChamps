@@ -43,6 +43,7 @@ import {
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
+  compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
   normalizeOpenRouterBenchmarkUsage,
   promptContainsBenchmarkLeakage,
@@ -734,6 +735,28 @@ test("OpenRouter usage separates cache reads and writes and preserves provider-r
   });
 });
 
+test("benchmark model dossiers keep the strongest bounded evidence per dimension", () => {
+  const items = [
+    ...Array.from({ length: 5 }, (_, index) => ({ claimType: "sport_identity", domain: `sport${index}.test` })),
+    ...Array.from({ length: 4 }, (_, index) => ({ claimType: "adult_eligibility", domain: `age${index}.test` })),
+    ...Array.from({ length: 5 }, (_, index) => ({ claimType: "athletic_momentum", domain: `momentum${index}.test` })),
+    ...Array.from({ length: 4 }, (_, index) => ({ claimType: "audience_signal", domain: `audience${index}.test` })),
+    ...Array.from({ length: 4 }, (_, index) => ({ claimType: "commercial_achievability_signal", domain: `commercial${index}.test` })),
+    ...Array.from({ length: 4 }, (_, index) => ({ claimType: "candidate_evidence", domain: `candidate${index}.test` })),
+  ].map((item, index) => ({
+    sourceId: `source-${index}`, claimId: `claim-${index}`, sourceRef: `OLD${index}`, url: `https://${item.domain}/${index}`,
+    domain: item.domain, title: `Evidence ${index}`, claimType: item.claimType, claim: `Claim ${index}`, excerpt: `Excerpt ${index}`,
+    effectiveAt: `2026-01-${String((index % 28) + 1).padStart(2, "0")}T00:00:00Z`, independenceGroup: item.domain,
+    material: true, structuredValue: item.claimType === "adult_eligibility" ? { birth_date: "1998-01-01" } : {},
+  }));
+  const compact = compactBenchmarkModelEvidence(items);
+  assert.equal(compact.length, 13);
+  assert.deepEqual(compact.map((item) => item.sourceRef), Array.from({ length: 13 }, (_, index) => `E${index + 1}`));
+  assert.equal(compact.filter((item) => item.claimType === "sport_identity").length, 2);
+  assert.equal(compact.filter((item) => item.claimType === "adult_eligibility").length, 2);
+  assert.equal(compact.filter((item) => item.claimType === "athletic_momentum").length, 3);
+});
+
 test("benchmark execution is evaluation-only and cannot mutate outreach or live pipeline tables", () => {
   const source = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   for (const forbiddenTable of [
@@ -746,7 +769,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v9/);
+  assert.match(source, /research-v2-benchmark-runner-v10/);
   assert.match(source, /researcherOutputTokens: 2_200/);
   assert.match(source, /blindOutputTokens: 2_000/);
   assert.match(source, /reviewOutputTokens: 2_200/);
@@ -759,6 +782,8 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.match(source, /const auditorCaught = researcherFailure && finalPredictionCorrect/);
   assert.match(source, /compatible replay checkpoint; start a fresh development smoke test/);
   assert.ok(!source.includes("researcher.unsupported_claims"), "unsupported researcher claims must come from citation validity, not self-report");
+  assert.ok(!source.includes("blind.unsupported_claims"), "blind limitations must not be counted as unsupported material claims");
+  assert.match(source, /compactBenchmarkModelEvidence/);
   assert.ok(!source.includes("minimum: 0"), "Anthropic structured outputs reject numeric minimum keywords");
   assert.ok(!source.includes("maximum: 100"), "Anthropic structured outputs reject numeric maximum keywords");
   assert.match(source, /status: "draft"/);

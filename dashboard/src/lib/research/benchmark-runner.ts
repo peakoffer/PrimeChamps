@@ -11,6 +11,7 @@ import {
   benchmarkIdentityGate,
   BENCHMARK_PRE_OUTREACH_CALIBRATION,
   buildBenchmarkResearcherPrompt,
+  compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
   normalizeOpenRouterBenchmarkUsage,
   projectedBenchmarkCallCostMicrousd,
@@ -27,7 +28,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v9";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v10";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -85,14 +86,13 @@ const BLIND_AUDITOR_SCHEMA = {
     independent_achievability_score: { type: "number" },
     independent_confidence_score: { type: "number" },
     critical_gaps: { type: "array", items: { type: "string" } },
-    unsupported_claims: { type: "array", items: { type: "string" } },
     failure_types: { type: "array", items: { type: "string" } },
     summary: { type: "string" },
   },
   required: [
     "identity_passed", "eligibility_passed", "source_verification_passed",
     "commercial_constraints_complete", "independent_fit_score", "independent_achievability_score",
-    "independent_confidence_score", "critical_gaps", "unsupported_claims", "failure_types", "summary",
+    "independent_confidence_score", "critical_gaps", "failure_types", "summary",
   ],
 } as const;
 
@@ -148,7 +148,6 @@ type BlindAssessment = {
   independent_achievability_score: number;
   independent_confidence_score: number;
   critical_gaps: string[];
-  unsupported_claims: string[];
   failure_types: string[];
   summary: string;
 };
@@ -456,7 +455,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 7,
+      version: 8,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -482,14 +481,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v7",
+      content_hash: "research-v2-benchmark-researcher-v8",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; platform willingness is not required or inferred; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-auditor-v7",
+      content_hash: "research-v2-benchmark-auditor-v8",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -812,7 +811,8 @@ async function processBenchmarkCase(input: {
   if (readinessReasons.length) throw new Error(`${record.athlete_name} is no longer benchmark-ready: ${readinessReasons.join(", ")}`);
   const identityGate = benchmarkIdentityGate(record, selection.evidence);
   const adultGate = benchmarkAdultEligibilityGate(record, selection.evidence);
-  const evidenceHash = stableEvidenceSetHash(selection.evidence.map((item) => ({
+  const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
+  const evidenceHash = stableEvidenceSetHash(modelEvidence.map((item) => ({
     url: item.url,
     claim: item.claim,
     sourceExcerpt: item.excerpt,
@@ -834,7 +834,7 @@ async function processBenchmarkCase(input: {
     };
   } else {
     const researcherCall = await callStructuredSonnet<ResearcherAssessment>({
-      prompt: buildBenchmarkResearcherPrompt(record, selection.evidence),
+      prompt: buildBenchmarkResearcherPrompt(record, modelEvidence),
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -843,7 +843,7 @@ async function processBenchmarkCase(input: {
     });
     researcher = researcherCall.value;
     researcherUsage = researcherCall.usage;
-    const citationQuality = safeRefs(researcher, selection.evidence);
+    const citationQuality = safeRefs(researcher, modelEvidence);
     const researcherScore = buildResearchV2Score({
       onlyfansFit: bounded(researcher.onlyfans_fit_score),
       commercialAchievability: bounded(researcher.commercial_achievability_score),
@@ -909,7 +909,7 @@ async function processBenchmarkCase(input: {
   let blindUsage = checkpointAssessment.blind_usage as ModelUsage | undefined;
   if (!blind || !blindUsage) {
     const blindCall = await callStructuredSonnet<BlindAssessment>({
-      prompt: blindPrompt(record, selection.evidence),
+      prompt: blindPrompt(record, modelEvidence),
       schema: BLIND_AUDITOR_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -943,10 +943,9 @@ async function processBenchmarkCase(input: {
       .eq("id", researcherScoreId).eq("organization_id", run.organization_id);
     if (error) throw error;
   }
-  const citationQuality = safeRefs(researcher, selection.evidence);
-  const unsupportedCount = citationQuality.unsupportedClaimCount + (blind.unsupported_claims || []).length;
+  const citationQuality = safeRefs(researcher, modelEvidence);
+  const unsupportedCount = citationQuality.unsupportedClaimCount;
   const criticalGaps = [
-    ...(researcher.critical_gaps || []),
     ...(blind.critical_gaps || []),
     ...(review.findings || []).filter((finding) => finding.severity === "critical").map((finding) => finding.details),
   ];

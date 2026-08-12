@@ -96,6 +96,38 @@ export type BenchmarkEvidenceSelection = {
   pointInTimeCompliant: boolean;
 };
 
+const MODEL_EVIDENCE_CAPS: Record<string, number> = {
+  sport_identity: 2,
+  adult_eligibility: 2,
+  athletic_momentum: 3,
+  audience_signal: 2,
+  commercial_achievability_signal: 2,
+  candidate_evidence: 2,
+};
+
+export function compactBenchmarkModelEvidence(evidence: LeakageSafeBenchmarkEvidence[]) {
+  const typeOrder = Object.keys(MODEL_EVIDENCE_CAPS);
+  const selected: LeakageSafeBenchmarkEvidence[] = [];
+  for (const claimType of typeOrder) {
+    const usedSources = new Set<string>();
+    const candidates = evidence.filter((item) => item.claimType === claimType).sort((left, right) => {
+      const leftExactBirth = claimType === "adult_eligibility" && typeof left.structuredValue.birth_date === "string" ? 1 : 0;
+      const rightExactBirth = claimType === "adult_eligibility" && typeof right.structuredValue.birth_date === "string" ? 1 : 0;
+      return rightExactBirth - leftExactBirth
+        || right.effectiveAt.localeCompare(left.effectiveAt)
+        || left.url.localeCompare(right.url);
+    });
+    for (const item of candidates) {
+      const sourceKey = item.independenceGroup || item.domain || item.sourceId;
+      if (usedSources.has(sourceKey)) continue;
+      selected.push(item);
+      usedSources.add(sourceKey);
+      if (usedSources.size >= MODEL_EVIDENCE_CAPS[claimType]) break;
+    }
+  }
+  return selected.map((item, index) => ({ ...item, sourceRef: `E${index + 1}` }));
+}
+
 function validTimestamp(value: string | null | undefined) {
   if (!value) return null;
   const timestamp = Date.parse(value);
