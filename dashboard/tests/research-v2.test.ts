@@ -761,6 +761,8 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(!source.includes("minimum: 0"), "Anthropic structured outputs reject numeric minimum keywords");
   assert.ok(!source.includes("maximum: 100"), "Anthropic structured outputs reject numeric maximum keywords");
   assert.match(source, /status: "draft"/);
+  assert.match(source, /rubricArchiveError/);
+  assert.ok(source.indexOf("rubricArchiveError") < source.indexOf("rubricActivateError"), "the previous rubric must be archived before the new one is activated");
   assert.match(source, /update\(\{ status: "archived" \}\)/);
   assert.match(source, /BENCHMARK_GOLDEN_RECORD_SELECT = .*stratification_tags/);
   assert.equal((source.match(/\.select\(BENCHMARK_GOLDEN_RECORD_SELECT\)/g) || []).length, 2,

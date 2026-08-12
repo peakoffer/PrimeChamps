@@ -435,11 +435,22 @@ async function ensureBenchmarkArtifacts(input: {
       outreach_disabled: true,
     },
     definition_hash: "research-v2-benchmark-rubric-v2",
-    status: "active",
+    status: "draft",
     created_by_user_id: userId,
-    activated_at: new Date().toISOString(),
+    activated_at: null,
   }, { onConflict: "organization_id,rubric_key,version" }).select("id").single();
   if (rubricError) throw rubricError;
+  const { error: rubricArchiveError } = await admin.from("research_rubric_versions").update({ status: "archived" })
+    .eq("organization_id", organizationId)
+    .eq("rubric_key", "onlyfans_benchmark_fit_achievability_confidence")
+    .eq("status", "active")
+    .neq("id", rubric.id);
+  if (rubricArchiveError) throw rubricArchiveError;
+  const { error: rubricActivateError } = await admin.from("research_rubric_versions").update({
+    status: "active",
+    activated_at: new Date().toISOString(),
+  }).eq("id", rubric.id).eq("organization_id", organizationId);
+  if (rubricActivateError) throw rubricActivateError;
 
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
