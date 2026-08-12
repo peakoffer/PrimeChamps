@@ -58,6 +58,7 @@ import {
 import {
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
+  buildHistoricalSignalRecoveryQueries,
   dedupeHistoricalSearchCandidates,
   extractPreparedArchivedEvidence,
   normalizeEvidencePreparationBudget,
@@ -1095,6 +1096,16 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   assert.ok(ageRecovery.every((query) => /birth|born|age/i.test(query)));
   assert.ok(ageRecovery.every((query) => query.includes("before:2024-06-01")));
   assert.ok(ageRecovery.some((query) => query.includes("site:wikipedia.org") && query.includes("site:worldathletics.org")));
+  const signalRecovery = buildHistoricalSignalRecoveryQueries({
+    athlete_name: "Jane Doe",
+    sport: "Volleyball",
+    evidence_cutoff_at: "2024-06-01T12:00:00Z",
+  });
+  assert.equal(signalRecovery.length, 3);
+  assert.ok(signalRecovery.every((query) => query.includes("before:2024-06-01")));
+  assert.ok(signalRecovery.some((query) => /content creator|followers|personal brand/.test(query)));
+  assert.ok(signalRecovery.some((query) => /sponsor|brand partnership/.test(query)));
+  assert.ok(signalRecovery.every((query) => !/onlyfans/i.test(query)), "development signal recovery must not search for the labeled outcome");
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
   assert.equal(normalizeEvidencePreparationBudget(undefined), 0.75);
@@ -1154,6 +1165,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /latestSummary\?\.providerRunId/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
+  assert.match(route, /eligibleForDevelopmentSignalRecovery/);
+  assert.match(route, /requestedMode === "signal_recovery" \? "development" : "excluded"/);
+  assert.match(route, /!record\.held_out_locked_at/);
+  assert.match(workflow, /preparationMode === "signal_recovery"/);
   assert.match(route, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(route, /query_plan_version: queryPlanVersion/);
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);

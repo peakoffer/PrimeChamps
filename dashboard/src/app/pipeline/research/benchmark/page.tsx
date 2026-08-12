@@ -66,6 +66,7 @@ type EvidencePreparationRun = {
   max_apify_charge_microusd: number;
   actual_apify_cost_microusd: number | null;
   error_message: string | null;
+  checkpoint?: { preparation_mode?: "baseline" | "age_recovery" | "signal_recovery" } | null;
   created_at: string;
 };
 
@@ -289,6 +290,7 @@ export default function ResearchBenchmarkPage() {
   const [benchmarkRuns, setBenchmarkRuns] = useState<BenchmarkRun[]>([]);
   const [benchmarkReadiness, setBenchmarkReadiness] = useState(INITIAL_BENCHMARK_READINESS);
   const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
+  const [developmentSignalRecoveryCount, setDevelopmentSignalRecoveryCount] = useState(0);
   const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -318,6 +320,7 @@ export default function ResearchBenchmarkPage() {
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
       setEvidencePreparationRuns(preparationPayload.runs || []);
       setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
+      setDevelopmentSignalRecoveryCount(preparationPayload.developmentSignalRecoveryCount || 0);
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
       setBenchmarkRuns(benchmarkPayload.runs || []);
       setBenchmarkReadiness(benchmarkPayload.readiness || INITIAL_BENCHMARK_READINESS);
@@ -565,6 +568,29 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const recoverDevelopmentSignals = async () => {
+    setWorking(true);
+    setMessage("Starting a bounded creator and commercial signal recovery run for development cases only…");
+    try {
+      const response = await fetch("/api/research/golden-records/prepare-evidence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ maxRecords: 10, maxApifyChargeUsd: 0.75, preparationMode: "signal_recovery" }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Development signal recovery failed to start");
+      setMessage(payload.discoveryReused
+        ? `Queued ${payload.records} development cases from the saved discovery checkpoint. No new Apify spend or scoring tokens.`
+        : `Queued ${payload.records} development cases with a $${payload.maxApifyChargeUsd.toFixed(2)} discovery ceiling. Held-out cases remain locked; scoring tokens are zero.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Development signal recovery failed to start");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const importCsv = async (file: File) => {
     setWorking(true);
     setMessage("");
@@ -781,6 +807,15 @@ export default function ResearchBenchmarkPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                disabled={working || Boolean(activeEvidenceRun) || developmentSignalRecoveryCount === 0}
+                onClick={() => void recoverDevelopmentSignals()}
+                className="rounded-lg border border-amber-700/50 px-3 py-2 text-sm font-medium text-amber-100 disabled:opacity-40"
+              >
+                {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
+                  ? `Recovering signals ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
+                  : `Recover creator evidence (${Math.min(developmentSignalRecoveryCount, 10)})`}
+              </button>
               {activeDevelopmentRun ? (
                 <>
                   <button disabled={working || activeDevelopmentRun.status === "running"} onClick={() => void resumeDevelopmentBenchmark(activeDevelopmentRun.id)} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">

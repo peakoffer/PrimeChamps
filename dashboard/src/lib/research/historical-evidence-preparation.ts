@@ -7,14 +7,15 @@ import {
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-development-signal-recovery-v1";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-athlete-centered-age-v3";
 
-export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery";
+export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
 export function historicalEvidenceQueryPlanVersion(mode: HistoricalEvidencePreparationMode) {
-  return mode === "age_recovery"
-    ? HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION
-    : HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION;
+  if (mode === "age_recovery") return HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION;
+  if (mode === "signal_recovery") return HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION;
+  return HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION;
 }
 
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
@@ -537,6 +538,18 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
     `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthdate OR birthday OR DOB) ${excludeSocial} before:${before}`,
     `"${record.athlete_name}" (born OR "date of birth" OR age) (site:wikipedia.org OR site:olympedia.org OR site:paralympic.org OR site:teamusa.com OR site:worldathletics.org OR site:espn.com OR site:tapology.com OR site:sherdog.com) before:${before}`,
     `"${record.athlete_name}" ${sportExpression} ("player profile" OR "athlete bio") (birth OR age) ${excludeSocial} before:${before}`,
+  ];
+}
+
+export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at">) {
+  const cutoff = new Date(record.evidence_cutoff_at);
+  if (!Number.isFinite(cutoff.getTime())) return [];
+  const before = cutoff.toISOString().slice(0, 10);
+  const excludeSocial = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:x.com -site:twitter.com";
+  return [
+    `"${record.athlete_name}" "${record.sport}" ("content creator" OR influencer OR followers OR "social media" OR "personal brand") ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" (represented OR management OR agency OR "business inquiries" OR collaboration OR entrepreneur OR podcast OR YouTube) ${excludeSocial} before:${before}`,
   ];
 }
 

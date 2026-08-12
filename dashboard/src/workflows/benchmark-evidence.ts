@@ -6,6 +6,7 @@ import {
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
+  buildHistoricalSignalRecoveryQueries,
   dedupeHistoricalSearchCandidates,
   extractPreparedArchivedEvidence,
   preparedEvidenceSignalSupported,
@@ -83,11 +84,20 @@ function normalizeName(value: string) {
     .replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function validatePreparationRecord(record: Record<string, unknown>): asserts record is Record<string, unknown> & EvidencePreparationRecord {
+function validatePreparationRecord(
+  record: Record<string, unknown>,
+  preparationMode: HistoricalEvidencePreparationMode
+): asserts record is Record<string, unknown> & EvidencePreparationRecord {
   const validTimestamp = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
   const outcomeGroundTruth = Array.isArray(record.stratification_tags)
     && record.stratification_tags.includes("dylan_outcome_ground_truth");
-  if (record.benchmark_split !== "excluded") throw new FatalError(`Record ${record.id} is already assigned to a benchmark cohort`);
+  if (preparationMode === "signal_recovery") {
+    if (record.benchmark_split !== "development") {
+      throw new FatalError(`Record ${record.id} is not in the development cohort`);
+    }
+  } else if (record.benchmark_split !== "excluded") {
+    throw new FatalError(`Record ${record.id} is already assigned to a benchmark cohort`);
+  }
   if ((record.label_order_fit_before_outcome !== true && !outcomeGroundTruth) || !record.labeled_at) throw new FatalError(`Record ${record.id} does not have an authoritative ground-truth label`);
   if (record.fit_label !== "fit" && record.fit_label !== "not_fit") throw new FatalError(`Record ${record.id} has no binary fit label`);
   if (!['high', 'medium', 'low'].includes(String(record.achievability_label))) throw new FatalError(`Record ${record.id} has no achievability label`);
@@ -121,7 +131,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   const records = input.recordIds.map((id) => {
     const record = byId.get(id);
     if (!record) throw new FatalError(`Record ${id} was not found`);
-    validatePreparationRecord(record);
+    validatePreparationRecord(record, input.preparationMode);
     return {
       id: String(record.id),
       athlete_name: String(record.athlete_name),
@@ -132,7 +142,9 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   });
   const queryBuilder = input.preparationMode === "age_recovery"
     ? buildHistoricalAgeRecoveryQueries
-    : buildHistoricalEvidenceQueries;
+    : input.preparationMode === "signal_recovery"
+      ? buildHistoricalSignalRecoveryQueries
+      : buildHistoricalEvidenceQueries;
   const queries = records.flatMap(queryBuilder);
   const actor = process.env.APIFY_GOOGLE_SEARCH_ACTOR || "apify/google-search-scraper";
   const discoveryReused = Boolean(input.reuseProviderRunId);
@@ -288,9 +300,19 @@ async function retrieveArchivedEvidenceCandidate(input: {
 }
 retrieveArchivedEvidenceCandidate.maxRetries = 0;
 
-function archivedEvidenceSufficient(record: EvidencePreparationRecord, evidence: PreparedArchivedEvidence[]) {
+function archivedEvidenceSufficient(
+  record: EvidencePreparationRecord,
+  evidence: PreparedArchivedEvidence[],
+  preparationMode: HistoricalEvidencePreparationMode
+) {
   const domains = new Set(evidence.map((item) => item.domain));
   const claimCount = evidence.reduce((sum, item) => sum + item.claims.length, 0);
+  if (preparationMode === "signal_recovery") {
+    const signalCount = evidence.reduce((sum, item) => sum + item.claims.filter((claim) =>
+      claim.claimType === "audience_signal" || claim.claimType === "commercial_achievability_signal"
+    ).length, 0);
+    return domains.size >= 2 && signalCount >= 2;
+  }
   const adultDomains = new Set(evidence.filter((item) =>
     item.claims.some((claim) => claim.claimType === "adult_eligibility")
   ).map((item) => item.domain));
@@ -483,7 +505,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             reason: archiveResult?.rejectionReason || "archive_lookup_failed",
           });
         }
-        if (archivedEvidenceSufficient(record, evidence)) break;
+        if (archivedEvidenceSufficient(record, evidence, input.preparationMode)) break;
         await sleep("2s");
       }
       const persisted = await persistPreparedRecordEvidence({

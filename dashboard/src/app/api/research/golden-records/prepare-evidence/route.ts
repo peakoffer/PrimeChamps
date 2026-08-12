@@ -7,6 +7,7 @@ import {
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+  HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   historicalEvidenceQueryPlanVersion,
   normalizeEvidencePreparationBudget,
   type HistoricalEvidencePreparationMode,
@@ -108,6 +109,20 @@ function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
     && !(record.held_out_locked_at && !record.held_out_revealed_at);
 }
 
+function eligibleForDevelopmentSignalRecovery(record: GoldenPreparationCandidate) {
+  return record.benchmark_split === "development"
+    && record.sport !== "Needs enrichment"
+    && record.sport !== "Unknown"
+    && (record.fit_label === "fit" || record.fit_label === "not_fit")
+    && ["high", "medium", "low"].includes(record.achievability_label)
+    && Boolean(record.decision_at && Number.isFinite(Date.parse(record.decision_at)))
+    && Boolean(record.evidence_cutoff_at && Number.isFinite(Date.parse(record.evidence_cutoff_at)))
+    && Date.parse(record.evidence_cutoff_at!) <= Date.parse(record.decision_at!)
+    && ["strong", "partial"].includes(record.point_in_time_reliability)
+    && Boolean(record.labeled_at)
+    && !record.held_out_locked_at;
+}
+
 export async function GET() {
   try {
     const user = await requireAuth();
@@ -116,7 +131,7 @@ export async function GET() {
       admin.from("research_golden_records")
         .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
         .eq("organization_id", user.organizationId)
-        .eq("benchmark_split", "excluded")
+        .in("benchmark_split", ["excluded", "development"])
         .order("updated_at", { ascending: true }),
       admin.from("research_evidence_preparation_runs")
         .select("id,workflow_run_id,status,record_ids,max_apify_charge_microusd,actual_apify_cost_microusd,records_processed,records_ready,safe_source_count,safe_claim_count,checkpoint,summary,error_message,started_at,completed_at,created_at")
@@ -126,10 +141,13 @@ export async function GET() {
     ]);
     if (candidateError) throw candidateError;
     if (runError) throw runError;
-    const eligible = ((candidates || []) as GoldenPreparationCandidate[]).filter(eligibleForEvidencePreparation);
+    const allCandidates = (candidates || []) as GoldenPreparationCandidate[];
+    const eligible = allCandidates.filter(eligibleForEvidencePreparation);
+    const developmentEligible = allCandidates.filter(eligibleForDevelopmentSignalRecovery);
     const runRows = (runs || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
     const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
+    const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
     const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
     const ageRecoveryRemaining = baselineRemaining.length ? [] : await unresolvedFitRecordsForAgeRecovery({
       admin, organizationId: user.organizationId, eligible, baselineCompleted, recoveryCompleted,
@@ -142,6 +160,7 @@ export async function GET() {
       preparationMode,
       baselineRemainingCount: baselineRemaining.length,
       ageRecoveryRemainingCount: ageRecoveryRemaining.length,
+      developmentSignalRecoveryCount: developmentEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
       defaultMaxApifyChargeUsd: EVIDENCE_PREPARATION_LIMITS.defaultMaxApifyChargeUsd,
       scoringTokensSpentByPreparation: 0,
@@ -191,15 +210,22 @@ export async function POST(request: NextRequest) {
         activeRunId: active.id,
       }, { status: 409 });
     }
+    const requestedMode = body.preparationMode === "baseline"
+      || body.preparationMode === "age_recovery"
+      || body.preparationMode === "signal_recovery"
+      ? body.preparationMode as HistoricalEvidencePreparationMode
+      : null;
     let query = admin.from("research_golden_records")
       .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
       .eq("organization_id", user.organizationId)
-      .eq("benchmark_split", "excluded")
+      .eq("benchmark_split", requestedMode === "signal_recovery" ? "development" : "excluded")
       .order("updated_at", { ascending: true });
     if (requestedIds.length) query = query.in("id", requestedIds);
     const { data, error } = await query.limit(500);
     if (error) throw error;
-    const eligible = ((data || []) as GoldenPreparationCandidate[]).filter(eligibleForEvidencePreparation);
+    const eligible = ((data || []) as GoldenPreparationCandidate[]).filter(requestedMode === "signal_recovery"
+      ? eligibleForDevelopmentSignalRecovery
+      : eligibleForEvidencePreparation);
     if (requestedIds.length && eligible.length !== requestedIds.length) {
       return NextResponse.json({
         error: "Every selected record must have authoritative ground truth, complete dates, and usable point-in-time reliability.",
@@ -216,10 +242,8 @@ export async function POST(request: NextRequest) {
     const runRows = (recentRuns || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
     const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
+    const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
     const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
-    const requestedMode = body.preparationMode === "baseline" || body.preparationMode === "age_recovery"
-      ? body.preparationMode as HistoricalEvidencePreparationMode
-      : null;
     const preparationMode: HistoricalEvidencePreparationMode = requestedMode
       || (baselineRemaining.length ? "baseline" : "age_recovery");
     const ageRecoveryRemaining = preparationMode === "age_recovery"
@@ -227,16 +251,23 @@ export async function POST(request: NextRequest) {
         admin, organizationId: user.organizationId, eligible, baselineCompleted, recoveryCompleted,
       })
       : [];
+    const signalRecoveryRemaining = preparationMode === "signal_recovery"
+      ? eligible.filter((record) => !signalRecoveryCompleted.has(record.id))
+      : [];
     const selected = (requestedIds.length
       ? eligible
-      : preparationMode === "baseline" ? baselineRemaining : ageRecoveryRemaining
+      : preparationMode === "baseline"
+        ? baselineRemaining
+        : preparationMode === "age_recovery" ? ageRecoveryRemaining : signalRecoveryRemaining
     ).slice(0, requestedCount);
     if (!selected.length) {
       return NextResponse.json({
         error: eligible.length
           ? preparationMode === "age_recovery"
             ? "Every blocked fit record has completed the current age-recovery plan; no provider call was started."
-            : "Every eligible record has completed the current evidence-extraction version; no provider call was started."
+            : preparationMode === "signal_recovery"
+              ? "Every development record has completed the current creator-signal recovery plan; no provider call was started."
+              : "Every eligible record has completed the current evidence-extraction version; no provider call was started."
           : "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
         eligible: eligible.length,
         scoringTokensSpent: 0,
