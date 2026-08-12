@@ -246,6 +246,32 @@ function evidenceExcerpt(name: string, text: string) {
   return text.slice(Math.max(0, anchor - 180), Math.min(text.length, anchor + 720)).trim();
 }
 
+function statedAgeSharesAthleteClause(name: string, evidence: string) {
+  const surname = name.trim().split(/\s+/).at(-1)?.toLowerCase();
+  if (!surname) return false;
+  const lower = evidence.toLowerCase();
+  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)/i.exec(evidence);
+  if (!ageMatch || ageMatch.index === undefined) return false;
+  const beforeAge = lower.slice(0, ageMatch.index);
+  const surnameIndex = beforeAge.lastIndexOf(surname);
+  if (surnameIndex < 0) return false;
+  return !/[.!?]/.test(evidence.slice(surnameIndex + surname.length, ageMatch.index));
+}
+
+export function parsePreparedAgeEvidenceForAthlete(name: string, text: string, now = new Date()) {
+  // A stated age must stay in the same clause as the athlete's own name. Exact
+  // birth facts can tolerate normal profile chrome, but the wider window never
+  // admits a loose age phrase that could belong to a teammate or sibling.
+  const parsedNearbyAge = parseAgeEvidenceForAthlete(name, text, now, 110);
+  const nearbyAge = parsedNearbyAge?.parsed.precision === "stated_age"
+    && !statedAgeSharesAthleteClause(name, parsedNearbyAge.evidence)
+    ? null
+    : parsedNearbyAge;
+  if (nearbyAge) return nearbyAge;
+  const extendedAge = parseAgeEvidenceForAthlete(name, text, now, 220);
+  return extendedAge?.parsed.precision === "stated_age" ? null : extendedAge;
+}
+
 function extractBirthDate(text: string) {
   const iso = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\b[^0-9]{0,80}\(?\s*(\d{4})-(\d{1,2})-(\d{1,2})\b/i);
   if (iso) return normalizeNumericBirthDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
@@ -366,15 +392,10 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     },
   ];
-  const titleNamesAthlete = benchmarkSourceNamesAthlete(record.athlete_name, title);
-  // A page centered on the athlete can have normal profile chrome between the
-  // name and age field. On a generic or third-party page, keep the window much
-  // tighter so a teammate mention cannot inherit the subject's age.
-  const attributableAge = parseAgeEvidenceForAthlete(
+  const attributableAge = parsePreparedAgeEvidenceForAthlete(
     record.athlete_name,
     attributable,
-    new Date(capture.capturedAt),
-    titleNamesAthlete ? 220 : 110
+    new Date(capture.capturedAt)
   );
   const officialCompactBirthDate = attributableAge
     ? null

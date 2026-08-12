@@ -285,6 +285,22 @@ test("blind golden-record labeling hides outcomes until fit is locked", () => {
   });
   assert.equal(visible.outcome_masked, false);
   assert.equal(visible.final_outcome, "onlyfans_rejected");
+
+  const lockedHeldOut = maskGoldenRecordForBlindLabeling({
+    ...visible,
+    fit_label: "fit",
+    achievability_label: "high",
+    pursue_today: "yes",
+    benchmark_split: "held_out",
+    held_out_locked_at: "2026-08-12T12:00:00.000Z",
+    held_out_revealed_at: null,
+    stratification_tags: ["dylan_outcome_ground_truth", "outcome_signed", "volleyball"],
+  });
+  assert.equal(lockedHeldOut.outcome_masked, true);
+  assert.equal(lockedHeldOut.fit_label, "uncertain");
+  assert.equal(lockedHeldOut.achievability_label, "uncertain");
+  assert.equal(lockedHeldOut.final_outcome, null);
+  assert.deepEqual(lockedHeldOut.stratification_tags, ["volleyball"]);
 });
 
 test("benchmark splits are deterministic, balanced, and never hold out development-only cases", () => {
@@ -972,6 +988,15 @@ test("archived evidence extraction requires exact identity and sport and preserv
   });
   assert.equal(teammateAgeMention.rejectionReason, null);
   assert.ok(!teammateAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
+
+  const siblingAgeMention = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Gisele Thompson", sport: "Soccer" },
+    candidate: { ...candidate, title: "Gisele Thompson forges her own path", url: "https://news.example/gisele-thompson" },
+    capture: { ...capture, originalUrl: "https://news.example/gisele-thompson" },
+    html: "<html><title>Gisele Thompson forges her own path</title><body><main>Sisters Alyssa and Gisele Thompson have played soccer together. Alyssa turned pro in 2023 at age 18 when she signed with Angel City, and Gisele followed.</main></body></html>",
+  });
+  assert.equal(siblingAgeMention.rejectionReason, null);
+  assert.ok(!siblingAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
 });
 
 test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {

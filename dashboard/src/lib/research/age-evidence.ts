@@ -96,8 +96,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     ? ""
     : text.slice(Math.max(0, stated.index - 80), stated.index).toLowerCase();
   const historicalAgeContext = /(?:since|when|while)\s+(?:she|he|they|the athlete)\s+(?:was|were)\s*$/.test(statedContext)
-    || /\b(?:began|started|learned|first)\b[^.!?]{0,55}\bat\s*$/.test(statedContext)
-    || (/\bat\s*$/.test(statedContext) && /^age\b/i.test(stated?.[0] || ""));
+    || /\b(?:began|started|learned|first)\b[^.!?]{0,55}\bat\s*$/.test(statedContext);
   if (!historicalAgeContext && Number.isFinite(statedAge) && statedAge >= 10 && statedAge <= 80) {
     return {
       age: statedAge,

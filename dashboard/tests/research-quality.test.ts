@@ -249,6 +249,7 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
   assert.equal(parseAgeEvidence("She began kitesurfing aged 15", now), null);
   assert.equal(parseAgeEvidence("Margo has been climbing since she was 10 years old", now), null);
   assert.equal(parseAgeEvidence("He first competed at age 15", now), null);
+  assert.equal(parseAgeEvidence("He announced his retirement at age 28", now)?.age, 28);
   assert.equal(parseAgeEvidence("born 2005", now)?.age, 20);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", "Kendall Kipp player profile. Date of birth: 12/12/2000."), true);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", `Kendall Kipp appears in a roster. ${"Other roster details ".repeat(20)} Age: 21.`), false);

@@ -183,6 +183,34 @@ export function maskGoldenRecordForBlindLabeling(record: Record<string, unknown>
 } {
   const labelConflict = Array.isArray(record.stratification_tags)
     && record.stratification_tags.includes("historical_label_conflict");
+  const lockedHeldOut = record.benchmark_split === "held_out"
+    && Boolean(record.held_out_locked_at)
+    && !record.held_out_revealed_at;
+  if (lockedHeldOut) {
+    const stratificationTags = Array.isArray(record.stratification_tags)
+      ? record.stratification_tags.filter((tag) => typeof tag === "string"
+        && !tag.startsWith("outcome_")
+        && !tag.startsWith("conflicting_outcome_")
+        && !tag.startsWith("label_")
+        && tag !== "historical_label_conflict"
+        && tag !== "dylan_outcome_ground_truth")
+      : [];
+    return {
+      ...record,
+      fit_label: "uncertain",
+      achievability_label: "uncertain",
+      final_outcome: null,
+      primary_reason: null,
+      explanation: null,
+      pursue_today: "uncertain",
+      internal_record_reference: null,
+      exclusion_reason: null,
+      stratification_tags: stratificationTags,
+      outcome_masked: true,
+      label_conflict: false,
+      ready_for_split: false,
+    };
+  }
   if (record.label_order_fit_before_outcome === true || hasOutcomeGroundTruth(record)) {
     return {
       ...record,
