@@ -226,6 +226,27 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
     birthYear: 1986,
     precision: "birth_date",
   });
+  assert.deepEqual(parseAgeEvidence("Birthday November Nov 30 , 1995", new Date("2023-02-03T12:00:00Z")), {
+    age: 27,
+    birthYear: 1995,
+    precision: "birth_date",
+  });
+  assert.deepEqual(parseAgeEvidence("Born Arnold Billy Allen (1994-01-22) 22 January 1994 (age 32)", now), {
+    age: 32,
+    birthYear: 1994,
+    precision: "birth_date",
+  });
+  assert.deepEqual(parseAgeEvidence("AGE 39 / Jan 3, 1986", new Date("2025-06-21T12:00:00Z")), {
+    age: 39,
+    birthYear: 1986,
+    precision: "birth_date",
+  });
+  assert.deepEqual(parseAgeEvidence("Age: 24 years old", now), {
+    age: 24,
+    birthYear: null,
+    precision: "stated_age",
+  });
+  assert.equal(parseAgeEvidence("She began kitesurfing aged 15", now), null);
   assert.equal(parseAgeEvidence("born 2005", now)?.age, 20);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", "Kendall Kipp player profile. Date of birth: 12/12/2000."), true);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", `Kendall Kipp appears in a roster. ${"Other roster details ".repeat(20)} Age: 21.`), false);

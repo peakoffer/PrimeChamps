@@ -6,7 +6,7 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-precise-signals-v1";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-precise-signals-age-v2";
 
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
@@ -238,7 +238,15 @@ function evidenceExcerpt(name: string, text: string) {
 }
 
 function extractBirthDate(text: string) {
-  const match = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\b/i);
+  const iso = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\b[^0-9]{0,80}\(?\s*(\d{4})-(\d{1,2})-(\d{1,2})\b/i);
+  if (iso) return normalizeNumericBirthDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/i);
+  if (numeric) {
+    const first = Number(numeric[1]);
+    const second = Number(numeric[2]);
+    return normalizeNumericBirthDate(Number(numeric[3]), first > 12 ? second : first, first > 12 ? first : second);
+  }
+  const match = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)(?:\s+([A-Za-z]+))?\s+(\d{1,2})\s*,?\s*(\d{4})\b/i);
   if (!match) return text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|age)\s*[:\-]?\s*(\d{4})\s*(?:[-/•]|\s)\s*([A-Za-z]+|\d{1,2})\s*(?:[-/•]|\s)\s*(\d{1,2})\b/i)
     ? normalizeYearFirstBirthDate(text)
     : null;
@@ -248,10 +256,15 @@ function extractBirthDate(text: string) {
     sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
     dec: 12, december: 12,
   };
-  const month = months[match[1].toLowerCase()];
-  const day = Number(match[2]);
-  const year = Number(match[3]);
-  if (!month || day < 1 || day > 31 || year < 1970) return null;
+  const monthToken = match[2] && months[match[2].toLowerCase()] ? match[2] : match[1];
+  const month = months[monthToken.toLowerCase()];
+  const day = Number(match[3]);
+  const year = Number(match[4]);
+  return normalizeNumericBirthDate(year, month, day);
+}
+
+function normalizeNumericBirthDate(year: number, month: number, day: number) {
+  if (!month || month < 1 || month > 12 || day < 1 || day > 31 || year < 1970) return null;
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return date.toISOString().slice(0, 10);
@@ -359,7 +372,9 @@ export function extractPreparedArchivedEvidence(input: {
         : `${record.athlete_name} has attributable public age evidence in this archived source.`,
       structuredValue: {
         ...(birthDate ? { birth_date: birthDate } : {}),
-        birth_year: birthDate ? Number(birthDate.slice(0, 4)) : attributableAge?.parsed.birthYear,
+        birth_year: birthDate || attributableAge?.parsed.precision === "birth_year"
+          ? birthDate ? Number(birthDate.slice(0, 4)) : attributableAge?.parsed.birthYear
+          : undefined,
         age: attributableAge?.parsed.age,
         precision: birthDate ? "birth_date" : attributableAge?.parsed.precision,
         age_as_of: capture.capturedAt,

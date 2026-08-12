@@ -912,6 +912,24 @@ test("archived evidence extraction requires exact identity and sport and preserv
   });
   const officialAge = officialCompactDob.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
   assert.equal(officialAge?.structuredValue.birth_date, "1995-01-04");
+
+  const famousBirthdaysDob = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Boyd Hilder", sport: "BMX" },
+    candidate: { ...candidate, title: "Boyd Hilder - Age, Family, Bio", url: "https://www.famousbirthdays.com/people/boyd-hilder.html" },
+    capture: { ...capture, capturedAt: "2023-02-03T19:44:35.000Z", originalUrl: "https://www.famousbirthdays.com/people/boyd-hilder.html" },
+    html: "<html><title>Boyd Hilder - Age, Family, Bio</title><body><main>Boyd Hilder BMX Rider Birthday November Nov 30 , 1995 Birthplace Australia Age 27 years old. Professional BMX rider and winner with more than 80,000 followers.</main></body></html>",
+  });
+  const famousBirthdaysAge = famousBirthdaysDob.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(famousBirthdaysAge?.structuredValue.birth_date, "1995-11-30");
+  assert.equal(famousBirthdaysAge?.structuredValue.birth_year, 1995);
+
+  const historicalAgeMention = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Rita Arnaus", sport: "Kitesurfing" },
+    candidate: { ...candidate, title: "Rita Arnaus profile", url: "https://example.com/rita-arnaus" },
+    capture: { ...capture, originalUrl: "https://example.com/rita-arnaus" },
+    html: "<html><title>Rita Arnaus kitesurfing profile</title><body><main>Rita Arnaus is a professional kitesurfing athlete who began kitesurfing aged 15 and later won a championship.</main></body></html>",
+  });
+  assert.ok(!historicalAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
 });
 
 test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {

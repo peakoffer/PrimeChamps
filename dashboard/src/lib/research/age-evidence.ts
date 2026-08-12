@@ -1,6 +1,6 @@
 export type ParsedAgeEvidence = {
   age: number;
-  birthYear: number;
+  birthYear: number | null;
   precision: "birth_date" | "stated_age" | "birth_year";
 };
 
@@ -26,7 +26,17 @@ function ageAt(year: number, month: number, day: number, now: Date) {
 }
 
 export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvidence | null {
-  const numeric = text.match(/\b(?:birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/i);
+  const iso = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\b[^0-9]{0,80}\(?\s*(\d{4})-(\d{1,2})-(\d{1,2})\b/i);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1970) {
+      return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
+    }
+  }
+
+  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/i);
   if (numeric) {
     const first = Number(numeric[1]);
     const second = Number(numeric[2]);
@@ -38,11 +48,31 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const textual = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\b/i);
+  const textual = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)(?:\s+([A-Za-z]+))?\s+(\d{1,2})\s*,?\s*(\d{4})\b/i);
   if (textual) {
-    const month = MONTHS[textual[1].toLowerCase()];
-    const day = Number(textual[2]);
-    const year = Number(textual[3]);
+    const month = MONTHS[(textual[2] && MONTHS[textual[2].toLowerCase()] ? textual[2] : textual[1]).toLowerCase()];
+    const day = Number(textual[3]);
+    const year = Number(textual[4]);
+    if (month && day >= 1 && day <= 31 && year >= 1970) {
+      return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
+    }
+  }
+
+  const dayFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b/i);
+  if (dayFirst) {
+    const day = Number(dayFirst[1]);
+    const month = MONTHS[dayFirst[2].toLowerCase()];
+    const year = Number(dayFirst[3]);
+    if (month && day >= 1 && day <= 31 && year >= 1970) {
+      return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
+    }
+  }
+
+  const statedThenBirthDate = text.match(/\bage\s*[:\-]?\s*\d{1,2}\s*[\/|,]\s*([A-Za-z]+)\s+(\d{1,2})\s*,?\s*(\d{4})\b/i);
+  if (statedThenBirthDate) {
+    const month = MONTHS[statedThenBirthDate[1].toLowerCase()];
+    const day = Number(statedThenBirthDate[2]);
+    const year = Number(statedThenBirthDate[3]);
     if (month && day >= 1 && day <= 31 && year >= 1970) {
       return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
     }
@@ -58,12 +88,14 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const stated = text.match(/\b(?:age|aged)\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
+  // "aged 15" frequently describes when an athlete started a sport, not their
+  // age at publication. Only accept an explicit age field or current-age phrase.
+  const stated = text.match(/\bage\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
   const statedAge = Number(stated?.[1] || stated?.[2]);
   if (Number.isFinite(statedAge) && statedAge >= 10 && statedAge <= 80) {
     return {
       age: statedAge,
-      birthYear: now.getUTCFullYear() - statedAge,
+      birthYear: null,
       precision: "stated_age",
     };
   }
@@ -189,6 +221,7 @@ export function selectVerifiedAthleteAge(
 
   const candidatesByBirthYear = new Map<number, VerifiedAthleteAge[]>();
   for (const candidate of corroborationCandidates) {
+    if (candidate.birthYear === null) continue;
     const matches = candidatesByBirthYear.get(candidate.birthYear) || [];
     matches.push(candidate);
     candidatesByBirthYear.set(candidate.birthYear, matches);
