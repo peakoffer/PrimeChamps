@@ -520,7 +520,11 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
     return NextResponse.json({ ok: true, created: data?.length || 0, ids: (data || []).map((record) => record.id) }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not save golden records";
+    const message = error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message
+        : "Could not save golden records";
     const status = message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 400;
     return NextResponse.json({ error: message }, { status });
   }

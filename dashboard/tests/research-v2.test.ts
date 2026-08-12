@@ -1140,3 +1140,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
   assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);
 });
+
+test("the database permits evidence-gated Dylan outcome cases to freeze without inventing public knowability", () => {
+  const migration = readFileSync(new URL("../../supabase/migrations/20260812174331_allow_outcome_ground_truth_benchmark_split.sql", import.meta.url), "utf8");
+  assert.match(migration, /decisive_information_publicly_knowable is not null/);
+  assert.match(migration, /stratification_tags @> array\['dylan_outcome_ground_truth'\]::text\[\]/);
+  assert.match(migration, /benchmark_split = 'excluded'/);
+});
