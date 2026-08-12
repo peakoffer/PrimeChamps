@@ -7,7 +7,7 @@ import {
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-development-signal-recovery-v1";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-development-signal-recovery-v2";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-athlete-centered-age-v3";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -545,11 +545,10 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
   const cutoff = new Date(record.evidence_cutoff_at);
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
-  const excludeSocial = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:x.com -site:twitter.com";
   return [
-    `"${record.athlete_name}" "${record.sport}" ("content creator" OR influencer OR followers OR "social media" OR "personal brand") ${excludeSocial} before:${before}`,
-    `"${record.athlete_name}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") ${excludeSocial} before:${before}`,
-    `"${record.athlete_name}" (represented OR management OR agency OR "business inquiries" OR collaboration OR entrepreneur OR podcast OR YouTube) ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" "${record.sport}" (Instagram OR TikTok OR followers OR subscribers OR "content creator" OR influencer OR "personal brand") before:${before}`,
+    `"${record.athlete_name}" "${record.sport}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") before:${before}`,
+    `"${record.athlete_name}" (interview OR podcast OR YouTube OR "behind the scenes" OR represented OR management OR agency OR "business inquiries" OR collaboration) before:${before}`,
   ];
 }
 
@@ -563,7 +562,7 @@ const AUTHORITATIVE_AGE_SOURCE_DOMAINS = new Set([
 
 export function dedupeHistoricalSearchCandidates(
   candidates: HistoricalSearchCandidate[],
-  options: { preferAuthoritativeAgeSources?: boolean } = {}
+  options: { preferAuthoritativeAgeSources?: boolean; allowSocialProfiles?: boolean } = {}
 ) {
   const seenUrls = new Set<string>();
   const seenDomains = new Map<string, number>();
@@ -580,7 +579,9 @@ export function dedupeHistoricalSearchCandidates(
     .filter((candidate) => {
       const normalized = normalizedUrlForComparison(candidate.url);
       const domain = benchmarkSourceDomain(candidate.url);
-      if (!normalized || !domain || HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS.has(domain) || seenUrls.has(normalized)) return false;
+      if (!normalized || !domain
+        || (!options.allowSocialProfiles && HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS.has(domain))
+        || seenUrls.has(normalized)) return false;
       if ((seenDomains.get(domain) || 0) >= 2) return false;
       seenUrls.add(normalized);
       seenDomains.set(domain, (seenDomains.get(domain) || 0) + 1);

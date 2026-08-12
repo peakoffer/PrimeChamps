@@ -31,12 +31,14 @@ export type BenchmarkGoldenCase = {
 };
 
 export const BENCHMARK_PRE_OUTREACH_CALIBRATION = `PRE-OUTREACH CALIBRATION
-- Fit 80-89 is supported when identity and 21+ gates pass and the evidence shows current athletic relevance, a meaningful personal audience, and creator-led content or a concrete brand/business signal.
+- A finalist that clears every core gate should normally land above 80 priority: identity and 21+ are independently corroborated; current athletic relevance is source-backed; a meaningful personal audience and creator behavior are present; and the career tier is realistically accessible.
+- Finalist anchor: when those core dimensions are all present, use fit 86-91, commercial achievability 76-84, and research confidence 82-90. Do not apply this anchor when any core dimension is missing or contradictory.
+- Fit 80-85 is a promising reserve, not automatically a finalist, when the evidence is positive but one core dimension is thin, stale, or only indirectly supported.
 - Performance, training, behind-the-scenes, interview, podcast, and personality-led social content all count as creator behavior; lifestyle content is not required.
 - A roughly 50,000-500,000 personal audience is a meaningful accessibility band when corroborated by athlete-centered public evidence. One platform is sufficient; missing cross-platform data is optional, not critical.
 - Commercial achievability 70-85 is supported for a non-iconic or realistically accessible career tier with a meaningful audience and creator/brand behavior. Representation, a public business email, or prior platform activity strengthens the score but is not required.
 - Research confidence 80-90 is supported when identity and 21+ are independently corroborated, material claims cite valid evidence, the cutoff is respected, and the core momentum/audience/creator dimensions are present. Missing optional amplifiers must not cap confidence below 80.
-- Fit below 60 is appropriate when public evidence lacks a meaningful personal audience, creator behavior, or business signal even if the athlete is competitively successful.
+- Fit below 60 is appropriate when public evidence lacks both a meaningful personal audience and creator/brand behavior even if the athlete is competitively successful.
 - Critical gaps are limited to unresolved identity, insufficient 21+ corroboration, no source-backed current athletic relevance, no meaningful audience/creator evidence, material contradiction, invalid citations, or post-cutoff evidence. Do not list representation, cross-platform reach, platform-specific history, adult-content willingness, lifestyle content, market receptivity, or exact economics as critical when the core proxies are present.`;
 
 export type BenchmarkEvidenceSourceRow = {
@@ -384,8 +386,8 @@ SCORING
 - Missing representation or a public business contact lowers achievability only when the rest of the public proxy evidence is insufficient; it is not an automatic blocker.
 - A strong pre-outreach fit may be supported by verified-adult status, current athletic momentum, a meaningful personal audience, creator-led content, and realistic career-tier accessibility without any platform-specific signal.
 - Cite evidence using only the supplied E-numbers. If evidence is missing, return a lower score and list the gap.
-- Put absent evidence and unanswered questions only in critical_gaps. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
-- Keep reasoning under 120 words and return no more than six material claims and five critical gaps.
+- Put only failed core gates in critical_gaps. Put optional missing amplifiers and unanswered non-blocking questions in limitations. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
+- Keep reasoning under 120 words and return no more than six material claims, five critical gaps, and five limitations.
 
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 

@@ -429,6 +429,11 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
         && result.predictedAchievability === result.actualAchievability).length,
       results.length
     ),
+    outcomeAgreementRate: rate(
+      results.filter((result) => result.predictedFit === result.actualFit
+        && result.predictedAchievability === result.actualAchievability).length,
+      results.length
+    ),
     sourceVerificationRate: rate(
       results.reduce((total, result) => total + result.sourceVerificationRate, 0),
       results.length
@@ -445,6 +450,14 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
     ),
     finalistZeroUnsupportedClaimRate: rate(
       predictedPriority.filter((result) => result.unsupportedClaimRate === 0).length,
+      predictedPriority.length
+    ),
+    finalistAuditPassRate: rate(
+      predictedPriority.filter((result) => result.identityCorrect
+        && result.eligibilityVerified
+        && result.sourceVerificationRate === 1
+        && result.unsupportedClaimRate === 0
+        && result.pointInTimeCompliant).length,
       predictedPriority.length
     ),
     pointInTimeComplianceRate: rate(results.filter((result) => result.pointInTimeCompliant).length, results.length),

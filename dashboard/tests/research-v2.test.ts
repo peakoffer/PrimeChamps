@@ -433,10 +433,12 @@ test("benchmark metrics reward precision rather than score volume", () => {
   assert.equal(metrics.precisionAbove80, 0.5);
   assert.equal(metrics.falsePositiveRate, 1);
   assert.equal(metrics.auditDecisionAccuracy, 0.5);
+  assert.equal(metrics.outcomeAgreementRate, 0.5);
   assert.equal(metrics.auditorCatchRate, 1);
   assert.equal(metrics.finalistIdentityAccuracy, 1);
   assert.equal(metrics.finalistEligibilityVerificationRate, 1);
   assert.equal(metrics.finalistZeroUnsupportedClaimRate, 1);
+  assert.equal(metrics.finalistAuditPassRate, 1);
   assert.equal(metrics.averageCostMicrousd, 1_000);
   assert.equal(metrics.costPerValidatedCandidateMicrousd, 2_000);
   assert.deepEqual(metrics.tokenUsage, {
@@ -770,7 +772,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v14/);
+  assert.match(source, /research-v2-benchmark-runner-v15/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -1161,6 +1163,10 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     { query: "q", title: "World Athletics", url: "https://worldathletics.org/athletes/nick-ponzio", snippet: "", position: 4 },
   ], { preferAuthoritativeAgeSources: true });
   assert.deepEqual(agePrioritized.slice(0, 2).map((item) => item.title), ["World Athletics", "Wikipedia"]);
+  const archivedSocialCandidate = dedupeHistoricalSearchCandidates([
+    { query: "q", title: "Instagram profile", url: "https://www.instagram.com/jane", snippet: "", position: 1 },
+  ], { allowSocialProfiles: true });
+  assert.equal(archivedSocialCandidate.length, 1);
 });
 
 test("generated material signals require explicit athlete-relevant language", () => {

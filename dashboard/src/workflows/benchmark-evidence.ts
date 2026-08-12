@@ -196,6 +196,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       record.id,
       dedupeHistoricalSearchCandidates(grouped.get(record.id) || [], {
         preferAuthoritativeAgeSources: input.preparationMode === "age_recovery",
+        allowSocialProfiles: input.preparationMode === "signal_recovery",
       }),
     ])),
     providerRunId: provider.usage.runId,

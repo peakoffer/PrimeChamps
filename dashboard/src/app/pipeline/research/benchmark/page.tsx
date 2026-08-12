@@ -77,10 +77,12 @@ type BenchmarkMetrics = {
   fitAccuracy: number | null;
   achievabilityAccuracy: number | null;
   auditDecisionAccuracy: number | null;
+  outcomeAgreementRate: number | null;
   sourceVerificationRate: number | null;
   finalistIdentityAccuracy: number | null;
   finalistEligibilityVerificationRate: number | null;
   finalistZeroUnsupportedClaimRate: number | null;
+  finalistAuditPassRate: number | null;
   pointInTimeComplianceRate: number | null;
   unsupportedClaimRate: number | null;
   auditorCatchRate: number | null;
@@ -834,7 +836,12 @@ export default function ResearchBenchmarkPage() {
                   <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
                     Start four-case smoke test
                   </button>
-                  {latestDevelopmentRun?.status === "completed" && latestDevelopmentRun.calculated_metrics?.auditDecisionAccuracy === 1 && (
+                  {latestDevelopmentRun?.status === "completed"
+                    && (latestDevelopmentRun.calculated_metrics?.precisionAbove80 === null
+                      || (latestDevelopmentRun.calculated_metrics?.precisionAbove80 || 0) >= 0.9)
+                    && latestDevelopmentRun.calculated_metrics?.sourceVerificationRate === 1
+                    && latestDevelopmentRun.calculated_metrics?.unsupportedClaimRate === 0
+                    && (
                     <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(8, 750_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
                       Start eight-case calibration
                     </button>
@@ -859,12 +866,12 @@ export default function ResearchBenchmarkPage() {
                 <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.precisionAbove80)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Fit accuracy</p>
-                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.fitAccuracy)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Finalist audit</p>
+                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.finalistAuditPassRate)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Audit accuracy</p>
-                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.auditDecisionAccuracy)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Outcome agreement</p>
+                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.outcomeAgreementRate)}</p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-zinc-600">Spend</p>

@@ -28,7 +28,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v14";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v15";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -65,12 +65,13 @@ const RESEARCHER_SCHEMA = {
       },
     },
     critical_gaps: { type: "array", items: { type: "string" } },
+    limitations: { type: "array", items: { type: "string" } },
     reasoning: { type: "string" },
   },
   required: [
     "identity_confirmed", "adult_eligibility_verified", "onlyfans_fit_score",
     "commercial_achievability_score", "research_confidence_score", "fit_label",
-    "achievability_label", "material_claims", "critical_gaps", "reasoning",
+    "achievability_label", "material_claims", "critical_gaps", "limitations", "reasoning",
   ],
 } as const;
 
@@ -137,6 +138,7 @@ type ResearcherAssessment = {
   achievability_label: "high" | "medium" | "low" | "uncertain";
   material_claims: Array<{ claim: string; evidence_refs: string[] }>;
   critical_gaps: string[];
+  limitations: string[];
   reasoning: string;
 };
 
@@ -438,8 +440,8 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 3,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v3",
+    version: 4,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v4",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
@@ -448,7 +450,7 @@ async function ensureBenchmarkArtifacts(input: {
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v3",
+    definition_hash: "research-v2-benchmark-rubric-v4",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -469,7 +471,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 10,
+      version: 11,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -495,14 +497,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v10",
+      content_hash: "research-v2-benchmark-researcher-v11",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; platform willingness is not required or inferred; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-auditor-v10",
+      content_hash: "research-v2-benchmark-auditor-v11",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -979,9 +981,9 @@ async function processBenchmarkCase(input: {
     || citationQuality.sourceVerificationRate < 1 || unsupportedCount > 0 || criticalGaps.length > 0;
   const verdict: "pass" | "corrected" | "fail" = forcedFailure ? "fail" : review.verdict;
   const corrected = buildResearchV2Score({
-    onlyfansFit: verdict === "pass" ? bounded(researcher.onlyfans_fit_score) : bounded(review.corrected_fit_score),
-    commercialAchievability: verdict === "pass" ? bounded(researcher.commercial_achievability_score) : bounded(review.corrected_achievability_score),
-    researchConfidence: verdict === "pass" ? bounded(researcher.research_confidence_score) : bounded(review.corrected_confidence_score),
+    onlyfansFit: bounded(review.corrected_fit_score),
+    commercialAchievability: bounded(review.corrected_achievability_score),
+    researchConfidence: bounded(review.corrected_confidence_score),
     hasCriticalGap: forcedFailure,
     unsupportedMaterialClaims: unsupportedCount,
   });
