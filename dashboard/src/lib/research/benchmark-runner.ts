@@ -26,12 +26,17 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v5";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v6";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
 const MAX_COST_LIMIT_MICROUSD = 25_000_000;
 const MODEL_TIMEOUT_MS = 90_000;
+const BENCHMARK_CALL_LIMITS = {
+  researcherOutputTokens: 2_200,
+  blindOutputTokens: 2_000,
+  reviewOutputTokens: 2_200,
+} as const;
 const BENCHMARK_GOLDEN_RECORD_SELECT = "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags";
 
 const RESEARCHER_SCHEMA = {
@@ -184,6 +189,11 @@ type RunCheckpoint = {
   no_outreach: true;
   input_token_limit: number;
   output_token_limit: number;
+  call_limits: {
+    researcherOutputTokens: number;
+    blindOutputTokens: number;
+    reviewOutputTokens: number;
+  };
   lease_id: string | null;
   lease_expires_at: string | null;
   last_error?: string | null;
@@ -616,7 +626,12 @@ export async function startBenchmarkRun(input: {
     pricing,
     no_outreach: true,
     input_token_limit: selected.length * 30_000,
-    output_token_limit: selected.length * 5_000,
+    output_token_limit: selected.length * (
+      BENCHMARK_CALL_LIMITS.researcherOutputTokens
+      + BENCHMARK_CALL_LIMITS.blindOutputTokens
+      + BENCHMARK_CALL_LIMITS.reviewOutputTokens
+    ) * 2,
+    call_limits: BENCHMARK_CALL_LIMITS,
     lease_id: null,
     lease_expires_at: null,
     last_error: null,
@@ -808,7 +823,7 @@ async function processBenchmarkCase(input: {
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
-      maximumOutputTokens: 1_600,
+      maximumOutputTokens: run.metrics.call_limits.researcherOutputTokens,
       ledger,
     });
     researcher = researcherCall.value;
@@ -883,7 +898,7 @@ async function processBenchmarkCase(input: {
       schema: BLIND_AUDITOR_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
-      maximumOutputTokens: 1_300,
+      maximumOutputTokens: run.metrics.call_limits.blindOutputTokens,
       ledger,
     });
     blind = blindCall.value;
@@ -903,7 +918,7 @@ async function processBenchmarkCase(input: {
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
-      maximumOutputTokens: 1_600,
+      maximumOutputTokens: run.metrics.call_limits.reviewOutputTokens,
       ledger,
     });
     review = reviewCall.value;
@@ -1076,7 +1091,12 @@ export async function resumeBenchmarkRun(input: { organizationId: string; runId:
   const run = rawRun as RunRow;
   if (run.status === "completed") return { runId: run.id, completed: true, alreadyCompleted: true };
   if (run.status === "cancelled") throw new Error("Cancelled benchmark runs cannot be resumed");
-  if (run.metrics.runner_version !== RUNNER_VERSION || !Array.isArray(run.metrics.case_ids)) {
+  if (run.metrics.runner_version !== RUNNER_VERSION
+    || !Array.isArray(run.metrics.case_ids)
+    || !run.metrics.call_limits
+    || !Number.isFinite(run.metrics.call_limits.researcherOutputTokens)
+    || !Number.isFinite(run.metrics.call_limits.blindOutputTokens)
+    || !Number.isFinite(run.metrics.call_limits.reviewOutputTokens)) {
     const compatibilityError = "This benchmark run does not have a compatible replay checkpoint; start a fresh development smoke test";
     await admin.from("research_benchmark_runs").update({
       status: "failed",

@@ -745,9 +745,12 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v5/);
-  assert.match(source, /maximumOutputTokens: 1_600/);
-  assert.match(source, /maximumOutputTokens: 1_300/);
+  assert.match(source, /research-v2-benchmark-runner-v6/);
+  assert.match(source, /researcherOutputTokens: 2_200/);
+  assert.match(source, /blindOutputTokens: 2_000/);
+  assert.match(source, /reviewOutputTokens: 2_200/);
+  assert.match(source, /call_limits: BENCHMARK_CALL_LIMITS/);
+  assert.match(source, /maximumOutputTokens: run\.metrics\.call_limits\.blindOutputTokens/);
   assert.match(source, /0-100 numeric scale, never fractions from 0 to 1/);
   assert.match(source, /const auditorCaught = researcherFailure && finalPredictionCorrect/);
   assert.match(source, /compatible replay checkpoint; start a fresh development smoke test/);
