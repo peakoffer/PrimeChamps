@@ -340,8 +340,8 @@ SCORING
 - Research confidence measures identity, corroborated 21+ eligibility, evidence freshness, source independence, and completeness.
 - A candidate cannot be recommended above 80 with unresolved identity, missing two-source 21+ corroboration, unsupported material claims, or critical commercial gaps.
 - Cite evidence using only the supplied E-numbers. If evidence is missing, return a lower score and list the gap.
-- List only affirmative factual assertions in your own proposal that lack supplied support in unsupported_claims. Put absent evidence and unanswered questions only in critical_gaps.
-- Keep reasoning under 120 words and return no more than six material claims, five unsupported claims, and five critical gaps.
+- Put absent evidence and unanswered questions only in critical_gaps. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
+- Keep reasoning under 120 words and return no more than six material claims and five critical gaps.
 
 PUBLIC EVIDENCE AVAILABLE BY THE CUTOFF
 ${dossier || "No eligible evidence."}

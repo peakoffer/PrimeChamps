@@ -26,7 +26,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v6";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v7";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -62,14 +62,13 @@ const RESEARCHER_SCHEMA = {
         required: ["claim", "evidence_refs"],
       },
     },
-    unsupported_claims: { type: "array", items: { type: "string" } },
     critical_gaps: { type: "array", items: { type: "string" } },
     reasoning: { type: "string" },
   },
   required: [
     "identity_confirmed", "adult_eligibility_verified", "onlyfans_fit_score",
     "commercial_achievability_score", "research_confidence_score", "fit_label",
-    "achievability_label", "material_claims", "unsupported_claims", "critical_gaps", "reasoning",
+    "achievability_label", "material_claims", "critical_gaps", "reasoning",
   ],
 } as const;
 
@@ -135,7 +134,6 @@ type ResearcherAssessment = {
   fit_label: "fit" | "not_fit" | "uncertain";
   achievability_label: "high" | "medium" | "low" | "uncertain";
   material_claims: Array<{ claim: string; evidence_refs: string[] }>;
-  unsupported_claims: string[];
   critical_gaps: string[];
   reasoning: string;
 };
@@ -444,7 +442,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 4,
+      version: 5,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -469,15 +467,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time athlete assessment using only supplied public evidence; labels and outcomes are withheld; every score uses the 0-100 scale; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-researcher-v4",
+      content: "Blind point-in-time athlete assessment using only supplied public evidence; labels and outcomes are withheld; every score uses the 0-100 scale; unsupported material claims are determined from citation validity, not model self-report.",
+      content_hash: "research-v2-benchmark-researcher-v5",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind evidence audit before comparison with the Researcher assessment; every score uses the 0-100 scale; unsupported claims are distinct from missing-evidence gaps; review findings stay concise.",
-      content_hash: "research-v2-benchmark-auditor-v4",
+      content_hash: "research-v2-benchmark-auditor-v5",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -672,8 +670,8 @@ function safeRefs(assessment: ResearcherAssessment, evidence: LeakageSafeBenchma
   const total = (assessment.material_claims || []).length;
   return {
     sourceVerificationRate: total > 0 ? claimsWithValidSupport / total : 0,
-    unsupportedClaimCount: invalidClaimCount + (assessment.unsupported_claims || []).length,
-    unsupportedClaimRate: total > 0 ? Math.min(1, (invalidClaimCount + (assessment.unsupported_claims || []).length) / total) : 1,
+    unsupportedClaimCount: invalidClaimCount,
+    unsupportedClaimRate: total > 0 ? Math.min(1, invalidClaimCount / total) : 0,
   };
 }
 
@@ -689,7 +687,7 @@ Evidence cutoff: ${record.evidence_cutoff_at}
 Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
-All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. List only affirmative factual assertions that lack supplied support in unsupported_claims. Put absent evidence or unanswered questions only in critical_gaps. Keep the summary under 120 words and return no more than five gaps or unsupported claims.
+All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. Put absent evidence or unanswered questions in critical_gaps. Keep the summary under 120 words and return no more than five gaps.
 Return the required JSON only.`;
 }
 
@@ -828,12 +826,13 @@ async function processBenchmarkCase(input: {
     });
     researcher = researcherCall.value;
     researcherUsage = researcherCall.usage;
+    const citationQuality = safeRefs(researcher, selection.evidence);
     const researcherScore = buildResearchV2Score({
       onlyfansFit: bounded(researcher.onlyfans_fit_score),
       commercialAchievability: bounded(researcher.commercial_achievability_score),
       researchConfidence: bounded(researcher.research_confidence_score),
       hasCriticalGap: (researcher.critical_gaps || []).length > 0,
-      unsupportedMaterialClaims: (researcher.unsupported_claims || []).length,
+      unsupportedMaterialClaims: citationQuality.unsupportedClaimCount,
     });
     const { data: score, error } = await admin.from("research_scores").insert({
       organization_id: run.organization_id,
@@ -850,7 +849,7 @@ async function processBenchmarkCase(input: {
       model_version_id: artifacts.researcherModelVersionId,
       evidence_set_hash: evidenceHash,
       assessment: { benchmark_run_id: run.id, researcher, identity_gate: identityGate, adult_gate: adultGate },
-      unsourced_claim_count: (researcher.unsupported_claims || []).length,
+      unsourced_claim_count: citationQuality.unsupportedClaimCount,
       critical_gap_count: (researcher.critical_gaps || []).length,
       is_final: false,
       cost_microusd: researcherUsage.costMicrousd,
@@ -862,7 +861,6 @@ async function processBenchmarkCase(input: {
     }).select("id").single();
     if (error) throw error;
     researcherScoreId = score.id;
-    const citationQuality = safeRefs(researcher, selection.evidence);
     const { data: result, error: resultError } = await admin.from("research_benchmark_results").upsert({
       organization_id: run.organization_id,
       benchmark_run_id: run.id,
