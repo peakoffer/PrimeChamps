@@ -770,10 +770,11 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v11/);
-  assert.match(source, /researcherOutputTokens: 2_200/);
-  assert.match(source, /blindOutputTokens: 2_000/);
-  assert.match(source, /reviewOutputTokens: 2_200/);
+  assert.match(source, /research-v2-benchmark-runner-v12/);
+  assert.match(source, /researcherOutputTokens: 3_200/);
+  assert.match(source, /blindOutputTokens: 3_000/);
+  assert.match(source, /reviewOutputTokens: 2_600/);
+  assert.match(source, /reasoning: \{ effort: attempt === 1 \? "medium" : "low", exclude: true \}/);
   assert.match(source, /call_limits: BENCHMARK_CALL_LIMITS/);
   assert.match(source, /maximumOutputTokens: run\.metrics\.call_limits\.blindOutputTokens/);
   assert.match(source, /0-100 numeric scale, never fractions from 0 to 1/);

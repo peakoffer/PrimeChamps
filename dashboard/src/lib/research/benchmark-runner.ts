@@ -28,16 +28,16 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v11";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v12";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
 const MAX_COST_LIMIT_MICROUSD = 25_000_000;
 const MODEL_TIMEOUT_MS = 90_000;
 const BENCHMARK_CALL_LIMITS = {
-  researcherOutputTokens: 2_200,
-  blindOutputTokens: 2_000,
-  reviewOutputTokens: 2_200,
+  researcherOutputTokens: 3_200,
+  blindOutputTokens: 3_000,
+  reviewOutputTokens: 2_600,
 } as const;
 const BENCHMARK_GOLDEN_RECORD_SELECT = "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags";
 
@@ -332,6 +332,7 @@ async function callStructuredSonnet<T>(input: {
   };
   let accumulatedCostMicrousd = 0;
   let accumulatedLatencyMs = 0;
+  const failureReasons: string[] = [];
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const prompt = attempt === 1
       ? input.prompt
@@ -361,6 +362,7 @@ async function callStructuredSonnet<T>(input: {
           type: "json_schema",
           json_schema: { name: "benchmark_assessment", strict: true, schema: input.schema },
         },
+        reasoning: { effort: attempt === 1 ? "medium" : "low", exclude: true },
         provider: { require_parameters: true, data_collection: "deny" },
       } : {
         model: input.model,
@@ -414,11 +416,13 @@ async function callStructuredSonnet<T>(input: {
           } satisfies ModelUsage,
         };
       } catch {
-        // The strict schema should make this rare; one paid retry is allowed.
+        failureReasons.push(`attempt ${attempt}: invalid JSON`);
       }
+    } else {
+      failureReasons.push(`attempt ${attempt}: ${truncated ? "max-token truncation" : "empty structured output"}`);
     }
   }
-  throw new Error(`${input.model} returned invalid benchmark JSON twice`);
+  throw new Error(`${input.model} failed structured output twice (${failureReasons.join("; ")})`);
 }
 
 async function ensureBenchmarkArtifacts(input: {
