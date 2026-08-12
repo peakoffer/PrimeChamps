@@ -351,17 +351,17 @@ export default function ResearchBenchmarkPage() {
     return () => window.clearInterval(timer);
   }, [activeEvidenceRun, load]);
 
-  const startDevelopmentBenchmark = async () => {
+  const startDevelopmentBenchmark = async (caseLimit = 4, costLimitMicrousd = 500_000) => {
     setWorking(true);
-    setMessage("Creating a four-case development smoke test without spending model tokens…");
+    setMessage(`Creating a ${caseLimit}-case development test without spending model tokens…`);
     try {
       const response = await fetch("/api/research/benchmarks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           split: "development",
-          caseLimit: 4,
-          costLimitMicrousd: 500_000,
+          caseLimit,
+          costLimitMicrousd,
         }),
       });
       const payload = await response.json();
@@ -802,7 +802,7 @@ export default function ResearchBenchmarkPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">Development evaluation</p>
-              <h2 className="mt-2 text-base font-medium text-zinc-100">Latest Sonnet · four balanced cases · $0.50 hard ceiling</h2>
+              <h2 className="mt-2 text-base font-medium text-zinc-100">Latest Sonnet · bounded balanced runs · explicit cost ceilings</h2>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
                 {benchmarkReadiness.development.fit} positive + {benchmarkReadiness.development.notFit} negative development cases are frozen. The {benchmarkReadiness.heldOut.total}-case held-out set remains locked and cannot run from this screen.
               </p>
@@ -829,9 +829,16 @@ export default function ResearchBenchmarkPage() {
                   )}
                 </>
               ) : (
-                <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
-                  Start four-case smoke test
-                </button>
+                <>
+                  <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
+                    Start four-case smoke test
+                  </button>
+                  {latestDevelopmentRun?.status === "completed" && latestDevelopmentRun.calculated_metrics?.auditDecisionAccuracy === 1 && (
+                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(8, 750_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                      Start eight-case calibration
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

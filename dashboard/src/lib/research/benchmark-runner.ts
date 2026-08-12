@@ -28,7 +28,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v13";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v14";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -469,7 +469,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 9,
+      version: 10,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -495,14 +495,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v9",
+      content_hash: "research-v2-benchmark-researcher-v10",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; platform willingness is not required or inferred; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-auditor-v9",
+      content_hash: "research-v2-benchmark-auditor-v10",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -731,7 +731,11 @@ ${JSON.stringify(researcher)}
 
 Pass only when every material score and claim is supported. Correct a usable proposal when evidence supports different scores. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from public creator, audience, momentum, and accessibility proxies. Missing representation alone is not automatically critical.
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
-All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
+All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. If the proposal passes with no actual research-system error, return an empty findings array; never create a finding whose failure_type is "none". Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
+}
+
+function actionableReviewFinding(finding: ReviewAssessment["findings"][number]) {
+  return !["none", "no_failure", "no_issue", "pass"].includes(finding.failure_type.trim().toLowerCase());
 }
 
 function normalizeFailureType(value: string) {
@@ -961,7 +965,8 @@ async function processBenchmarkCase(input: {
   }
   const citationQuality = safeRefs(researcher, modelEvidence);
   const unsupportedCount = citationQuality.unsupportedClaimCount;
-  const criticalReviewFindings = (review.findings || [])
+  const reviewFindings = (review.findings || []).filter(actionableReviewFinding);
+  const criticalReviewFindings = reviewFindings
     .filter((finding) => finding.severity === "critical")
     .map((finding) => finding.details);
   const criticalGaps = [
@@ -1045,7 +1050,7 @@ async function processBenchmarkCase(input: {
   if (auditError) throw auditError;
 
   const findings = [
-    ...(review.findings || []),
+    ...reviewFindings,
     ...(!identityGate.passed ? [{ failure_type: "wrong_entity", severity: "critical" as const, details: "Two-source identity corroboration was not established before the cutoff.", proposed_fix: "Add two independent exact-name sport identity sources from before the cutoff." }] : []),
     ...(!adultGate.passed ? [{ failure_type: "unverified_eligibility", severity: "critical" as const, details: "Corroborated 21+ eligibility was not established before the cutoff.", proposed_fix: "Add two independent dated birth or age sources from before the cutoff." }] : []),
   ];
