@@ -32,6 +32,7 @@ import { selectBalancedResearchCandidates } from "../src/lib/research/candidate-
 import {
   benchmarkSourceNamesAthlete,
   benchmarkSourceDomain,
+  benchmarkSourceSupportsSport,
   benchmarkSportHints,
   groupBenchmarkSearchResults,
   validateBenchmarkSportClassification,
@@ -777,6 +778,23 @@ test("benchmark sport enrichment rejects a spelling-only near match", () => {
   assert.equal(benchmarkSourceNamesAthlete(record.athlete_name, `${sources[0].title} ${sources[0].snippet}`), false);
 });
 
+test("historical evidence accepts Dylan's broad sport labels without weakening canonical classification", () => {
+  const examples: Array<[string, string]> = [
+    ["American Football", "Josh Butler played NCAA football before entering the NFL."],
+    ["Beach Volleyball", "Olivia Macdonald is a beach volleyball athlete."],
+    ["Cliff Diving", "Carlos Gimeno competes on the Red Bull Cliff Diving World Series."],
+    ["Combat Sports", "Payton Talbott is a UFC mixed martial arts fighter."],
+    ["Football", "Kerstin Casparij is a women's footballer and soccer defender."],
+    ["Jet Ski / Aquabike", "Estelle Poret competes in aquabike racing."],
+    ["MMA / LFA", "Allan Begosso fought for Legacy Fighting Alliance."],
+    ["Motorcycle Road Racing", "Davey Todd is an Isle of Man TT road racer."],
+    ["Racquet Sports", "Claudia Jensen is a professional pickleball player."],
+    ["Supercross / Motocross", "Dean Wilson is a supercross rider."],
+  ];
+  for (const [sport, source] of examples) assert.equal(benchmarkSourceSupportsSport(sport, source), true, sport);
+  assert.equal(benchmarkSourceSupportsSport("Combat Sports", "Payton Talbott plays professional baseball."), false);
+});
+
 test("benchmark sport enrichment uses Sonnet-compatible structured output schema", () => {
   const source = readFileSync(new URL("../src/lib/research/benchmark-sport-enrichment.ts", import.meta.url), "utf8");
   assert.match(source, /confidence: \{ type: "integer" \}/);
@@ -882,8 +900,16 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     sport: "Volleyball",
     evidence_cutoff_at: "2024-06-01T12:00:00Z",
   });
-  assert.equal(queries.length, 2);
+  assert.equal(queries.length, 3);
   assert.ok(queries.every((query) => query.includes("before:2024-06-01")));
+  assert.ok(queries.every((query) => query.includes("-site:instagram.com")));
+  const broadSportQueries = buildHistoricalEvidenceQueries({
+    athlete_name: "Payton Talbott",
+    sport: "Combat Sports",
+    evidence_cutoff_at: "2025-01-01T00:00:00Z",
+  });
+  assert.ok(broadSportQueries.every((query) => query.includes("(MMA OR UFC OR boxing OR kickboxing OR fighter)")));
+  assert.ok(broadSportQueries.every((query) => !query.includes('"Combat Sports"')));
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
   assert.equal(normalizeEvidencePreparationBudget(undefined), 0.75);
@@ -893,6 +919,7 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     { query: "q", title: "B", url: "https://one.example/b", snippet: "", position: 3 },
     { query: "q", title: "C over domain cap", url: "https://one.example/c", snippet: "", position: 4 },
     { query: "q", title: "Local", url: "http://localhost/private", snippet: "", position: 5 },
+    { query: "q", title: "Social", url: "https://www.instagram.com/jane", snippet: "", position: 5 },
     { query: "q", title: "D", url: "https://two.example/d", snippet: "", position: 6 },
   ]);
   assert.deepEqual(deduped.map((item) => item.title), ["A", "B", "D"]);

@@ -58,6 +58,29 @@ const SPORT_TERMS: Partial<Record<BenchmarkSport, string[]>> = {
   Wingfoil: ["wingfoil", "wing foil"],
 };
 
+// Dylan's historical source uses several broader or alternate sport labels. Keep
+// these aliases separate from canonical sport classification so, for example,
+// association football evidence does not make the enrichment classifier infer
+// both "Football" and "Soccer" for the same athlete.
+const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
+  "American Football": ["american football", "nfl", "ncaa football", "gridiron"],
+  "Beach Volleyball": ["beach volleyball"],
+  "Cliff Diving": ["cliff diving", "cliff diver", "high diving", "red bull cliff diving"],
+  "Combat Sports": [
+    "combat sports", "mixed martial arts", "mma", "ufc", "boxing", "boxer",
+    "kickboxing", "kickboxer", "bare knuckle", "bkfc", "fighter",
+  ],
+  Football: ["association football", "footballer", "women's football", "womens football", "soccer"],
+  "Jet Ski / Aquabike": ["jet ski", "jetski", "aquabike", "personal watercraft"],
+  "MMA / LFA": ["mixed martial arts", "mma", "ufc", "lfa", "legacy fighting alliance"],
+  "Motorcycle Road Racing": [
+    "motorcycle road racing", "motorcycle racer", "motorbike racing", "road racer",
+    "superbike", "motogp", "moto gp", "isle of man tt",
+  ],
+  "Racquet Sports": ["racquet sports", "tennis", "padel", "pickleball", "badminton", "squash"],
+  "Supercross / Motocross": ["supercross", "motocross"],
+};
+
 export function normalizeBenchmarkIdentity(value: unknown) {
   return String(value || "").toLowerCase().normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -101,9 +124,17 @@ export function benchmarkSourceNamesAthlete(name: string, sourceText: string) {
   return nameTokens.length >= 2 && nameTokens.every((token) => sourceTokens.has(token));
 }
 
-export function benchmarkSourceSupportsSport(sport: BenchmarkSport, sourceText: string) {
+function benchmarkCanonicalSourceSupportsSport(sport: BenchmarkSport, sourceText: string) {
   const normalized = normalizeBenchmarkIdentity(sourceText);
   return (SPORT_TERMS[sport] || [sport]).some((term) => normalized.includes(normalizeBenchmarkIdentity(term)));
+}
+
+export function benchmarkSourceSupportsSport(sport: string, sourceText: string) {
+  const normalized = normalizeBenchmarkIdentity(sourceText);
+  const terms = HISTORICAL_SPORT_TERMS[sport]
+    || SPORT_TERMS[sport as BenchmarkSport]
+    || [sport];
+  return terms.some((term) => normalized.includes(normalizeBenchmarkIdentity(term)));
 }
 
 export function benchmarkSourceDomain(value: string) {
@@ -126,7 +157,7 @@ export function benchmarkSportHints(name: string, sources: BenchmarkSearchResult
     const text = `${source.title} ${source.snippet}`;
     if (!benchmarkSourceNamesAthlete(name, text)) continue;
     for (const sport of BENCHMARK_SPORTS) {
-      if (sport !== "Unknown" && benchmarkSourceSupportsSport(sport, text)) hints.add(sport);
+      if (sport !== "Unknown" && benchmarkCanonicalSourceSupportsSport(sport, text)) hints.add(sport);
     }
   }
   return hints;
@@ -149,7 +180,7 @@ export function validateBenchmarkSportClassification(
   for (const item of [source, corroboratingSource]) {
     const text = `${item.title} ${item.snippet}`;
     if (!benchmarkSourceNamesAthlete(record.athlete_name, text)) return null;
-    if (!benchmarkSourceSupportsSport(classification.sport, text)) return null;
+    if (!benchmarkCanonicalSourceSupportsSport(classification.sport, text)) return null;
   }
   const sportHints = benchmarkSportHints(record.athlete_name, sources);
   if (sportHints.size > 1) return null;

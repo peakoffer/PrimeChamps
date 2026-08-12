@@ -3,12 +3,11 @@ import {
   benchmarkSourceDomain,
   benchmarkSourceNamesAthlete,
   benchmarkSourceSupportsSport,
-  type BenchmarkSport,
 } from "./benchmark-sport-validation.ts";
 
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
-  queriesPerRecord: 2,
+  queriesPerRecord: 3,
   searchResultsPerQuery: 8,
   archiveUrlsPerRecord: 8,
   archiveBodyCharacters: 120_000,
@@ -277,7 +276,7 @@ export function extractPreparedArchivedEvidence(input: {
     || !benchmarkSourceNamesAthlete(record.athlete_name, attributable)) {
     return { evidence: null, rejectionReason: "archived_page_does_not_name_exact_athlete" };
   }
-  if (!benchmarkSourceSupportsSport(record.sport as BenchmarkSport, attributable)) {
+  if (!benchmarkSourceSupportsSport(record.sport, attributable)) {
     return { evidence: null, rejectionReason: "archived_page_does_not_support_requested_sport" };
   }
   const domain = benchmarkSourceDomain(candidate.url);
@@ -369,11 +368,30 @@ export function buildHistoricalEvidenceQueries(record: Pick<EvidencePreparationR
   const cutoff = new Date(record.evidence_cutoff_at);
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
+  const excludeSocial = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:x.com -site:twitter.com";
+  const broadSportExpressions: Record<string, string> = {
+    "American Football": "(\"American football\" OR NFL OR \"NCAA football\")",
+    "Beach Volleyball": "\"beach volleyball\"",
+    "Cliff Diving": "(\"cliff diving\" OR \"high diving\")",
+    "Combat Sports": "(MMA OR UFC OR boxing OR kickboxing OR fighter)",
+    Football: "(footballer OR soccer)",
+    "Jet Ski / Aquabike": "(aquabike OR \"jet ski\")",
+    "MMA / LFA": "(MMA OR LFA OR \"Legacy Fighting Alliance\")",
+    "Motorcycle Road Racing": "(\"motorcycle road racing\" OR superbike OR MotoGP OR \"Isle of Man TT\")",
+    "Racquet Sports": "(pickleball OR tennis OR padel OR badminton OR squash)",
+    "Supercross / Motocross": "(supercross OR motocross)",
+  };
+  const sportExpression = broadSportExpressions[record.sport] || `"${record.sport}"`;
   return [
-    `"${record.athlete_name}" "${record.sport}" athlete profile before:${before}`,
-    `"${record.athlete_name}" "${record.sport}" born biography results before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} athlete profile biography ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} born age date of birth roster ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} results championship ranking interview ${excludeSocial} before:${before}`,
   ];
 }
+
+const HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS = new Set([
+  "facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com",
+]);
 
 export function dedupeHistoricalSearchCandidates(candidates: HistoricalSearchCandidate[]) {
   const seenUrls = new Set<string>();
@@ -384,7 +402,7 @@ export function dedupeHistoricalSearchCandidates(candidates: HistoricalSearchCan
     .filter((candidate) => {
       const normalized = normalizedUrlForComparison(candidate.url);
       const domain = benchmarkSourceDomain(candidate.url);
-      if (!normalized || !domain || seenUrls.has(normalized)) return false;
+      if (!normalized || !domain || HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS.has(domain) || seenUrls.has(normalized)) return false;
       if ((seenDomains.get(domain) || 0) >= 2) return false;
       seenUrls.add(normalized);
       seenDomains.set(domain, (seenDomains.get(domain) || 0) + 1);
