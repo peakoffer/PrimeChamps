@@ -109,8 +109,8 @@ function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
     && !(record.held_out_locked_at && !record.held_out_revealed_at);
 }
 
-function eligibleForDevelopmentSignalRecovery(record: GoldenPreparationCandidate) {
-  return record.benchmark_split === "development"
+function eligibleForSignalRecovery(record: GoldenPreparationCandidate, split: "development" | "held_out") {
+  return record.benchmark_split === split
     && record.sport !== "Needs enrichment"
     && record.sport !== "Unknown"
     && (record.fit_label === "fit" || record.fit_label === "not_fit")
@@ -120,7 +120,9 @@ function eligibleForDevelopmentSignalRecovery(record: GoldenPreparationCandidate
     && Date.parse(record.evidence_cutoff_at!) <= Date.parse(record.decision_at!)
     && ["strong", "partial"].includes(record.point_in_time_reliability)
     && Boolean(record.labeled_at)
-    && !record.held_out_locked_at;
+    && (split === "development"
+      ? !record.held_out_locked_at
+      : Boolean(record.held_out_locked_at && !record.held_out_revealed_at));
 }
 
 export async function GET() {
@@ -131,7 +133,7 @@ export async function GET() {
       admin.from("research_golden_records")
         .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
         .eq("organization_id", user.organizationId)
-        .in("benchmark_split", ["excluded", "development"])
+        .in("benchmark_split", ["excluded", "development", "held_out"])
         .order("updated_at", { ascending: true }),
       admin.from("research_evidence_preparation_runs")
         .select("id,workflow_run_id,status,record_ids,max_apify_charge_microusd,actual_apify_cost_microusd,records_processed,records_ready,safe_source_count,safe_claim_count,checkpoint,summary,error_message,started_at,completed_at,created_at")
@@ -143,7 +145,8 @@ export async function GET() {
     if (runError) throw runError;
     const allCandidates = (candidates || []) as GoldenPreparationCandidate[];
     const eligible = allCandidates.filter(eligibleForEvidencePreparation);
-    const developmentEligible = allCandidates.filter(eligibleForDevelopmentSignalRecovery);
+    const developmentEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "development"));
+    const heldOutEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "held_out"));
     const runRows = (runs || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
     const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
@@ -161,6 +164,9 @@ export async function GET() {
       baselineRemainingCount: baselineRemaining.length,
       ageRecoveryRemainingCount: ageRecoveryRemaining.length,
       developmentSignalRecoveryCount: developmentEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
+      heldOutSignalRecoveryCount: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true"
+        ? heldOutEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length
+        : 0,
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
       defaultMaxApifyChargeUsd: EVIDENCE_PREPARATION_LIMITS.defaultMaxApifyChargeUsd,
       scoringTokensSpentByPreparation: 0,
@@ -215,16 +221,22 @@ export async function POST(request: NextRequest) {
       || body.preparationMode === "signal_recovery"
       ? body.preparationMode as HistoricalEvidencePreparationMode
       : null;
+    const signalRecoverySplit = body.benchmarkSplit === "held_out" ? "held_out" : "development";
+    if (requestedMode === "signal_recovery"
+      && signalRecoverySplit === "held_out"
+      && process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED !== "true") {
+      return NextResponse.json({ error: "Held-out evidence preparation is disabled outside the one-time release window." }, { status: 409 });
+    }
     let query = admin.from("research_golden_records")
       .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
       .eq("organization_id", user.organizationId)
-      .eq("benchmark_split", requestedMode === "signal_recovery" ? "development" : "excluded")
+      .eq("benchmark_split", requestedMode === "signal_recovery" ? signalRecoverySplit : "excluded")
       .order("updated_at", { ascending: true });
     if (requestedIds.length) query = query.in("id", requestedIds);
     const { data, error } = await query.limit(500);
     if (error) throw error;
     const eligible = ((data || []) as GoldenPreparationCandidate[]).filter(requestedMode === "signal_recovery"
-      ? eligibleForDevelopmentSignalRecovery
+      ? (record) => eligibleForSignalRecovery(record, signalRecoverySplit)
       : eligibleForEvidencePreparation);
     if (requestedIds.length && eligible.length !== requestedIds.length) {
       return NextResponse.json({
@@ -266,7 +278,7 @@ export async function POST(request: NextRequest) {
           ? preparationMode === "age_recovery"
             ? "Every blocked fit record has completed the current age-recovery plan; no provider call was started."
             : preparationMode === "signal_recovery"
-              ? "Every development record has completed the current creator-signal recovery plan; no provider call was started."
+              ? `Every ${signalRecoverySplit === "held_out" ? "locked held-out" : "development"} record has completed the current creator-signal recovery plan; no provider call was started.`
               : "Every eligible record has completed the current evidence-extraction version; no provider call was started."
           : "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
         eligible: eligible.length,
@@ -306,6 +318,7 @@ export async function POST(request: NextRequest) {
       checkpoint: {
         phase: "queued",
         preparation_mode: preparationMode,
+        benchmark_split: preparationMode === "signal_recovery" ? signalRecoverySplit : null,
         extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
         query_plan_version: queryPlanVersion,
         evaluation_only: true,

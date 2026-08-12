@@ -7,7 +7,7 @@ import {
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-development-signal-recovery-v2";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-blind-signal-recovery-v3";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-current-athletic-relevance-v5";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -562,9 +562,9 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
   return [
-    `"${record.athlete_name}" "${record.sport}" (Instagram OR TikTok OR followers OR subscribers OR "content creator" OR influencer OR "personal brand") before:${before}`,
+    `"${record.athlete_name}" "${record.sport}" ("Instagram followers" OR "TikTok followers" OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
     `"${record.athlete_name}" "${record.sport}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") before:${before}`,
-    `"${record.athlete_name}" (interview OR podcast OR YouTube OR "behind the scenes" OR represented OR management OR agency OR "business inquiries" OR collaboration) before:${before}`,
+    `"${record.athlete_name}" "${record.sport}" (interview OR podcast OR YouTube OR "behind the scenes" OR "content creator" OR "personal brand" OR represented OR management OR agency OR "business inquiries" OR collaboration) before:${before}`,
   ];
 }
 

@@ -66,7 +66,10 @@ type EvidencePreparationRun = {
   max_apify_charge_microusd: number;
   actual_apify_cost_microusd: number | null;
   error_message: string | null;
-  checkpoint?: { preparation_mode?: "baseline" | "age_recovery" | "signal_recovery" } | null;
+  checkpoint?: {
+    preparation_mode?: "baseline" | "age_recovery" | "signal_recovery";
+    benchmark_split?: "development" | "held_out" | null;
+  } | null;
   created_at: string;
 };
 
@@ -113,13 +116,14 @@ type BenchmarkRun = {
     model?: string;
     no_outreach?: boolean;
     last_error?: string | null;
+    cohort_version?: string;
   };
   calculated_metrics: BenchmarkMetrics | null;
 };
 
 type BenchmarkReadiness = {
-  development: { total: number; fit: number; notFit: number };
-  heldOut: { total: number; fit: number; notFit: number };
+  development: { total: number; fit: number; notFit: number; cohortVersion: string | null };
+  heldOut: { total: number; fit: number; notFit: number; cohortVersion: string | null };
   canRunDevelopment: boolean;
   canRunHeldOut: boolean;
   heldOutEvaluationEnabled: boolean;
@@ -127,8 +131,8 @@ type BenchmarkReadiness = {
 };
 
 const INITIAL_BENCHMARK_READINESS: BenchmarkReadiness = {
-  development: { total: 0, fit: 0, notFit: 0 },
-  heldOut: { total: 0, fit: 0, notFit: 0 },
+  development: { total: 0, fit: 0, notFit: 0, cohortVersion: null },
+  heldOut: { total: 0, fit: 0, notFit: 0, cohortVersion: null },
   canRunDevelopment: false,
   canRunHeldOut: false,
   heldOutEvaluationEnabled: false,
@@ -296,6 +300,7 @@ export default function ResearchBenchmarkPage() {
   const [benchmarkReadiness, setBenchmarkReadiness] = useState(INITIAL_BENCHMARK_READINESS);
   const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
   const [developmentSignalRecoveryCount, setDevelopmentSignalRecoveryCount] = useState(0);
+  const [heldOutSignalRecoveryCount, setHeldOutSignalRecoveryCount] = useState(0);
   const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -326,6 +331,7 @@ export default function ResearchBenchmarkPage() {
       setEvidencePreparationRuns(preparationPayload.runs || []);
       setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
       setDevelopmentSignalRecoveryCount(preparationPayload.developmentSignalRecoveryCount || 0);
+      setHeldOutSignalRecoveryCount(preparationPayload.heldOutSignalRecoveryCount || 0);
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
       setBenchmarkRuns(benchmarkPayload.runs || []);
       setBenchmarkReadiness(benchmarkPayload.readiness || INITIAL_BENCHMARK_READINESS);
@@ -344,8 +350,12 @@ export default function ResearchBenchmarkPage() {
 
   const activeEvidenceRun = evidencePreparationRuns.find((run) => run.status === "queued" || run.status === "running");
   const latestEvidenceRun = evidencePreparationRuns[0];
-  const latestDevelopmentRun = benchmarkRuns.find((run) => run.benchmark_split === "development");
-  const latestHeldOutRun = benchmarkRuns.find((run) => run.benchmark_split === "held_out");
+  const latestDevelopmentRun = benchmarkRuns.find((run) => run.benchmark_split === "development"
+    && (!benchmarkReadiness.development.cohortVersion
+      || run.metrics.cohort_version === benchmarkReadiness.development.cohortVersion));
+  const latestHeldOutRun = benchmarkRuns.find((run) => run.benchmark_split === "held_out"
+    && (!benchmarkReadiness.heldOut.cohortVersion
+      || run.metrics.cohort_version === benchmarkReadiness.heldOut.cohortVersion));
   const activeDevelopmentRun = latestDevelopmentRun
     && ["queued", "running", "failed"].includes(latestDevelopmentRun.status)
     ? latestDevelopmentRun
@@ -651,6 +661,34 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const recoverHeldOutSignals = async () => {
+    setWorking(true);
+    setMessage("Starting blind creator and commercial signal recovery for locked held-out cases…");
+    try {
+      const response = await fetch("/api/research/golden-records/prepare-evidence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          maxRecords: 10,
+          maxApifyChargeUsd: 0.75,
+          preparationMode: "signal_recovery",
+          benchmarkSplit: "held_out",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Held-out signal recovery failed to start");
+      setMessage(payload.discoveryReused
+        ? `Queued ${payload.records} locked cases from a saved discovery checkpoint. Labels remain concealed and new provider spend is zero.`
+        : `Queued ${payload.records} locked cases with a $${payload.maxApifyChargeUsd.toFixed(2)} discovery ceiling. Labels remain concealed and scoring-token spend is zero.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Held-out signal recovery failed to start");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const importCsv = async (file: File) => {
     setWorking(true);
     setMessage("");
@@ -905,7 +943,18 @@ export default function ResearchBenchmarkPage() {
                 </>
               )}
               {benchmarkReadiness.heldOutEvaluationEnabled && (
-                activeHeldOutRun ? (
+                heldOutSignalRecoveryCount > 0 ? (
+                  <button
+                    disabled={working || Boolean(activeEvidenceRun)}
+                    onClick={() => void recoverHeldOutSignals()}
+                    className="rounded-lg border border-amber-700/50 px-3 py-2 text-sm font-medium text-amber-100 disabled:opacity-40"
+                  >
+                    {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
+                      && activeEvidenceRun.checkpoint.benchmark_split === "held_out"
+                      ? `Preparing locked evidence ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
+                      : `Prepare locked evidence (${Math.min(heldOutSignalRecoveryCount, 10)})`}
+                  </button>
+                ) : activeHeldOutRun ? (
                   <button
                     disabled={working || activeHeldOutRun.status === "running"}
                     onClick={() => void resumeHeldOutRelease(activeHeldOutRun.id)}
@@ -915,7 +964,7 @@ export default function ResearchBenchmarkPage() {
                   </button>
                 ) : !latestHeldOutRun && (
                   <button
-                    disabled={working || !benchmarkReadiness.canRunHeldOut || latestDevelopmentRun?.status !== "completed"}
+                    disabled={working || !benchmarkReadiness.canRunHeldOut || latestDevelopmentRun?.status !== "completed" || heldOutSignalRecoveryCount > 0}
                     onClick={() => void startHeldOutRelease()}
                     className="rounded-lg border border-red-800 px-3 py-2 text-sm font-medium text-red-200 disabled:opacity-40"
                   >

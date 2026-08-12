@@ -92,8 +92,11 @@ function validatePreparationRecord(
   const outcomeGroundTruth = Array.isArray(record.stratification_tags)
     && record.stratification_tags.includes("dylan_outcome_ground_truth");
   if (preparationMode === "signal_recovery") {
-    if (record.benchmark_split !== "development") {
-      throw new FatalError(`Record ${record.id} is not in the development cohort`);
+    const blindHeldOut = record.benchmark_split === "held_out"
+      && Boolean(record.held_out_locked_at)
+      && !record.held_out_revealed_at;
+    if (record.benchmark_split !== "development" && !blindHeldOut) {
+      throw new FatalError(`Record ${record.id} is not in an eligible development or locked held-out cohort`);
     }
   } else if (record.benchmark_split !== "excluded") {
     throw new FatalError(`Record ${record.id} is already assigned to a benchmark cohort`);
@@ -105,7 +108,9 @@ function validatePreparationRecord(
   if (Date.parse(String(record.evidence_cutoff_at)) > Date.parse(String(record.decision_at))) throw new FatalError(`Record ${record.id} has an evidence cutoff after its decision`);
   if (record.point_in_time_reliability !== "strong" && record.point_in_time_reliability !== "partial") throw new FatalError(`Record ${record.id} is not point-in-time reliable`);
   if (typeof record.decisive_information_publicly_knowable !== "boolean" && !outcomeGroundTruth) throw new FatalError(`Record ${record.id} lacks a public-knowability judgment`);
-  if (record.held_out_locked_at && !record.held_out_revealed_at) throw new FatalError(`Record ${record.id} is an unrevealed held-out case`);
+  if (record.held_out_locked_at && !record.held_out_revealed_at && preparationMode !== "signal_recovery") {
+    throw new FatalError(`Record ${record.id} is an unrevealed held-out case`);
+  }
 }
 
 async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInput): Promise<DiscoveryBatch> {

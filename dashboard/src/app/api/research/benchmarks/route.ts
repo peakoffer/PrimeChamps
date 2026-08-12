@@ -56,7 +56,7 @@ export async function GET() {
         .order("created_at", { ascending: false })
         .limit(20),
       admin.from("research_golden_records")
-        .select("benchmark_split,fit_label,achievability_label,point_in_time_reliability")
+        .select("benchmark_split,fit_label,achievability_label,point_in_time_reliability,benchmark_cohort_version")
         .eq("organization_id", user.organizationId),
     ]);
     if (runError) throw runError;
@@ -91,11 +91,16 @@ export async function GET() {
       };
     });
     const goldenLabels = labels || [];
-    const splitSummary = (split: "development" | "held_out") => ({
-      total: goldenLabels.filter((record) => record.benchmark_split === split).length,
-      fit: goldenLabels.filter((record) => record.benchmark_split === split && record.fit_label === "fit").length,
-      notFit: goldenLabels.filter((record) => record.benchmark_split === split && record.fit_label === "not_fit").length,
-    });
+    const splitSummary = (split: "development" | "held_out") => {
+      const splitRecords = goldenLabels.filter((record) => record.benchmark_split === split);
+      const cohorts = Array.from(new Set(splitRecords.map((record) => record.benchmark_cohort_version).filter(Boolean)));
+      return {
+        total: splitRecords.length,
+        fit: splitRecords.filter((record) => record.fit_label === "fit").length,
+        notFit: splitRecords.filter((record) => record.fit_label === "not_fit").length,
+        cohortVersion: cohorts.length === 1 ? String(cohorts[0]) : null,
+      };
+    };
     const development = splitSummary("development");
     const heldOut = splitSummary("held_out");
     return NextResponse.json({
