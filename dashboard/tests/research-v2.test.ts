@@ -64,6 +64,7 @@ import {
   parseWaybackTimestamp,
   preparedEvidenceSignalSupported,
   selectWaybackCapture,
+  validatePreparedAgeEvidenceForSource,
   waybackCdxUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
 
@@ -997,6 +998,53 @@ test("archived evidence extraction requires exact identity and sport and preserv
   });
   assert.equal(siblingAgeMention.rejectionReason, null);
   assert.ok(!siblingAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
+});
+
+test("age evidence revalidation preserves athlete profiles without inheriting another person's age", () => {
+  const norma = validatePreparedAgeEvidenceForSource({
+    athleteName: "Norma Dumont",
+    title: "Norma Dumont | UFC",
+    domain: "ufc.com",
+    observedAt: new Date("2026-04-19T19:32:11Z"),
+    text: "Norma Dumont | UFC\nLearn more about Norma Dumont's UFC history. Bio Fighter Facts Status Active Place of Birth Belo Horizonte, Brazil Age 35 Height 67.00",
+  });
+  assert.equal(norma.attributableAge?.parsed.age, 35);
+
+  const kerstin = validatePreparedAgeEvidenceForSource({
+    athleteName: "Kerstin Casparij",
+    title: "Kerstin Casparij - Player profile",
+    domain: "soccerdonna.de",
+    observedAt: new Date("2024-01-26T03:05:07Z"),
+    text: `Kerstin Casparij - Player profile\n${"Profile navigation ".repeat(20)} Kerstin Casparij Date of birth: 19.08.2000 Place of birth: Alphen aan den Rijn Age: 23`,
+  });
+  assert.equal(kerstin.attributableAge?.parsed.precision, "birth_date");
+
+  const mondo = validatePreparedAgeEvidenceForSource({
+    athleteName: "Mondo Duplantis",
+    title: "Mondo Duplantis bio: Age, height, hometown, family, fun facts",
+    domain: "nbcolympics.com",
+    observedAt: new Date("2025-08-06T09:22:47Z"),
+    text: `Mondo Duplantis bio\n${"Career accolades and records. ".repeat(10)} Mondo Duplantis has collected many accolades. At just 24 years old, the Swedish pole vaulter is a world champion.`,
+  });
+  assert.equal(mondo.attributableAge?.parsed.age, 24);
+
+  const sibling = validatePreparedAgeEvidenceForSource({
+    athleteName: "Gisele Thompson",
+    title: "Gisele Thompson forges her own path",
+    domain: "latimes.com",
+    observedAt: new Date("2026-03-23T05:00:55Z"),
+    text: "Gisele Thompson forges her own path\nSisters Alyssa and Gisele Thompson have played soccer together. Alyssa turned pro in 2023 at age 18 when she signed with Angel City, and Gisele followed.",
+  });
+  assert.equal(sibling.attributableAge, null);
+
+  const childhood = validatePreparedAgeEvidenceForSource({
+    athleteName: "Margo Hayes",
+    title: "Margo Hayes Makes History",
+    domain: "exploreinspired.com",
+    observedAt: new Date("2026-03-07T02:43:39Z"),
+    text: "Margo Hayes Makes History\nMargo Hayes has been climbing since she was 10 years old and making waves ever since.",
+  });
+  assert.equal(childhood.attributableAge, null);
 });
 
 test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {

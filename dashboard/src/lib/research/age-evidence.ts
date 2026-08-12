@@ -36,7 +36,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/i);
+  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b/i);
   if (numeric) {
     const first = Number(numeric[1]);
     const second = Number(numeric[2]);

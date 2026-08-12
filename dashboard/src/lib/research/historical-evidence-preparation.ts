@@ -275,7 +275,7 @@ export function parsePreparedAgeEvidenceForAthlete(name: string, text: string, n
 function extractBirthDate(text: string) {
   const iso = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\b[^0-9]{0,80}\(?\s*(\d{4})-(\d{1,2})-(\d{1,2})\b/i);
   if (iso) return normalizeNumericBirthDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
-  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/i);
+  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b/i);
   if (numeric) {
     const first = Number(numeric[1]);
     const second = Number(numeric[2]);
@@ -330,6 +330,46 @@ function extractOfficialCompactBirthDate(name: string, text: string, domain: str
   if (!match) return null;
   const normalized = normalizeYearFirstBirthDate(`Date of birth: ${match[3]} ${match[2]} ${match[1]}`);
   return normalized ? { birthDate: normalized, evidence: match[0].slice(0, 500) } : null;
+}
+
+export function validatePreparedAgeEvidenceForSource(input: {
+  athleteName: string;
+  text: string;
+  domain: string;
+  title?: string;
+  observedAt?: Date;
+}) {
+  const attributableAge = parsePreparedAgeEvidenceForAthlete(
+    input.athleteName,
+    input.text,
+    input.observedAt || new Date()
+  );
+  const officialCompactBirthDate = attributableAge
+    ? null
+    : extractOfficialCompactBirthDate(input.athleteName, input.text, input.domain);
+  if (attributableAge || officialCompactBirthDate) return { attributableAge, officialCompactBirthDate };
+
+  const normalizedName = normalizeEvidenceText(input.athleteName);
+  const normalizedTitle = normalizeEvidenceText(input.title || "");
+  const athleteCenteredPage = Boolean(normalizedName && normalizedTitle.includes(normalizedName));
+  if (!athleteCenteredPage) return { attributableAge: null, officialCompactBirthDate: null };
+
+  // Exact birth facts on an athlete-titled profile can sit behind substantial
+  // profile navigation. A wider window is safe for birth dates/years, but not
+  // for loose ages that may describe another person in the article.
+  const wider = parseAgeEvidenceForAthlete(input.athleteName, input.text, input.observedAt || new Date(), 900);
+  if (wider && wider.parsed.precision !== "stated_age") {
+    return { attributableAge: wider, officialCompactBirthDate: null };
+  }
+
+  if (wider?.parsed.precision === "stated_age") {
+    const profileAgeField = /\b(?:place of birth|date of birth|height|status)\b[\s\S]{0,450}\bage\s*[:\-]?\s*\d{1,2}\b/i.test(wider.evidence);
+    const currentAgePhrase = /\b(?:at\s+)?(?:just\s+)?\d{1,2}\s+years?\s+old\b/i.test(wider.evidence);
+    if (profileAgeField || currentAgePhrase) {
+      return { attributableAge: wider, officialCompactBirthDate: null };
+    }
+  }
+  return { attributableAge: null, officialCompactBirthDate: null };
 }
 
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
@@ -392,14 +432,13 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     },
   ];
-  const attributableAge = parsePreparedAgeEvidenceForAthlete(
-    record.athlete_name,
-    attributable,
-    new Date(capture.capturedAt)
-  );
-  const officialCompactBirthDate = attributableAge
-    ? null
-    : extractOfficialCompactBirthDate(record.athlete_name, attributable, domain);
+  const { attributableAge, officialCompactBirthDate } = validatePreparedAgeEvidenceForSource({
+    athleteName: record.athlete_name,
+    text: attributable,
+    domain,
+    title,
+    observedAt: new Date(capture.capturedAt),
+  });
   if (attributableAge || officialCompactBirthDate) {
     const ageExcerpt = (attributableAge?.evidence || officialCompactBirthDate?.evidence || "").slice(0, 1_000);
     const birthDate = officialCompactBirthDate?.birthDate
