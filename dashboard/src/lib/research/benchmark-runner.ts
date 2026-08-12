@@ -28,7 +28,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v10";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v11";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -86,13 +86,14 @@ const BLIND_AUDITOR_SCHEMA = {
     independent_achievability_score: { type: "number" },
     independent_confidence_score: { type: "number" },
     critical_gaps: { type: "array", items: { type: "string" } },
+    limitations: { type: "array", items: { type: "string" } },
     failure_types: { type: "array", items: { type: "string" } },
     summary: { type: "string" },
   },
   required: [
     "identity_passed", "eligibility_passed", "source_verification_passed",
     "commercial_constraints_complete", "independent_fit_score", "independent_achievability_score",
-    "independent_confidence_score", "critical_gaps", "failure_types", "summary",
+    "independent_confidence_score", "critical_gaps", "limitations", "failure_types", "summary",
   ],
 } as const;
 
@@ -148,6 +149,7 @@ type BlindAssessment = {
   independent_achievability_score: number;
   independent_confidence_score: number;
   critical_gaps: string[];
+  limitations: string[];
   failure_types: string[];
   summary: string;
 };
@@ -224,6 +226,14 @@ function bounded(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(100, Math.round(number * 100) / 100));
+}
+
+function fitLabelForScore(score: number): "fit" | "not_fit" | "uncertain" {
+  return score >= 80 ? "fit" : score < 60 ? "not_fit" : "uncertain";
+}
+
+function achievabilityLabelForScore(score: number): "high" | "medium" | "low" | "uncertain" {
+  return score >= 75 ? "high" : score >= 60 ? "medium" : score < 45 ? "low" : "uncertain";
 }
 
 function integer(value: unknown) {
@@ -455,7 +465,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 8,
+      version: 9,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -481,14 +491,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v8",
+      content_hash: "research-v2-benchmark-researcher-v9",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; platform willingness is not required or inferred; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-auditor-v8",
+      content_hash: "research-v2-benchmark-auditor-v9",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -702,7 +712,7 @@ Evidence cutoff: ${record.evidence_cutoff_at}
 Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
-All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. Put absent evidence or unanswered questions in critical_gaps. Keep the summary under 120 words and return no more than five gaps.
+All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. Put only a failed core gate from the calibration definition in critical_gaps. Put optional missing amplifiers, stale-but-still-usable evidence, and non-blocking unanswered questions in limitations instead. A limitation must not become a critical gap merely because fresher or more complete evidence would be preferable. Keep the summary under 120 words and return no more than five critical gaps and five limitations.
 Return the required JSON only.`;
 }
 
@@ -851,6 +861,8 @@ async function processBenchmarkCase(input: {
       hasCriticalGap: (researcher.critical_gaps || []).length > 0,
       unsupportedMaterialClaims: citationQuality.unsupportedClaimCount,
     });
+    const researcherFitLabel = fitLabelForScore(researcherScore.onlyfansFit);
+    const researcherAchievabilityLabel = achievabilityLabelForScore(researcherScore.commercialAchievability);
     const { data: score, error } = await admin.from("research_scores").insert({
       organization_id: run.organization_id,
       golden_record_id: record.id,
@@ -859,8 +871,8 @@ async function processBenchmarkCase(input: {
       achievability_score: researcherScore.commercialAchievability,
       research_confidence_score: researcherScore.researchConfidence,
       priority_score: researcherScore.priority,
-      fit_label: researcher.fit_label,
-      achievability_label: researcher.achievability_label,
+      fit_label: researcherFitLabel,
+      achievability_label: researcherAchievabilityLabel,
       rubric_version_id: artifacts.rubricVersionId,
       prompt_version_id: artifacts.researcherPromptVersionId,
       model_version_id: artifacts.researcherModelVersionId,
@@ -883,8 +895,8 @@ async function processBenchmarkCase(input: {
       benchmark_run_id: run.id,
       golden_record_id: record.id,
       researcher_score_id: researcherScoreId,
-      predicted_fit_label: researcher.fit_label,
-      predicted_achievability_label: researcher.achievability_label,
+      predicted_fit_label: researcherFitLabel,
+      predicted_achievability_label: researcherAchievabilityLabel,
       predicted_priority_score: researcherScore.priority,
       source_verification_rate: citationQuality.sourceVerificationRate,
       unsupported_claim_rate: citationQuality.unsupportedClaimRate,
@@ -945,9 +957,12 @@ async function processBenchmarkCase(input: {
   }
   const citationQuality = safeRefs(researcher, modelEvidence);
   const unsupportedCount = citationQuality.unsupportedClaimCount;
+  const criticalReviewFindings = (review.findings || [])
+    .filter((finding) => finding.severity === "critical")
+    .map((finding) => finding.details);
   const criticalGaps = [
-    ...(blind.critical_gaps || []),
-    ...(review.findings || []).filter((finding) => finding.severity === "critical").map((finding) => finding.details),
+    ...(review.verdict === "fail" ? (blind.critical_gaps || []) : []),
+    ...criticalReviewFindings,
   ];
   const forcedFailure = !identityGate.passed || !adultGate.passed
     || !researcher.identity_confirmed || !researcher.adult_eligibility_verified
@@ -961,10 +976,8 @@ async function processBenchmarkCase(input: {
     hasCriticalGap: forcedFailure,
     unsupportedMaterialClaims: unsupportedCount,
   });
-  const correctedFitLabel = corrected.onlyfansFit >= 80 ? "fit" : corrected.onlyfansFit < 60 ? "not_fit" : "uncertain";
-  const correctedAchievabilityLabel = corrected.commercialAchievability >= 75 ? "high"
-    : corrected.commercialAchievability >= 60 ? "medium"
-      : corrected.commercialAchievability < 45 ? "low" : "uncertain";
+  const correctedFitLabel = fitLabelForScore(corrected.onlyfansFit);
+  const correctedAchievabilityLabel = achievabilityLabelForScore(corrected.commercialAchievability);
   const auditUsage = combinedUsage(blindUsage, reviewUsage);
   const auditCostMicrousd = blindUsage.costMicrousd + reviewUsage.costMicrousd;
   const auditLatencyMs = blindUsage.latencyMs + reviewUsage.latencyMs;
@@ -1046,21 +1059,21 @@ async function processBenchmarkCase(input: {
     if (error) throw error;
   }
 
-  const researcherPriority = buildResearchV2Score({
+  const researcherScoring = buildResearchV2Score({
     onlyfansFit: bounded(researcher.onlyfans_fit_score),
     commercialAchievability: bounded(researcher.commercial_achievability_score),
     researchConfidence: bounded(researcher.research_confidence_score),
     hasCriticalGap: (researcher.critical_gaps || []).length > 0,
     unsupportedMaterialClaims: citationQuality.unsupportedClaimCount,
-  }).priority;
+  });
+  const researcherFitLabel = fitLabelForScore(researcherScoring.onlyfansFit);
+  const researcherAchievabilityLabel = achievabilityLabelForScore(researcherScoring.commercialAchievability);
   const actualPriority = record.fit_label === "fit" && record.achievability_label !== "low";
-  const researcherFailure = researcher.fit_label !== record.fit_label
-    || researcher.achievability_label !== record.achievability_label
-    || (researcherPriority > 80) !== actualPriority
-    || (researcherPriority > 80 && (!identityGate.passed || !adultGate.passed || citationQuality.unsupportedClaimCount > 0));
+  const researcherFailure = researcherFitLabel !== record.fit_label
+    || researcherAchievabilityLabel !== record.achievability_label
+    || (researcherScoring.priority > 80 && (!identityGate.passed || !adultGate.passed || citationQuality.unsupportedClaimCount > 0));
   const finalPredictionCorrect = correctedFitLabel === record.fit_label
-    && correctedAchievabilityLabel === record.achievability_label
-    && (corrected.priority > 80) === actualPriority;
+    && correctedAchievabilityLabel === record.achievability_label;
   const auditorCaught = researcherFailure && finalPredictionCorrect;
   const totalUsage = combinedUsage(researcherUsage, auditUsage);
   const totalCost = researcherUsage.costMicrousd + auditCostMicrousd;

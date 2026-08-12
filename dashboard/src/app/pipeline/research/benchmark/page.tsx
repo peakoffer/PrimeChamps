@@ -76,6 +76,7 @@ type BenchmarkMetrics = {
   recallStrongFit: number | null;
   fitAccuracy: number | null;
   achievabilityAccuracy: number | null;
+  auditDecisionAccuracy: number | null;
   sourceVerificationRate: number | null;
   finalistIdentityAccuracy: number | null;
   finalistEligibilityVerificationRate: number | null;
@@ -854,8 +855,8 @@ export default function ResearchBenchmarkPage() {
                 <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.fitAccuracy)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Audit catch</p>
-                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.auditorCatchRate)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Audit accuracy</p>
+                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.auditDecisionAccuracy)}</p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-zinc-600">Spend</p>

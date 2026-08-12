@@ -424,6 +424,11 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
       results.filter((result) => result.predictedAchievability === result.actualAchievability).length,
       results.length
     ),
+    auditDecisionAccuracy: rate(
+      results.filter((result) => result.predictedFit === result.actualFit
+        && result.predictedAchievability === result.actualAchievability).length,
+      results.length
+    ),
     sourceVerificationRate: rate(
       results.reduce((total, result) => total + result.sourceVerificationRate, 0),
       results.length

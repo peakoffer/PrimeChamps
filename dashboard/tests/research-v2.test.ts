@@ -432,6 +432,7 @@ test("benchmark metrics reward precision rather than score volume", () => {
   ]);
   assert.equal(metrics.precisionAbove80, 0.5);
   assert.equal(metrics.falsePositiveRate, 1);
+  assert.equal(metrics.auditDecisionAccuracy, 0.5);
   assert.equal(metrics.auditorCatchRate, 1);
   assert.equal(metrics.finalistIdentityAccuracy, 1);
   assert.equal(metrics.finalistEligibilityVerificationRate, 1);
@@ -769,7 +770,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v10/);
+  assert.match(source, /research-v2-benchmark-runner-v11/);
   assert.match(source, /researcherOutputTokens: 2_200/);
   assert.match(source, /blindOutputTokens: 2_000/);
   assert.match(source, /reviewOutputTokens: 2_200/);
@@ -784,6 +785,8 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(!source.includes("researcher.unsupported_claims"), "unsupported researcher claims must come from citation validity, not self-report");
   assert.ok(!source.includes("blind.unsupported_claims"), "blind limitations must not be counted as unsupported material claims");
   assert.match(source, /compactBenchmarkModelEvidence/);
+  assert.match(source, /review\.verdict === "fail" \? \(blind\.critical_gaps/);
+  assert.ok(!source.includes('(researcherPriority > 80) !== actualPriority'), "a deliberately selective finalist threshold must not be treated as a classifier miss");
   assert.ok(!source.includes("minimum: 0"), "Anthropic structured outputs reject numeric minimum keywords");
   assert.ok(!source.includes("maximum: 100"), "Anthropic structured outputs reject numeric maximum keywords");
   assert.match(source, /status: "draft"/);
