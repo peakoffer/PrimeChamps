@@ -334,6 +334,7 @@ Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
 
 SCORING
+- Every score uses the 0-100 numeric scale, never fractions from 0 to 1.
 - OnlyFans fit measures evidence-backed creator/audience opportunity, not appearance.
 - Commercial achievability measures realistic access, representation, economics, geography, and closeability.
 - Research confidence measures identity, corroborated 21+ eligibility, evidence freshness, source independence, and completeness.

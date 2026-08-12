@@ -782,9 +782,16 @@ export default function ResearchBenchmarkPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               {activeDevelopmentRun ? (
-                <button disabled={working || activeDevelopmentRun.status === "running"} onClick={() => void resumeDevelopmentBenchmark(activeDevelopmentRun.id)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
-                  {activeDevelopmentRun.status === "failed" ? "Retry saved checkpoint" : "Score next case"}
-                </button>
+                <>
+                  <button disabled={working || activeDevelopmentRun.status === "running"} onClick={() => void resumeDevelopmentBenchmark(activeDevelopmentRun.id)} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
+                    {activeDevelopmentRun.status === "failed" ? "Retry saved checkpoint" : "Score next case"}
+                  </button>
+                  {activeDevelopmentRun.status === "failed" && (
+                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                      Start fresh smoke test
+                    </button>
+                  )}
+                </>
               ) : (
                 <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
                   Start four-case smoke test

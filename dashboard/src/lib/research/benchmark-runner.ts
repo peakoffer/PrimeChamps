@@ -26,7 +26,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v2";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v3";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -40,9 +40,9 @@ const RESEARCHER_SCHEMA = {
   properties: {
     identity_confirmed: { type: "boolean" },
     adult_eligibility_verified: { type: "boolean" },
-    onlyfans_fit_score: { type: "number" },
-    commercial_achievability_score: { type: "number" },
-    research_confidence_score: { type: "number" },
+    onlyfans_fit_score: { type: "number", minimum: 0, maximum: 100 },
+    commercial_achievability_score: { type: "number", minimum: 0, maximum: 100 },
+    research_confidence_score: { type: "number", minimum: 0, maximum: 100 },
     fit_label: { type: "string", enum: ["fit", "not_fit", "uncertain"] },
     achievability_label: { type: "string", enum: ["high", "medium", "low", "uncertain"] },
     material_claims: {
@@ -76,9 +76,9 @@ const BLIND_AUDITOR_SCHEMA = {
     eligibility_passed: { type: "boolean" },
     source_verification_passed: { type: "boolean" },
     commercial_constraints_complete: { type: "boolean" },
-    independent_fit_score: { type: "number" },
-    independent_achievability_score: { type: "number" },
-    independent_confidence_score: { type: "number" },
+    independent_fit_score: { type: "number", minimum: 0, maximum: 100 },
+    independent_achievability_score: { type: "number", minimum: 0, maximum: 100 },
+    independent_confidence_score: { type: "number", minimum: 0, maximum: 100 },
     critical_gaps: { type: "array", items: { type: "string" } },
     unsupported_claims: { type: "array", items: { type: "string" } },
     failure_types: { type: "array", items: { type: "string" } },
@@ -96,9 +96,9 @@ const REVIEW_SCHEMA = {
   additionalProperties: false,
   properties: {
     verdict: { type: "string", enum: ["pass", "corrected", "fail"] },
-    corrected_fit_score: { type: "number" },
-    corrected_achievability_score: { type: "number" },
-    corrected_confidence_score: { type: "number" },
+    corrected_fit_score: { type: "number", minimum: 0, maximum: 100 },
+    corrected_achievability_score: { type: "number", minimum: 0, maximum: 100 },
+    corrected_confidence_score: { type: "number", minimum: 0, maximum: 100 },
     findings: {
       type: "array",
       items: {
@@ -434,7 +434,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 1,
+      version: 2,
       status: "active",
       created_by_user_id: userId,
       activated_at: new Date().toISOString(),
@@ -447,15 +447,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time athlete assessment using only supplied public evidence; labels and outcomes are withheld.",
-      content_hash: "research-v2-benchmark-researcher-v1",
+      content: "Blind point-in-time athlete assessment using only supplied public evidence; labels and outcomes are withheld; every score uses the 0-100 scale.",
+      content_hash: "research-v2-benchmark-researcher-v2",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
-      content: "Independent blind evidence audit before comparison with the Researcher assessment.",
-      content_hash: "research-v2-benchmark-auditor-v1",
+      content: "Independent blind evidence audit before comparison with the Researcher assessment; every score uses the 0-100 scale and review findings stay concise.",
+      content_hash: "research-v2-benchmark-auditor-v2",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -662,6 +662,7 @@ Evidence cutoff: ${record.evidence_cutoff_at}
 Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
+All three scores must use the 0-100 numeric scale, never fractions from 0 to 1.
 Return the required JSON only.`;
 }
 
@@ -674,7 +675,8 @@ ${JSON.stringify(blind)}
 RESEARCHER PROPOSAL
 ${JSON.stringify(researcher)}
 
-Pass only when every material score and claim is supported. Correct a usable proposal when evidence supports different scores. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Return the required JSON only.`;
+Pass only when every material score and claim is supported. Correct a usable proposal when evidence supports different scores. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps.
+All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
 }
 
 function normalizeFailureType(value: string) {
@@ -889,7 +891,7 @@ async function processBenchmarkCase(input: {
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
-      maximumOutputTokens: 900,
+      maximumOutputTokens: 1_600,
       ledger,
     });
     review = reviewCall.value;
