@@ -745,9 +745,11 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v3/);
+  assert.match(source, /research-v2-benchmark-runner-v4/);
   assert.match(source, /maximumOutputTokens: 1_600/);
   assert.match(source, /0-100 numeric scale, never fractions from 0 to 1/);
+  assert.ok(!source.includes("minimum: 0"), "Anthropic structured outputs reject numeric minimum keywords");
+  assert.ok(!source.includes("maximum: 100"), "Anthropic structured outputs reject numeric maximum keywords");
   assert.match(source, /status: "draft"/);
   assert.match(source, /update\(\{ status: "archived" \}\)/);
   assert.match(source, /BENCHMARK_GOLDEN_RECORD_SELECT = .*stratification_tags/);
