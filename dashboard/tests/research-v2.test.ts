@@ -12,8 +12,13 @@ import {
   summarizeGoldenRecords,
 } from "../src/lib/research/v2.ts";
 import {
+  buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
+  hasMeaningfulPersonalAudience,
+  hasSourceBackedResearchV2Signal,
+  holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  researchV2CitedSignalIsSourceBacked,
   stableEvidenceSetHash,
 } from "../src/lib/research/v2-scoring.ts";
 import { sanitizeUnicodeForJson } from "../src/lib/research/text-safety.ts";
@@ -534,6 +539,11 @@ test("V2 priority cannot hide weak achievability or weak research confidence", (
   }).priority, 79);
   assert.equal(buildResearchV2Score({
     onlyfansFit: 98,
+    commercialAchievability: 69,
+    researchConfidence: 95,
+  }).priority, 79);
+  assert.equal(buildResearchV2Score({
+    onlyfansFit: 98,
     commercialAchievability: 90,
     researchConfidence: 70,
   }).priority, 79);
@@ -555,6 +565,9 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     identityConfirmed: true,
     adultEligibilityVerified: true,
     currentAthleticMomentumVerified: true,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "pass",
     criticalGapCount: 0,
@@ -564,6 +577,9 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     identityConfirmed: true,
     adultEligibilityVerified: true,
     currentAthleticMomentumVerified: true,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "fail",
     criticalGapCount: 0,
@@ -573,10 +589,98 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     identityConfirmed: true,
     adultEligibilityVerified: true,
     currentAthleticMomentumVerified: false,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "pass",
     criticalGapCount: 0,
   }), false);
+});
+
+test("V2 final gate fails closed on audience, creator, and commercial evidence", () => {
+  const score = buildResearchV2Score({
+    onlyfansFit: 92,
+    commercialAchievability: 84,
+    researchConfidence: 88,
+  });
+  const complete = {
+    ...score,
+    identityConfirmed: true,
+    adultEligibilityVerified: true,
+    currentAthleticMomentumVerified: true,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    commercialConstraintsComplete: true,
+    materialClaimsVerified: true,
+    auditorVerdict: "pass" as const,
+    criticalGapCount: 0,
+  };
+  assert.equal(passesResearchV2FinalGate({ ...complete, meaningfulAudienceVerified: false }), false);
+  assert.equal(passesResearchV2FinalGate({ ...complete, creatorPotentialVerified: false }), false);
+  assert.equal(passesResearchV2FinalGate({ ...complete, commercialConstraintsComplete: false }), false);
+});
+
+test("blind and review scores are hard ceilings and can never inflate the researcher", () => {
+  const constrained = buildAuditorConstrainedResearchV2Score({
+    researcher: { onlyfansFit: 92, commercialAchievability: 84, researchConfidence: 88 },
+    independentAudit: { onlyfansFit: 95, commercialAchievability: 68, researchConfidence: 82 },
+    reviewCorrection: { onlyfansFit: 96, commercialAchievability: 90, researchConfidence: 80 },
+  });
+  assert.equal(constrained.onlyfansFit, 92);
+  assert.equal(constrained.commercialAchievability, 68);
+  assert.equal(constrained.researchConfidence, 80);
+  assert.equal(constrained.priority, 79, "sub-70 independent achievability must cap the candidate below 80");
+  assert.equal(holdResearchV2PriorityForIndependentAudit(88.4), 79);
+  assert.equal(holdResearchV2PriorityForIndependentAudit(80), 80);
+});
+
+test("V2 evidence citations must match a frozen source URL and source text", () => {
+  const sources = [{
+    url: "https://league.test/athletes/example?tracking=1",
+    text: "Example Athlete earned rookie of the year after winning three events in 2026.",
+  }];
+  const supported = {
+    signal: "Won rookie of the year in 2026",
+    source_url: "https://league.test/athletes/example",
+    source_excerpt: "earned rookie of the year after winning three events in 2026",
+  };
+  assert.equal(researchV2CitedSignalIsSourceBacked(supported, sources), true);
+  assert.equal(hasSourceBackedResearchV2Signal([supported], sources), true);
+  assert.equal(researchV2CitedSignalIsSourceBacked({
+    ...supported,
+    source_url: "https://unseen.test/example",
+  }, sources), false);
+  assert.equal(researchV2CitedSignalIsSourceBacked({
+    ...supported,
+    source_excerpt: "launched a daily lifestyle vlog and paid subscription community",
+  }, sources), false);
+});
+
+test("meaningful audience uses the active minimum with a bounded engagement exception", () => {
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 30_000, engagementRate: 1, followerMinimum: 30_000 }), true);
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 15_000, engagementRate: 4.2, followerMinimum: 30_000 }), true);
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 15_000, engagementRate: 3.9, followerMinimum: 30_000 }), false);
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 9_999, engagementRate: 20, followerMinimum: 30_000 }), false);
+});
+
+test("live research evaluation exits before athlete writes and suppresses notifications", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  const finalistLoop = workflow.indexOf("for (const [finalistIndex, athlete] of finalResults.entries())");
+  const evaluationGuard = workflow.indexOf("if (config.evaluationMode) {", finalistLoop);
+  const evaluationContinue = workflow.indexOf("continue;", evaluationGuard);
+  const liveAthleteInsert = workflow.indexOf('.from("athletes")\n            .insert({', evaluationContinue);
+  const notificationGuard = workflow.indexOf("if (!config.evaluationMode) try", liveAthleteInsert);
+  const notificationInsert = workflow.indexOf('.from("activity_notifications").insert({', notificationGuard);
+
+  assert.ok(finalistLoop >= 0, "finalist persistence loop must exist");
+  assert.ok(evaluationGuard > finalistLoop, "evaluation guard must be inside finalist persistence");
+  assert.ok(evaluationContinue > evaluationGuard, "evaluation branch must exit the finalist iteration");
+  assert.ok(liveAthleteInsert > evaluationContinue, "athlete insert must be unreachable after evaluation continue");
+  assert.ok(notificationGuard > liveAthleteInsert && notificationInsert > notificationGuard, "notifications must be production-only");
+  for (const forbiddenTable of ["messages", "channel_messages", "outreach_touchpoints", "message_drafts"]) {
+    assert.ok(!workflow.includes(`from("${forbiddenTable}")`), `research workflow must not touch ${forbiddenTable}`);
+  }
 });
 
 test("evidence set hashes are order-independent but content-sensitive", () => {

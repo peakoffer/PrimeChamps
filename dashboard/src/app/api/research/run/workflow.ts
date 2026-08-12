@@ -39,9 +39,15 @@ import {
   type AthleteAgeSearchResult,
 } from "@/lib/research/age-evidence";
 import {
+  buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
+  hasMeaningfulPersonalAudience,
+  hasSourceBackedResearchV2Signal,
+  holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
   stableEvidenceSetHash,
+  type ResearchV2CitedSignal,
+  type ResearchV2EvidenceSource,
 } from "@/lib/research/v2-scoring";
 import {
   applyResearchObjectiveScoreGuardrails,
@@ -108,13 +114,39 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
     career_stage: { type: "string", enum: ["emerging", "established", "veteran", "unknown"] },
     objective_fit: { type: "string", enum: ["strong", "possible", "weak"] },
     creator_signals: { type: "array", items: { type: "string" } },
+    momentum_evidence: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          signal: { type: "string" },
+          source_url: { type: "string" },
+          source_excerpt: { type: "string" },
+        },
+        required: ["signal", "source_url", "source_excerpt"],
+        additionalProperties: false,
+      },
+    },
+    creator_evidence: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          signal: { type: "string" },
+          source_url: { type: "string" },
+          source_excerpt: { type: "string" },
+        },
+        required: ["signal", "source_url", "source_excerpt"],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ["score", "onlyfans_fit_score", "commercial_achievability_score", "research_confidence_score", "score_breakdown", "reasoning", "concerns", "is_minor", "career_stage", "objective_fit", "creator_signals"],
+  required: ["score", "onlyfans_fit_score", "commercial_achievability_score", "research_confidence_score", "score_breakdown", "reasoning", "concerns", "is_minor", "career_stage", "objective_fit", "creator_signals", "momentum_evidence", "creator_evidence"],
   additionalProperties: false,
 } as const;
 
 const RESEARCH_V2_RUBRIC_DEFINITION = {
-  version: "v1",
+  version: "v2",
   dimensions: {
     onlyfans_fit: "Public-evidence opportunity quality, independent of price or access",
     commercial_achievability: "Access, representation, likely economics, geography, and realistic close probability",
@@ -124,15 +156,19 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   final_gate: {
     priority_above: 80,
     onlyfans_fit_minimum: 80,
-    commercial_achievability_minimum: 60,
+    commercial_achievability_minimum: 70,
     research_confidence_minimum: 80,
+    source_backed_momentum_required: true,
+    meaningful_audience_required: true,
+    source_backed_creator_potential_required: true,
+    complete_commercial_constraints_required: true,
     independent_audit_required: true,
     critical_gaps_allowed: 0,
   },
 } as const;
 
-const RESEARCHER_PROMPT_RECORD = "Research V2 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and evidence-backed reasoning. Unsourced material claims do not score.";
-const AUDITOR_PROMPT_RECORD = "Research V2 blind auditor: independently verify identity, adult eligibility, freshness, source support, contradictory evidence, and commercial gaps before viewing and reviewing the proposed score.";
+const RESEARCHER_PROMPT_RECORD = "Research V2 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score.";
+const AUDITOR_PROMPT_RECORD = "Research V2 blind auditor: independently verify identity, adult eligibility, current momentum, meaningful audience, creator potential, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
 
 const RESEARCH_AUDIT_BLIND_SCHEMA = {
   type: "object",
@@ -140,6 +176,9 @@ const RESEARCH_AUDIT_BLIND_SCHEMA = {
     identity_passed: { type: "boolean" },
     eligibility_passed: { type: "boolean" },
     source_verification_passed: { type: "boolean" },
+    current_momentum_passed: { type: "boolean" },
+    audience_evidence_passed: { type: "boolean" },
+    creator_evidence_passed: { type: "boolean" },
     commercial_constraints_complete: { type: "boolean" },
     independent_fit_score: { type: "number" },
     independent_achievability_score: { type: "number" },
@@ -150,7 +189,7 @@ const RESEARCH_AUDIT_BLIND_SCHEMA = {
     failure_types: { type: "array", items: { type: "string" } },
     summary: { type: "string" },
   },
-  required: ["identity_passed", "eligibility_passed", "source_verification_passed", "commercial_constraints_complete", "independent_fit_score", "independent_achievability_score", "independent_confidence_score", "critical_gaps", "contradictions", "unsupported_claims", "failure_types", "summary"],
+  required: ["identity_passed", "eligibility_passed", "source_verification_passed", "current_momentum_passed", "audience_evidence_passed", "creator_evidence_passed", "commercial_constraints_complete", "independent_fit_score", "independent_achievability_score", "independent_confidence_score", "critical_gaps", "contradictions", "unsupported_claims", "failure_types", "summary"],
   additionalProperties: false,
 } as const;
 
@@ -439,6 +478,7 @@ interface EnrichedAthlete extends DiscoveredAthlete {
     timestamp?: string;
     likes?: number;
     comments?: number;
+    url?: string;
   }>;
   last_posted_at?: string;
   account_active?: boolean;
@@ -525,6 +565,7 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
 
 interface ScoredAthlete extends EnrichedAthlete {
   score: number;
+  researcher_proposed_score?: number;
   onlyfans_fit_score: number;
   commercial_achievability_score: number;
   research_confidence_score: number;
@@ -563,6 +604,12 @@ interface ScoredAthlete extends EnrichedAthlete {
   career_stage?: ResearchCareerStage;
   objective_fit?: "strong" | "possible" | "weak";
   creator_signals?: string[];
+  momentum_evidence?: ResearchV2CitedSignal[];
+  creator_evidence?: ResearchV2CitedSignal[];
+  audit_current_momentum_verified?: boolean;
+  audit_meaningful_audience_verified?: boolean;
+  audit_creator_potential_verified?: boolean;
+  audit_commercial_constraints_complete?: boolean;
   disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
   disposition_reason?: string;
   score_breakdown?: {
@@ -765,7 +812,11 @@ async function persistResearchV2EvidenceAndScore(
       reasoning: athlete.reasoning,
       concerns: athlete.concerns,
       creator_signals: athlete.creator_signals || [],
+      momentum_evidence: athlete.momentum_evidence || [],
+      creator_evidence: athlete.creator_evidence || [],
       score_breakdown: athlete.score_breakdown || {},
+      researcher_proposed_priority: athlete.researcher_proposed_score ?? athlete.score,
+      pre_audit_priority: athlete.score,
     },
     unsourced_claim_count: claims.filter((claim) => claim.support_status !== "supported").length,
     critical_gap_count: athlete.age_verified === true && (athlete.identity_confidence || 0) >= 70 ? 0 : 1,
@@ -2843,6 +2894,7 @@ async function enrichAthletesWithInstagram(
             timestamp: post.timestamp,
             likes: post.likesCount,
             comments: post.commentsCount,
+            url: post.url,
           })),
           last_posted_at: profile.lastPostedAt || undefined,
           account_active: profile.isActive,
@@ -3406,7 +3458,18 @@ async function scoreAthletes(
           log(`    ⚠️ Could not verify age for ${athlete.name}`);
       }
 
-      log(`  ${athlete.name}: Score ${score.score}/100 - ${score.reasoning.slice(0, 100)}`);
+      // The Researcher may propose an above-80 priority for audit selection,
+      // but the candidate's visible/durable score cannot cross 80 until the
+      // independent audit completes. The proposal is retained separately so
+      // the audit can evaluate it without prematurely qualifying the person.
+      const researcherProposedScore = score.score;
+      score = {
+        ...score,
+        researcher_proposed_score: researcherProposedScore,
+        score: holdResearchV2PriorityForIndependentAudit(researcherProposedScore),
+      };
+
+      log(`  ${athlete.name}: Researcher proposed ${researcherProposedScore}/100; pre-audit score ${score.score}/100 - ${score.reasoning.slice(0, 100)}`);
       return score;
     }));
     const completedBatch = batchScores.filter((candidate): candidate is ScoredAthlete => candidate !== null);
@@ -3516,6 +3579,42 @@ function auditTokenSet(value: string) {
     .split(" ").filter((token) => token.length >= 5));
 }
 
+function candidateResearchV2EvidenceSources(athlete: ScoredAthlete): ResearchV2EvidenceSource[] {
+  const sources: ResearchV2EvidenceSource[] = (athlete.evidence || []).flatMap((item) =>
+    item.url?.startsWith("http") ? [{
+      url: item.url,
+      text: `${item.title || ""} ${item.sourceExcerpt || ""} ${item.claim || ""}`.trim(),
+    }] : []
+  );
+  if (athlete.instagram_url) {
+    sources.push({
+      url: athlete.instagram_url,
+      text: `${athlete.name} ${athlete.bio || ""}`.trim(),
+    });
+  }
+  for (const post of athlete.latest_posts || []) {
+    if (!post.url?.startsWith("http") || !post.caption?.trim()) continue;
+    sources.push({
+      url: post.url,
+      text: `${post.timestamp || ""} ${post.caption}`.trim(),
+    });
+  }
+  return sources;
+}
+
+function deterministicResearchV2FinalistEvidence(athlete: ScoredAthlete, followerMinimum: number) {
+  const sources = candidateResearchV2EvidenceSources(athlete);
+  return {
+    currentMomentum: hasSourceBackedResearchV2Signal(athlete.momentum_evidence, sources),
+    meaningfulAudience: hasMeaningfulPersonalAudience({
+      followerCount: athlete.follower_count,
+      engagementRate: athlete.engagement_rate,
+      followerMinimum,
+    }),
+    creatorPotential: hasSourceBackedResearchV2Signal(athlete.creator_evidence, sources),
+  };
+}
+
 async function refetchMaterialClaimSample(athlete: ScoredAthlete) {
   const eligible = (athlete.evidence || [])
     .filter((item) => item.url?.startsWith("http") && !/instagram\.com|tiktok\.com/i.test(item.url))
@@ -3572,11 +3671,18 @@ async function auditPriorityCandidate(
     .single();
   if (candidateError) throw candidateError;
 
+  const deterministicEvidence = deterministicResearchV2FinalistEvidence(
+    athlete,
+    input.config.profileSnapshot?.parameters.follower_min ?? input.config.followerMin
+  );
+
   let independentResults: Array<{ title: string; url: string; snippet: string }> = [];
   try {
+    const currentYear = new Date().getUTCFullYear();
     const auditSearch = await runApifyGoogleSearchQueries([
-      `"${athlete.name}" ${athlete.sport} current roster profile age`,
+      `"${athlete.name}" ${athlete.sport} ${currentYear} results ranking roster award breakout`,
       `"${athlete.name}" ${athlete.sport} agent representation management NIL sponsorship`,
+      `"${athlete.name}" ${athlete.sport} creator YouTube podcast vlog lifestyle collaboration business`,
       `"${athlete.name}" ${athlete.sport} retired injury controversy contract`,
     ], 10);
     independentResults = auditSearch.results.filter((result) =>
@@ -3590,7 +3696,7 @@ async function auditPriorityCandidate(
 
 You have NOT been shown the Researcher's score. Independently determine whether the public evidence supports this person as a current, source-verified adult athlete and whether the research is complete enough to judge OnlyFans fit and commercial achievability.
 
-Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Do not infer adult-content willingness from appearance or identity.
+Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Independently require a specific current athletic-momentum source, a meaningful verified audience, and a concrete source-backed creator/content behavior signal. Sponsorship alone is not creator behavior. Do not infer adult-content willingness from appearance or identity.
 
 CANDIDATE (NO PROPOSED SCORE):
 - Name: ${athlete.name}
@@ -3600,8 +3706,10 @@ CANDIDATE (NO PROPOSED SCORE):
 - Identity confidence: ${athlete.identity_confidence || 0}/100; ${athlete.identity_evidence?.join("; ") || "no identity explanation"}
 - Age: ${athlete.age_verified ? `${athlete.age} via ${athlete.age_source}` : "not source-verified"}
 - Followers / engagement / latest activity: ${athlete.follower_count || 0} / ${athlete.engagement_rate ?? "unknown"}% / ${athlete.last_posted_at || "unknown"}
-- Research evidence: ${(athlete.evidence || []).map((item) => `${item.title || "Source"} (${item.url || "missing URL"}): ${item.sourceExcerpt || item.claim}`).join(" | ") || "none"}
-- Independently retrieved audit evidence: ${independentResults.map((item) => `${item.title} (${item.url}): ${item.snippet}`).join(" | ") || "none retrieved"}
+- Instagram profile / bio: ${athlete.instagram_url || "missing"} / ${(athlete.bio || "not available").slice(0, 500)}
+- Recent Instagram posts: ${(athlete.latest_posts || []).slice(0, 6).map((post) => `${post.timestamp || "unknown date"} (${post.url || "missing URL"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "none"}
+- Research evidence: ${(athlete.evidence || []).slice(0, 12).map((item) => `${(item.title || "Source").slice(0, 200)} (${item.url || "missing URL"}): ${(item.sourceExcerpt || item.claim).slice(0, 700)}`).join(" | ") || "none"}
+- Independently retrieved audit evidence: ${independentResults.slice(0, 10).map((item) => `${item.title.slice(0, 200)} (${item.url}): ${item.snippet.slice(0, 500)}`).join(" | ") || "none retrieved"}
 - Random claim re-fetch: ${claimSample.sampled} sampled; ${claimSample.unsupported} failed; ${claimSample.failures.join(" | ") || "no failures"}
 
 Return the strict JSON assessment. Independent fit, achievability, and confidence must be evidence-based; missing commercial facts lower achievability/confidence.`;
@@ -3609,6 +3717,9 @@ Return the strict JSON assessment. Independent fit, achievability, and confidenc
     identity_passed: boolean;
     eligibility_passed: boolean;
     source_verification_passed: boolean;
+    current_momentum_passed: boolean;
+    audience_evidence_passed: boolean;
+    creator_evidence_passed: boolean;
     commercial_constraints_complete: boolean;
     independent_fit_score: number;
     independent_achievability_score: number;
@@ -3630,7 +3741,7 @@ RESEARCHER PROPOSAL:
 - OnlyFans fit: ${athlete.onlyfans_fit_score}/100
 - Commercial achievability: ${athlete.commercial_achievability_score}/100
 - Research confidence: ${athlete.research_confidence_score}/100
-- Overall priority: ${athlete.score}/100
+- Overall priority proposed for audit: ${athlete.researcher_proposed_score ?? athlete.score}/100
 - Reasoning: ${athlete.reasoning}
 - Concerns: ${(athlete.concerns || []).join("; ") || "none"}
 
@@ -3652,31 +3763,82 @@ Return pass only if the proposed dimensions are justified and there is no critic
     latencyMs: blindCall.latencyMs + reviewCall.latencyMs,
   };
 
-  const criticalGaps = [
+  const deterministicGaps = [
+    !deterministicEvidence.currentMomentum ? "No source-backed current athletic-momentum citation matched the frozen dossier" : null,
+    !deterministicEvidence.meaningfulAudience ? "Verified audience did not meet the active minimum or exceptional-engagement rule" : null,
+    !deterministicEvidence.creatorPotential ? "No source-backed creator/content behavior citation matched the frozen dossier" : null,
+    !blind.current_momentum_passed ? "Independent auditor did not verify current athletic momentum" : null,
+    !blind.audience_evidence_passed ? "Independent auditor did not verify meaningful audience evidence" : null,
+    !blind.creator_evidence_passed ? "Independent auditor did not verify creator potential" : null,
+    !blind.commercial_constraints_complete ? "Commercial access, representation, or economics constraints remain incomplete" : null,
+  ].filter((gap): gap is string => Boolean(gap));
+  const unsupportedBlindClaims = Array.isArray(blind.unsupported_claims)
+    ? blind.unsupported_claims.filter((claim): claim is string => typeof claim === "string" && Boolean(claim.trim()))
+    : [];
+  const criticalGaps = Array.from(new Set([
     ...(Array.isArray(blind.critical_gaps) ? blind.critical_gaps : []),
+    ...deterministicGaps,
+    ...unsupportedBlindClaims.map((claim) => `Unsupported material claim: ${claim}`),
     ...review.findings.filter((finding) => finding.severity === "critical").map((finding) => finding.details),
-  ];
+  ]));
   const forcedFailure = !blind.identity_passed
     || !blind.eligibility_passed
     || !blind.source_verification_passed
+    || !blind.current_momentum_passed
+    || !blind.audience_evidence_passed
+    || !blind.creator_evidence_passed
+    || !blind.commercial_constraints_complete
+    || !deterministicEvidence.currentMomentum
+    || !deterministicEvidence.meaningfulAudience
+    || !deterministicEvidence.creatorPotential
     || claimSample.unsupported > 0
     || criticalGaps.length > 0;
   const verdict = forcedFailure ? "fail" : review.verdict;
-  const corrected = verdict === "pass"
-    ? buildResearchV2Score({
-        onlyfansFit: athlete.onlyfans_fit_score,
-        commercialAchievability: athlete.commercial_achievability_score,
-        researchConfidence: athlete.research_confidence_score,
-      })
-    : buildResearchV2Score({
-        onlyfansFit: review.corrected_fit_score,
-        commercialAchievability: review.corrected_achievability_score,
-        researchConfidence: review.corrected_confidence_score,
-        hasCriticalGap: forcedFailure,
-        unsupportedMaterialClaims: claimSample.unsupported + (blind.unsupported_claims?.length || 0),
-      });
+  const corrected = buildAuditorConstrainedResearchV2Score({
+    researcher: {
+      onlyfansFit: athlete.onlyfans_fit_score,
+      commercialAchievability: athlete.commercial_achievability_score,
+      researchConfidence: athlete.research_confidence_score,
+    },
+    independentAudit: {
+      onlyfansFit: blind.independent_fit_score,
+      commercialAchievability: blind.independent_achievability_score,
+      researchConfidence: blind.independent_confidence_score,
+    },
+    reviewCorrection: {
+      onlyfansFit: review.corrected_fit_score,
+      commercialAchievability: review.corrected_achievability_score,
+      researchConfidence: review.corrected_confidence_score,
+    },
+    hasCriticalGap: forcedFailure,
+    unsupportedMaterialClaims: claimSample.unsupported + unsupportedBlindClaims.length,
+  });
+  const correctedWithObjectiveGuardrails = {
+    ...corrected,
+    priority: applyResearchObjectiveScoreGuardrails({
+      score: corrected.priority,
+      objective: input.config.partnershipGoal,
+      age: athlete.age,
+      targetAgeMin: input.config.profileSnapshot?.parameters.target_age_min,
+      maximumPriorityAge: input.config.profileSnapshot?.parameters.maximum_priority_age,
+      careerStage: athlete.career_stage,
+      objectiveFit: athlete.objective_fit,
+    }),
+  };
   const normalizedFindings = [
     ...review.findings,
+    ...deterministicGaps.map((detail) => ({
+      failure_type: "criteria_drift",
+      severity: "critical" as const,
+      details: detail,
+      proposed_fix: "Add the missing source-backed evidence to the frozen dossier and re-run scoring and audit.",
+    })),
+    ...unsupportedBlindClaims.map((detail) => ({
+      failure_type: "unsupported_claim",
+      severity: "critical" as const,
+      details: detail,
+      proposed_fix: "Remove the claim or replace it with a directly supported source and excerpt.",
+    })),
     ...claimSample.failures.map((detail) => ({
       failure_type: "source_retrieval_failure",
       severity: "critical" as const,
@@ -3688,10 +3850,13 @@ Return pass only if the proposed dimensions are justified and there is no critic
     failure_type: RESEARCH_AUDIT_FAILURE_TYPES.has(finding.failure_type) ? finding.failure_type : "criteria_drift",
   }));
   const passesFinal = passesResearchV2FinalGate({
-    ...corrected,
+    ...correctedWithObjectiveGuardrails,
     identityConfirmed: blind.identity_passed,
     adultEligibilityVerified: blind.eligibility_passed,
-    currentAthleticMomentumVerified: (athlete.score_breakdown?.momentum || 0) >= 80,
+    currentAthleticMomentumVerified: deterministicEvidence.currentMomentum && blind.current_momentum_passed,
+    meaningfulAudienceVerified: deterministicEvidence.meaningfulAudience && blind.audience_evidence_passed,
+    creatorPotentialVerified: deterministicEvidence.creatorPotential && blind.creator_evidence_passed,
+    commercialConstraintsComplete: blind.commercial_constraints_complete,
     materialClaimsVerified: blind.source_verification_passed && claimSample.unsupported === 0 && (blind.unsupported_claims?.length || 0) === 0,
     auditorVerdict: verdict,
     criticalGapCount: criticalGaps.length,
@@ -3705,7 +3870,7 @@ Return pass only if the proposed dimensions are justified and there is no critic
     fit_score: corrected.onlyfansFit,
     achievability_score: corrected.commercialAchievability,
     research_confidence_score: corrected.researchConfidence,
-    priority_score: corrected.priority,
+    priority_score: correctedWithObjectiveGuardrails.priority,
     fit_label: corrected.onlyfansFit >= 80 ? "fit" : corrected.onlyfansFit >= 60 ? "uncertain" : "not_fit",
     achievability_label: corrected.commercialAchievability >= 70 ? "high" : corrected.commercialAchievability >= 60 ? "medium" : corrected.commercialAchievability < 45 ? "low" : "uncertain",
     rubric_version_id: artifacts.rubricVersionId,
@@ -3715,7 +3880,7 @@ Return pass only if the proposed dimensions are justified and there is no critic
       ...(athlete.evidence || []),
       ...independentResults.map((item) => ({ url: item.url, claim: item.snippet, sourceExcerpt: item.snippet })),
     ]),
-    assessment: { blind, review, claimSample },
+    assessment: { blind, review, claimSample, deterministicEvidence },
     unsourced_claim_count: claimSample.unsupported + (blind.unsupported_claims?.length || 0),
     critical_gap_count: criticalGaps.length,
     is_final: passesFinal,
@@ -3773,7 +3938,7 @@ Return pass only if the proposed dimensions are justified and there is no critic
   }
   return {
     ...athlete,
-    score: corrected.priority,
+    score: correctedWithObjectiveGuardrails.priority,
     onlyfans_fit_score: corrected.onlyfansFit,
     commercial_achievability_score: corrected.commercialAchievability,
     research_confidence_score: corrected.researchConfidence,
@@ -3782,6 +3947,10 @@ Return pass only if the proposed dimensions are justified and there is no critic
     audit_summary: review.summary,
     audit_critical_gap_count: criticalGaps.length,
     audit_material_claims_verified: blind.source_verification_passed && claimSample.unsupported === 0 && (blind.unsupported_claims?.length || 0) === 0,
+    audit_current_momentum_verified: deterministicEvidence.currentMomentum && blind.current_momentum_passed,
+    audit_meaningful_audience_verified: deterministicEvidence.meaningfulAudience && blind.audience_evidence_passed,
+    audit_creator_potential_verified: deterministicEvidence.creatorPotential && blind.creator_evidence_passed,
+    audit_commercial_constraints_complete: blind.commercial_constraints_complete,
     audit_findings: normalizedFindings,
     audit_input_tokens: auditUsage.inputTokens,
     audit_output_tokens: auditUsage.outputTokens,
@@ -3881,6 +4050,10 @@ async function persistAuditExecutionFailure(
     audit_summary: failureMessage,
     audit_critical_gap_count: 1,
     audit_material_claims_verified: false,
+    audit_current_momentum_verified: false,
+    audit_meaningful_audience_verified: false,
+    audit_creator_potential_verified: false,
+    audit_commercial_constraints_complete: false,
     audit_findings: [finding],
   };
 }
@@ -3893,7 +4066,21 @@ async function auditPriorityCandidates(
 ) {
   const artifacts = await ensureResearchV2Artifacts(input, scoringModel);
   const priorityCandidates = athletes
-    .filter((athlete) => athlete.score > RESEARCH_PRIORITY_THRESHOLD)
+    .filter((athlete) => {
+      const proposedPriority = athlete.researcher_proposed_score ?? athlete.score;
+      if (proposedPriority <= RESEARCH_PRIORITY_THRESHOLD) return false;
+      const evidence = deterministicResearchV2FinalistEvidence(
+        athlete,
+        input.config.profileSnapshot?.parameters.follower_min ?? input.config.followerMin
+      );
+      return (athlete.identity_confidence || 0) >= 70
+        && athlete.age_verified === true
+        && typeof athlete.age === "number"
+        && athlete.age >= 21
+        && evidence.currentMomentum
+        && evidence.meaningfulAudience
+        && evidence.creatorPotential;
+    })
     .slice(0, Math.max(0, maxAuditCandidates));
   const audited: ScoredAthlete[] = [];
   for (let index = 0; index < priorityCandidates.length; index += 5) {
@@ -3968,6 +4155,18 @@ async function persistScoringAudit(
   }
 }
 
+function parseResearchV2CitedSignals(value: unknown): ResearchV2CitedSignal[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const signal = "signal" in item && typeof item.signal === "string" ? item.signal.trim() : "";
+    const sourceUrl = "source_url" in item && typeof item.source_url === "string" ? item.source_url.trim() : "";
+    const sourceExcerpt = "source_excerpt" in item && typeof item.source_excerpt === "string" ? item.source_excerpt.trim() : "";
+    if (!signal || !sourceUrl.startsWith("http") || !sourceExcerpt) return [];
+    return [{ signal, source_url: sourceUrl, source_excerpt: sourceExcerpt }];
+  });
+}
+
 async function scoreAthlete(
   athlete: EnrichedAthlete,
   scoringModel: string,
@@ -4001,7 +4200,7 @@ ATHLETE PROFILE:
 - Source-verified age: ${athlete.age_verified === true && typeof athlete.age === "number"
     ? `${athlete.age} (${athlete.age_source || "source URL unavailable"}; ${athlete.age_precision || "precision unknown"})`
     : "not verified"}
-- Instagram: @${athlete.instagram_handle}
+- Instagram: @${athlete.instagram_handle} (${athlete.instagram_url || "profile URL unavailable"})
 - Instagram identity confidence: ${athlete.identity_confidence || 0}/100 (${athlete.identity_evidence?.join("; ") || "no identity evidence"})
 - Followers: ${athlete.follower_count?.toLocaleString() || "unknown"}
 - Following: ${athlete.following_count?.toLocaleString() || "unknown"}
@@ -4010,7 +4209,7 @@ ATHLETE PROFILE:
 - Average likes/comments: ${typeof athlete.average_likes === "number" ? Math.round(athlete.average_likes).toLocaleString() : "not available"} / ${typeof athlete.average_comments === "number" ? Math.round(athlete.average_comments).toLocaleString() : "not available"}
 - Audience history: ${athlete.momentum_metrics?.status === "measured" ? `${athlete.momentum_metrics.follower_growth_percent?.toFixed(2) || "0.00"}% follower change over ${athlete.momentum_metrics.days_between_snapshots || "unknown"} days` : "baseline snapshot only; do not claim measured growth"}
 - Latest post date: ${athlete.last_posted_at || "not available"}
-- Recent post evidence: ${athlete.latest_posts?.slice(0, 4).map((post) => `${post.timestamp || "unknown date"}: ${(post.caption || "no caption").slice(0, 180)}`).join(" | ") || "not available"}
+- Recent post evidence: ${athlete.latest_posts?.slice(0, 4).map((post) => `${post.timestamp || "unknown date"} (${post.url || "URL unavailable"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "not available"}
 - Bio: ${athlete.bio || "No bio"}
 - Verified: ${athlete.verified ? "Yes" : "No"}
 
@@ -4020,6 +4219,7 @@ HARD GATES (not weighted points):
 - Age must be source-verified as 18 or older before Approval
 - The account must be public and active
 - A failed gate must be described in concerns and cannot be recommended for Approval
+- An 80+ proposal must include at least one momentum_evidence citation and one creator_evidence citation copied from the supplied dossier. Each source_url must be an exact URL shown above and each source_excerpt must be text actually present at that URL. Return an empty evidence array when the dossier does not support the claim.
 
 WEIGHTED EVALUATION CRITERIA:
 
@@ -4100,7 +4300,17 @@ Respond with ONLY valid JSON:
   "is_minor": <true if under 18 or likely minor, false otherwise>,
   "career_stage": <"emerging" | "established" | "veteran" | "unknown">,
   "objective_fit": <"strong" | "possible" | "weak">,
-  "creator_signals": ["<specific evidence-backed creator or audience signal>"]
+  "creator_signals": ["<short display summary of a concrete creator or audience signal>"],
+  "momentum_evidence": [{
+    "signal": "<specific current athletic momentum fact>",
+    "source_url": "<exact supplied source URL>",
+    "source_excerpt": "<verbatim or near-verbatim supplied source text>"
+  }],
+  "creator_evidence": [{
+    "signal": "<specific creator/content behavior fact>",
+    "source_url": "<exact supplied source or Instagram URL>",
+    "source_excerpt": "<verbatim or near-verbatim supplied source text>"
+  }]
 }`;
 
   if (!ANTHROPIC_API_KEY) {
@@ -4165,6 +4375,8 @@ Respond with ONLY valid JSON:
           career_stage?: unknown;
           objective_fit?: unknown;
           creator_signals?: unknown;
+          momentum_evidence?: unknown;
+          creator_evidence?: unknown;
         };
         const dimensions = parseResearchScoreBreakdown(parsed.score_breakdown);
         if (
@@ -4218,6 +4430,8 @@ Respond with ONLY valid JSON:
             creator_signals: Array.isArray(parsed.creator_signals)
               ? parsed.creator_signals.filter((signal): signal is string => typeof signal === "string")
               : [],
+            momentum_evidence: parseResearchV2CitedSignals(parsed.momentum_evidence),
+            creator_evidence: parseResearchV2CitedSignals(parsed.creator_evidence),
           };
         }
       } catch {
@@ -4866,7 +5080,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         researchConfidence: athlete.research_confidence_score,
         identityConfirmed: (athlete.identity_confidence || 0) >= 70,
         adultEligibilityVerified: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 21,
-        currentAthleticMomentumVerified: (athlete.score_breakdown?.momentum || 0) >= 80,
+        currentAthleticMomentumVerified: athlete.audit_current_momentum_verified === true,
+        meaningfulAudienceVerified: athlete.audit_meaningful_audience_verified === true,
+        creatorPotentialVerified: athlete.audit_creator_potential_verified === true,
+        commercialConstraintsComplete: athlete.audit_commercial_constraints_complete === true,
         materialClaimsVerified: athlete.audit_material_claims_verified === true,
         auditorVerdict: athlete.audit_verdict || "fail",
         criticalGapCount: athlete.audit_critical_gap_count ?? 1,
@@ -4999,6 +5216,11 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               adult_age_verified: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 21 && athlete.age_source?.startsWith("http"),
               age_evidence: athlete.age_evidence || null,
               age_precision: athlete.age_precision || null,
+              current_momentum_verified: athlete.audit_current_momentum_verified === true,
+              meaningful_audience_verified: athlete.audit_meaningful_audience_verified === true,
+              creator_potential_verified: athlete.audit_creator_potential_verified === true,
+              commercial_constraints_complete: athlete.audit_commercial_constraints_complete === true,
+              material_claims_verified: athlete.audit_material_claims_verified === true,
               priority_score: athlete.score >= RESEARCH_PRIORITY_THRESHOLD,
             },
             is_minor: athlete.is_minor ?? null,
