@@ -4,6 +4,7 @@ import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
   normalizeEvidencePreparationBudget,
 } from "@/lib/research/historical-evidence-preparation";
 import { prepareBenchmarkEvidenceWorkflow } from "@/workflows/benchmark-evidence";
@@ -142,23 +143,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "APIFY_API_KEY is not configured; no provider call was started." }, { status: 503 });
     }
     const recordIds = selected.map((record) => record.id);
-    const { data: failedRuns, error: failedRunError } = await admin.from("research_evidence_preparation_runs")
-      .select("record_ids,actual_apify_cost_microusd,checkpoint,created_at")
+    const { data: recentRuns, error: recentRunError } = await admin.from("research_evidence_preparation_runs")
+      .select("status,record_ids,actual_apify_cost_microusd,checkpoint,created_at")
       .eq("organization_id", user.organizationId)
-      .eq("status", "failed")
       .order("created_at", { ascending: false })
-      .limit(10);
-    if (failedRunError) throw failedRunError;
+      .limit(20);
+    if (recentRunError) throw recentRunError;
     const sameRecordIds = (left: unknown, right: string[]) => Array.isArray(left)
       && left.length === right.length
       && left.every((value, index) => value === right[index]);
-    const reusableRun = (failedRuns || []).find((run) => {
-      const checkpoint = run.checkpoint as Record<string, unknown> | null;
-      return sameRecordIds(run.record_ids, recordIds)
-        && typeof checkpoint?.provider_run_id === "string"
-        && checkpoint.provider_run_id.length > 0
-        && typeof run.actual_apify_cost_microusd === "number";
-    });
+    const latestSameRecordRun = (recentRuns || []).find((run) => sameRecordIds(run.record_ids, recordIds));
+    const latestCheckpoint = latestSameRecordRun?.checkpoint as Record<string, unknown> | null | undefined;
+    const reusableRun = latestSameRecordRun?.status === "failed"
+      && latestCheckpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
+      && typeof latestCheckpoint?.provider_run_id === "string"
+      && latestCheckpoint.provider_run_id.length > 0
+      && typeof latestSameRecordRun.actual_apify_cost_microusd === "number"
+      ? latestSameRecordRun
+      : undefined;
     const reusableCheckpoint = reusableRun?.checkpoint as Record<string, unknown> | null | undefined;
     const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
       ? reusableCheckpoint.provider_run_id
@@ -171,6 +173,7 @@ export async function POST(request: NextRequest) {
       max_apify_charge_microusd: Math.round(maxApifyChargeUsd * 1_000_000),
       checkpoint: {
         phase: "queued",
+        query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
         evaluation_only: true,
         scoring_tokens_spent: 0,
         outreach_mutations_allowed: false,

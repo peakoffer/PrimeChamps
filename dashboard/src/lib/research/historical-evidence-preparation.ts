@@ -5,6 +5,8 @@ import {
   benchmarkSourceSupportsSport,
 } from "./benchmark-sport-validation.ts";
 
+export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-v2";
+
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
   queriesPerRecord: 3,

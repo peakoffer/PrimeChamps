@@ -946,6 +946,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.ok(route.indexOf("if (!selected.length)") < route.indexOf("await start(prepareBenchmarkEvidenceWorkflow"), "blind-label gate must run before workflow start");
   assert.match(route, /no provider call was started/);
   assert.match(route, /reuseProviderRunId/);
+  assert.match(route, /latestSameRecordRun\?\.status === "failed"/);
+  assert.match(route, /query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION/);
+  assert.match(workflow, /query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION/);
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
   assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);

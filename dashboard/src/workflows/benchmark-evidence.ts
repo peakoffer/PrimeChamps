@@ -3,6 +3,7 @@ import { readApifyRunDatasetWithUsage, runApifyActorWithUsage } from "@/lib/apif
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
   buildHistoricalEvidenceQueries,
   dedupeHistoricalSearchCandidates,
   extractPreparedArchivedEvidence,
@@ -387,6 +388,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         actual_apify_cost_microusd: discovery.actualApifyCostMicrousd,
         checkpoint: {
           phase: "archive_retrieval",
+          query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
           provider_run_id: discovery.providerRunId,
           discovery_reused: discovery.discoveryReused,
           source_apify_cost_microusd: discovery.sourceApifyCostMicrousd,
@@ -438,6 +440,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           safe_claim_count: results.reduce((sum, result) => sum + result.safeClaims, 0),
           checkpoint: {
             phase: "record_persisted",
+            query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
             last_record_id: record.id,
             processed_record_ids: results.map((result) => result.recordId),
             provider_run_id: discovery.providerRunId,
@@ -464,7 +467,12 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         records_ready: results.filter((result) => result.ready).length,
         safe_source_count: results.reduce((sum, result) => sum + result.independentSources, 0),
         safe_claim_count: results.reduce((sum, result) => sum + result.safeClaims, 0),
-        checkpoint: { phase: "completed", processed_record_ids: results.map((result) => result.recordId), scoring_tokens_spent: 0 },
+        checkpoint: {
+          phase: "completed",
+          query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+          processed_record_ids: results.map((result) => result.recordId),
+          scoring_tokens_spent: 0,
+        },
         summary,
       },
     });
