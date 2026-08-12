@@ -1,13 +1,16 @@
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import {
+  HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+  HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
   validatePreparedAgeEvidenceForSource,
 } from "../src/lib/research/historical-evidence-preparation.ts";
 
 config({ path: ".env.local", quiet: true });
 
 const apply = process.argv.includes("--apply");
+const upgradeCheckpoints = process.argv.includes("--upgrade-checkpoints");
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
 if (!supabaseUrl || !serviceKey) throw new Error("Supabase server credentials are not configured");
@@ -85,4 +88,38 @@ if (apply && invalid.length) {
     .eq("support_status", "unsupported");
   if (verifyError) throw verifyError;
   if (count !== invalid.length) throw new Error(`Expected ${invalid.length} invalid claims after update; found ${count || 0}`);
+}
+
+if (upgradeCheckpoints) {
+  if (invalid.length && !apply) {
+    throw new Error("Refusing to upgrade extraction checkpoints while invalid active age claims remain");
+  }
+  const { data: runs, error: runError } = await admin.from("research_evidence_preparation_runs")
+    .select("id,checkpoint")
+    .eq("status", "completed")
+    .limit(500);
+  if (runError) throw runError;
+  const queryPlans = new Set([
+    HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+    HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
+  ]);
+  const staleRuns = (runs || []).filter((run) => {
+    const checkpoint = run.checkpoint as Record<string, unknown> | null;
+    return checkpoint
+      && queryPlans.has(String(checkpoint.query_plan_version || ""))
+      && checkpoint.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION;
+  });
+  for (const run of staleRuns) {
+    const checkpoint = run.checkpoint as Record<string, unknown>;
+    const { error } = await admin.from("research_evidence_preparation_runs").update({
+      checkpoint: {
+        ...checkpoint,
+        extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+        extraction_revalidated_at: new Date().toISOString(),
+        extraction_revalidation: "audit:benchmark-age-evidence",
+      },
+    }).eq("id", run.id).eq("status", "completed");
+    if (error) throw error;
+  }
+  console.log(JSON.stringify({ upgradedCheckpointCount: staleRuns.length }, null, 2));
 }
