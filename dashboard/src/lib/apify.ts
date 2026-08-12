@@ -306,6 +306,37 @@ export async function runApifyActorWithUsage<T>(
   };
 }
 
+export async function readApifyRunDatasetWithUsage<T>(
+  runId: string,
+  datasetLimit = 100
+): Promise<{ items: T[]; usage: ApifyRunUsage }> {
+  const normalizedRunId = runId.trim();
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(normalizedRunId)) {
+    throw new Error("Apify run ID is invalid");
+  }
+  const payload = await apifyFetch<{ data?: ApifyRun }>(`/actor-runs/${normalizedRunId}`);
+  const run = payload.data;
+  if (!run?.defaultDatasetId || run.status !== "SUCCEEDED") {
+    throw new Error(`Apify run ${normalizedRunId} is not a completed reusable discovery run`);
+  }
+  const limit = Math.max(1, Math.min(datasetLimit, 1_000));
+  const items = await apifyFetch<T[]>(
+    `/datasets/${run.defaultDatasetId}/items?clean=true&limit=${limit}`
+  );
+  return {
+    items,
+    usage: {
+      runId: normalizedRunId,
+      usageTotalUsd: typeof run.usageTotalUsd === "number" && Number.isFinite(run.usageTotalUsd)
+        ? Math.max(0, run.usageTotalUsd)
+        : null,
+      chargedEventCounts: run.chargedEventCounts && typeof run.chargedEventCounts === "object"
+        ? run.chargedEventCounts
+        : {},
+    },
+  };
+}
+
 export async function runApifyGoogleSearch(
   query: string,
   limit = 10

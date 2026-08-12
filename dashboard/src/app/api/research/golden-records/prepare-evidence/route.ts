@@ -142,6 +142,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "APIFY_API_KEY is not configured; no provider call was started." }, { status: 503 });
     }
     const recordIds = selected.map((record) => record.id);
+    const { data: failedRuns, error: failedRunError } = await admin.from("research_evidence_preparation_runs")
+      .select("record_ids,actual_apify_cost_microusd,checkpoint,created_at")
+      .eq("organization_id", user.organizationId)
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (failedRunError) throw failedRunError;
+    const sameRecordIds = (left: unknown, right: string[]) => Array.isArray(left)
+      && left.length === right.length
+      && left.every((value, index) => value === right[index]);
+    const reusableRun = (failedRuns || []).find((run) => {
+      const checkpoint = run.checkpoint as Record<string, unknown> | null;
+      return sameRecordIds(run.record_ids, recordIds)
+        && typeof checkpoint?.provider_run_id === "string"
+        && checkpoint.provider_run_id.length > 0
+        && typeof run.actual_apify_cost_microusd === "number";
+    });
+    const reusableCheckpoint = reusableRun?.checkpoint as Record<string, unknown> | null | undefined;
+    const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
+      ? reusableCheckpoint.provider_run_id
+      : undefined;
     const { data: preparationRun, error: insertError } = await admin.from("research_evidence_preparation_runs").insert({
       organization_id: user.organizationId,
       requested_by_user_id: user.id,
@@ -153,6 +174,8 @@ export async function POST(request: NextRequest) {
         evaluation_only: true,
         scoring_tokens_spent: 0,
         outreach_mutations_allowed: false,
+        discovery_reused: Boolean(reuseProviderRunId),
+        reused_provider_run_id: reuseProviderRunId || null,
       },
     }).select("id").single();
     if (insertError) throw insertError;
@@ -163,6 +186,7 @@ export async function POST(request: NextRequest) {
         requestedByUserId: user.id,
         recordIds,
         maxApifyChargeUsd,
+        reuseProviderRunId,
       }]);
       const { error: linkError } = await admin.from("research_evidence_preparation_runs")
         .update({ workflow_run_id: workflow.runId })
@@ -175,6 +199,7 @@ export async function POST(request: NextRequest) {
         workflowRunId: workflow.runId,
         records: recordIds.length,
         maxApifyChargeUsd,
+        discoveryReused: Boolean(reuseProviderRunId),
         scoringTokensSpent: 0,
       }, { status: 202 });
     } catch (error) {

@@ -1,5 +1,5 @@
-import { FatalError, RetryableError } from "workflow";
-import { runApifyActorWithUsage } from "@/lib/apify";
+import { FatalError, RetryableError, sleep } from "workflow";
+import { readApifyRunDatasetWithUsage, runApifyActorWithUsage } from "@/lib/apify";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
@@ -26,6 +26,7 @@ type EvidencePreparationWorkflowInput = {
   requestedByUserId: string;
   recordIds: string[];
   maxApifyChargeUsd: number;
+  reuseProviderRunId?: string;
 };
 
 type SearchPage = {
@@ -47,6 +48,8 @@ type DiscoveryBatch = {
   candidatesByRecord: Record<string, HistoricalSearchCandidate[]>;
   providerRunId: string;
   actualApifyCostMicrousd: number | null;
+  sourceApifyCostMicrousd: number | null;
+  discoveryReused: boolean;
   chargedEventCounts: Record<string, number>;
 };
 
@@ -117,22 +120,28 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   });
   const queries = records.flatMap(buildHistoricalEvidenceQueries);
   const actor = process.env.APIFY_GOOGLE_SEARCH_ACTOR || "apify/google-search-scraper";
-  const provider = await runApifyActorWithUsage<SearchPage>(actor, {
-    queries: queries.join("\n"),
-    maxPagesPerQuery: 1,
-    resultsPerPage: EVIDENCE_PREPARATION_LIMITS.searchResultsPerQuery,
-    countryCode: "us",
-    languageCode: "en",
-    mobileResults: false,
-    saveHtml: false,
-    saveHtmlToKeyValueStore: false,
-    includeUnfilteredResults: false,
-    maxConcurrency: 5,
-  }, {
-    datasetLimit: queries.length,
-    timeoutMs: 240_000,
-    maxTotalChargeUsd: input.maxApifyChargeUsd,
-  });
+  const discoveryReused = Boolean(input.reuseProviderRunId);
+  const provider = input.reuseProviderRunId
+    ? await readApifyRunDatasetWithUsage<SearchPage>(input.reuseProviderRunId, queries.length)
+    : await runApifyActorWithUsage<SearchPage>(actor, {
+      queries: queries.join("\n"),
+      maxPagesPerQuery: 1,
+      resultsPerPage: EVIDENCE_PREPARATION_LIMITS.searchResultsPerQuery,
+      countryCode: "us",
+      languageCode: "en",
+      mobileResults: false,
+      saveHtml: false,
+      saveHtmlToKeyValueStore: false,
+      includeUnfilteredResults: false,
+      maxConcurrency: 5,
+    }, {
+      datasetLimit: queries.length,
+      timeoutMs: 240_000,
+      maxTotalChargeUsd: input.maxApifyChargeUsd,
+    });
+  const sourceApifyCostMicrousd = provider.usage.usageTotalUsd === null
+    ? null
+    : Math.round(provider.usage.usageTotalUsd * 1_000_000);
   const recordByName = new Map(records.map((record) => [normalizeName(record.athlete_name), record]));
   const grouped = new Map(records.map((record) => [record.id, [] as HistoricalSearchCandidate[]]));
   for (const page of provider.items) {
@@ -161,9 +170,9 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       dedupeHistoricalSearchCandidates(grouped.get(record.id) || []),
     ])),
     providerRunId: provider.usage.runId,
-    actualApifyCostMicrousd: provider.usage.usageTotalUsd === null
-      ? null
-      : Math.round(provider.usage.usageTotalUsd * 1_000_000),
+    actualApifyCostMicrousd: discoveryReused ? 0 : sourceApifyCostMicrousd,
+    sourceApifyCostMicrousd,
+    discoveryReused,
     chargedEventCounts: provider.usage.chargedEventCounts,
   };
 }
@@ -196,46 +205,52 @@ async function fetchArchiveHtml(url: string) {
   return (await response.text()).slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters * 3);
 }
 
-async function retrieveArchivedEvidenceForRecord(input: {
+async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
-  candidates: HistoricalSearchCandidate[];
+  candidate: HistoricalSearchCandidate;
 }) {
   "use step";
 
-  const evidence: PreparedArchivedEvidence[] = [];
-  const rejections: Array<{ url: string; reason: string }> = [];
-  for (const candidate of input.candidates.slice(0, EVIDENCE_PREPARATION_LIMITS.archiveUrlsPerRecord)) {
-    try {
-      const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
-      const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
-      if (!capture) {
-        rejections.push({ url: candidate.url, reason: "no_html_capture_before_cutoff" });
-        continue;
-      }
-      const html = await fetchArchiveHtml(capture.archivedUrl);
-      if (!html) {
-        rejections.push({ url: candidate.url, reason: "archived_page_unavailable_or_not_html" });
-        continue;
-      }
-      const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
-      if (!prepared.evidence) {
-        rejections.push({ url: candidate.url, reason: prepared.rejectionReason || "archived_page_rejected" });
-        continue;
-      }
-      evidence.push(prepared.evidence);
-      const domains = new Set(evidence.map((item) => item.domain));
-      const claimCount = evidence.reduce((sum, item) => sum + item.claims.length, 0);
-      const adultDomains = new Set(evidence.filter((item) => item.claims.some((claim) => claim.claimType === "adult_eligibility"))
-        .map((item) => item.domain));
-      if (domains.size >= 2 && claimCount >= 4 && (input.record.fit_label === "not_fit" || adultDomains.size >= 2)) break;
-    } catch (error) {
-      if (error instanceof RetryableError) throw error;
-      rejections.push({ url: candidate.url, reason: error instanceof Error ? error.message.slice(0, 180) : "archive_lookup_failed" });
+  const { candidate } = input;
+  try {
+    const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
+    const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
+    if (!capture) return { evidence: null, rejectionReason: "no_html_capture_before_cutoff", rateLimited: false };
+    const html = await fetchArchiveHtml(capture.archivedUrl);
+    if (!html) return { evidence: null, rejectionReason: "archived_page_unavailable_or_not_html", rateLimited: false };
+    const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
+    return {
+      evidence: prepared.evidence,
+      rejectionReason: prepared.rejectionReason,
+      rateLimited: false,
+    };
+  } catch (error) {
+    if (error instanceof RetryableError) {
+      return {
+        evidence: null,
+        rejectionReason: error.message.slice(0, 180),
+        rateLimited: true,
+      };
     }
+    return {
+      evidence: null,
+      rejectionReason: error instanceof Error ? error.message.slice(0, 180) : "archive_lookup_failed",
+      rateLimited: false,
+    };
   }
-  return { record: input.record, evidence, rejections };
 }
-retrieveArchivedEvidenceForRecord.maxRetries = 1;
+retrieveArchivedEvidenceCandidate.maxRetries = 0;
+
+function archivedEvidenceSufficient(record: EvidencePreparationRecord, evidence: PreparedArchivedEvidence[]) {
+  const domains = new Set(evidence.map((item) => item.domain));
+  const claimCount = evidence.reduce((sum, item) => sum + item.claims.length, 0);
+  const adultDomains = new Set(evidence.filter((item) =>
+    item.claims.some((claim) => claim.claimType === "adult_eligibility")
+  ).map((item) => item.domain));
+  return domains.size >= 2
+    && claimCount >= 4
+    && (record.fit_label === "not_fit" || adultDomains.size >= 2);
+}
 
 async function persistPreparedRecordEvidence(input: {
   organizationId: string;
@@ -373,6 +388,8 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         checkpoint: {
           phase: "archive_retrieval",
           provider_run_id: discovery.providerRunId,
+          discovery_reused: discovery.discoveryReused,
+          source_apify_cost_microusd: discovery.sourceApifyCostMicrousd,
           charged_event_counts: discovery.chargedEventCounts,
           discovered_url_count: Object.values(discovery.candidatesByRecord).reduce((sum, values) => sum + values.length, 0),
           scoring_tokens_spent: 0,
@@ -381,14 +398,34 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
     });
     const results = [];
     for (const record of discovery.records) {
-      const archived = await retrieveArchivedEvidenceForRecord({
-        record,
-        candidates: discovery.candidatesByRecord[record.id] || [],
-      });
+      const evidence: PreparedArchivedEvidence[] = [];
+      const rejections: Array<{ url: string; reason: string }> = [];
+      const candidates = (discovery.candidatesByRecord[record.id] || [])
+        .slice(0, EVIDENCE_PREPARATION_LIMITS.archiveUrlsPerRecord);
+      for (const candidate of candidates) {
+        let archiveResult: Awaited<ReturnType<typeof retrieveArchivedEvidenceCandidate>> | null = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          archiveResult = await retrieveArchivedEvidenceCandidate({ record, candidate });
+          if (!archiveResult.rateLimited) break;
+          if (attempt < 2) await sleep(`${20 * (attempt + 1)}s`);
+        }
+        if (archiveResult?.evidence) {
+          evidence.push(archiveResult.evidence);
+        } else {
+          rejections.push({
+            url: candidate.url,
+            reason: archiveResult?.rejectionReason || "archive_lookup_failed",
+          });
+        }
+        if (archivedEvidenceSufficient(record, evidence)) break;
+        await sleep("2s");
+      }
       const persisted = await persistPreparedRecordEvidence({
         organizationId: input.organizationId,
         preparationRunId: input.preparationRunId,
-        ...archived,
+        record,
+        evidence,
+        rejections,
       });
       results.push(persisted);
       await updatePreparationRun({
@@ -411,8 +448,10 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
     }
     const summary = {
       providerRunId: discovery.providerRunId,
+      discoveryReused: discovery.discoveryReused,
       maxApifyChargeUsd: input.maxApifyChargeUsd,
       actualApifyCostMicrousd: discovery.actualApifyCostMicrousd,
+      sourceApifyCostMicrousd: discovery.sourceApifyCostMicrousd,
       scoringTokensSpent: 0,
       records: results,
     };

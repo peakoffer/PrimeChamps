@@ -425,7 +425,10 @@ export default function ResearchBenchmarkPage() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Evidence preparation failed to start");
-      setMessage(`Queued ${payload.records} records. Google discovery is capped at $${payload.maxApifyChargeUsd.toFixed(2)}; archive retrieval is free and scoring-token spend is zero.`);
+      setMessage(payload.discoveryReused
+        ? `Queued ${payload.records} records using the prior paid discovery checkpoint. New Apify spend is zero; archive retrieval is free and scoring-token spend is zero.`
+        : `Queued ${payload.records} records. Google discovery is capped at $${payload.maxApifyChargeUsd.toFixed(2)}; archive retrieval is free and scoring-token spend is zero.`
+      );
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Evidence preparation failed to start");

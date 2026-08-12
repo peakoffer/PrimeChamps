@@ -905,6 +905,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /"use workflow"/);
   assert.match(workflow, /"use step"/);
   assert.match(workflow, /discoverHistoricalEvidence\.maxRetries = 0/);
+  assert.match(workflow, /retrieveArchivedEvidenceCandidate\.maxRetries = 0/);
+  assert.match(workflow, /await sleep\(`\$\{20 \* \(attempt \+ 1\)\}s`\)/);
+  assert.match(workflow, /readApifyRunDatasetWithUsage/);
   assert.match(workflow, /maxTotalChargeUsd: input\.maxApifyChargeUsd/);
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
   assert.match(workflow, /scoringTokensSpent: 0/);
@@ -915,6 +918,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   }
   assert.ok(route.indexOf("if (!selected.length)") < route.indexOf("await start(prepareBenchmarkEvidenceWorkflow"), "blind-label gate must run before workflow start");
   assert.match(route, /no provider call was started/);
+  assert.match(route, /reuseProviderRunId/);
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
   assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);
