@@ -12,6 +12,7 @@ function asNumber(value: unknown, fallback = 0) {
 }
 
 function benchmarkCase(row: Record<string, unknown>): BenchmarkCaseResult | null {
+  if (!row.audit_id) return null;
   const relation = row.golden_record;
   const golden = Array.isArray(relation) ? relation[0] : relation;
   if (!golden || typeof golden !== "object") return null;
@@ -148,7 +149,10 @@ export async function POST(request: NextRequest) {
       message: "Benchmark created without spending model tokens. Resume processes one checkpointed case at a time.",
     }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not execute Research V2 benchmark";
+    const message = error instanceof Error ? error.message
+      : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message
+        : "Could not execute Research V2 benchmark";
     const status = message === "Not authenticated" ? 401
       : message === "Forbidden" ? 403
         : /not ready|not execution-ready|needs both|frozen cohort|held-out|locked|already been evaluated/i.test(message) ? 409

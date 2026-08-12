@@ -748,9 +748,16 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.match(source, /research-v2-benchmark-runner-v3/);
   assert.match(source, /maximumOutputTokens: 1_600/);
   assert.match(source, /0-100 numeric scale, never fractions from 0 to 1/);
+  assert.match(source, /status: "draft"/);
+  assert.match(source, /update\(\{ status: "archived" \}\)/);
   assert.match(source, /BENCHMARK_GOLDEN_RECORD_SELECT = .*stratification_tags/);
   assert.equal((source.match(/\.select\(BENCHMARK_GOLDEN_RECORD_SELECT\)/g) || []).length, 2,
     "run start and checkpoint resume must load the same ground-truth fields");
+});
+
+test("benchmark progress excludes researcher-only partial checkpoints", () => {
+  const route = readFileSync(new URL("../src/app/api/research/benchmarks/route.ts", import.meta.url), "utf8");
+  assert.match(route, /if \(!row\.audit_id\) return null/);
 });
 
 test("benchmark sport enrichment associates only the exact quoted athlete query", () => {

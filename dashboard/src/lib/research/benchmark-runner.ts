@@ -435,12 +435,24 @@ async function ensureBenchmarkArtifacts(input: {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
       version: 2,
-      status: "active",
+      status: "draft",
       created_by_user_id: userId,
-      activated_at: new Date().toISOString(),
+      activated_at: null,
       ...row,
     }, { onConflict: "organization_id,prompt_key,version" }).select("id").single();
     if (error) throw error;
+    const { error: archiveError } = await admin.from("research_prompt_versions").update({ status: "archived" })
+      .eq("organization_id", organizationId)
+      .eq("prompt_key", String(row.prompt_key))
+      .eq("role", String(row.role))
+      .eq("status", "active")
+      .neq("id", data.id);
+    if (archiveError) throw archiveError;
+    const { error: activateError } = await admin.from("research_prompt_versions").update({
+      status: "active",
+      activated_at: new Date().toISOString(),
+    }).eq("id", data.id).eq("organization_id", organizationId);
+    if (activateError) throw activateError;
     return data.id as string;
   };
   const [researcherPromptVersionId, auditorPromptVersionId] = await Promise.all([
