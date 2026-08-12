@@ -49,7 +49,7 @@ The original workbook has the 100 outcomes and evidence index but lacks enough h
 
 ## Current production checkpoint
 
-- Latest main commit: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`.
+- Deployed production-code checkpoint: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`. Later documentation-only commits do not change this code checkpoint.
 - Vercel production deployment: `dpl_39DMEHCxpkkBkpS5RvCPrhMmfxEb` — `READY`.
 - Production alias is attached to `crm.prime-champs.com`; `/` returns a 307 to login and `/login` returns 200.
 - Active prompt version: `research-v8-source-backed-finalist-gates`.
