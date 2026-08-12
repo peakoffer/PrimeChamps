@@ -341,9 +341,10 @@ export default function ResearchBenchmarkPage() {
   const activeEvidenceRun = evidencePreparationRuns.find((run) => run.status === "queued" || run.status === "running");
   const latestEvidenceRun = evidencePreparationRuns[0];
   const latestDevelopmentRun = benchmarkRuns.find((run) => run.benchmark_split === "development");
-  const activeDevelopmentRun = benchmarkRuns.find((run) =>
-    run.benchmark_split === "development" && ["queued", "running", "failed"].includes(run.status)
-  );
+  const activeDevelopmentRun = latestDevelopmentRun
+    && ["queued", "running", "failed"].includes(latestDevelopmentRun.status)
+    ? latestDevelopmentRun
+    : undefined;
 
   useEffect(() => {
     if (!activeEvidenceRun) return;
