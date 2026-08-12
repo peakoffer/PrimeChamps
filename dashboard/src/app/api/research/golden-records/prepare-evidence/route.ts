@@ -4,16 +4,27 @@ import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+  historicalEvidenceQueryPlanVersion,
   normalizeEvidencePreparationBudget,
+  type HistoricalEvidencePreparationMode,
 } from "@/lib/research/historical-evidence-preparation";
 import { prepareBenchmarkEvidenceWorkflow } from "@/workflows/benchmark-evidence";
+import {
+  benchmarkEvidenceFreezeReadiness,
+  selectLeakageSafeBenchmarkEvidence,
+  type BenchmarkEvidenceClaimRow,
+  type BenchmarkEvidenceSourceRow,
+  type BenchmarkGoldenCase,
+} from "@/lib/research/benchmark-runner-support";
 
 export const maxDuration = 60;
 
 type GoldenPreparationCandidate = {
   id: string;
+  athlete_name: string;
   sport: string;
   benchmark_split: string;
   label_order_fit_before_outcome: boolean;
@@ -28,6 +39,57 @@ type GoldenPreparationCandidate = {
   held_out_revealed_at: string | null;
   stratification_tags: string[] | null;
 };
+
+type EvidencePreparationRunRow = {
+  status: string;
+  record_ids: unknown;
+  checkpoint: unknown;
+};
+
+function completedRecordIds(runs: EvidencePreparationRunRow[], queryPlanVersion: string) {
+  return new Set(runs.flatMap((run) => {
+    const checkpoint = run.checkpoint as Record<string, unknown> | null;
+    return run.status === "completed"
+      && checkpoint?.query_plan_version === queryPlanVersion
+      && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
+      && Array.isArray(run.record_ids)
+      ? run.record_ids.filter((id): id is string => typeof id === "string")
+      : [];
+  }));
+}
+
+async function unresolvedFitRecordsForAgeRecovery(input: {
+  admin: ReturnType<typeof createAdminClient>;
+  organizationId: string;
+  eligible: GoldenPreparationCandidate[];
+  baselineCompleted: Set<string>;
+  recoveryCompleted: Set<string>;
+}) {
+  const candidates = input.eligible.filter((record) => record.fit_label === "fit"
+    && input.baselineCompleted.has(record.id)
+    && !input.recoveryCompleted.has(record.id));
+  if (!candidates.length) return [];
+  const recordIds = candidates.map((record) => record.id);
+  const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
+    input.admin.from("research_evidence_sources").select(
+      "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
+    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
+    input.admin.from("research_evidence_claims").select(
+      "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
+    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
+  ]);
+  if (sourceError) throw sourceError;
+  if (claimError) throw claimError;
+  return candidates.filter((record) => {
+    const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
+    const selection = selectLeakageSafeBenchmarkEvidence({
+      record: benchmarkRecord,
+      sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
+      claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
+    });
+    return !benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel: "fit", selection }).ready;
+  });
+}
 
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
   const outcomeGroundTruth = record.stratification_tags?.includes("dylan_outcome_ground_truth") === true;
@@ -52,7 +114,7 @@ export async function GET() {
     const admin = createAdminClient();
     const [{ data: candidates, error: candidateError }, { data: runs, error: runError }] = await Promise.all([
       admin.from("research_golden_records")
-        .select("id,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+        .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
         .eq("organization_id", user.organizationId)
         .eq("benchmark_split", "excluded")
         .order("updated_at", { ascending: true }),
@@ -65,18 +127,21 @@ export async function GET() {
     if (candidateError) throw candidateError;
     if (runError) throw runError;
     const eligible = ((candidates || []) as GoldenPreparationCandidate[]).filter(eligibleForEvidencePreparation);
-    const completedForCurrentExtraction = new Set((runs || []).flatMap((run) => {
-      const checkpoint = run.checkpoint as Record<string, unknown> | null;
-      return run.status === "completed"
-        && checkpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
-        && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
-        && Array.isArray(run.record_ids)
-        ? run.record_ids.filter((id): id is string => typeof id === "string")
-        : [];
-    }));
+    const runRows = (runs || []) as EvidencePreparationRunRow[];
+    const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
+    const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
+    const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
+    const ageRecoveryRemaining = baselineRemaining.length ? [] : await unresolvedFitRecordsForAgeRecovery({
+      admin, organizationId: user.organizationId, eligible, baselineCompleted, recoveryCompleted,
+    });
+    const preparationMode: HistoricalEvidencePreparationMode = baselineRemaining.length ? "baseline" : "age_recovery";
+    const nextRecords = baselineRemaining.length ? baselineRemaining : ageRecoveryRemaining;
     return NextResponse.json({
-      eligibleRecordCount: eligible.filter((record) => !completedForCurrentExtraction.has(record.id)).length,
+      eligibleRecordCount: nextRecords.length,
       totalEligibleRecordCount: eligible.length,
+      preparationMode,
+      baselineRemainingCount: baselineRemaining.length,
+      ageRecoveryRemainingCount: ageRecoveryRemaining.length,
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
       defaultMaxApifyChargeUsd: EVIDENCE_PREPARATION_LIMITS.defaultMaxApifyChargeUsd,
       scoringTokensSpentByPreparation: 0,
@@ -127,7 +192,7 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
     let query = admin.from("research_golden_records")
-      .select("id,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+      .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
       .eq("organization_id", user.organizationId)
       .eq("benchmark_split", "excluded")
       .order("updated_at", { ascending: true });
@@ -148,23 +213,30 @@ export async function POST(request: NextRequest) {
       .order("created_at", { ascending: false })
       .limit(100);
     if (recentRunError) throw recentRunError;
-    const completedForCurrentExtraction = new Set((recentRuns || []).flatMap((run) => {
-      const checkpoint = run.checkpoint as Record<string, unknown> | null;
-      return run.status === "completed"
-        && checkpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
-        && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
-        && Array.isArray(run.record_ids)
-        ? run.record_ids.filter((id): id is string => typeof id === "string")
-        : [];
-    }));
+    const runRows = (recentRuns || []) as EvidencePreparationRunRow[];
+    const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
+    const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
+    const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
+    const requestedMode = body.preparationMode === "baseline" || body.preparationMode === "age_recovery"
+      ? body.preparationMode as HistoricalEvidencePreparationMode
+      : null;
+    const preparationMode: HistoricalEvidencePreparationMode = requestedMode
+      || (baselineRemaining.length ? "baseline" : "age_recovery");
+    const ageRecoveryRemaining = preparationMode === "age_recovery"
+      ? await unresolvedFitRecordsForAgeRecovery({
+        admin, organizationId: user.organizationId, eligible, baselineCompleted, recoveryCompleted,
+      })
+      : [];
     const selected = (requestedIds.length
       ? eligible
-      : eligible.filter((record) => !completedForCurrentExtraction.has(record.id))
+      : preparationMode === "baseline" ? baselineRemaining : ageRecoveryRemaining
     ).slice(0, requestedCount);
     if (!selected.length) {
       return NextResponse.json({
         error: eligible.length
-          ? "Every eligible record has completed the current evidence-extraction version; no provider call was started."
+          ? preparationMode === "age_recovery"
+            ? "Every blocked fit record has completed the current age-recovery plan; no provider call was started."
+            : "Every eligible record has completed the current evidence-extraction version; no provider call was started."
           : "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
         eligible: eligible.length,
         scoringTokensSpent: 0,
@@ -174,6 +246,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "APIFY_API_KEY is not configured; no provider call was started." }, { status: 503 });
     }
     const recordIds = selected.map((record) => record.id);
+    const queryPlanVersion = historicalEvidenceQueryPlanVersion(preparationMode);
     const sameRecordIds = (left: unknown, right: string[]) => Array.isArray(left)
       && left.length === right.length
       && left.every((value, index) => value === right[index]);
@@ -185,7 +258,7 @@ export async function POST(request: NextRequest) {
       : typeof latestSummary?.providerRunId === "string" ? latestSummary.providerRunId : undefined;
     const reusableRun = (latestSameRecordRun?.status === "failed"
       || latestCheckpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION)
-      && latestCheckpoint?.query_plan_version === HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION
+      && latestCheckpoint?.query_plan_version === queryPlanVersion
       && typeof latestProviderRunId === "string"
       && latestProviderRunId.length > 0
       && typeof latestSameRecordRun?.actual_apify_cost_microusd === "number"
@@ -200,8 +273,9 @@ export async function POST(request: NextRequest) {
       max_apify_charge_microusd: Math.round(maxApifyChargeUsd * 1_000_000),
       checkpoint: {
         phase: "queued",
+        preparation_mode: preparationMode,
         extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
-        query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+        query_plan_version: queryPlanVersion,
         evaluation_only: true,
         scoring_tokens_spent: 0,
         outreach_mutations_allowed: false,
@@ -217,6 +291,8 @@ export async function POST(request: NextRequest) {
         requestedByUserId: user.id,
         recordIds,
         maxApifyChargeUsd,
+        preparationMode,
+        queryPlanVersion,
         reuseProviderRunId,
       }]);
       const { error: linkError } = await admin.from("research_evidence_preparation_runs")
@@ -230,6 +306,7 @@ export async function POST(request: NextRequest) {
         workflowRunId: workflow.runId,
         records: recordIds.length,
         maxApifyChargeUsd,
+        preparationMode,
         discoveryReused: Boolean(reuseProviderRunId),
         scoringTokensSpent: 0,
       }, { status: 202 });

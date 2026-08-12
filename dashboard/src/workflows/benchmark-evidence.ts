@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
-  HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+  buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   dedupeHistoricalSearchCandidates,
   extractPreparedArchivedEvidence,
@@ -13,6 +13,7 @@ import {
   waybackCdxUrl,
   type EvidencePreparationRecord,
   type HistoricalSearchCandidate,
+  type HistoricalEvidencePreparationMode,
   type PreparedArchivedEvidence,
 } from "@/lib/research/historical-evidence-preparation";
 import {
@@ -29,6 +30,8 @@ type EvidencePreparationWorkflowInput = {
   requestedByUserId: string;
   recordIds: string[];
   maxApifyChargeUsd: number;
+  preparationMode: HistoricalEvidencePreparationMode;
+  queryPlanVersion: string;
   reuseProviderRunId?: string;
 };
 
@@ -127,7 +130,10 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       evidence_cutoff_at: String(record.evidence_cutoff_at),
     } satisfies EvidencePreparationRecord;
   });
-  const queries = records.flatMap(buildHistoricalEvidenceQueries);
+  const queryBuilder = input.preparationMode === "age_recovery"
+    ? buildHistoricalAgeRecoveryQueries
+    : buildHistoricalEvidenceQueries;
+  const queries = records.flatMap(queryBuilder);
   const actor = process.env.APIFY_GOOGLE_SEARCH_ACTOR || "apify/google-search-scraper";
   const discoveryReused = Boolean(input.reuseProviderRunId);
   const provider = input.reuseProviderRunId
@@ -437,7 +443,8 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         checkpoint: {
           phase: "archive_retrieval",
           extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
-          query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+          query_plan_version: input.queryPlanVersion,
+          preparation_mode: input.preparationMode,
           provider_run_id: discovery.providerRunId,
           discovery_reused: discovery.discoveryReused,
           source_apify_cost_microusd: discovery.sourceApifyCostMicrousd,
@@ -490,7 +497,8 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           checkpoint: {
             phase: "record_persisted",
             extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
-            query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+            query_plan_version: input.queryPlanVersion,
+            preparation_mode: input.preparationMode,
             last_record_id: record.id,
             processed_record_ids: results.map((result) => result.recordId),
             provider_run_id: discovery.providerRunId,
@@ -507,6 +515,8 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       sourceApifyCostMicrousd: discovery.sourceApifyCostMicrousd,
       scoringTokensSpent: 0,
       excludedUnsupportedSignals: signalReconciliation.excludedUnsupportedSignals,
+      preparationMode: input.preparationMode,
+      queryPlanVersion: input.queryPlanVersion,
       records: results,
     };
     await updatePreparationRun({
@@ -521,7 +531,8 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         checkpoint: {
           phase: "completed",
           extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
-          query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+          query_plan_version: input.queryPlanVersion,
+          preparation_mode: input.preparationMode,
           provider_run_id: discovery.providerRunId,
           processed_record_ids: results.map((result) => result.recordId),
           scoring_tokens_spent: 0,

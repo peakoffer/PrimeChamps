@@ -6,7 +6,16 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-age-recovery-v1";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-precise-signals-age-v2";
+
+export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery";
+
+export function historicalEvidenceQueryPlanVersion(mode: HistoricalEvidencePreparationMode) {
+  return mode === "age_recovery"
+    ? HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION
+    : HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION;
+}
 
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
@@ -444,6 +453,21 @@ export function buildHistoricalEvidenceQueries(record: Pick<EvidencePreparationR
     `"${record.athlete_name}" ${sportExpression} athlete profile biography ${excludeSocial} before:${before}`,
     `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthday OR born OR age) (profile OR bio OR roster) ${excludeSocial} before:${before}`,
     `"${record.athlete_name}" ${sportExpression} results championship ranking interview ${excludeSocial} before:${before}`,
+  ];
+}
+
+export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at">) {
+  const cutoff = new Date(record.evidence_cutoff_at);
+  if (!Number.isFinite(cutoff.getTime())) return [];
+  const before = cutoff.toISOString().slice(0, 10);
+  const excludeSocial = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:x.com -site:twitter.com";
+  const baseline = buildHistoricalEvidenceQueries(record);
+  const sportExpression = baseline[0]?.slice(`"${record.athlete_name}" `.length).split(" athlete profile biography ")[0]
+    || `"${record.sport}"`;
+  return [
+    `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthdate OR birthday OR DOB) ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} (born OR "born in" OR age) (profile OR bio OR roster) ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} ("player profile" OR "athlete bio") (birth OR age) ${excludeSocial} before:${before}`,
   ];
 }
 

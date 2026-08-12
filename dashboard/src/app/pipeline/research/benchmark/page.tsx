@@ -223,6 +223,7 @@ export default function ResearchBenchmarkPage() {
   const [evidenceSummary, setEvidenceSummary] = useState(INITIAL_EVIDENCE_SUMMARY);
   const [evidencePreparationRuns, setEvidencePreparationRuns] = useState<EvidencePreparationRun[]>([]);
   const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
+  const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -247,6 +248,7 @@ export default function ResearchBenchmarkPage() {
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
       setEvidencePreparationRuns(preparationPayload.runs || []);
       setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
+      setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
@@ -416,18 +418,20 @@ export default function ResearchBenchmarkPage() {
 
   const prepareHistoricalEvidence = async () => {
     setWorking(true);
-    setMessage("Starting a bounded archive-evidence run…");
+    setMessage(evidencePreparationMode === "age_recovery"
+      ? "Starting a bounded age-evidence recovery run…"
+      : "Starting a bounded archive-evidence run…");
     try {
       const response = await fetch("/api/research/golden-records/prepare-evidence", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ maxRecords: 10, maxApifyChargeUsd: 0.75 }),
+        body: JSON.stringify({ maxRecords: 10, maxApifyChargeUsd: 0.75, preparationMode: evidencePreparationMode }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Evidence preparation failed to start");
       setMessage(payload.discoveryReused
         ? `Queued ${payload.records} records using the prior paid discovery checkpoint. New Apify spend is zero; archive retrieval is free and scoring-token spend is zero.`
-        : `Queued ${payload.records} records. Google discovery is capped at $${payload.maxApifyChargeUsd.toFixed(2)}; archive retrieval is free and scoring-token spend is zero.`
+        : `Queued ${payload.records} ${payload.preparationMode === "age_recovery" ? "age-recovery" : "baseline"} records. Google discovery is capped at $${payload.maxApifyChargeUsd.toFixed(2)}; archive retrieval is free and scoring-token spend is zero.`
       );
       await load();
     } catch (error) {
@@ -626,7 +630,11 @@ export default function ResearchBenchmarkPage() {
               Freeze benchmark cohort
             </button>
             <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
-              {activeEvidenceRun ? `Preparing ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…` : `Build evidence packets (${Math.min(eligibleEvidenceRecords, 10)})`}
+              {activeEvidenceRun
+                ? `Preparing ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
+                : evidencePreparationMode === "age_recovery"
+                  ? `Recover age evidence (${Math.min(eligibleEvidenceRecords, 10)})`
+                  : `Build evidence packets (${Math.min(eligibleEvidenceRecords, 10)})`}
             </button>
           </div>
         </div>

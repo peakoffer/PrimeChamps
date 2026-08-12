@@ -56,6 +56,7 @@ import {
   type BenchmarkGoldenCase,
 } from "../src/lib/research/benchmark-runner-support.ts";
 import {
+  buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   dedupeHistoricalSearchCandidates,
   extractPreparedArchivedEvidence,
@@ -949,6 +950,14 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   assert.ok(broadSportQueries.every((query) => query.includes("(MMA OR UFC OR boxing OR kickboxing OR fighter)")));
   assert.ok(broadSportQueries.every((query) => !query.includes('"Combat Sports"')));
   assert.ok(queries[1].includes('("date of birth" OR birthday OR born OR age)'));
+  const ageRecovery = buildHistoricalAgeRecoveryQueries({
+    athlete_name: "Jane Doe",
+    sport: "Volleyball",
+    evidence_cutoff_at: "2024-06-01T12:00:00Z",
+  });
+  assert.equal(ageRecovery.length, 3);
+  assert.ok(ageRecovery.every((query) => /birth|born|age/i.test(query)));
+  assert.ok(ageRecovery.every((query) => query.includes("before:2024-06-01")));
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
   assert.equal(normalizeEvidencePreparationBudget(undefined), 0.75);
@@ -998,11 +1007,12 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /reuseProviderRunId/);
   assert.match(route, /latestSameRecordRun\?\.status === "failed"/);
   assert.match(route, /latestSummary\?\.providerRunId/);
-  assert.match(route, /completedForCurrentExtraction/);
+  assert.match(route, /completedRecordIds/);
+  assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
-  assert.match(route, /query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION/);
+  assert.match(route, /query_plan_version: queryPlanVersion/);
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
-  assert.match(workflow, /query_plan_version: HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION/);
+  assert.match(workflow, /query_plan_version: input\.queryPlanVersion/);
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
   assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);
