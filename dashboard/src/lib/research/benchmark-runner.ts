@@ -28,7 +28,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v12";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v13";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -233,7 +233,7 @@ function fitLabelForScore(score: number): "fit" | "not_fit" | "uncertain" {
 }
 
 function achievabilityLabelForScore(score: number): "high" | "medium" | "low" | "uncertain" {
-  return score >= 75 ? "high" : score >= 60 ? "medium" : score < 45 ? "low" : "uncertain";
+  return score >= 70 ? "high" : score >= 60 ? "medium" : score < 45 ? "low" : "uncertain";
 }
 
 function integer(value: unknown) {
@@ -1083,7 +1083,6 @@ async function processBenchmarkCase(input: {
   const totalCost = researcherUsage.costMicrousd + auditCostMicrousd;
   const finalHigh = corrected.priority > 80;
   const failureTypes = Array.from(new Set([
-    ...(blind.failure_types || []).map(normalizeFailureType),
     ...findings.map((finding) => normalizeFailureType(finding.failure_type)),
     ...(researcherFailure ? [auditorCaught ? "researcher_miss_caught_by_auditor" : "researcher_and_auditor_missed"] : []),
   ]));

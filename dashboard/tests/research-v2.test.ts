@@ -770,7 +770,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v12/);
+  assert.match(source, /research-v2-benchmark-runner-v13/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -788,6 +788,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.match(source, /compactBenchmarkModelEvidence/);
   assert.match(source, /review\.verdict === "fail" \? \(blind\.critical_gaps/);
   assert.ok(!source.includes('(researcherPriority > 80) !== actualPriority'), "a deliberately selective finalist threshold must not be treated as a classifier miss");
+  assert.ok(!source.includes('...(blind.failure_types || []).map(normalizeFailureType)'), "candidate evidence gaps must not be logged as research-system failures");
   assert.ok(!source.includes("minimum: 0"), "Anthropic structured outputs reject numeric minimum keywords");
   assert.ok(!source.includes("maximum: 100"), "Anthropic structured outputs reject numeric maximum keywords");
   assert.match(source, /status: "draft"/);
