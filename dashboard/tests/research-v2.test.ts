@@ -2209,6 +2209,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(instagramHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
   assert.match(socialBladeHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
   assert.match(socialBladeHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
+  assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0\.5/);
+  assert.match(socialBladeHistoryRoute, /apifyPublicAttemptedRecordIds/);
+  assert.match(socialBladeHistoryRoute, /retrieval_status: "error"/);
+  assert.match(socialBladeHistoryRoute, /eligible_before_cutoff: false/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runner, /signalPreparedIds/);
   assert.match(runner, /Execution is gated by the evidence itself/);

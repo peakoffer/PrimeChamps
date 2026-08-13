@@ -29,6 +29,7 @@ type Candidate = {
   tier: SocialBladeHistoryTier;
   credits: number;
   ageDays: number;
+  apifyPublicAttempted: boolean;
 };
 
 function normalizeHandle(value: unknown) {
@@ -54,6 +55,13 @@ async function buildCandidatePlan(organizationId: string) {
     .in("golden_record_id", recordIds)
     .eq("eligible_for_scoring", true);
   if (claimError) throw claimError;
+  const { data: apifyPublicSources, error: apifyPublicSourceError } = await admin.from("research_evidence_sources")
+    .select("golden_record_id")
+    .eq("organization_id", organizationId)
+    .in("golden_record_id", recordIds)
+    .eq("provider", "apify_social_blade_public_history");
+  if (apifyPublicSourceError) throw apifyPublicSourceError;
+  const apifyPublicAttemptedRecordIds = new Set((apifyPublicSources || []).map((source) => source.golden_record_id));
 
   const recordById = new Map((records || []).map((record) => [record.id, record]));
   const handleByRecord = new Map<string, { handle: string; effectiveAt: string }>();
@@ -96,6 +104,7 @@ async function buildCandidatePlan(organizationId: string) {
       tier: tier.tier,
       credits: tier.credits,
       ageDays: tier.ageDays,
+      apifyPublicAttempted: apifyPublicAttemptedRecordIds.has(record.id),
     }];
   }).sort((left, right) => right.safeClaimCount - left.safeClaimCount
     || left.credits - right.credits
@@ -105,7 +114,7 @@ async function buildCandidatePlan(organizationId: string) {
 
 function publicPlan(candidates: Candidate[]) {
   const pilot = candidates.slice(0, MAX_PILOT_RECORDS);
-  const apifyPilot = candidates.filter((candidate) => candidate.ageDays <= 30).slice(0, 1);
+  const apifyPilot = candidates.filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted).slice(0, 1);
   return {
     configured: Boolean(process.env.SOCIAL_BLADE_CLIENT_ID && process.env.SOCIAL_BLADE_TOKEN),
     candidateCount: candidates.length,
@@ -189,7 +198,7 @@ export async function POST(request: NextRequest) {
         }, { status: 409 });
       }
       const candidates = (await buildCandidatePlan(user.organizationId))
-        .filter((candidate) => candidate.ageDays <= 30)
+        .filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted)
         .slice(0, 1);
       const candidate = candidates[0];
       if (!candidate) {
@@ -226,12 +235,53 @@ export async function POST(request: NextRequest) {
         rows: actorResult.items,
         maximumSnapshotAgeDays: 31,
       });
+      const admin = createAdminClient();
       if (!snapshot) {
+        const provider = "apify_social_blade_public_history";
+        const providerRequestId = `${APIFY_PUBLIC_HISTORY_ACTOR}:${candidate.handle}:${candidate.cutoff.slice(0, 10)}:no-match`;
+        const diagnosticSourceRow = {
+          organization_id: user.organizationId,
+          golden_record_id: candidate.id,
+          canonical_url: `https://socialblade.com/instagram/user/${candidate.handle}`,
+          domain: "socialblade.com",
+          title: `@${candidate.handle} Instagram public-history lookup (${candidate.cutoff.slice(0, 10)} cutoff)`,
+          publisher: "Social Blade public data via Apify",
+          source_type: "social_analytics",
+          provider,
+          provider_request_id: providerRequestId,
+          published_at: null,
+          retrieved_at: new Date().toISOString(),
+          historical_as_of: null,
+          retrieval_status: "error",
+          eligible_before_cutoff: false,
+          exclusion_reason: "The Actor returned no exact-handle daily snapshot at or before the cutoff.",
+          metadata: {
+            handle: candidate.handle,
+            evidence_cutoff_at: candidate.cutoff,
+            actor_id: APIFY_PUBLIC_HISTORY_ACTOR,
+            actor_run_id: actorResult.usage.runId,
+            actual_apify_cost_usd: actorResult.usage.usageTotalUsd,
+            charged_event_counts: actorResult.usage.chargedEventCounts,
+            maximum_charge_usd: APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD,
+            history_days_requested: historyDays,
+            dataset_rows_returned: actorResult.items.length,
+            scoring_tokens_spent: 0,
+            outreach_mutations_allowed: false,
+          },
+        };
+        const { data: existingDiagnostic, error: existingDiagnosticError } = await admin.from("research_evidence_sources")
+          .select("id").eq("organization_id", user.organizationId).eq("golden_record_id", candidate.id)
+          .eq("provider", provider).eq("provider_request_id", providerRequestId).maybeSingle();
+        if (existingDiagnosticError) throw existingDiagnosticError;
+        const { error: diagnosticWriteError } = existingDiagnostic?.id
+          ? await admin.from("research_evidence_sources").update(diagnosticSourceRow).eq("id", existingDiagnostic.id)
+          : await admin.from("research_evidence_sources").insert(diagnosticSourceRow);
+        if (diagnosticWriteError) throw diagnosticWriteError;
         return NextResponse.json({
           ok: true,
           attempted: 1,
           matched: 0,
-          sourcesWritten: 0,
+          sourcesWritten: 1,
           claimsWritten: 0,
           actorRunId: actorResult.usage.runId,
           actualApifyCostUsd: actorResult.usage.usageTotalUsd,
@@ -241,8 +291,6 @@ export async function POST(request: NextRequest) {
           outreachMutationsAllowed: false,
         });
       }
-
-      const admin = createAdminClient();
       const provider = "apify_social_blade_public_history";
       const providerRequestId = `${APIFY_PUBLIC_HISTORY_ACTOR}:${snapshot.handle}:${snapshot.capturedAt.slice(0, 10)}`;
       const sourceRow = {
