@@ -77,12 +77,17 @@ import {
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   buildHistoricalSignalRecoveryQueries,
+  canonicalHistoricalArchiveUrl,
+  commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
+  extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
   preparedMomentumEffectiveAt,
   preparedEvidenceSignalSupported,
+  selectCommonCrawlCapture,
+  selectCommonCrawlCollections,
   selectWaybackCapture,
   validatePreparedAgeEvidenceForSource,
   waybackCdxUrl,
@@ -1439,6 +1444,48 @@ test("Wayback selection uses the latest exact HTML capture no later than the evi
   assert.equal(cdxUrl.hostname, "web.archive.org");
   assert.equal(cdxUrl.searchParams.get("matchType"), "exact");
   assert.equal(cdxUrl.searchParams.get("to"), "20240601123456");
+  assert.equal(
+    canonicalHistoricalArchiveUrl(`${canonicalUrl}?srsltid=tracking&utm_source=google#bio`),
+    canonicalUrl
+  );
+});
+
+test("Common Crawl fallback selects bounded pre-cutoff captures and extracts the WARC response body", () => {
+  const canonicalUrl = "https://sports.example/athletes/jane-doe";
+  const collections = selectCommonCrawlCollections([
+    { id: "CC-MAIN-2024-18", from: "2024-04-20T00:00:00Z", to: "2024-05-03T23:59:59Z" },
+    { id: "CC-MAIN-2024-22", from: "2024-05-17T00:00:00Z", to: "2024-05-31T23:59:59Z" },
+    { id: "CC-MAIN-2024-26", from: "2024-06-20T00:00:00Z", to: "2024-07-03T23:59:59Z" },
+  ], "2024-06-01T00:00:00Z", 2);
+  assert.deepEqual(collections, ["CC-MAIN-2024-22", "CC-MAIN-2024-18"]);
+
+  const capture = selectCommonCrawlCapture([
+    { timestamp: "20240501010101", url: canonicalUrl, status: "200", mime: "text/html", filename: "crawl-data/old.warc.gz", offset: "10", length: "100", digest: "OLD" },
+    { timestamp: "20240530010101", url: canonicalUrl, status: "200", "mime-detected": "text/html", filename: "crawl-data/latest.warc.gz", offset: "20", length: "200", digest: "LATEST" },
+    { timestamp: "20240602010101", url: canonicalUrl, status: "200", mime: "text/html", filename: "crawl-data/future.warc.gz", offset: "30", length: "300", digest: "FUTURE" },
+  ], "CC-MAIN-2024-22", canonicalUrl, "2024-06-01T00:00:00Z");
+  assert.equal(capture?.timestamp, "20240530010101");
+  assert.equal(capture?.digest, "LATEST");
+  assert.equal(capture?.warcUrl, "https://data.commoncrawl.org/crawl-data/latest.warc.gz");
+
+  const indexUrl = new URL(commonCrawlIndexUrl("CC-MAIN-2024-22", canonicalUrl));
+  assert.equal(indexUrl.hostname, "index.commoncrawl.org");
+  assert.equal(indexUrl.searchParams.get("url"), canonicalUrl);
+  assert.deepEqual(indexUrl.searchParams.getAll("filter"), ["status:200", "mime:text/html"]);
+
+  const warc = [
+    "WARC/1.0",
+    "WARC-Type: response",
+    "Content-Type: application/http; msgtype=response",
+    "",
+    "HTTP/1.1 200 OK",
+    "Content-Type: text/html; charset=UTF-8",
+    "",
+    "<html><body>Jane Doe volleyball athlete</body></html>",
+    "",
+  ].join("\r\n");
+  assert.equal(extractCommonCrawlWarcBody(warc), "<html><body>Jane Doe volleyball athlete</body></html>");
+  assert.equal(extractCommonCrawlWarcBody(warc.replace("200 OK", "404 Not Found")), null);
 });
 
 test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
@@ -1692,12 +1739,15 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /discoverHistoricalEvidence\.maxRetries = 0/);
   assert.match(workflow, /retrieveArchivedEvidenceCandidate\.maxRetries = 0/);
   assert.match(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
-  assert.match(workflow, /Internet Archive stayed rate limited after one bounded retry/);
+  assert.match(workflow, /Historical archive providers stayed rate limited after one bounded retry/);
   assert.match(workflow, /readApifyRunDatasetWithUsage/);
   assert.match(workflow, /maxTotalChargeUsd: input\.maxApifyChargeUsd/);
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
   assert.match(workflow, /scoringTokensSpent: 0/);
-  assert.match(workflow, /provider: "internet_archive_wayback"/);
+  assert.match(workflow, /item\.archiveProvider \|\| "internet_archive_wayback"/);
+  assert.match(workflow, /selectCommonCrawlCapture/);
+  assert.match(workflow, /Range: `bytes=\$\{capture\.offset\}-\$\{lastByte\}`/);
+  assert.match(workflow, /archiveProvider: "common_crawl"/);
   assert.match(workflow, /from\("research_evidence_claims"\)\.delete\(\)/);
   assert.match(workflow, /reconcilePreparedSignalClaims/);
   for (const forbiddenTable of ["athletes", "research_candidates", "pipeline_athletes", "messages", "outreach_touchpoints", "channel_messages"]) {
@@ -1712,7 +1762,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /recordIds\.every\(\(recordId\) => run\.record_ids\.includes\(recordId\)\)/);
   assert.match(route, /reusableSummary\?\.providerRunId/);
   assert.match(route, /ARCHIVE_RATE_LIMIT_COOLDOWN_MS/);
-  assert.match(route, /retry-after/);
+  assert.match(route, /archive_fallback_available: true/);
+  assert.doesNotMatch(route, /status: 429, headers: \{ "retry-after"/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /readiness\.momentum\.passed/);

@@ -56,6 +56,27 @@ export type WaybackCapture = {
   archivedUrl: string;
 };
 
+export type CommonCrawlCollection = {
+  id?: string;
+  name?: string;
+  from?: string;
+  to?: string;
+};
+
+export type CommonCrawlCapture = {
+  collectionId: string;
+  timestamp: string;
+  capturedAt: string;
+  originalUrl: string;
+  statusCode: string;
+  digest: string | null;
+  mimeType: string | null;
+  filename: string;
+  offset: number;
+  length: number;
+  warcUrl: string;
+};
+
 export type PreparedEvidenceClaim = {
   claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
   claimText: string;
@@ -79,11 +100,31 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
+  archiveProvider?: "internet_archive_wayback" | "common_crawl";
+  providerRequestId?: string;
 };
+
+const ARCHIVE_TRACKING_PARAMS = new Set(["fbclid", "gclid", "hl", "igshid", "srsltid"]);
+
+export function canonicalHistoricalArchiveUrl(value: string) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (ARCHIVE_TRACKING_PARAMS.has(key.toLowerCase()) || key.toLowerCase().startsWith("utm_")) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
 
 function normalizedUrlForComparison(value: string) {
   try {
-    const url = new URL(value);
+    const url = new URL(canonicalHistoricalArchiveUrl(value));
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const query = new URLSearchParams(url.searchParams);
     query.sort();
@@ -119,13 +160,130 @@ export function parseWaybackTimestamp(value: string) {
   return date.toISOString();
 }
 
+function parseCollectionTimestamp(value: unknown) {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Selects a very small number of Common Crawl collections whose crawl window
+ * began no later than the benchmark cutoff. Individual captures are filtered
+ * again by timestamp, so a collection that overlaps the cutoff is still safe.
+ */
+export function selectCommonCrawlCollections(
+  payload: unknown,
+  evidenceCutoffAt: string,
+  maximum = 2
+) {
+  if (!Array.isArray(payload)) return [];
+  const cutoff = Date.parse(evidenceCutoffAt);
+  if (!Number.isFinite(cutoff)) return [];
+  return payload.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const collection = raw as CommonCrawlCollection;
+    const id = typeof collection.id === "string" ? collection.id.trim() : "";
+    const from = parseCollectionTimestamp(collection.from);
+    const to = parseCollectionTimestamp(collection.to);
+    if (!/^CC-MAIN-\d{4}-\d{2}$/.test(id) || from === null || from > cutoff) return [];
+    return [{ id, from, to: to ?? from }];
+  }).sort((left, right) => right.from - left.from || right.to - left.to)
+    .slice(0, Math.max(1, Math.min(3, Math.floor(maximum))))
+    .map((collection) => collection.id);
+}
+
+export function commonCrawlIndexUrl(collectionId: string, canonicalUrl: string) {
+  if (!/^CC-MAIN-\d{4}-\d{2}$/.test(collectionId)) throw new Error("Common Crawl collection ID is invalid");
+  if (!isPublicHttpUrl(canonicalUrl)) throw new Error("Common Crawl lookup requires a public HTTP URL");
+  const params = new URLSearchParams({
+    url: canonicalHistoricalArchiveUrl(canonicalUrl),
+    output: "json",
+    limit: "10",
+  });
+  params.append("filter", "status:200");
+  params.append("filter", "mime:text/html");
+  return `https://index.commoncrawl.org/${collectionId}-index?${params.toString()}`;
+}
+
+function commonCrawlRows(payload: unknown) {
+  if (typeof payload === "string") {
+    return payload.split(/\r?\n/).flatMap((line) => {
+      if (!line.trim()) return [];
+      try {
+        return [JSON.parse(line) as unknown];
+      } catch {
+        return [];
+      }
+    });
+  }
+  return Array.isArray(payload) ? payload : [];
+}
+
+export function selectCommonCrawlCapture(
+  payload: unknown,
+  collectionId: string,
+  canonicalUrl: string,
+  evidenceCutoffAt: string
+): CommonCrawlCapture | null {
+  const cutoff = Date.parse(evidenceCutoffAt);
+  if (!Number.isFinite(cutoff) || !/^CC-MAIN-\d{4}-\d{2}$/.test(collectionId)) return null;
+  const requested = normalizedUrlForComparison(canonicalUrl);
+  const captures = commonCrawlRows(payload).flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const row = raw as Record<string, unknown>;
+    const timestamp = String(row.timestamp || "");
+    const capturedAt = parseWaybackTimestamp(timestamp);
+    const originalUrl = String(row.url || "");
+    const statusCode = String(row.status || "");
+    const mimeType = String(row["mime-detected"] || row.mime || "");
+    const filename = String(row.filename || "");
+    const offset = Number(row.offset);
+    const length = Number(row.length);
+    if (!capturedAt || Date.parse(capturedAt) > cutoff || statusCode !== "200"
+      || normalizedUrlForComparison(originalUrl) !== requested
+      || !/html|xhtml/i.test(mimeType)
+      || !filename.startsWith("crawl-data/")
+      || !Number.isSafeInteger(offset) || offset < 0
+      || !Number.isSafeInteger(length) || length < 1 || length > 2_000_000) return [];
+    return [{
+      collectionId,
+      timestamp,
+      capturedAt,
+      originalUrl,
+      statusCode,
+      digest: typeof row.digest === "string" ? row.digest : null,
+      mimeType,
+      filename,
+      offset,
+      length,
+      warcUrl: `https://data.commoncrawl.org/${filename}`,
+    } satisfies CommonCrawlCapture];
+  });
+  return captures.sort((left, right) => Date.parse(right.capturedAt) - Date.parse(left.capturedAt))[0] || null;
+}
+
+/** Extracts the HTTP response payload from one decompressed WARC response. */
+export function extractCommonCrawlWarcBody(value: string) {
+  const warcHeaderEnd = value.indexOf("\r\n\r\n");
+  if (warcHeaderEnd < 0) return null;
+  const httpStart = warcHeaderEnd + 4;
+  const httpHeaderEnd = value.indexOf("\r\n\r\n", httpStart);
+  if (httpHeaderEnd < 0) return null;
+  const httpHeader = value.slice(httpStart, httpHeaderEnd);
+  if (!/^HTTP\/\d(?:\.\d)?\s+200\b/m.test(httpHeader)) return null;
+  const contentType = httpHeader.match(/^content-type:\s*([^\r\n]+)/im)?.[1] || "";
+  if (contentType && !/html|xhtml|text\//i.test(contentType)) return null;
+  const body = value.slice(httpHeaderEnd + 4).trim();
+  return body || null;
+}
+
 export function waybackCdxUrl(canonicalUrl: string, evidenceCutoffAt: string) {
   if (!isPublicHttpUrl(canonicalUrl)) throw new Error("Archive lookup requires a public HTTP URL");
   const cutoff = new Date(evidenceCutoffAt);
   if (!Number.isFinite(cutoff.getTime())) throw new Error("Archive lookup requires a valid evidence cutoff");
   const to = cutoff.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const params = new URLSearchParams({
-    url: canonicalUrl,
+    url: canonicalHistoricalArchiveUrl(canonicalUrl),
     matchType: "exact",
     output: "json",
     fl: "timestamp,original,statuscode,digest,mimetype",

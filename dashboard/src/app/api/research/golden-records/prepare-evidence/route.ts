@@ -200,6 +200,7 @@ export async function GET() {
       runs: (runs || []).map((run) => ({
         ...run,
         retry_after_seconds: archiveRateLimitRetryAfterSeconds(run),
+        archive_fallback_available: true,
       })),
     }, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
@@ -339,15 +340,9 @@ export async function POST(request: NextRequest) {
     });
     const reusableCheckpoint = reusableRun?.checkpoint as Record<string, unknown> | null | undefined;
     const reusableSummary = reusableRun?.summary as Record<string, unknown> | null | undefined;
-    const retryAfterSeconds = reusableRun ? archiveRateLimitRetryAfterSeconds(reusableRun) : 0;
-    if (retryAfterSeconds > 0) {
-      return NextResponse.json({
-        error: "Internet Archive is cooling down after a bounded rate-limit failure. The saved discovery checkpoint remains reusable with zero new Apify spend.",
-        retryAfterSeconds,
-        discoveryReused: true,
-        scoringTokensSpent: 0,
-      }, { status: 429, headers: { "retry-after": String(retryAfterSeconds) } });
-    }
+    // The paid Google discovery checkpoint remains reusable while Wayback is
+    // cooling down. The durable workflow now falls back to Common Crawl, so a
+    // Wayback-only rate limit no longer justifies blocking the recovery run.
     const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
       ? reusableCheckpoint.provider_run_id
       : typeof reusableSummary?.providerRunId === "string" ? reusableSummary.providerRunId : undefined;

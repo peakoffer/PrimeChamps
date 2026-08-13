@@ -67,6 +67,7 @@ type EvidencePreparationRun = {
   actual_apify_cost_microusd: number | null;
   error_message: string | null;
   retry_after_seconds?: number;
+  archive_fallback_available?: boolean;
   checkpoint?: {
     preparation_mode?: "baseline" | "age_recovery" | "signal_recovery";
     benchmark_split?: "excluded" | "development" | "held_out" | null;
@@ -412,7 +413,8 @@ export default function ResearchBenchmarkPage() {
     const processed = new Set(interruptedExcludedSignalRun.checkpoint?.processed_record_ids || []);
     return interruptedExcludedSignalRun.record_ids.filter((recordId) => !processed.has(recordId));
   }, [interruptedExcludedSignalRun]);
-  const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0;
+  const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0
+    && interruptedExcludedSignalRun?.archive_fallback_available !== true;
   const excludedSignalRecoveryRecords = useMemo(() => records
     .filter((record) => record.benchmark_split === "excluded"
       && record.fit_label === "fit"

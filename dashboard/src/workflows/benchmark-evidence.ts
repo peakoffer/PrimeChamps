@@ -7,11 +7,16 @@ import {
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   buildHistoricalSignalRecoveryQueries,
+  commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
+  extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
   preparedEvidenceSignalSupported,
+  selectCommonCrawlCapture,
+  selectCommonCrawlCollections,
   selectWaybackCapture,
   waybackCdxUrl,
+  type CommonCrawlCapture,
   type EvidencePreparationRecord,
   type HistoricalSearchCandidate,
   type HistoricalEvidencePreparationMode,
@@ -229,7 +234,7 @@ async function reconcilePreparedSignalClaims(input: {
     .in("golden_record_id", input.recordIds)
     .in("claim_type", ["athletic_momentum", "audience_signal", "commercial_achievability_signal"])
     .eq("eligible_for_scoring", true)
-    .eq("research_evidence_sources.provider", "internet_archive_wayback");
+    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl"]);
   if (error) throw error;
   const unsupportedIds = ((data || []) as unknown as StoredPreparedSignalClaim[])
     .filter((claim) => !preparedEvidenceSignalSupported(claim.claim_type, claim.source_excerpt || ""))
@@ -273,37 +278,168 @@ async function fetchArchiveHtml(url: string) {
   return (await response.text()).slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters * 3);
 }
 
+async function loadCommonCrawlCollections() {
+  "use step";
+
+  const response = await fetch("https://index.commoncrawl.org/collinfo.json", {
+    headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(30_000),
+    cache: "no-store",
+  });
+  if (!response.ok) return [];
+  const payload = await response.json() as unknown;
+  return Array.isArray(payload) ? payload : [];
+}
+loadCommonCrawlCollections.maxRetries = 1;
+
+async function decompressCommonCrawlRecord(bytes: Uint8Array) {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > 6_000_000) {
+      await reader.cancel("Common Crawl record exceeded the decompression limit");
+      return null;
+    }
+    chunks.push(value);
+  }
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(combined);
+}
+
+async function fetchCommonCrawlHtml(capture: CommonCrawlCapture) {
+  const lastByte = capture.offset + capture.length - 1;
+  const response = await fetch(capture.warcUrl, {
+    headers: {
+      Accept: "application/warc,application/octet-stream",
+      Range: `bytes=${capture.offset}-${lastByte}`,
+      "User-Agent": "PrimeChampsResearch/1.0 evidence-audit",
+    },
+    signal: AbortSignal.timeout(45_000),
+    cache: "no-store",
+  });
+  if (response.status !== 206) return null;
+  const compressed = new Uint8Array(await response.arrayBuffer());
+  if (!compressed.length || compressed.length > 2_000_000) return null;
+  const decompressed = await decompressCommonCrawlRecord(compressed);
+  return decompressed ? extractCommonCrawlWarcBody(decompressed) : null;
+}
+
+async function retrieveCommonCrawlEvidenceCandidate(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+  collections: unknown;
+}) {
+  const collectionIds = selectCommonCrawlCollections(
+    input.collections,
+    input.record.evidence_cutoff_at,
+    2
+  );
+  for (const collectionId of collectionIds) {
+    const response = await fetch(commonCrawlIndexUrl(collectionId, input.candidate.url), {
+      headers: { Accept: "application/x-ndjson,text/plain", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+      signal: AbortSignal.timeout(30_000),
+      cache: "no-store",
+    });
+    if (!response.ok) continue;
+    const capture = selectCommonCrawlCapture(
+      await response.text(),
+      collectionId,
+      input.candidate.url,
+      input.record.evidence_cutoff_at
+    );
+    if (!capture) continue;
+    const html = await fetchCommonCrawlHtml(capture);
+    if (!html) continue;
+    const prepared = extractPreparedArchivedEvidence({
+      record: input.record,
+      candidate: input.candidate,
+      capture: {
+        timestamp: capture.timestamp,
+        capturedAt: capture.capturedAt,
+        originalUrl: capture.originalUrl,
+        statusCode: capture.statusCode,
+        digest: capture.digest,
+        mimeType: capture.mimeType,
+        archivedUrl: `${capture.warcUrl}#offset=${capture.offset}&length=${capture.length}`,
+      },
+      html,
+    });
+    return {
+      evidence: prepared.evidence ? {
+        ...prepared.evidence,
+        archiveProvider: "common_crawl" as const,
+        providerRequestId: `${collectionId}:${capture.timestamp}:${capture.offset}`,
+      } : null,
+      rejectionReason: prepared.rejectionReason,
+    };
+  }
+  return { evidence: null, rejectionReason: "no_common_crawl_html_capture_before_cutoff" };
+}
+
 async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
+  commonCrawlCollections: unknown;
+  skipWayback?: boolean;
 }) {
   "use step";
 
   const { candidate } = input;
+  let waybackRateLimited = false;
+  if (!input.skipWayback) {
+    try {
+      const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
+      const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
+      if (capture) {
+        const html = await fetchArchiveHtml(capture.archivedUrl);
+        if (html) {
+          const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
+          if (prepared.evidence) {
+            return {
+              evidence: {
+                ...prepared.evidence,
+                archiveProvider: "internet_archive_wayback" as const,
+                providerRequestId: capture.timestamp,
+              },
+              rejectionReason: null,
+              rateLimited: false,
+              waybackRateLimited: false,
+            };
+          }
+        }
+      }
+    } catch (error) {
+      waybackRateLimited = error instanceof RetryableError;
+    }
+  }
   try {
-    const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
-    const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
-    if (!capture) return { evidence: null, rejectionReason: "no_html_capture_before_cutoff", rateLimited: false };
-    const html = await fetchArchiveHtml(capture.archivedUrl);
-    if (!html) return { evidence: null, rejectionReason: "archived_page_unavailable_or_not_html", rateLimited: false };
-    const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
+    const commonCrawl = await retrieveCommonCrawlEvidenceCandidate({
+      record: input.record,
+      candidate,
+      collections: input.commonCrawlCollections,
+    });
     return {
-      evidence: prepared.evidence,
-      rejectionReason: prepared.rejectionReason,
+      evidence: commonCrawl.evidence,
+      rejectionReason: commonCrawl.rejectionReason,
       rateLimited: false,
+      waybackRateLimited,
     };
   } catch (error) {
-    if (error instanceof RetryableError) {
-      return {
-        evidence: null,
-        rejectionReason: error.message.slice(0, 180),
-        rateLimited: true,
-      };
-    }
     return {
       evidence: null,
       rejectionReason: error instanceof Error ? error.message.slice(0, 180) : "archive_lookup_failed",
       rateLimited: false,
+      waybackRateLimited,
     };
   }
 }
@@ -351,8 +487,8 @@ async function persistPreparedRecordEvidence(input: {
       title: item.title,
       publisher: item.domain,
       source_type: "archive",
-      provider: "internet_archive_wayback",
-      provider_request_id: item.captureTimestamp,
+      provider: item.archiveProvider || "internet_archive_wayback",
+      provider_request_id: item.providerRequestId || item.captureTimestamp,
       published_at: item.publishedAt,
       retrieved_at: verifiedAt,
       historical_as_of: item.historicalAsOf,
@@ -368,6 +504,7 @@ async function persistPreparedRecordEvidence(input: {
         discovery_query: item.searchQuery,
         discovery_snippet: item.searchSnippet,
         verification: "exact_name_plus_sport_in_archived_page",
+        archive_provider: item.archiveProvider || "internet_archive_wayback",
         scoring_tokens_spent: 0,
       },
     }, { onConflict: "organization_id,golden_record_id,canonical_url,historical_as_of" }).select("id").single();
@@ -464,6 +601,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       patch: { status: "running", error_message: null },
     });
     const discovery = await discoverHistoricalEvidence(input);
+    const commonCrawlCollections = await loadCommonCrawlCollections();
     const signalReconciliation = await reconcilePreparedSignalClaims({
       organizationId: input.organizationId,
       recordIds: input.recordIds,
@@ -489,6 +627,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       },
     });
     const results = [];
+    let skipWayback = false;
     for (const record of discovery.records) {
       const evidence: PreparedArchivedEvidence[] = [];
       const rejections: Array<{ url: string; reason: string }> = [];
@@ -497,13 +636,19 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       for (const candidate of candidates) {
         let archiveResult: Awaited<ReturnType<typeof retrieveArchivedEvidenceCandidate>> | null = null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
-          archiveResult = await retrieveArchivedEvidenceCandidate({ record, candidate });
+          archiveResult = await retrieveArchivedEvidenceCandidate({
+            record,
+            candidate,
+            commonCrawlCollections,
+            skipWayback,
+          });
+          if (archiveResult.waybackRateLimited) skipWayback = true;
           if (!archiveResult.rateLimited) break;
           if (attempt < 1) await sleep("20s");
         }
         if (archiveResult?.rateLimited) {
           throw new RetryableError(
-            "Internet Archive stayed rate limited after one bounded retry; stop and replay the saved discovery run after cooldown",
+            "Historical archive providers stayed rate limited after one bounded retry; stop and replay the saved discovery run after cooldown",
             { retryAfter: "10m" }
           );
         }
