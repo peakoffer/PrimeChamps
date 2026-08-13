@@ -63,7 +63,11 @@ import {
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
 } from "../src/lib/research/benchmark-runner-support.ts";
-import { prepareHistoricalSocialSnapshot } from "../src/lib/research/historical-social-snapshot.ts";
+import {
+  prepareHistoricalEvidenceDetails,
+  prepareHistoricalSocialSnapshot,
+} from "../src/lib/research/historical-social-snapshot.ts";
+import { convertOnlyFansHistoricalWorkbookExtraction } from "../src/lib/research/historical-workbook-converter.ts";
 import {
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
@@ -243,6 +247,28 @@ test("historical reconciliation makes Dylan's workbook authoritative", () => {
   });
   assert.equal(idempotent.conflict, false);
   assert.equal(idempotent.golden.finalOutcome, "non_signing");
+
+  const sourceBackedSport = prepareHistoricalBenchmarkRecord({
+    ...HISTORICAL_CASE,
+    evidenceRef: "E11",
+    evidenceDetails: [{
+      claimCategory: "Sport",
+      extractedValue: "Snowboarding",
+      sourceDate: "2026-04-20",
+      sourceEmailSubject: "Athlete proposal",
+      sourceDocumentReference: "proposal.pdf",
+      supportingExcerpt: "The athlete competes in snowboarding.",
+      beforeDecisionCutoff: "Yes",
+      identityMatchConfidence: "High",
+    }],
+  });
+  assert.equal(reconcileHistoricalGoldenRecord(sourceBackedSport, {
+    id: "generic",
+    athlete_name: HISTORICAL_CASE.athleteName,
+    sport: "Motorsports",
+    fit_label: "fit",
+    final_outcome: "signed",
+  }).golden.sport, "Snowboarding");
 });
 
 test("historical social snapshots require dated pre-decision provenance", () => {
@@ -291,6 +317,118 @@ test("historical social snapshots require dated pre-decision provenance", () => 
       sourceDocumentReference: "snapshot.pdf",
     },
   }), /metrics require the Instagram handle/);
+});
+
+test("historical workbook conversion locks Dylan's truth and preserves row-level provenance", () => {
+  const benchmarkHeaders = [
+    "Athlete / Talent", "Approx. decision date", "OnlyFans fit at the time", "Outcome",
+    "Primary reason", "One-sentence explanation", "Evidence ref", "Confidence",
+  ];
+  const evidenceHeaders = [
+    "Evidence ref", "Athlete / Talent", "Email subject(s)", "Relevant date(s)",
+    "What the evidence establishes", "Notes / documents available",
+  ];
+  const detailHeaders = [
+    "Athlete Name", "Claim Category", "Extracted Value", "Source Date", "Email Subject",
+    "Attachment Filename or Document Reference", "Supporting Excerpt",
+    "Before Decision Cutoff — Yes/No", "Identity Match Confidence — High/Medium/Low", "Notes",
+  ];
+  const outcomes = [
+    ...Array(41).fill("Signed"),
+    ...Array(3).fill("Approved but Did Not Sign"),
+    ...Array(23).fill("Rejected"),
+    ...Array(33).fill("Stalled"),
+  ];
+  const benchmarkRows = outcomes.map((outcome, index) => [
+    `Athlete ${index + 1}`, "2026-05-03", "Uncertain", outcome, "internal decision",
+    `Locked explanation ${index + 1}`, `E${String(index + 1).padStart(2, "0")}`, "High",
+  ]);
+  const evidenceRows = outcomes.map((_, index) => [
+    `E${String(index + 1).padStart(2, "0")}`, `Athlete ${index + 1}`, `Subject ${index + 1}`,
+    "2026-04-20", `Evidence ${index + 1}`, `Document ${index + 1}.pdf`,
+  ]);
+  const details = outcomes.map((_, index) => [
+    `Athlete ${index + 1}`, "Sport", "Volleyball", "2026-04-20", `Subject ${index + 1}`,
+    `Document ${index + 1}.pdf`, `Athlete ${index + 1} played volleyball.`, "Yes", "High", "",
+  ]);
+  const baseline = {
+    sheets: {
+      Benchmark: [["title"], [], [], benchmarkHeaders, ...benchmarkRows],
+      "Evidence Index": [["title"], [], [], evidenceHeaders, ...evidenceRows],
+    },
+  };
+  const enriched = {
+    sheets: {
+      ...baseline.sheets,
+      "Historical Evidence Details": [["title"], [], [], detailHeaders, ...details],
+    },
+  };
+  const converted = convertOnlyFansHistoricalWorkbookExtraction({ enriched, baseline });
+  assert.equal(converted.validation.records, 100);
+  assert.equal(converted.validation.lockedDifferences, 0);
+  assert.equal(converted.validation.evidenceDetailRows, 100);
+  assert.equal(converted.validation.evidenceDetailAthletes, 100);
+  assert.deepEqual(converted.validation.outcomeCounts, {
+    "Approved but Did Not Sign": 3, Rejected: 23, Signed: 41, Stalled: 33,
+  });
+  const prepared = prepareHistoricalBenchmarkRecord(converted.records[0]);
+  assert.equal(prepared.golden.sport, "Volleyball");
+  assert.equal(prepared.evidenceDetails[0].claimType, "sport_identity");
+  assert.equal(prepared.evidenceDetails[0].sourceDate, "2026-04-20");
+
+  const changed = structuredClone(enriched);
+  changed.sheets.Benchmark[4][3] = "Rejected";
+  assert.throws(() => convertOnlyFansHistoricalWorkbookExtraction({ enriched: changed, baseline }), /changed 1 locked source cell/);
+});
+
+test("historical detail evidence rejects leakage and keeps age as a non-scoring hint", () => {
+  const detail = prepareHistoricalEvidenceDetails({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    details: [{
+      claimCategory: "Explicit Age or 21+ Evidence",
+      extractedValue: "Born in 2000",
+      sourceDate: "2026-04-20",
+      sourceEmailSubject: "Example proposal",
+      sourceDocumentReference: "example.pdf",
+      supportingExcerpt: "Example Athlete was born in 2000.",
+      beforeDecisionCutoff: "Yes",
+      identityMatchConfidence: "High",
+    }],
+  });
+  assert.equal(detail[0].claimType, "adult_eligibility_hint");
+  assert.equal(detail[0].eligibleForScoring, false);
+  assert.match(detail[0].exclusionReason || "", /two independent public sources/);
+  const leaked = prepareHistoricalEvidenceDetails({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    details: [{
+      claimCategory: "Known Commercial or Economic Information",
+      extractedValue: "$60K ask; approved structure discussed at $30K",
+      sourceDate: "2026-04-20",
+      sourceEmailSubject: "Example proposal",
+      sourceDocumentReference: "example.pdf",
+      supportingExcerpt: "The approved structure was $30K plus bonus.",
+      beforeDecisionCutoff: "Yes",
+      identityMatchConfidence: "High",
+    }],
+  });
+  assert.equal(leaked[0].eligibleForScoring, false);
+  assert.match(leaked[0].exclusionReason || "", /benchmark leakage/);
+  assert.throws(() => prepareHistoricalEvidenceDetails({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    details: [{
+      claimCategory: "Athletic Momentum at Decision",
+      extractedValue: "Won the championship",
+      sourceDate: "2026-05-04",
+      sourceEmailSubject: "Future proposal",
+      sourceDocumentReference: "future.pdf",
+      supportingExcerpt: "Example Athlete won the championship.",
+      beforeDecisionCutoff: "Yes",
+      identityMatchConfidence: "High",
+    }],
+  }), /after the decision date/);
 });
 
 test("creator potential gate requires both audience and creator behavior", () => {
@@ -1502,4 +1640,16 @@ test("the database permits evidence-gated Dylan outcome cases to freeze without 
   assert.match(migration, /decisive_information_publicly_knowable is not null/);
   assert.match(migration, /stratification_tags @> array\['dylan_outcome_ground_truth'\]::text\[\]/);
   assert.match(migration, /benchmark_split = 'excluded'/);
+});
+
+test("historical evidence import preserves prior cohort assignments and uses replay-safe detail sources", () => {
+  const importer = readFileSync(new URL("../scripts/import-onlyfans-historical-benchmark.ts", import.meta.url), "utf8");
+  assert.match(importer, /existingBenchmarkSplit = item\.existing!\.benchmark_split \|\| "excluded"/);
+  assert.match(importer, /benchmark_split: existingBenchmarkSplit/);
+  assert.match(importer, /historical_evidence_detail/);
+  assert.match(importer, /provider_request_id: providerRequestId/);
+  assert.doesNotMatch(importer, /from\("athletes"\)\.(?:insert|upsert|update|delete)/);
+  for (const forbiddenTable of ["messages", "outreach_touchpoints", "channel_messages", "message_drafts"]) {
+    assert.ok(!importer.includes(`from("${forbiddenTable}")`), `historical import must not touch ${forbiddenTable}`);
+  }
 });

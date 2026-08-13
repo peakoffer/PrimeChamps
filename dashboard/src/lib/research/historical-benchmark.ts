@@ -1,6 +1,9 @@
 import type { GoldenRecordInput } from "./v2";
 import {
+  prepareHistoricalEvidenceDetails,
   prepareHistoricalSocialSnapshot,
+  type HistoricalEvidenceDetailInput,
+  type PreparedHistoricalEvidenceDetail,
   type HistoricalSocialSnapshotInput,
   type PreparedHistoricalSocialSnapshot,
 } from "./historical-social-snapshot.ts";
@@ -23,6 +26,7 @@ export type HistoricalBenchmarkRecord = {
   evidenceEstablishes: string;
   evidenceNotes: string;
   socialSnapshot?: HistoricalSocialSnapshotInput | null;
+  evidenceDetails?: HistoricalEvidenceDetailInput[] | null;
 };
 
 export type ExistingHistoricalGoldenRecord = {
@@ -32,6 +36,7 @@ export type ExistingHistoricalGoldenRecord = {
   sport: string;
   fit_label: string;
   final_outcome: string;
+  benchmark_split?: "development" | "held_out" | "excluded" | null;
   internal_record_reference?: string | null;
   stratification_tags?: string[] | null;
 };
@@ -47,6 +52,7 @@ export type PreparedHistoricalBenchmarkRecord = {
   evidencePhase: "pre_decision" | "post_decision" | "mixed" | "unknown";
   hasPostDecisionEvidence: boolean;
   socialSnapshot: PreparedHistoricalSocialSnapshot | null;
+  evidenceDetails: PreparedHistoricalEvidenceDetail[];
   evidence: {
     providerRequestId: string;
     canonicalUrl: string;
@@ -191,7 +197,20 @@ export function prepareHistoricalBenchmarkRecord(
     decisionDate: record.decisionDate,
     snapshot: record.socialSnapshot,
   });
-  const sport = socialSnapshot?.sport || inferSport(record);
+  const detailInstagramHandle = record.evidenceDetails?.find((detail) =>
+    detail.claimCategory === "Instagram Handle at Decision")?.extractedValue;
+  const detailTiktokHandle = record.evidenceDetails?.find((detail) =>
+    detail.claimCategory === "TikTok Handle at Decision")?.extractedValue;
+  const evidenceDetails = prepareHistoricalEvidenceDetails({
+    athleteName,
+    decisionDate: record.decisionDate,
+    instagramHandle: record.socialSnapshot?.instagramHandle || detailInstagramHandle,
+    tiktokHandle: record.socialSnapshot?.tiktokHandle || detailTiktokHandle,
+    details: record.evidenceDetails,
+  });
+  const detailSport = evidenceDetails.find((detail) => detail.claimCategory === "Sport")
+    ?.structuredValue.value;
+  const sport = socialSnapshot?.sport || (typeof detailSport === "string" ? detailSport : null) || inferSport(record);
   const groundTruth = historicalOutcomeGroundTruth(record.outcome);
   const finalOutcome = normalizedOutcome(record.outcome);
   const primaryReason = normalizedReason(record.primaryReason);
@@ -208,6 +227,7 @@ export function prepareHistoricalBenchmarkRecord(
     evidencePhase: phase,
     hasPostDecisionEvidence,
     socialSnapshot,
+    evidenceDetails,
     golden: {
       athleteName,
       sport,
@@ -265,9 +285,12 @@ export function reconcileHistoricalGoldenRecord(
   );
   const preservedReference = [existing.internal_record_reference, prepared.golden.internalRecordReference]
     .filter(Boolean).join("; ");
-  const resolvedSport = existing.sport && existing.sport !== "Needs enrichment"
-    ? existing.sport
-    : prepared.golden.sport;
+  // A dated, source-backed sport from the enriched workbook is more precise
+  // than a previous inferred/generic value. Preserve the existing sport only
+  // when the new evidence still cannot resolve it.
+  const resolvedSport = prepared.golden.sport !== "Needs enrichment"
+    ? prepared.golden.sport
+    : existing.sport || "Needs enrichment";
   const golden: GoldenRecordInput = {
     ...prepared.golden,
     athleteId: existing.athlete_id || null,

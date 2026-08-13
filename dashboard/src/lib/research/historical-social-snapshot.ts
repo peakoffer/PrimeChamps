@@ -40,6 +40,47 @@ export type PreparedHistoricalSocialSnapshot = {
   claims: HistoricalSocialSnapshotClaim[];
 };
 
+export type HistoricalEvidenceDetailInput = {
+  claimCategory: string;
+  extractedValue: string;
+  sourceDate: string;
+  sourceEmailSubject: string;
+  sourceDocumentReference: string;
+  supportingExcerpt: string;
+  beforeDecisionCutoff: "Yes" | "No";
+  identityMatchConfidence: "High" | "Medium" | "Low";
+  notes?: string | null;
+};
+
+export type PreparedHistoricalEvidenceDetail = {
+  ordinal: number;
+  claimCategory: string;
+  claimType:
+    | "sport_identity"
+    | "athlete_profile"
+    | "audience_signal"
+    | "social_engagement_signal"
+    | "creator_behavior_signal"
+    | "athletic_momentum"
+    | "adult_eligibility_hint"
+    | "commercial_achievability_signal";
+  claimText: string;
+  structuredValue: Record<string, unknown>;
+  sourceDate: string;
+  sourceTimestamp: string;
+  sourceEmailSubject: string;
+  sourceDocumentReference: string;
+  supportingExcerpt: string;
+  identityMatchConfidence: "High" | "Medium" | "Low";
+  notes: string | null;
+  canonicalUrl: string;
+  domain: string;
+  independenceGroup: string;
+  material: boolean;
+  eligibleForScoring: boolean;
+  exclusionReason: string | null;
+};
+
 const MISSING_VALUES = new Set(["", "-", "—", "n/a", "na", "none", "not available", "unknown"]);
 
 function optionalText(value: string | null | undefined) {
@@ -101,6 +142,124 @@ function exactDate(value: string | null | undefined, label: string) {
     throw new Error(`${label} is not a valid calendar date`);
   }
   return { date: text, timestamp: date.toISOString() };
+}
+
+const DETAIL_CATEGORY_CONFIGURATION = {
+  "Sport": { claimType: "sport_identity", material: false },
+  "Instagram Handle at Decision": { claimType: "athlete_profile", material: false, platform: "instagram" },
+  "TikTok Handle at Decision": { claimType: "athlete_profile", material: false, platform: "tiktok" },
+  "Instagram Followers at Decision": { claimType: "audience_signal", material: true, platform: "instagram" },
+  "Instagram Engagement Rate at Decision": { claimType: "social_engagement_signal", material: true, platform: "instagram" },
+  "Average Likes or Average Engagement at Decision": { claimType: "social_engagement_signal", material: true, platform: "instagram" },
+  "Creator Activity at Decision": { claimType: "creator_behavior_signal", material: true },
+  "Posting Frequency at Decision": { claimType: "creator_behavior_signal", material: true },
+  "Athletic Momentum at Decision": { claimType: "athletic_momentum", material: true },
+  "Momentum Date or Season": { claimType: "athletic_momentum", material: true },
+  "Date of Birth": { claimType: "adult_eligibility_hint", material: false },
+  "Explicit Age or 21+ Evidence": { claimType: "adult_eligibility_hint", material: false },
+  "Agent, Manager, or Agency": { claimType: "commercial_achievability_signal", material: true },
+  "Direct Business or Contact Path": { claimType: "commercial_achievability_signal", material: true },
+  "Sponsorship, NIL, or Brand Activity": { claimType: "commercial_achievability_signal", material: true },
+  "Known Commercial or Economic Information": { claimType: "commercial_achievability_signal", material: true },
+} as const;
+
+/**
+ * Converts the workbook's row-level evidence ledger into independently dated
+ * claims. Outcome/fit fields never enter this path. A mailbox age statement is
+ * retained as a discovery hint only and can never clear the two-public-source
+ * finalist gate.
+ */
+export function prepareHistoricalEvidenceDetails(input: {
+  athleteName: string;
+  decisionDate: string;
+  instagramHandle?: string | null;
+  tiktokHandle?: string | null;
+  details?: HistoricalEvidenceDetailInput[] | null;
+}): PreparedHistoricalEvidenceDetail[] {
+  const athleteName = optionalText(input.athleteName);
+  if (!athleteName) throw new Error("Historical detail evidence requires an athlete name");
+  const decision = exactDate(input.decisionDate, "Decision date");
+  const instagramHandle = normalizedHandle(input.instagramHandle, "instagram");
+  const tiktokHandle = normalizedHandle(input.tiktokHandle, "tiktok");
+  return (input.details || []).map((detail, index) => {
+    const claimCategory = optionalText(detail.claimCategory);
+    const extractedValue = optionalText(detail.extractedValue);
+    const sourceEmailSubject = optionalText(detail.sourceEmailSubject);
+    const sourceDocumentReference = optionalText(detail.sourceDocumentReference);
+    const supportingExcerpt = optionalText(detail.supportingExcerpt);
+    if (!claimCategory || !(claimCategory in DETAIL_CATEGORY_CONFIGURATION)) {
+      throw new Error(`Unsupported historical evidence category: ${claimCategory || "missing"}`);
+    }
+    if (!extractedValue || !sourceEmailSubject || !sourceDocumentReference || !supportingExcerpt) {
+      throw new Error(`Historical evidence detail ${athleteName} / ${claimCategory} is missing value or provenance`);
+    }
+    if (detail.beforeDecisionCutoff !== "Yes") {
+      throw new Error(`Historical evidence detail ${athleteName} / ${claimCategory} is not confirmed before the decision cutoff`);
+    }
+    if (!(["High", "Medium", "Low"] as const).includes(detail.identityMatchConfidence)) {
+      throw new Error(`Historical evidence detail ${athleteName} / ${claimCategory} has invalid identity confidence`);
+    }
+    const source = exactDate(detail.sourceDate, `Historical evidence source date for ${athleteName} / ${claimCategory}`);
+    if (source.timestamp > decision.timestamp) {
+      throw new Error(`Historical evidence source date ${source.date} is after the decision date ${decision.date}`);
+    }
+    const configuration = DETAIL_CATEGORY_CONFIGURATION[claimCategory as keyof typeof DETAIL_CATEGORY_CONFIGURATION];
+    const platform = "platform" in configuration ? configuration.platform : null;
+    const categoryHandle = claimCategory === "Instagram Handle at Decision"
+      ? normalizedHandle(extractedValue, "instagram")
+      : claimCategory === "TikTok Handle at Decision"
+        ? normalizedHandle(extractedValue, "tiktok")
+        : null;
+    const effectiveInstagramHandle = platform === "instagram" ? categoryHandle || instagramHandle : instagramHandle;
+    const effectiveTiktokHandle = platform === "tiktok" ? categoryHandle || tiktokHandle : tiktokHandle;
+    const canonicalUrl = platform === "instagram" && effectiveInstagramHandle
+      ? `https://www.instagram.com/${effectiveInstagramHandle}/`
+      : platform === "tiktok" && effectiveTiktokHandle
+        ? `https://www.tiktok.com/@${effectiveTiktokHandle}`
+        : "https://mail.google.com/";
+    const domain = platform === "instagram" && effectiveInstagramHandle ? "instagram.com"
+      : platform === "tiktok" && effectiveTiktokHandle ? "tiktok.com"
+        : "mail.google.com";
+    const isAgeHint = configuration.claimType === "adult_eligibility_hint";
+    const outcomeLikeEvidence = /\b(?:approved structure|fully executed|countersign(?:ed|ature)|linksquares fully signed)\b/i.test(`${extractedValue} ${supportingExcerpt}`)
+      || /\b(?:onlyfans|only fans|of)\b.{0,60}\b(?:approved|rejected|declined|passed|signed|executed|payment)\b/i.test(`${extractedValue} ${supportingExcerpt}`);
+    const highConfidence = detail.identityMatchConfidence === "High";
+    const eligibleForScoring = !isAgeHint && !outcomeLikeEvidence && highConfidence;
+    return {
+      ordinal: index + 1,
+      claimCategory,
+      claimType: configuration.claimType,
+      claimText: `${athleteName} — ${claimCategory}: ${extractedValue}`,
+      structuredValue: {
+        category: claimCategory,
+        value: extractedValue,
+        platform,
+        handle: categoryHandle,
+        source_document_reference: sourceDocumentReference,
+      },
+      sourceDate: source.date,
+      sourceTimestamp: source.timestamp,
+      sourceEmailSubject,
+      sourceDocumentReference,
+      supportingExcerpt,
+      identityMatchConfidence: detail.identityMatchConfidence,
+      notes: optionalText(detail.notes),
+      canonicalUrl,
+      domain,
+      // Mailbox materials are one archive family and must never masquerade as
+      // independent corroboration. Platform-native metrics use that platform.
+      independenceGroup: domain,
+      material: configuration.material,
+      eligibleForScoring,
+      exclusionReason: isAgeHint
+        ? "Mailbox age evidence is a discovery hint only; two independent public sources remain required."
+        : outcomeLikeEvidence
+          ? "The excerpt contains an internal approval/outcome-like signal and is excluded to prevent benchmark leakage."
+          : !highConfidence
+            ? "Only high-confidence identity matches enter benchmark model evidence."
+            : null,
+    };
+  });
 }
 
 export function historicalSocialSnapshotHasData(input: HistoricalSocialSnapshotInput | null | undefined) {

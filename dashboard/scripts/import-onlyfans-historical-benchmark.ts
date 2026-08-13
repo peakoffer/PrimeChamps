@@ -65,7 +65,7 @@ const admin = createClient(supabaseUrl, serviceKey, {
 const [{ data: organizations, error: organizationError }, { data: existingRows, error: existingError }, { data: athletes, error: athleteError }] = await Promise.all([
   admin.from("organizations").select("id,name").limit(2),
   admin.from("research_golden_records")
-    .select("id,athlete_id,athlete_name,sport,fit_label,final_outcome,internal_record_reference,stratification_tags")
+    .select("id,athlete_id,athlete_name,sport,fit_label,final_outcome,benchmark_split,internal_record_reference,stratification_tags")
     .limit(1_000),
   admin.from("athletes").select("id,name,sport").limit(2_000),
 ]);
@@ -152,6 +152,13 @@ const summary = {
   historicalAudienceSnapshots: planned.filter((item) => item.prepared.socialSnapshot?.instagramFollowerCount != null).length,
   historicalCreatorSnapshots: planned.filter((item) => item.prepared.socialSnapshot?.creatorActivity).length,
   historicalSnapshotClaims: planned.reduce((total, item) => total + (item.prepared.socialSnapshot?.claims.length || 0), 0),
+  historicalEvidenceDetails: planned.reduce((total, item) => total + item.prepared.evidenceDetails.length, 0),
+  historicalEvidenceDetailAthletes: planned.filter((item) => item.prepared.evidenceDetails.length > 0).length,
+  historicalEvidenceDetailCategories: Object.fromEntries(Array.from(new Set(planned.flatMap((item) =>
+    item.prepared.evidenceDetails.map((detail) => detail.claimCategory)))).sort().map((category) => [
+      category,
+      planned.reduce((total, item) => total + item.prepared.evidenceDetails.filter((detail) => detail.claimCategory === category).length, 0),
+    ])),
   fit: planned.filter((item) => item.golden.fitLabel === "fit").length,
   notFit: planned.filter((item) => item.golden.fitLabel === "not_fit").length,
   uncertainFit: planned.filter((item) => item.golden.fitLabel === "uncertain").length,
@@ -169,6 +176,10 @@ const summary = {
     uncertain: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.fit_label === "uncertain").length,
     conflicts: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.stratification_tags?.includes("historical_label_conflict")).length,
     outcomeGroundTruth: existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.stratification_tags?.includes("dylan_outcome_ground_truth")).length,
+    splitCounts: Object.fromEntries(["development", "held_out", "excluded"].map((split) => [
+      split,
+      existingGolden.filter((record) => record.stratification_tags?.includes(ONLYFANS_HISTORICAL_DATASET) && record.benchmark_split === split).length,
+    ])),
   },
   storedVerification,
 };
@@ -196,8 +207,12 @@ await fs.writeFile(path.resolve(backupPath), JSON.stringify({
 
 const goldenIds = new Map<string, string>();
 for (const item of planned.filter((candidate) => candidate.existing)) {
+  // Evidence imports must not silently retire/reassign a prior development or
+  // held-out cohort. A new cohort is created only by the explicit split/freeze
+  // workflow after evidence readiness is recomputed.
+  const existingBenchmarkSplit = item.existing!.benchmark_split || "excluded";
   const { data, error } = await admin.from("research_golden_records")
-    .update(goldenRecordToRow(item.golden))
+    .update({ ...goldenRecordToRow(item.golden), benchmark_split: existingBenchmarkSplit })
     .eq("id", item.existing!.id)
     .eq("organization_id", organizationId)
     .select("id")
@@ -470,11 +485,99 @@ for (const item of planned) {
   }
 }
 
+const historicalDetailProvider = "onlyfans_historical_evidence_detail";
+let historicalDetailSourcesWritten = 0;
+let historicalDetailClaimsWritten = 0;
+for (const item of planned) {
+  for (const detail of item.prepared.evidenceDetails) {
+    const providerRequestId = `${item.prepared.datasetKey}:${item.prepared.sourceRecordKey}:historical-detail:${String(detail.ordinal).padStart(3, "0")}`;
+    const canonicalUrl = new URL(detail.canonicalUrl);
+    canonicalUrl.searchParams.set("historical_evidence_detail", `${item.prepared.sourceRecordKey}-${String(detail.ordinal).padStart(3, "0")}`);
+    const sourceRow = {
+      organization_id: organizationId,
+      golden_record_id: goldenIds.get(item.prepared.sourceRecordKey),
+      canonical_url: canonicalUrl.toString(),
+      domain: detail.domain,
+      title: `${item.golden.athleteName} — ${detail.claimCategory} (${detail.sourceDate})`,
+      publisher: "Contemporaneous OnlyFans partnership materials",
+      source_type: "archive",
+      provider: historicalDetailProvider,
+      provider_request_id: providerRequestId,
+      published_at: detail.sourceTimestamp,
+      historical_as_of: detail.sourceTimestamp,
+      retrieval_status: "retrieved",
+      eligible_before_cutoff: true,
+      exclusion_reason: null,
+      metadata: {
+        dataset_key: item.prepared.datasetKey,
+        source_record_key: item.prepared.sourceRecordKey,
+        claim_category: detail.claimCategory,
+        source_email_subject: detail.sourceEmailSubject,
+        source_document_reference: detail.sourceDocumentReference,
+        identity_match_confidence: detail.identityMatchConfidence,
+        notes: detail.notes,
+        provenance_boundary: "Exact pre-decision mailbox/attachment excerpt. Outcome, fit label, and post-cutoff evidence are excluded.",
+      },
+    };
+    const { data: existingSource, error: existingSourceError } = await admin.from("research_evidence_sources")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("provider", historicalDetailProvider)
+      .eq("provider_request_id", providerRequestId)
+      .maybeSingle();
+    if (existingSourceError) throw existingSourceError;
+    let evidenceSourceId = existingSource?.id as string | undefined;
+    if (evidenceSourceId) {
+      const { error } = await admin.from("research_evidence_sources").update(sourceRow)
+        .eq("id", evidenceSourceId).eq("organization_id", organizationId);
+      if (error) throw error;
+    } else {
+      const { data, error } = await admin.from("research_evidence_sources").insert(sourceRow).select("id").single();
+      if (error) throw error;
+      evidenceSourceId = data.id as string;
+    }
+    historicalDetailSourcesWritten += 1;
+    const supported = detail.identityMatchConfidence === "High";
+    const claimRow = {
+      organization_id: organizationId,
+      evidence_source_id: evidenceSourceId,
+      golden_record_id: goldenIds.get(item.prepared.sourceRecordKey),
+      claim_type: detail.claimType,
+      claim_text: detail.claimText,
+      structured_value: detail.structuredValue,
+      source_excerpt: detail.supportingExcerpt,
+      effective_at: detail.sourceTimestamp,
+      support_status: supported ? "supported" : detail.identityMatchConfidence === "Medium" ? "partial" : "unsupported",
+      extraction_confidence: detail.identityMatchConfidence === "High" ? 95 : detail.identityMatchConfidence === "Medium" ? 75 : 40,
+      independence_group: detail.independenceGroup,
+      material: detail.material,
+      eligible_for_scoring: detail.eligibleForScoring,
+      exclusion_reason: detail.exclusionReason || (supported ? null : "Only high-confidence identity matches enter benchmark model evidence."),
+      verified_at: new Date().toISOString(),
+    };
+    const { data: existingClaim, error: existingClaimError } = await admin.from("research_evidence_claims")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("golden_record_id", goldenIds.get(item.prepared.sourceRecordKey)!)
+      .eq("evidence_source_id", evidenceSourceId)
+      .eq("claim_type", detail.claimType)
+      .maybeSingle();
+    if (existingClaimError) throw existingClaimError;
+    const { error } = existingClaim?.id
+      ? await admin.from("research_evidence_claims").update(claimRow).eq("id", existingClaim.id)
+      : await admin.from("research_evidence_claims").insert(claimRow);
+    if (error) throw error;
+    historicalDetailClaimsWritten += 1;
+  }
+}
+
 console.log(JSON.stringify({
   ...summary,
   goldenRecordsWritten: goldenIds.size,
-  evidenceSourcesWritten: sourceIds.size + snapshotSourceIds.size,
-  claimsWritten: desiredClaims.length + snapshotClaimsWritten,
+  evidenceSourcesWritten: sourceIds.size + snapshotSourceIds.size + historicalDetailSourcesWritten,
+  claimsWritten: desiredClaims.length + snapshotClaimsWritten + historicalDetailClaimsWritten,
   historicalSnapshotSourcesWritten: snapshotSourceIds.size,
   historicalSnapshotClaimsWritten: snapshotClaimsWritten,
+  historicalDetailSourcesWritten,
+  historicalDetailClaimsWritten,
 }, null, 2));
