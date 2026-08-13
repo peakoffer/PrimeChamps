@@ -307,25 +307,26 @@ export async function POST(request: NextRequest) {
     }
     const recordIds = selected.map((record) => record.id);
     const queryPlanVersion = historicalEvidenceQueryPlanVersion(preparationMode);
-    const sameRecordIds = (left: unknown, right: string[]) => Array.isArray(left)
-      && left.length === right.length
-      && left.every((value, index) => value === right[index]);
-    const latestSameRecordRun = (recentRuns || []).find((run) => sameRecordIds(run.record_ids, recordIds));
-    const latestCheckpoint = latestSameRecordRun?.checkpoint as Record<string, unknown> | null | undefined;
-    const latestSummary = latestSameRecordRun?.summary as Record<string, unknown> | null | undefined;
-    const latestProviderRunId = typeof latestCheckpoint?.provider_run_id === "string"
-      ? latestCheckpoint.provider_run_id
-      : typeof latestSummary?.providerRunId === "string" ? latestSummary.providerRunId : undefined;
-    const reusableRun = (latestSameRecordRun?.status === "failed"
-      || latestSameRecordRun?.status === "cancelled"
-      || latestCheckpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION)
-      && latestCheckpoint?.query_plan_version === queryPlanVersion
-      && typeof latestProviderRunId === "string"
-      && latestProviderRunId.length > 0
-      && typeof latestSameRecordRun?.actual_apify_cost_microusd === "number"
-      ? latestSameRecordRun
-      : undefined;
-    const reuseProviderRunId = reusableRun ? latestProviderRunId : undefined;
+    const reusableRun = (recentRuns || []).find((run) => {
+      const checkpoint = run.checkpoint as Record<string, unknown> | null | undefined;
+      const summary = run.summary as Record<string, unknown> | null | undefined;
+      const providerRunId = typeof checkpoint?.provider_run_id === "string"
+        ? checkpoint.provider_run_id
+        : typeof summary?.providerRunId === "string" ? summary.providerRunId : undefined;
+      return (run.status === "failed" || run.status === "cancelled"
+          || checkpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION)
+        && checkpoint?.query_plan_version === queryPlanVersion
+        && Array.isArray(run.record_ids)
+        && recordIds.every((recordId) => run.record_ids.includes(recordId))
+        && typeof providerRunId === "string"
+        && providerRunId.length > 0
+        && typeof run.actual_apify_cost_microusd === "number";
+    });
+    const reusableCheckpoint = reusableRun?.checkpoint as Record<string, unknown> | null | undefined;
+    const reusableSummary = reusableRun?.summary as Record<string, unknown> | null | undefined;
+    const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
+      ? reusableCheckpoint.provider_run_id
+      : typeof reusableSummary?.providerRunId === "string" ? reusableSummary.providerRunId : undefined;
     const { data: preparationRun, error: insertError } = await admin.from("research_evidence_preparation_runs").insert({
       organization_id: user.organizationId,
       requested_by_user_id: user.id,

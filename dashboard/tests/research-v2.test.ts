@@ -1611,9 +1611,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.ok(route.indexOf("if (!selected.length)") < route.indexOf("await start(prepareBenchmarkEvidenceWorkflow"), "blind-label gate must run before workflow start");
   assert.match(route, /no provider call was started/);
   assert.match(route, /reuseProviderRunId/);
-  assert.match(route, /latestSameRecordRun\?\.status === "failed"/);
-  assert.match(route, /latestSameRecordRun\?\.status === "cancelled"/);
-  assert.match(route, /latestSummary\?\.providerRunId/);
+  assert.match(route, /run\.status === "failed"/);
+  assert.match(route, /run\.status === "cancelled"/);
+  assert.match(route, /recordIds\.every\(\(recordId\) => run\.record_ids\.includes\(recordId\)\)/);
+  assert.match(route, /reusableSummary\?\.providerRunId/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /readiness\.momentum\.passed/);
@@ -1634,7 +1635,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(benchmarkPage, /Recover fresh positives/);
   assert.match(benchmarkPage, /benchmarkSplit: "excluded"/);
   assert.match(benchmarkPage, /maxApifyChargeUsd: 0\.5/);
-  assert.match(benchmarkPage, /recordIds: excludedSignalRecoveryRecords/);
+  assert.match(benchmarkPage, /recordIds: nextExcludedSignalRecoveryRecords/);
+  assert.match(benchmarkPage, /Resume saved recovery/);
+  assert.match(benchmarkPage, /processed_record_ids/);
+  assert.match(workflow, /readApifyRunDatasetWithUsage<SearchPage>\(input\.reuseProviderRunId, 1_000\)/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runner, /signalPreparedIds/);
   assert.match(runner, /Execution is gated by the evidence itself/);

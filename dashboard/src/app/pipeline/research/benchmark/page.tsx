@@ -69,6 +69,8 @@ type EvidencePreparationRun = {
   checkpoint?: {
     preparation_mode?: "baseline" | "age_recovery" | "signal_recovery";
     benchmark_split?: "excluded" | "development" | "held_out" | null;
+    processed_record_ids?: string[];
+    provider_run_id?: string;
   } | null;
   created_at: string;
 };
@@ -371,6 +373,15 @@ export default function ResearchBenchmarkPage() {
       && run.checkpoint?.preparation_mode === "signal_recovery"
       && run.checkpoint?.benchmark_split === "excluded")
     .flatMap((run) => run.record_ids)), [evidencePreparationRuns]);
+  const interruptedExcludedSignalRun = evidencePreparationRuns.find((run) => run.status === "failed"
+    && run.checkpoint?.preparation_mode === "signal_recovery"
+    && run.checkpoint?.benchmark_split === "excluded"
+    && Boolean(run.checkpoint?.provider_run_id));
+  const interruptedExcludedRecordIds = useMemo(() => {
+    if (!interruptedExcludedSignalRun) return [];
+    const processed = new Set(interruptedExcludedSignalRun.checkpoint?.processed_record_ids || []);
+    return interruptedExcludedSignalRun.record_ids.filter((recordId) => !processed.has(recordId));
+  }, [interruptedExcludedSignalRun]);
   const excludedSignalRecoveryRecords = useMemo(() => records
     .filter((record) => record.benchmark_split === "excluded"
       && record.fit_label === "fit"
@@ -381,6 +392,11 @@ export default function ResearchBenchmarkPage() {
       || right.safe_evidence_claim_count - left.safe_evidence_claim_count
       || left.athlete_name.localeCompare(right.athlete_name))
     .slice(0, 10), [completedExcludedSignalRecordIds, records]);
+  const nextExcludedSignalRecoveryRecords = useMemo(() => interruptedExcludedRecordIds.length
+    ? interruptedExcludedRecordIds.map((recordId) => records.find((record) => record.id === recordId))
+      .filter((record): record is GoldenRecord => Boolean(record))
+    : excludedSignalRecoveryRecords,
+  [excludedSignalRecoveryRecords, interruptedExcludedRecordIds, records]);
 
   useEffect(() => {
     if (!activeEvidenceRun) return;
@@ -679,7 +695,7 @@ export default function ResearchBenchmarkPage() {
   };
 
   const recoverExcludedSignals = async () => {
-    if (!excludedSignalRecoveryRecords.length) return;
+    if (!nextExcludedSignalRecoveryRecords.length) return;
     setWorking(true);
     setMessage("Starting a capped creator and commercial signal recovery run for the closest fresh positive cases…");
     try {
@@ -687,8 +703,8 @@ export default function ResearchBenchmarkPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          recordIds: excludedSignalRecoveryRecords.map((record) => record.id),
-          maxRecords: excludedSignalRecoveryRecords.length,
+          recordIds: nextExcludedSignalRecoveryRecords.map((record) => record.id),
+          maxRecords: nextExcludedSignalRecoveryRecords.length,
           maxApifyChargeUsd: 0.5,
           preparationMode: "signal_recovery",
           benchmarkSplit: "excluded",
@@ -925,14 +941,16 @@ export default function ResearchBenchmarkPage() {
               Freeze benchmark cohort
             </button>
             <button
-              disabled={working || Boolean(activeEvidenceRun) || excludedSignalRecoveryCount === 0 || excludedSignalRecoveryRecords.length === 0}
+              disabled={working || Boolean(activeEvidenceRun) || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}
               onClick={() => void recoverExcludedSignals()}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
                 && activeEvidenceRun.checkpoint.benchmark_split === "excluded"
                 ? `Preparing fresh evidence ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
-                : `Recover fresh positives (${excludedSignalRecoveryRecords.length})`}
+                : interruptedExcludedRecordIds.length
+                  ? `Resume saved recovery (${nextExcludedSignalRecoveryRecords.length})`
+                  : `Recover fresh positives (${nextExcludedSignalRecoveryRecords.length})`}
             </button>
             <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
               {activeEvidenceRun

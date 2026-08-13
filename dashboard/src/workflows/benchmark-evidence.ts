@@ -156,7 +156,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   const actor = process.env.APIFY_GOOGLE_SEARCH_ACTOR || "apify/google-search-scraper";
   const discoveryReused = Boolean(input.reuseProviderRunId);
   const provider = input.reuseProviderRunId
-    ? await readApifyRunDatasetWithUsage<SearchPage>(input.reuseProviderRunId, queries.length)
+    ? await readApifyRunDatasetWithUsage<SearchPage>(input.reuseProviderRunId, 1_000)
     : await runApifyActorWithUsage<SearchPage>(actor, {
       queries: queries.join("\n"),
       maxPagesPerQuery: 1,
