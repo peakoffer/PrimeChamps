@@ -389,11 +389,14 @@ test("Social Blade recovery uses the cheapest sufficient tier and only exact, re
       status: { success: true, status: 200 },
       data: {
         id: { username: "example.athlete", display_name: "Example Athlete" },
-        daily: [
-          { date: "2026-05-04T00:00:00.000Z", followers: 999_999, media: 999, avg_likes: 99_999, avg_comments: 999 },
-          { date: "2026-05-03T00:00:00.000Z", followers: 120_000, following: 400, media: 240, avg_likes: 3_000, avg_comments: 75 },
-          { date: "2026-05-02T00:00:00.000Z", followers: 119_500, media: 239, avg_likes: 2_900, avg_comments: 70 },
-        ],
+        statistics: {
+          total: { followers: 130_000, following: 410, media: 250, engagement_rate: 2.4 },
+          daily: [
+            { date: "2026-05-04T00:00:00.000Z", followers: 999_999, media: 999, avg_likes: 99_999, avg_comments: 999 },
+            { date: "2026-05-03T00:00:00.000Z", followers: 120_000, following: 400, media: 240, avg_likes: 3_000, avg_comments: 75 },
+            { date: "2026-05-02T00:00:00.000Z", followers: 119_500, media: 239, avg_likes: 2_900, avg_comments: 70 },
+          ],
+        },
       },
     },
   });

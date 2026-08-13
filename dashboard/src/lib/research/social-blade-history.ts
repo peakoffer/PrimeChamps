@@ -15,6 +15,15 @@ export type SocialBladeInstagramResponse = {
   data?: {
     id?: { id?: string; username?: string; display_name?: string };
     daily?: SocialBladeDailyInstagramMetric[];
+    statistics?: {
+      total?: {
+        followers?: number;
+        following?: number;
+        media?: number;
+        engagement_rate?: number;
+      };
+      daily?: SocialBladeDailyInstagramMetric[];
+    };
   };
 };
 
@@ -84,7 +93,7 @@ export function prepareSocialBladeInstagramSnapshot(input: {
   if (!expectedHandle || returnedHandle !== expectedHandle || !Number.isFinite(cutoff)) return null;
   if (input.response.status?.success !== true) return null;
 
-  const row = (input.response.data?.daily || [])
+  const row = (input.response.data?.statistics?.daily || input.response.data?.daily || [])
     .map((metric) => ({ metric, timestamp: typeof metric.date === "string" ? Date.parse(metric.date) : Number.NaN }))
     .filter(({ timestamp }) => Number.isFinite(timestamp) && timestamp <= cutoff)
     .sort((left, right) => right.timestamp - left.timestamp)[0];
