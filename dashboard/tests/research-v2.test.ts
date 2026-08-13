@@ -1404,6 +1404,7 @@ test("historical evidence accepts Dylan's broad sport labels without weakening c
     ["Cliff Diving", "Carlos Gimeno competes on the Red Bull Cliff Diving World Series."],
     ["Combat Sports", "Payton Talbott is a UFC mixed martial arts fighter."],
     ["Football", "Kerstin Casparij is a women's footballer and soccer defender."],
+    ["Football / soccer", "Lola Gallardo is a Spanish footballer and goalkeeper."],
     ["Jet Ski / Aquabike", "Estelle Poret competes in aquabike racing."],
     ["MMA / LFA", "Allan Begosso fought for Legacy Fighting Alliance."],
     ["Motorcycle Road Racing", "Davey Todd is an Isle of Man TT road racer."],
@@ -1524,7 +1525,7 @@ test("Wikimedia revision fallback retrieves the last cutoff-safe article revisio
     record: {
       id: "golden-lola",
       athlete_name: "Lola Gallardo",
-      sport: "Football",
+      sport: "Football / soccer",
       fit_label: "fit",
       evidence_cutoff_at: cutoff,
     },

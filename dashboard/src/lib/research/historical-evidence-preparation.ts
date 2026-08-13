@@ -9,7 +9,7 @@ export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-blind-signal-recovery-v3";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-current-athletic-relevance-v5";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v2";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v3";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 

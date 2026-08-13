@@ -71,6 +71,7 @@ const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
     "kickboxing", "kickboxer", "bare knuckle", "bkfc", "fighter",
   ],
   Football: ["association football", "footballer", "women's football", "womens football", "soccer"],
+  "Football / Soccer": ["association football", "footballer", "football player", "women's football", "womens football", "soccer"],
   "Jet Ski / Aquabike": ["jet ski", "jetski", "aquabike", "personal watercraft"],
   "MMA / LFA": ["mixed martial arts", "mma", "ufc", "lfa", "legacy fighting alliance"],
   "Motorcycle Road Racing": [
@@ -131,8 +132,13 @@ function benchmarkCanonicalSourceSupportsSport(sport: BenchmarkSport, sourceText
 
 export function benchmarkSourceSupportsSport(sport: string, sourceText: string) {
   const normalized = normalizeBenchmarkIdentity(sourceText);
-  const terms = HISTORICAL_SPORT_TERMS[sport]
-    || SPORT_TERMS[sport as BenchmarkSport]
+  const normalizedSport = normalizeBenchmarkIdentity(sport);
+  const historicalTerms = Object.entries(HISTORICAL_SPORT_TERMS)
+    .find(([label]) => normalizeBenchmarkIdentity(label) === normalizedSport)?.[1];
+  const canonicalTerms = Object.entries(SPORT_TERMS)
+    .find(([label]) => normalizeBenchmarkIdentity(label) === normalizedSport)?.[1];
+  const terms = historicalTerms
+    || canonicalTerms
     || [sport];
   return terms.some((term) => normalized.includes(normalizeBenchmarkIdentity(term)));
 }
