@@ -66,6 +66,7 @@ type EvidencePreparationRun = {
   max_apify_charge_microusd: number;
   actual_apify_cost_microusd: number | null;
   error_message: string | null;
+  retry_after_seconds?: number;
   checkpoint?: {
     preparation_mode?: "baseline" | "age_recovery" | "signal_recovery";
     benchmark_split?: "excluded" | "development" | "held_out" | null;
@@ -411,6 +412,7 @@ export default function ResearchBenchmarkPage() {
     const processed = new Set(interruptedExcludedSignalRun.checkpoint?.processed_record_ids || []);
     return interruptedExcludedSignalRun.record_ids.filter((recordId) => !processed.has(recordId));
   }, [interruptedExcludedSignalRun]);
+  const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0;
   const excludedSignalRecoveryRecords = useMemo(() => records
     .filter((record) => record.benchmark_split === "excluded"
       && record.fit_label === "fit"
@@ -1029,16 +1031,18 @@ export default function ResearchBenchmarkPage() {
                   : `Run ${socialBladePlan.pilotRecords.length}-profile pilot · ≤${socialBladePlan.pilotMaximumCredits} credits`}
             </button>
             <button
-              disabled={working || Boolean(activeEvidenceRun) || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}
+              disabled={working || Boolean(activeEvidenceRun) || archiveCoolingDown || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}
               onClick={() => void recoverExcludedSignals()}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
                 && activeEvidenceRun.checkpoint.benchmark_split === "excluded"
                 ? `Preparing fresh evidence ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
-                : interruptedExcludedRecordIds.length
-                  ? `Resume saved recovery (${nextExcludedSignalRecoveryRecords.length})`
-                  : `Recover fresh positives (${nextExcludedSignalRecoveryRecords.length})`}
+                : archiveCoolingDown
+                  ? "Archive cooling down"
+                  : interruptedExcludedRecordIds.length
+                    ? `Resume saved recovery (${nextExcludedSignalRecoveryRecords.length})`
+                    : `Recover fresh positives (${nextExcludedSignalRecoveryRecords.length})`}
             </button>
             <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
               {activeEvidenceRun

@@ -45,7 +45,17 @@ type EvidencePreparationRunRow = {
   status: string;
   record_ids: unknown;
   checkpoint: unknown;
+  error_message?: string | null;
+  created_at?: string;
 };
+
+const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
+
+function archiveRateLimitRetryAfterSeconds(run: Pick<EvidencePreparationRunRow, "error_message" | "created_at">) {
+  const createdAt = run.created_at ? Date.parse(run.created_at) : Number.NaN;
+  if (!/internet archive.*rate limit/i.test(run.error_message || "") || !Number.isFinite(createdAt)) return 0;
+  return Math.max(0, Math.ceil((ARCHIVE_RATE_LIMIT_COOLDOWN_MS - (Date.now() - createdAt)) / 1_000));
+}
 
 type SignalRecoverySplit = "excluded" | "development" | "held_out";
 
@@ -185,7 +195,10 @@ export async function GET() {
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
       defaultMaxApifyChargeUsd: EVIDENCE_PREPARATION_LIMITS.defaultMaxApifyChargeUsd,
       scoringTokensSpentByPreparation: 0,
-      runs: runs || [],
+      runs: (runs || []).map((run) => ({
+        ...run,
+        retry_after_seconds: archiveRateLimitRetryAfterSeconds(run),
+      })),
     }, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load evidence-preparation status";
@@ -263,7 +276,7 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
     const { data: recentRuns, error: recentRunError } = await admin.from("research_evidence_preparation_runs")
-      .select("status,record_ids,actual_apify_cost_microusd,checkpoint,summary,created_at")
+      .select("status,record_ids,actual_apify_cost_microusd,checkpoint,summary,error_message,created_at")
       .eq("organization_id", user.organizationId)
       .order("created_at", { ascending: false })
       .limit(100);
@@ -324,6 +337,15 @@ export async function POST(request: NextRequest) {
     });
     const reusableCheckpoint = reusableRun?.checkpoint as Record<string, unknown> | null | undefined;
     const reusableSummary = reusableRun?.summary as Record<string, unknown> | null | undefined;
+    const retryAfterSeconds = reusableRun ? archiveRateLimitRetryAfterSeconds(reusableRun) : 0;
+    if (retryAfterSeconds > 0) {
+      return NextResponse.json({
+        error: "Internet Archive is cooling down after a bounded rate-limit failure. The saved discovery checkpoint remains reusable with zero new Apify spend.",
+        retryAfterSeconds,
+        discoveryReused: true,
+        scoringTokensSpent: 0,
+      }, { status: 429, headers: { "retry-after": String(retryAfterSeconds) } });
+    }
     const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
       ? reusableCheckpoint.provider_run_id
       : typeof reusableSummary?.providerRunId === "string" ? reusableSummary.providerRunId : undefined;

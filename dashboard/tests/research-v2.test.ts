@@ -1706,6 +1706,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /run\.status === "cancelled"/);
   assert.match(route, /recordIds\.every\(\(recordId\) => run\.record_ids\.includes\(recordId\)\)/);
   assert.match(route, /reusableSummary\?\.providerRunId/);
+  assert.match(route, /ARCHIVE_RATE_LIMIT_COOLDOWN_MS/);
+  assert.match(route, /retry-after/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /readiness\.momentum\.passed/);
@@ -1732,6 +1734,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(benchmarkPage, /Resume saved recovery/);
   assert.match(benchmarkPage, /processed_record_ids/);
   assert.match(benchmarkPage, /run\.record_ids\.every/);
+  assert.match(benchmarkPage, /Archive cooling down/);
   assert.match(workflow, /readApifyRunDatasetWithUsage<SearchPage>\(input\.reuseProviderRunId, 1_000\)/);
   assert.match(instagramHistoryRoute, /listApifyActorRuns/);
   assert.match(instagramHistoryRoute, /readApifyDatasetItems/);
