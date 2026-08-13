@@ -207,6 +207,8 @@ Required environment-variable names are documented in the app/Vercel configurati
 - The original revealed cohort `onlyfans-athlete-v1-2026-08-12-149b1a6e` must never be reused as held-out.
 - Original held-out run `8ddf4794-9107-4d97-ade1-e1b027b9b6f9` completed 16/16 for about $0.813. It safely returned no >80 finalists but achieved only 50% audit decisions, so it did not prove production readiness.
 - A fresh held-out cohort must be locked only after development calibration is frozen.
+- On 2026-08-13, exact-handle archive recovery pilot `b224d92c-2881-49ac-9416-3b432aabe023` tested Carlos Gimeno, Gaston Reyno, and Daryn Harris. Google discovery cost $0.0285, found 24 URLs, spent zero scoring tokens, and made zero outreach writes, but produced `0/3` new freeze-ready packets. The audit found one false publisher-footer Instagram handle (`@world_aquatics`); that claim was quarantined as unsupported and the extractor now rejects non-name-matching handles unless the archived text explicitly says the post was shared by the athlete. Post-cleanup readiness remains `0 fit / 16 not-fit` in the fresh excluded pool, so do not repeat this query strategy broadly.
+- The low-cost no-login Apify Social Blade actor was rejected for this use case after documentation review: Instagram history is premium-gated and returns null. Current Instagram profile scraping is not point-in-time evidence. The viable historical-audience path remains the direct Social Blade Business API (bounded five-profile pilot) or another provider that can prove a pre-cutoff snapshot—not a present-day count.
 
 ## Exact next sequence
 

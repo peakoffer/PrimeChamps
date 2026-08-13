@@ -8,7 +8,7 @@ import {
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-13-attributed-instagram-profile-v6";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-13-footer-safe-instagram-profile-v7";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v4";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -471,9 +471,13 @@ export function extractAttributedInstagramHandle(input: {
   const nameTokens = input.athleteName.split(/\s+/).map(compactIdentityToken).filter((token) => token.length >= 4);
   if (!athleteToken || nameTokens.length < 2) return null;
 
-  const hrefHandles = Array.from(input.html.matchAll(
+  const hrefMatches = Array.from(input.html.matchAll(
     /(?:https?:)?\/\/(?:www\.)?instagram\.com\/([a-z0-9._]{2,30})(?:[/?#"'])/gi
-  ), (match) => String(match[1]).toLowerCase());
+  ), (match) => ({
+    handle: String(match[1]).toLowerCase(),
+    index: match.index || 0,
+  }));
+  const hrefHandles = hrefMatches.map((item) => item.handle);
   const visibleHandles = Array.from(text.matchAll(/@([a-z0-9._]{2,30})\b/gi), (match) => ({
     handle: String(match[1]).toLowerCase(),
     index: match.index || 0,
@@ -490,13 +494,22 @@ export function extractAttributedInstagramHandle(input: {
 
   const scored = allHandles.map((handle) => {
     const visible = [...visibleHandles, ...labeledHandles].filter((item) => item.handle === handle);
-    const positions = visible.length ? visible.map((item) => item.index) : [Math.max(0, text.toLowerCase().indexOf(handle))];
-    const contexts = positions.map((index) => text.slice(Math.max(0, index - 500), Math.min(text.length, index + 500)));
+    const contexts = visible.map((item) =>
+      text.slice(Math.max(0, item.index - 500), Math.min(text.length, item.index + 500))
+    );
+    contexts.push(...hrefMatches.filter((item) => item.handle === handle).map((item) =>
+      archivedHtmlToText(input.html.slice(Math.max(0, item.index - 1_000), Math.min(input.html.length, item.index + 1_000)))
+    ));
     const bestContext = contexts.sort((left, right) => right.length - left.length)[0] || "";
     const normalizedContext = normalizeEvidenceText(bestContext);
     const contextNamesAthlete = ` ${normalizedContext} `.includes(` ${normalizeEvidenceText(input.athleteName)} `);
     const handleToken = compactIdentityToken(handle);
     const handleMatchesName = nameTokens.some((token) => handleToken.includes(token));
+    const explicitlySharedByAthlete = normalizedContext.includes(
+      `post shared by ${normalizeEvidenceText(input.athleteName)}`
+    ) || normalizedContext.includes(
+      `pspvek sdlen ${normalizeEvidenceText(input.athleteName)}`
+    );
     const explicitlyInstagram = visible.some((item) => /instagram/i.test(
       text.slice(Math.max(0, item.index - 80), Math.min(text.length, item.index + handle.length + 80))
     ));
@@ -507,10 +520,11 @@ export function extractAttributedInstagramHandle(input: {
       + (explicitlyInstagram ? 2 : 0)
       + (inInstagramHref ? 2 : 0)
       + (titleNamesAthlete && allHandles.length === 1 ? 1 : 0);
-    return { handle, score, context: bestContext, contextNamesAthlete, handleMatchesName };
+    return { handle, score, context: bestContext, contextNamesAthlete, handleMatchesName, explicitlySharedByAthlete };
   }).sort((left, right) => right.score - left.score || left.handle.localeCompare(right.handle));
   const winner = scored[0];
   if (!winner || winner.score < 5 || (!winner.contextNamesAthlete && !winner.handleMatchesName)
+    || (!winner.handleMatchesName && !winner.explicitlySharedByAthlete)
     || (scored[1] && scored[1].score === winner.score)) return null;
   const excerpt = `${input.title}. ${winner.context}`.replace(/\s+/g, " ").trim().slice(0, 1_000);
   return { handle: winner.handle, excerpt };

@@ -1865,6 +1865,11 @@ test("archived Instagram handles require athlete attribution and reject publishe
     title: "Jane Doe volleyball profile",
     html: '<main>Jane Doe is a volleyball athlete.</main><footer>Follow the publisher on Instagram <a href="https://instagram.com/volleyball_news/">@volleyball_news</a></footer>',
   }), null);
+  assert.equal(extractAttributedInstagramHandle({
+    athleteName: "Carlos Gimeno",
+    title: "High Diver on the Rise: Spain's Carlos Gimeno",
+    html: '<main><h1>High Diver on the Rise: Spain\'s Carlos Gimeno</h1><p>Carlos Gimeno competes in cliff diving.</p></main><footer>Follow World Aquatics on Instagram <a href="https://instagram.com/world_aquatics/">Instagram</a></footer>',
+  }), null);
 
   const record = {
     id: "golden-tessa",
