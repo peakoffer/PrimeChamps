@@ -124,13 +124,14 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 
 ## Current production checkpoint — 12 August 2026
 
-- Main commit `1763655` (`Require source-backed research finalists`) is deployed and READY as Vercel deployment `dpl_39DMEHCxpkkBkpS5RvCPrhMmfxEb` on `https://crm.prime-champs.com`.
+- Production gate checkpoint `1763655` (`Require source-backed research finalists`) was verified READY as Vercel deployment `dpl_39DMEHCxpkkBkpS5RvCPrhMmfxEb` on `https://crm.prime-champs.com`. The enriched-import checkpoint is `3e6b90d`; confirm the current `main` deployment before resuming paid work.
 - Research prompt `research-v8-source-backed-finalist-gates` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
 - A proposed priority above 80 remains 79 until audit. The final score is the minimum of the Researcher dimensions, blind-Auditor dimensions, and review correction, followed by objective guardrails.
 - Finalists now require deterministic source matches for current momentum and creator behavior, a meaningful measured audience, commercial achievability of at least 70, complete commercial constraints, zero unsupported material claims, and an independent audit.
 - Evaluation mode is regression-checked to exit before athlete inserts and to suppress notifications. The research workflow contains no message, draft, or outreach-table writes.
-- Type checking, focused lint, 74 unit tests, and the Vercel production build pass. The live root redirects to login and the login page returns 200.
-- Dylan's 100 outcomes remain the source of truth: 41 signed plus three approved/non-signing positives; 23 rejected plus 33 stalled negatives. The pending enriched workbook is the next data dependency.
+- Type checking, focused lint, 77 unit tests, and the Vercel production build pass. The live root redirects to login and the login page returns 200.
+- Dylan's enriched 100-row workbook was locked against the original source and imported with exact `41/3/23/33` outcomes. It added 420 pre-decision detail sources/claims across 76 athletes with zero future claims or eligible outcome-like leakage.
+- The post-import readiness audit finds 12/100 freeze-ready cases, but the fresh excluded pool is only `0 fit / 4 not-fit` ready. A new cohort requires `16/16`; targeted evidence recovery is the next dependency.
 - Bounded evaluation-only volleyball smoke run `6c898a22-c961-4612-8c5b-7dd14517c2a3` completed safely: 44 sourced, six admitted discoveries, four scored, and zero finalists. Its best score was 79, no blind audit was eligible, and it created zero live athletes or notifications. See `docs/RESEARCH_V2_CLAUDE_HANDOFF.md` for the full checkpoint and next actions.
 
 ## Implementation history through 11 August 2026
@@ -140,7 +141,7 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 - Dylan's 40-athlete commercial-positive deliverable was imported on 10 August 2026. Five records were merged with the original seed and 35 were added. All 40 are labeled `fit + signed`, linked to 14 existing athlete records, and remain safely excluded with `partial` point-in-time reliability because the dates and commercial reasons were reconstructed after the outcome.
 - Dylan's updated 100-opportunity mailbox benchmark is the authoritative outcome ledger. `Signed` and `Approved but Did Not Sign` map to positive; `Rejected` and `Stalled` map to negative. The resulting benchmark contains 44 positives and 56 negatives. The earlier `OnlyFans fit at the time` field is retained as source context but does not override the outcome label.
 - Reconciliation is source-authoritative and idempotent. Dylan's workbook replaces older contradictory seed labels while retaining the older internal reference for audit history; stale conflict and commercial-class tags are removed.
-- All 100 mailbox records remain excluded from development and held-out splits until sport enrichment where needed and a leakage-safe pre-decision public evidence snapshot are complete. No further subjective fit-labeling exercise is required.
+- The importer preserves the previously revealed cohort assignments: 16 development, 16 revealed held-out, and 68 excluded. The revealed 32 must never be reused as release proof; the next fresh cohort is built only from evidence-ready excluded records. No further subjective fit-labeling exercise is required.
 - The controlled production import contains all 100 rows, 100 dedicated mailbox evidence sources, and 300 normalized claims. No internal outcome claim is eligible for model scoring. The 33 stalled records are negative ground truth, not censored records, and 20 records remain queued for sport enrichment instead of receiving invented classifications.
 - Every delivered positive has one internal evidence source and three normalized claims: Dylan's fit label, the signed outcome, and the inferred commercial reason. That is 40 sources and 120 claims. None is eligible as point-in-time scoring evidence.
 - Thirty-five records from the original arbitrary historical seed remain `uncertain` and `excluded`; they are not training or benchmark truth.

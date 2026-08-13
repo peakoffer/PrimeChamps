@@ -15,7 +15,7 @@ Continue the existing objective; do not replace it with a smaller proxy:
 
 > Build and validate a production-ready, evaluation-only OnlyFans athlete research agent that returns up to 10 genuinely strong candidates per requested sport without padding results or inflating scores. A candidate may score above 80 only after verified identity, corroborated 21+ eligibility, source-backed athletic momentum and creator potential, realistic commercial achievability, and an independent quality audit. Use the latest Sonnet model for scoring, bounded API and token budgets, replayable checkpoints, development and locked held-out benchmarks, and iterative audit-driven improvements. Production readiness requires 100% identity and age-gate accuracy for finalists, zero unsupported material claims, at least 90% held-out precision for candidates scoring 80+, at least 90% audit pass accuracy, and absolutely no outreach or live pipeline promotion during testing. Returning fewer than 10 candidates is correct whenever the available evidence does not support 10 qualified results.
 
-The goal is **not complete**. The production gates are substantially stronger, but the enriched historical benchmark and required held-out proof are still missing.
+The goal is **not complete**. The production gates are substantially stronger and Dylan's enriched benchmark is safely imported, but a fresh evidence-ready cohort, development calibration, and locked held-out proof are still missing.
 
 ## Non-negotiable product intent
 
@@ -41,20 +41,22 @@ Dylan's 100-row workbook is the sole commercial ground truth for the core benchm
 
 Do not perform another subjective blind-label exercise on these records. Do not let an older seed label override Dylan's outcome. The historical outcome is revealed only after model predictions are locked.
 
-Current source workbook:
+Current enriched source workbook:
 
-`/Users/zacharyvanheyningen/Library/Messages/Attachments/0c/12/CFBA99F0-A4B3-4AD6-A4B4-EA3D65C540A7/OnlyFans_Athlete_Historical_Benchmark.xlsx`
+`/Users/zacharyvanheyningen/Library/Messages/Attachments/be/14/E5D20F7E-E020-4955-9E02-C247E30452A2/OnlyFans_Athlete_Historical_Benchmark_Enriched.xlsx`
 
-The original workbook has the 100 outcomes and evidence index but lacks enough historical social/audience evidence. Zac has been given an expanded prompt for Dylan's Gmail-connected chat. The pending return must preserve the 100 rows and add pre-decision sport, handles, follower/engagement data, creator behavior, athletic momentum, 21+ hints, commercial-access facts, and exact email/attachment provenance. Missing data must remain `Not available`; current or post-decision data must not be substituted.
+This workbook was validated and imported on 2026-08-12. The original workbook remains at `/Users/zacharyvanheyningen/Library/Messages/Attachments/0c/12/CFBA99F0-A4B3-4AD6-A4B4-EA3D65C540A7/OnlyFans_Athlete_Historical_Benchmark.xlsx` and is the locked comparison source. All 100 original benchmark rows and all 100 Evidence Index rows match it exactly. Do not replace `Not available` values with guesses or current/post-decision data.
+
+Import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evidence`.
 
 ## Current production checkpoint
 
-- Deployed production-code checkpoint: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`. Later documentation-only commits do not change this code checkpoint.
-- Vercel production deployment: `dpl_39DMEHCxpkkBkpS5RvCPrhMmfxEb` — `READY`.
+- Previously verified production-gate checkpoint: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`.
+- Enriched-import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evidence`. Confirm the current `main` Vercel deployment is `READY` before resuming paid work.
 - Production alias is attached to `crm.prime-champs.com`; `/` returns a 307 to login and `/login` returns 200.
 - Active prompt version: `research-v8-source-backed-finalist-gates`.
 - The 2026-08-12 smoke run resolved `claude-sonnet-5` dynamically through Anthropic's model catalog.
-- Typecheck passes, focused lint has zero errors, and all 74 unit tests pass.
+- Typecheck passes, focused lint has zero errors, and all 77 unit tests pass.
 - Full repository lint has zero errors and 53 pre-existing warnings unrelated to this checkpoint.
 - Local Turbopack production builds can hang after compilation on this machine. Vercel's exact Git production build is the authoritative build proof and is green.
 
@@ -165,7 +167,10 @@ Primary implementation files:
 - `dashboard/src/lib/research/benchmark-runner.ts` — historical development/held-out model stages and checkpoints.
 - `dashboard/src/lib/research/benchmark-runner-support.ts` — benchmark evidence/finalist gates, leakage controls, metrics, cost accounting.
 - `dashboard/src/lib/research/historical-social-snapshot.ts` — strict pre-decision mailbox snapshot validation.
+- `dashboard/src/lib/research/historical-workbook-converter.ts` — deterministic extracted-workbook conversion and locked-source comparison.
+- `dashboard/scripts/convert-onlyfans-historical-workbook-extraction.ts` — converts spreadsheet-tool extraction JSON into the importer's 100-record contract.
 - `dashboard/scripts/import-onlyfans-historical-benchmark.ts` — dry-run/apply importer with required backup.
+- `dashboard/scripts/audit-onlyfans-historical-benchmark-readiness.ts` — read-only evidence/readiness audit over the stored 100-record dataset.
 - `dashboard/tests/research-v2.test.ts` — benchmark, leakage, scoring, audit, and isolation regression suite.
 - `docs/research-v2-benchmark-runbook.md` — execution and release rules.
 
@@ -183,9 +188,13 @@ Required environment-variable names are documented in the app/Vercel configurati
 ## Historical benchmark status
 
 - Dylan source truth: 100/100 outcomes, 44 positive and 56 negative.
-- Current positive readiness audit before the pending workbook: identity 33/44; age 16/44; momentum 31/44; audience 4/44; creator 25/44; all core gates 3/44.
-- Current negative readiness: identity 38/56; age 5/56; momentum 30/56; audience 1/56; creator 20/56; all core gates 0/56.
-- Audience-at-decision is the largest data gap.
+- Enriched workbook validation: zero locked-source differences, zero duplicate names/refs, 748 detail ledger rows covering all 100 athletes, zero post-cutoff rows, and 420 usable claim rows across 76 athletes. The other 24 correctly contain only `Not available` audit notes.
+- Controlled import: 100 updates, zero creates, zero conflicts, 420 deterministic detail sources and 420 detail claims. All 420 sources are cutoff-safe, 406 claims are scoring-eligible, 12 medium-confidence claims remain excluded, one mailbox age hint remains excluded, and one outcome-like commercial excerpt remains excluded. Zero eligible outcome-like claims and zero future claims were found after import.
+- Current full readiness audit: 100/100 point-in-time compliant; 79 records with safe evidence; 12/100 pass the freeze gate. Identity 34/100, two-source adult age 11/100, current momentum 39/100, audience 12/100, creator behavior 45/100, and both audience + creator 6/100.
+- Positive readiness: 2/44 pass all freeze gates; identity 23/44, age 8/44, momentum 26/44, audience 2/44, creator behavior 28/44, audience + creator 2/44.
+- Negative readiness: 10/56 pass all freeze gates; identity 11/56, age 3/56, momentum 13/56, audience 10/56, creator behavior 17/56, audience + creator 4/56.
+- Fresh cohort gate uses only currently excluded, never-evaluated records. Those contain zero ready positives and four ready negatives. The route requires 16 ready records per label before it can lock eight fresh held-out examples per label. Therefore the immediate recovery target is 16 excluded positives and 12 additional excluded negatives.
+- Six records still have unresolved sport. Audience-at-decision and independent age/identity corroboration are the largest gaps.
 - The original revealed cohort `onlyfans-athlete-v1-2026-08-12-149b1a6e` must never be reused as held-out.
 - Original held-out run `8ddf4794-9107-4d97-ade1-e1b027b9b6f9` completed 16/16 for about $0.813. It safely returned no >80 finalists but achieved only 50% audit decisions, so it did not prove production readiness.
 - A fresh held-out cohort must be locked only after development calibration is frozen.
@@ -199,26 +208,33 @@ Required environment-variable names are documented in the app/Vercel configurati
 - No candidate exceeded 80, no blind audit was eligible, and the three isolation counts were zero.
 - The next paid work should follow the enriched-workbook import and a deliberate development-benchmark plan.
 
-### 2. Ingest Dylan's enriched workbook when Zac uploads it
+### 2. Preserve the completed enriched-workbook import
 
-- Treat the returned workbook as untrusted input and inspect it with the spreadsheet tooling.
-- Verify exactly 100 rows, stable names/order, and outcome counts `41/3/23/33` before any database write.
-- Verify every populated enrichment field has a pre-decision source date, email subject, document reference, and supporting evidence-detail row.
-- Quarantine post-decision/current/ambiguous records rather than repairing them with guesses.
-- Convert the workbook deterministically to the importer's JSON contract; add a converter or extend the importer if the returned column layout requires it. Do not manually rewrite 100 rows.
-- Run the importer without `--apply` first. Review counts and conflicts.
-- Apply only with an explicit pre-import backup path. Re-query the stored dataset after import.
+- This is complete. Do not re-import unless a genuinely newer source workbook arrives.
+- The two local pre-import backups are under `dashboard/data/backups/` and intentionally ignored by Git because they contain internal data.
+- The first apply attempt stopped on the third golden record because the old revealed held-out lock rejected a split reset. It wrote the backup first and no detailed evidence before stopping. The importer was corrected to preserve all existing cohort assignments, passed a second dry-run, and then completed idempotently.
+- Database post-proof: 100 golden records, exact `41/3/23/33` outcomes, 420 detail sources, 420 detail claims, zero future claims, zero eligible outcome-like claims, and old `16 development / 16 revealed held-out / 68 excluded` assignments preserved.
+- Raw workbook extraction JSON, converted records, and backups live under `dashboard/data/` and are intentionally ignored. Never commit them.
 
-### 3. Build the development benchmark
+### 3. Recover only the missing fresh-cohort evidence
+
+- Run `npm run audit:historical-benchmark` before and after each recovery batch.
+- Work only on excluded, never-evaluated records intended for the next cohort. Do not change or reuse the revealed held-out cohort.
+- Reach at least 16 evidence-ready excluded positives and 16 evidence-ready excluded negatives. Current state is `0 positive / 4 negative`, so the minimum gap is `16 positive / 12 negative`.
+- Prioritize positives with an existing historical Instagram handle, creator behavior, and momentum, then recover two-source identity, two-source 21+, and an audience snapshot. Do not spend age-research money on cases that still lack audience/creator viability.
+- Use bounded evidence-preparation batches; inspect each batch before the next. Do not run Researcher/Auditor scoring during evidence recovery.
+- A mailbox statement can seed a query but cannot satisfy two-source age. Medium/low identity claims and outcome-like commercial excerpts remain non-scoring.
+
+### 4. Build the development benchmark
 
 - Recompute readiness from actual evidence, not provider-run counts.
 - Keep source-of-truth labels hidden from prompts.
-- Assign evidence-ready records automatically and deterministically to development vs fresh held-out.
+- Assign only the fresh 16/16 evidence-ready excluded pool automatically and deterministically to development vs fresh held-out.
 - Run only development cases first under a bounded dollar/token budget.
 - Audit false positives, false negatives, unsupported claims, identity errors, age errors, criteria drift, and Auditor misses.
 - Change one major variable at a time and retain only measured improvements.
 
-### 4. Freeze and prove release
+### 5. Freeze and prove release
 
 - Freeze prompt, rubric, evidence policy, model route, weighting, and development decision before revealing the held-out split.
 - Run the fresh locked held-out cohort once.
@@ -238,6 +254,7 @@ Run from `dashboard/`:
 ```bash
 npm run typecheck
 npm run test:unit
+npm run audit:historical-benchmark
 npx eslint src/app/api/research/run/workflow.ts src/lib/research/scoring.ts src/lib/research/v2-scoring.ts tests/research-v2.test.ts
 ```
 
@@ -249,11 +266,14 @@ git status --short --branch
 git log --oneline -12
 ```
 
-The local branch and `main` pointed to commit `1763655` at this checkpoint, and the worktree was clean before this handoff documentation edit.
+The code checkpoint for the enriched import is `3e6b90d`. Use `git log --oneline -12` for the final documentation/push commit above it.
 
 ## Known traps
 
 - Do not call an internally stored outcome, fit explanation, or post-decision email public research evidence.
+- Do not count the 24 `Evidence Availability Notes` rows as evidence; they are audit records explaining that no eligible enrichment was found.
+- Do not treat mailbox age evidence as a finalist age source or medium-confidence identity matches as scoring evidence.
+- Do not reset a record's old benchmark split during an evidence import. The importer preserves it; a fresh split is created only by the explicit cohort-freeze route.
 - Do not reuse the revealed held-out cohort.
 - Do not use a provider run or profile scrape as proof that audience/creator evidence exists; inspect the actual normalized claims.
 - Do not accept model-generated creator strings without exact URL/excerpt matching.
@@ -267,9 +287,9 @@ The local branch and `main` pointed to commit `1763655` at this checkpoint, and 
 
 The next agent should aim to finish with:
 
-1. Dylan's enriched workbook validated and imported with backup.
-2. A sufficiently evidence-ready development cohort.
+1. At least 16 evidence-ready fresh excluded positives and 16 evidence-ready fresh excluded negatives.
+2. A new deterministic cohort with eight per label locked held-out and unrevealed.
 3. Development metrics and failure classes recorded after at least one controlled iteration.
 4. No held-out reveal until the configuration is frozen.
 
-The current Codex stopping point is intentionally one step earlier and clean: production code is deployed, the smoke test is complete and isolated, the handoff is documented, no live outreach state was touched, and no additional paid run should start until the pending workbook is available.
+The current Codex stopping point is intentionally clean: Dylan's workbook is validated/imported, database state is verified, the fail-closed smoke baseline is preserved, no live athletes or outreach were created, and no next paid benchmark run has started. Resume with targeted evidence recovery, not scoring.

@@ -109,6 +109,8 @@ A release is not production-ready until the locked held-out run proves all of th
 
 No metric is considered passed when its denominator is zero. Fewer than ten recommendations is correct when the evidence does not support ten.
 
-## Current data status (2026-08-11)
+## Current data status (2026-08-12)
 
-Dylan's source supplies a complete 100-case outcome benchmark: 44 positive and 56 negative. Those labels, achievability classes, decision cutoffs, pursue decisions, and source confidence are derived deterministically from the workbook. The remaining gate is leakage-safe public evidence from on or before each decision date; the 92 legacy drafts are not benchmark truth.
+Dylan's enriched source supplies the complete 100-case outcome benchmark: 44 positive and 56 negative. It was compared cell-for-cell with the original locked 100-row benchmark and Evidence Index, then imported as 420 individually dated detail sources and claims. All 100 cases are point-in-time compliant; 79 contain some safe evidence and 12 pass the current freeze gate.
+
+The original cohort has already been revealed and is never held out again. The next cohort route uses only excluded, never-evaluated, evidence-ready cases and requires 16 per label so eight per label can remain locked held-out. Current fresh-pool readiness is zero positive and four negative. Recover 16 positive and 12 additional negative cases before attempting a new split. Do not run a paid scoring benchmark merely because the workbook import succeeded.
