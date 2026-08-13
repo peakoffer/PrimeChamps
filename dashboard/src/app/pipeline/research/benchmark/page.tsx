@@ -760,9 +760,10 @@ export default function ResearchBenchmarkPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Apify history pilot failed");
       const snapshot = payload.snapshot;
+      const usage = typeof payload.actualUsageUsd === "number" ? `$${payload.actualUsageUsd.toFixed(4)}` : "not reported";
       setMessage(snapshot
-        ? `Inspection only: @${snapshot.handle} returned ${snapshot.followers?.toLocaleString?.() ?? "unknown"} followers on ${snapshot.capturedAt.slice(0, 10)} from ${snapshot.historyPointCount} history rows. Actual Actor usage: ${typeof payload.actualUsageUsd === "number" ? `$${payload.actualUsageUsd.toFixed(4)}` : "not reported"}. No evidence, scoring tokens, pipeline records, or outreach were written.`
-        : `The one-profile Apify pilot returned no exact history row within 31 days before ${record.cutoff.slice(0, 10)}. No evidence, scoring tokens, pipeline records, or outreach were written.`);
+        ? `Inspection only: @${snapshot.handle} returned ${snapshot.followers?.toLocaleString?.() ?? "unknown"} followers on ${snapshot.capturedAt.slice(0, 10)} from ${snapshot.historyPointCount} history rows. Actual Actor usage: ${usage}; run ${payload.runId}. No evidence, scoring tokens, pipeline records, or outreach were written.`
+        : `Apify pilot rejected: expected @${record.handle}, returned @${payload.diagnostics?.returnedHandle || "none"}, with ${payload.diagnostics?.historyPointCount || 0} history rows${payload.diagnostics?.historyMinimumDate ? ` from ${payload.diagnostics.historyMinimumDate} to ${payload.diagnostics.historyMaximumDate}` : ""}; nearest pre-cutoff row ${payload.diagnostics?.nearestPreCutoffDate || "none"}. Usage: ${usage}; run ${payload.runId}. No evidence, scoring tokens, pipeline records, or outreach were written.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Apify history pilot failed");
     } finally {

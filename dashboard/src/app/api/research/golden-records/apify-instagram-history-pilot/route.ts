@@ -146,6 +146,13 @@ export async function POST(request: NextRequest) {
       }
     );
     const exactResult = items.find((item) => normalizeHandle(item.username) === candidate.handle) || items[0];
+    const historyPoints = (exactResult?.profile_history_points || [])
+      .map((point) => ({ point, timestamp: typeof point.date === "string" ? Date.parse(point.date) : Number.NaN }))
+      .filter(({ timestamp }) => Number.isFinite(timestamp))
+      .sort((left, right) => left.timestamp - right.timestamp);
+    const cutoffTimestamp = Date.parse(candidate.cutoff);
+    const preCutoffPoints = historyPoints.filter(({ timestamp }) => timestamp <= cutoffTimestamp);
+    const nearestPreCutoff = preCutoffPoints.at(-1);
     const snapshot = exactResult ? prepareUnverifiedApifyInstagramHistoryPilot({
       expectedHandle: candidate.handle,
       evidenceCutoffAt: candidate.cutoff,
@@ -162,6 +169,16 @@ export async function POST(request: NextRequest) {
       actualUsageUsd: usage.usageTotalUsd,
       chargedEventCounts: usage.chargedEventCounts,
       datasetRows: items.length,
+      diagnostics: {
+        returnedHandle: normalizeHandle(exactResult?.username) || null,
+        exactHandleMatch: normalizeHandle(exactResult?.username) === candidate.handle,
+        historyPointCount: historyPoints.length,
+        historyMinimumDate: historyPoints[0] ? new Date(historyPoints[0].timestamp).toISOString().slice(0, 10) : null,
+        historyMaximumDate: historyPoints.at(-1) ? new Date(historyPoints.at(-1)!.timestamp).toISOString().slice(0, 10) : null,
+        nearestPreCutoffDate: nearestPreCutoff ? new Date(nearestPreCutoff.timestamp).toISOString().slice(0, 10) : null,
+        trackedSince: exactResult?.tracked_since || null,
+        updatedAt: exactResult?.updated_at || null,
+      },
       snapshot,
       usableForIndependentValidation: Boolean(snapshot),
       eligibleForScoring: false,
