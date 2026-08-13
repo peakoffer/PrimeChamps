@@ -18,6 +18,7 @@ const MAX_PILOT_RECORDS = 5;
 const MAX_PILOT_CREDITS = 10;
 const APIFY_PUBLIC_HISTORY_ACTOR = process.env.APIFY_SOCIAL_BLADE_ACTOR?.trim() || "solidcode/socialblade-scraper";
 const APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0.5;
+const APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2;
 
 type Candidate = {
   id: string;
@@ -112,9 +113,22 @@ async function buildCandidatePlan(organizationId: string) {
     || left.athleteName.localeCompare(right.athleteName));
 }
 
-function publicPlan(candidates: Candidate[]) {
+async function countApifyPublicHistoryAttempts(organizationId: string) {
+  const admin = createAdminClient();
+  const { count, error } = await admin.from("research_evidence_sources")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("provider", "apify_social_blade_public_history");
+  if (error) throw error;
+  return count || 0;
+}
+
+function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number) {
   const pilot = candidates.slice(0, MAX_PILOT_RECORDS);
-  const apifyPilot = candidates.filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted).slice(0, 1);
+  const apifyPilotExhausted = apifyPublicAttemptCount >= APIFY_PUBLIC_HISTORY_FAILURE_LIMIT;
+  const apifyPilot = apifyPilotExhausted
+    ? []
+    : candidates.filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted).slice(0, 1);
   return {
     configured: Boolean(process.env.SOCIAL_BLADE_CLIENT_ID && process.env.SOCIAL_BLADE_TOKEN),
     candidateCount: candidates.length,
@@ -140,6 +154,8 @@ function publicPlan(candidates: Candidate[]) {
     })),
     apifyPilotMaximumChargeUsd: APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD,
     apifyActor: APIFY_PUBLIC_HISTORY_ACTOR,
+    apifyPilotAttemptCount: apifyPublicAttemptCount,
+    apifyPilotExhausted,
     scoringTokensSpent: 0,
     outreachMutationsAllowed: false,
   };
@@ -168,8 +184,11 @@ async function fetchSocialBladeHistory(candidate: Candidate) {
 export async function GET() {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
-    const candidates = await buildCandidatePlan(user.organizationId);
-    return NextResponse.json({ ok: true, ...publicPlan(candidates) });
+    const [candidates, apifyPublicAttemptCount] = await Promise.all([
+      buildCandidatePlan(user.organizationId),
+      countApifyPublicHistoryAttempts(user.organizationId),
+    ]);
+    return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not prepare Social Blade history plan";
     const status = message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 500;
@@ -195,6 +214,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           error: `Refresh the plan and explicitly confirm its $${APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD.toFixed(2)} ceiling`,
           requiredMaximumChargeUsd: APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD,
+        }, { status: 409 });
+      }
+      const apifyPublicAttemptCount = await countApifyPublicHistoryAttempts(user.organizationId);
+      if (apifyPublicAttemptCount >= APIFY_PUBLIC_HISTORY_FAILURE_LIMIT) {
+        return NextResponse.json({
+          error: "The public-history diagnostic lane is closed after two no-match runs. Use the official historical API instead.",
+          attempts: apifyPublicAttemptCount,
         }, { status: 409 });
       }
       const candidates = (await buildCandidatePlan(user.organizationId))

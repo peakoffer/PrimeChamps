@@ -2210,6 +2210,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
   assert.match(socialBladeHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0\.5/);
+  assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2/);
   assert.match(socialBladeHistoryRoute, /apifyPublicAttemptedRecordIds/);
   assert.match(socialBladeHistoryRoute, /retrieval_status: "error"/);
   assert.match(socialBladeHistoryRoute, /eligible_before_cutoff: false/);

@@ -103,6 +103,8 @@ type SocialBladeHistoryPlan = {
     historyDays: number;
   }>;
   apifyPilotMaximumChargeUsd: number;
+  apifyPilotAttemptCount: number;
+  apifyPilotExhausted: boolean;
 };
 
 const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
@@ -114,6 +116,8 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   apifyConfigured: false,
   apifyPilotRecords: [],
   apifyPilotMaximumChargeUsd: 0.5,
+  apifyPilotAttemptCount: 0,
+  apifyPilotExhausted: false,
 };
 
 type BenchmarkMetrics = {
@@ -1102,12 +1106,16 @@ export default function ResearchBenchmarkPage() {
               onClick={() => void runApifySocialBladePilot()}
               title={!socialBladePlan.apifyConfigured
                 ? "APIFY_API_KEY is required"
+                : socialBladePlan.apifyPilotExhausted
+                  ? "Two bounded no-match runs proved the public Actor does not return usable dated Instagram history"
                 : socialBladePlan.apifyPilotRecords.length === 0
                   ? "No remaining positive cutoff is inside the public 31-day window"
                   : undefined}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
-              {socialBladePlan.apifyPilotRecords.length
+              {socialBladePlan.apifyPilotExhausted
+                ? "Public history pilot failed"
+                : socialBladePlan.apifyPilotRecords.length
                 ? `Check ${socialBladePlan.apifyPilotRecords[0].athleteName} · ≤$${socialBladePlan.apifyPilotMaximumChargeUsd.toFixed(2)}`
                 : "Public history window exhausted"}
             </button>
