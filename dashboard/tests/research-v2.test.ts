@@ -2213,6 +2213,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /apifyPublicAttemptedRecordIds/);
   assert.match(socialBladeHistoryRoute, /retrieval_status: "error"/);
   assert.match(socialBladeHistoryRoute, /eligible_before_cutoff: false/);
+  assert.doesNotMatch(socialBladeHistoryRoute, /source_type: "social_analytics"/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runner, /signalPreparedIds/);
   assert.match(runner, /Execution is gated by the evidence itself/);
