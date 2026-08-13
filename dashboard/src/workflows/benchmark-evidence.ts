@@ -95,8 +95,10 @@ function validatePreparationRecord(
     const blindHeldOut = record.benchmark_split === "held_out"
       && Boolean(record.held_out_locked_at)
       && !record.held_out_revealed_at;
-    if (record.benchmark_split !== "development" && !blindHeldOut) {
-      throw new FatalError(`Record ${record.id} is not in an eligible development or locked held-out cohort`);
+    const freshExcluded = record.benchmark_split === "excluded"
+      && !record.held_out_locked_at;
+    if (!freshExcluded && record.benchmark_split !== "development" && !blindHeldOut) {
+      throw new FatalError(`Record ${record.id} is not fresh excluded, development, or locked held-out evidence recovery`);
     }
   } else if (record.benchmark_split !== "excluded") {
     throw new FatalError(`Record ${record.id} is already assigned to a benchmark cohort`);

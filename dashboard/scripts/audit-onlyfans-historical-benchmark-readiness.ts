@@ -27,18 +27,27 @@ if (recordsError) throw recordsError;
 const records = (recordsData || []) as Array<BenchmarkGoldenCase & { fit_label: "fit" | "not_fit" }>;
 if (records.length !== 100) throw new Error(`Expected 100 historical records, received ${records.length}`);
 const recordIds = records.map((record) => record.id);
-const [{ data: sourcesData, error: sourcesError }, { data: claimsData, error: claimsError }] = await Promise.all([
-  admin.from("research_evidence_sources")
-    .select("id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason")
-    .in("golden_record_id", recordIds),
-  admin.from("research_evidence_claims")
-    .select("id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason")
-    .in("golden_record_id", recordIds),
-]);
-if (sourcesError) throw sourcesError;
-if (claimsError) throw claimsError;
-const sources = (sourcesData || []) as BenchmarkEvidenceSourceRow[];
-const claims = (claimsData || []) as BenchmarkEvidenceClaimRow[];
+const recordIdChunks = Array.from({ length: Math.ceil(recordIds.length / 20) }, (_, index) =>
+  recordIds.slice(index * 20, (index + 1) * 20)
+);
+const evidenceBatches = await Promise.all(recordIdChunks.map(async (ids) => {
+  const [{ data: sourcesData, error: sourcesError }, { data: claimsData, error: claimsError }] = await Promise.all([
+    admin.from("research_evidence_sources")
+      .select("id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason")
+      .in("golden_record_id", ids).limit(1_000),
+    admin.from("research_evidence_claims")
+      .select("id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason")
+      .in("golden_record_id", ids).limit(1_000),
+  ]);
+  if (sourcesError) throw sourcesError;
+  if (claimsError) throw claimsError;
+  return {
+    sources: (sourcesData || []) as BenchmarkEvidenceSourceRow[],
+    claims: (claimsData || []) as BenchmarkEvidenceClaimRow[],
+  };
+}));
+const sources = evidenceBatches.flatMap((batch) => batch.sources);
+const claims = evidenceBatches.flatMap((batch) => batch.claims);
 const entries = records.map((record) => {
   const selection = selectLeakageSafeBenchmarkEvidence({
     record,
@@ -49,6 +58,46 @@ const entries = records.map((record) => {
   const readiness = benchmarkEvidenceFreezeReadiness({ record, fitLabel: record.fit_label, selection });
   return { record, selection, readiness };
 });
+const recoveryLimitArgument = process.argv.find((argument) => argument.startsWith("--limit="));
+const recoveryLimit = Math.max(1, Math.min(68, Number(recoveryLimitArgument?.split("=")[1]) || 20));
+const includeRecoveryPlan = process.argv.includes("--recovery-plan");
+const recoveryPlan = (fitLabel: "fit" | "not_fit") => entries
+  .filter((entry) => entry.record.benchmark_split === "excluded" && entry.record.fit_label === fitLabel)
+  .map((entry) => {
+    const { readiness, selection, record } = entry;
+    const requiredModes = fitLabel === "fit" && !readiness.creatorPotential.passed
+      ? ["signal_recovery", ...(!readiness.adult.passed ? ["age_recovery"] : [])]
+      : fitLabel === "fit" && !readiness.adult.passed
+        ? ["age_recovery"]
+        : readiness.ready ? [] : ["baseline"];
+    return {
+      recordId: record.id,
+      athleteName: record.athlete_name,
+      sport: record.sport,
+      evidenceCutoffAt: record.evidence_cutoff_at,
+      ready: readiness.ready,
+      missingGateCount: readiness.reasons.length,
+      blockers: readiness.reasons,
+      requiredModes,
+      safeClaims: selection.evidence.length,
+      independentSources: readiness.independentSources,
+      identitySources: readiness.identity.independentSources,
+      adultSources: readiness.adult.independentSources,
+      momentumPassed: readiness.momentum.passed,
+      audienceEvidence: readiness.creatorPotential.audienceEvidenceCount,
+      creatorEvidence: readiness.creatorPotential.creatorEvidenceCount,
+    };
+  })
+  .sort((left, right) => Number(right.ready) - Number(left.ready)
+    || left.missingGateCount - right.missingGateCount
+    || right.audienceEvidence - left.audienceEvidence
+    || right.creatorEvidence - left.creatorEvidence
+    || right.adultSources - left.adultSources
+    || right.identitySources - left.identitySources
+    || Number(right.momentumPassed) - Number(left.momentumPassed)
+    || right.safeClaims - left.safeClaims
+    || left.athleteName.localeCompare(right.athleteName))
+  .slice(0, recoveryLimit);
 const summary = summarizeBenchmarkEvidenceReadiness(entries.map(({ record, selection }) => ({
   record, fitLabel: record.fit_label, selection,
 })));
@@ -96,4 +145,11 @@ console.log(JSON.stringify({
   currentSplitCounts: Object.fromEntries(["development", "held_out", "excluded"].map((split) => [
     split, entries.filter((entry) => entry.record.benchmark_split === split).length,
   ])),
+  ...(includeRecoveryPlan ? {
+    recoveryPlan: {
+      limitPerLabel: recoveryLimit,
+      positive: recoveryPlan("fit"),
+      negative: recoveryPlan("not_fit"),
+    },
+  } : {}),
 }, null, 2));

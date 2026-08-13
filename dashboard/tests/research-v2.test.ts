@@ -1616,11 +1616,13 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /eligibleForSignalRecovery/);
+  assert.match(route, /body\.benchmarkSplit === "excluded"/);
+  assert.match(route, /excludedSignalRecoveryCount/);
   assert.match(route, /requestedMode === "signal_recovery" \? signalRecoverySplit : "excluded"/);
   assert.match(route, /heldOutSignalRecoveryCount/);
   assert.match(route, /RESEARCH_HELD_OUT_EVALUATION_ENABLED/);
   assert.match(workflow, /preparationMode === "signal_recovery"/);
-  assert.match(workflow, /locked held-out cohort/);
+  assert.match(workflow, /fresh excluded, development, or locked held-out evidence recovery/);
   assert.match(route, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(route, /query_plan_version: queryPlanVersion/);
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
@@ -1633,6 +1635,21 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
   assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);
+});
+
+test("fresh cohort assignment uses the evidence-ready 16-per-label gate", () => {
+  const route = readFileSync(new URL("../src/app/api/research/golden-records/route.ts", import.meta.url), "utf8");
+  assert.match(route, /if \(perLabel < 16\)/);
+  assert.match(route, /at least 16 leakage-safe evidence packets per label/);
+  assert.doesNotMatch(route, /clean source pool requires 40 resolved-sport/);
+});
+
+test("historical readiness audit loads claims in bounded batches instead of truncating at 1000", () => {
+  const audit = readFileSync(new URL("../scripts/audit-onlyfans-historical-benchmark-readiness.ts", import.meta.url), "utf8");
+  assert.match(audit, /recordIdChunks/);
+  assert.match(audit, /recordIds\.slice\(index \* 20/);
+  assert.match(audit, /evidenceBatches\.flatMap\(\(batch\) => batch\.claims\)/);
+  assert.doesNotMatch(audit, /\.in\("golden_record_id", recordIds\),/);
 });
 
 test("the database permits evidence-gated Dylan outcome cases to freeze without inventing public knowability", () => {

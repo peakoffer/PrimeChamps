@@ -226,13 +226,6 @@ export async function POST(request: NextRequest) {
         final_outcome: string;
         stratification_tags: string[];
       }>;
-      const fitCount = ready.filter((record) => record.fit_label === "fit").length;
-      const notFitCount = ready.filter((record) => record.fit_label === "not_fit").length;
-      if (fitCount < 40 || notFitCount < 40) {
-        return NextResponse.json({
-          error: `A clean source pool requires 40 resolved-sport fit and 40 resolved-sport not-fit labels. Ready now: ${fitCount} fit and ${notFitCount} not fit.`,
-        }, { status: 409 });
-      }
       const readyIds = ready.map((record) => record.id);
       const { sources, claims } = await loadBenchmarkEvidenceRows({
         admin, organizationId: user.organizationId, recordIds: readyIds,

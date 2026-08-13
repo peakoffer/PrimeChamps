@@ -47,6 +47,8 @@ type EvidencePreparationRunRow = {
   checkpoint: unknown;
 };
 
+type SignalRecoverySplit = "excluded" | "development" | "held_out";
+
 function completedRecordIds(runs: EvidencePreparationRunRow[], queryPlanVersion: string) {
   return new Set(runs.flatMap((run) => {
     const checkpoint = run.checkpoint as Record<string, unknown> | null;
@@ -109,7 +111,8 @@ function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
     && !(record.held_out_locked_at && !record.held_out_revealed_at);
 }
 
-function eligibleForSignalRecovery(record: GoldenPreparationCandidate, split: "development" | "held_out") {
+function eligibleForSignalRecovery(record: GoldenPreparationCandidate, split: SignalRecoverySplit) {
+  if (split === "excluded") return eligibleForEvidencePreparation(record);
   return record.benchmark_split === split
     && record.sport !== "Needs enrichment"
     && record.sport !== "Unknown"
@@ -146,6 +149,7 @@ export async function GET() {
     const allCandidates = (candidates || []) as GoldenPreparationCandidate[];
     const eligible = allCandidates.filter(eligibleForEvidencePreparation);
     const developmentEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "development"));
+    const excludedEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "excluded"));
     const heldOutEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "held_out"));
     const runRows = (runs || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
@@ -163,6 +167,7 @@ export async function GET() {
       preparationMode,
       baselineRemainingCount: baselineRemaining.length,
       ageRecoveryRemainingCount: ageRecoveryRemaining.length,
+      excludedSignalRecoveryCount: excludedEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
       developmentSignalRecoveryCount: developmentEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
       heldOutSignalRecoveryCount: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true"
         ? heldOutEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length
@@ -221,7 +226,9 @@ export async function POST(request: NextRequest) {
       || body.preparationMode === "signal_recovery"
       ? body.preparationMode as HistoricalEvidencePreparationMode
       : null;
-    const signalRecoverySplit = body.benchmarkSplit === "held_out" ? "held_out" : "development";
+    const signalRecoverySplit: SignalRecoverySplit = body.benchmarkSplit === "held_out"
+      ? "held_out"
+      : body.benchmarkSplit === "excluded" ? "excluded" : "development";
     if (requestedMode === "signal_recovery"
       && signalRecoverySplit === "held_out"
       && process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED !== "true") {
@@ -278,7 +285,7 @@ export async function POST(request: NextRequest) {
           ? preparationMode === "age_recovery"
             ? "Every blocked fit record has completed the current age-recovery plan; no provider call was started."
             : preparationMode === "signal_recovery"
-              ? `Every ${signalRecoverySplit === "held_out" ? "locked held-out" : "development"} record has completed the current creator-signal recovery plan; no provider call was started.`
+              ? `Every ${signalRecoverySplit === "held_out" ? "locked held-out" : signalRecoverySplit === "excluded" ? "fresh excluded" : "development"} record has completed the current creator-signal recovery plan; no provider call was started.`
               : "Every eligible record has completed the current evidence-extraction version; no provider call was started."
           : "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
         eligible: eligible.length,
