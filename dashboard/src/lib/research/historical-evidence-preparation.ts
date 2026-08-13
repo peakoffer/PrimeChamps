@@ -615,6 +615,7 @@ export function validatePreparedAgeEvidenceForSource(input: {
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
   athletic_momentum: /\b(?:ranked|ranking|champion|finalist|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)\b/i,
   audience_signal: /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
+  creator_behavior_signal: /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i,
   commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
 };
 

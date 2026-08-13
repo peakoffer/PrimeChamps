@@ -849,7 +849,7 @@ async function processBenchmarkCase(input: {
   const identityGate = benchmarkIdentityGate(record, selection.evidence);
   const adultGate = benchmarkAdultEligibilityGate(record, selection.evidence);
   const momentumGate = benchmarkCurrentMomentumGate(record, selection.evidence);
-  const creatorPotentialGate = benchmarkCreatorPotentialGate(selection.evidence);
+  const creatorPotentialGate = benchmarkCreatorPotentialGate(record, selection.evidence);
   const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
   const evidenceHash = stableEvidenceSetHash(modelEvidence.map((item) => ({
     url: item.url,

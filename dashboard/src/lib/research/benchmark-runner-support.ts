@@ -1,5 +1,5 @@
 import {
-  preparedEvidenceSignalSupported,
+  preparedEvidenceSignalExcerptForAthlete,
   preparedMomentumEffectiveAt,
 } from "./historical-evidence-preparation.ts";
 
@@ -327,7 +327,11 @@ export function benchmarkCurrentMomentumGate(
     const signalText = `${item.title}\n${item.claim}\n${item.excerpt}`;
     const supportsMomentum = item.claimType === "athletic_momentum"
       || (item.claimType === "candidate_evidence"
-        && preparedEvidenceSignalSupported("athletic_momentum", signalText));
+        && Boolean(preparedEvidenceSignalExcerptForAthlete({
+          athleteName: record.athlete_name,
+          claimType: "athletic_momentum",
+          sourceExcerpt: signalText,
+        })));
     const datedSignal = item.claimType === "athletic_momentum"
       ? item.effectiveAt
       : preparedMomentumEffectiveAt(signalText, item.effectiveAt);
@@ -348,18 +352,25 @@ export function benchmarkCurrentMomentumGate(
   return { passed: recent.length > 0, recentEvidenceCount: recent.length, freshestAt };
 }
 
-export function benchmarkCreatorPotentialGate(evidence: LeakageSafeBenchmarkEvidence[]) {
+export function benchmarkCreatorPotentialGate(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
   const audienceEvidence = evidence.filter((item) =>
     item.claimType === "audience_signal"
     || item.claimType === "social_engagement_signal"
     || (item.claimType === "candidate_evidence"
-      && preparedEvidenceSignalSupported("audience_signal", `${item.title}\n${item.claim}\n${item.excerpt}`))
+      && Boolean(preparedEvidenceSignalExcerptForAthlete({
+        athleteName: record.athlete_name,
+        claimType: "audience_signal",
+        sourceExcerpt: `${item.title}\n${item.claim}\n${item.excerpt}`,
+      })))
   );
   const creatorEvidence = evidence.filter((item) =>
     item.claimType === "creator_behavior_signal"
     || (item.claimType === "candidate_evidence"
-      && /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i
-        .test(`${item.title}\n${item.claim}\n${item.excerpt}`))
+      && Boolean(preparedEvidenceSignalExcerptForAthlete({
+        athleteName: record.athlete_name,
+        claimType: "creator_behavior_signal",
+        sourceExcerpt: `${item.title}\n${item.claim}\n${item.excerpt}`,
+      })))
   );
   return {
     passed: audienceEvidence.length > 0 && creatorEvidence.length > 0,
@@ -397,7 +408,7 @@ export function benchmarkEvidenceFreezeReadiness(input: {
   const identity = benchmarkIdentityGate(input.record, input.selection.evidence);
   const adult = benchmarkAdultEligibilityGate(input.record, input.selection.evidence);
   const momentum = benchmarkCurrentMomentumGate(input.record, input.selection.evidence);
-  const creatorPotential = benchmarkCreatorPotentialGate(input.selection.evidence);
+  const creatorPotential = benchmarkCreatorPotentialGate(input.record, input.selection.evidence);
   const domains = new Set(input.selection.evidence.map((item) => item.independenceGroup));
   const reasons: string[] = [];
   if (!input.selection.pointInTimeCompliant) reasons.push("point-in-time evidence is unsafe");

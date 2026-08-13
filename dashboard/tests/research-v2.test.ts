@@ -547,12 +547,23 @@ test("creator potential gate requires both audience and creator behavior", () =>
       structuredValue: { creator_activity: "weekly tournament vlogs" },
     },
   ];
-  assert.deepEqual(benchmarkCreatorPotentialGate(evidence), {
+  assert.deepEqual(benchmarkCreatorPotentialGate({ id: "case", athlete_name: "Example Athlete", sport: "Volleyball", benchmark_split: "excluded", evidence_cutoff_at: "2026-05-03T12:00:00.000Z" }, evidence), {
     passed: true,
     audienceEvidenceCount: 1,
     creatorEvidenceCount: 1,
   });
-  assert.equal(benchmarkCreatorPotentialGate(evidence.slice(0, 1)).passed, false);
+  assert.equal(benchmarkCreatorPotentialGate({ id: "case", athlete_name: "Example Athlete", sport: "Volleyball", benchmark_split: "excluded", evidence_cutoff_at: "2026-05-03T12:00:00.000Z" }, evidence.slice(0, 1)).passed, false);
+  const contaminatedCandidateEvidence = [{
+    ...evidence[0],
+    claimType: "candidate_evidence",
+    title: "Example Athlete profile",
+    claim: "Example Athlete is a volleyball player.",
+    excerpt: "Teammate Riley Roe has 200,000 followers and posts weekly videos.",
+  }];
+  assert.deepEqual(
+    benchmarkCreatorPotentialGate({ id: "case", athlete_name: "Example Athlete", sport: "Volleyball", benchmark_split: "excluded", evidence_cutoff_at: "2026-05-03T12:00:00.000Z" }, contaminatedCandidateEvidence),
+    { passed: false, audienceEvidenceCount: 0, creatorEvidenceCount: 0 }
+  );
 });
 
 test("stratified sampling rotates through sports before taking deeper rows", () => {
