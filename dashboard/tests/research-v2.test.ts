@@ -85,6 +85,7 @@ import {
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
+  preparedEvidenceSignalExcerptForAthlete,
   preparedMomentumEffectiveAt,
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
@@ -1586,7 +1587,7 @@ test("archived evidence extraction requires exact identity and sport and preserv
     mimeType: "text/html",
     archivedUrl: `https://web.archive.org/web/20240501010101id_/${candidate.url}`,
   };
-  const html = `<!doctype html><html><head><title>Jane Doe | Volleyball Roster</title><script type="application/ld+json">{"datePublished":"2023-09-01"}</script></head><body><main><h1>Jane Doe</h1><p>Jane Doe was born January 15, 2000 and is a volleyball outside hitter. The nationally ranked rookie won a conference championship and is a content creator with 100,000 Instagram followers.</p></main></body></html>`;
+  const html = `<!doctype html><html><head><title>Jane Doe | Volleyball Roster</title><script type="application/ld+json">{"datePublished":"2023-09-01"}</script></head><body><main><h1>Jane Doe</h1><p>Jane Doe was born January 15, 2000 and is a volleyball outside hitter. Jane Doe, a nationally ranked rookie, won a conference championship and is a content creator with 100,000 Instagram followers.</p></main></body></html>`;
   const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
 
   assert.equal(prepared.rejectionReason, null);
@@ -1634,6 +1635,25 @@ test("archived evidence extraction requires exact identity and sport and preserv
   assert.equal(navigationOnlySignals.rejectionReason, null);
   assert.ok(!navigationOnlySignals.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
   assert.ok(!navigationOnlySignals.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const teammateSignals = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: "<html><title>Jane Doe volleyball profile</title><body><main><p>Jane Doe is a volleyball athlete. Teammate Riley Roe won the national championship and has 120,000 followers.</p></main></body></html>",
+  });
+  assert.equal(teammateSignals.rejectionReason, null);
+  assert.ok(!teammateSignals.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
+  assert.ok(!teammateSignals.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const pronounSignals = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: "<html><title>Jane Doe volleyball profile</title><body><main><p>Jane Doe is a volleyball athlete. She won the national championship and has 120,000 followers.</p></main></body></html>",
+  });
+  assert.ok(pronounSignals.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
+  assert.ok(pronounSignals.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
 
   const officialCompactDob = extractPreparedArchivedEvidence({
     record: { ...record, athlete_name: "Nick Ponzio", sport: "Track & Field" },
@@ -1811,8 +1831,29 @@ test("generated material signals require explicit athlete-relevant language", ()
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "The athlete is listed as a pro team rider."), true);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "Main navigation Management Contact"), false);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "She signed with a management agency."), true);
+  assert.equal(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Jane Doe",
+    claimType: "athletic_momentum",
+    sourceExcerpt: "Jane Doe is a volleyball player. Teammate Riley Roe won the championship.",
+  }), null);
+  assert.match(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Jane Doe",
+    claimType: "athletic_momentum",
+    sourceExcerpt: "Jane Doe is a volleyball player. She won the championship.",
+  }) || "", /Jane Doe.*She won/);
   assert.equal(preparedMomentumEffectiveAt("She won the national championship in 2021.", "2026-05-10T00:00:00.000Z"), "2021-01-01T00:00:00.000Z");
   assert.equal(preparedMomentumEffectiveAt("Current X Games medals and results", "2026-05-10T00:00:00.000Z"), "2026-05-10T00:00:00.000Z");
+});
+
+test("archive signal revalidation quarantines claims without deleting evidence or touching live tables", () => {
+  const script = readFileSync(new URL("../scripts/revalidate-archived-material-signals.ts", import.meta.url), "utf8");
+  assert.match(script, /support_status:\s*"unsupported"/);
+  assert.match(script, /eligible_for_scoring:\s*false/);
+  assert.match(script, /archive_signal_not_explicitly_attributed_to_named_athlete/);
+  assert.doesNotMatch(script, /\.delete\s*\(/);
+  for (const table of ["athletes", "notifications", "messages", "outreach_touchpoints"]) {
+    assert.doesNotMatch(script, new RegExp(`from\\(["']${table}["']\\)`));
+  }
 });
 
 test("evidence preparation is durable, replay-safe, zero-scoring, and isolated from outreach", () => {

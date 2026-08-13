@@ -14,6 +14,8 @@
     "convert:historical-workbook": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/convert-onlyfans-historical-workbook-extraction.ts",
     "audit:benchmark-age-evidence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/audit-benchmark-age-evidence.ts",
     "audit:historical-benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/audit-onlyfans-historical-benchmark-readiness.ts",
+    "audit:archive-signals": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/revalidate-archived-material-signals.ts",
+    "fix:archive-signals": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/revalidate-archived-material-signals.ts --apply",
     "plan:historical-benchmark-recovery": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/audit-onlyfans-historical-benchmark-readiness.ts --recovery-plan --limit=20",
     "prepare:benchmark-archive-source": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/prepare-benchmark-archive-source.ts",
     "check": "npm run typecheck && npm run lint && npm run test:unit && npm run build"

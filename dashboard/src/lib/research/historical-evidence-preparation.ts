@@ -623,6 +623,37 @@ export function preparedEvidenceSignalSupported(claimType: string, sourceExcerpt
   return Boolean(pattern && pattern.test(sourceExcerpt));
 }
 
+export function preparedEvidenceSignalExcerptForAthlete(input: {
+  athleteName: string;
+  claimType: string;
+  sourceExcerpt: string;
+}) {
+  const signalPattern = PREPARED_EVIDENCE_SIGNAL_PATTERNS[input.claimType];
+  const normalizedName = normalizeEvidenceText(input.athleteName);
+  if (!signalPattern || !normalizedName) return null;
+  const segments = input.sourceExcerpt
+    .split(/\n|(?<=[.!?])\s+/)
+    .map((segment) => segment.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (!signalPattern.test(segment)) continue;
+    const normalizedSegment = normalizeEvidenceText(segment);
+    if (` ${normalizedSegment} `.includes(` ${normalizedName} `)) return segment.slice(0, 1_000);
+
+    // A directly following pronoun sentence can safely inherit the named
+    // athlete from the preceding sentence. Generic team/article context and
+    // named teammates cannot.
+    const previous = segments[index - 1] || "";
+    const normalizedPrevious = normalizeEvidenceText(previous);
+    const directlyRefersBack = /^(?:she|he|they|the athlete|the player|the fighter|the rider|the surfer|the driver|the runner)\b/i.test(segment);
+    if (directlyRefersBack && ` ${normalizedPrevious} `.includes(` ${normalizedName} `)) {
+      return `${previous} ${segment}`.slice(0, 1_000);
+    }
+  }
+  return null;
+}
+
 export function preparedMomentumEffectiveAt(sourceExcerpt: string, fallbackEffectiveAt: string) {
   const fallback = Date.parse(fallbackEffectiveAt);
   if (!Number.isFinite(fallback)) return fallbackEffectiveAt;
@@ -719,22 +750,31 @@ export function extractPreparedArchivedEvidence(input: {
     });
   }
   const signalExcerpt = `${title}\n${excerpt}`.slice(0, 1_200);
-  if (preparedEvidenceSignalSupported("athletic_momentum", signalExcerpt)) {
+  const momentumExcerpt = preparedEvidenceSignalExcerptForAthlete({
+    athleteName: record.athlete_name, claimType: "athletic_momentum", sourceExcerpt: signalExcerpt,
+  });
+  if (momentumExcerpt) {
     claims.push({
-      claimType: "athletic_momentum", claimText: signalExcerpt.slice(0, 600), structuredValue: { signal: "competitive_momentum" },
-      sourceExcerpt: signalExcerpt, effectiveAt: preparedMomentumEffectiveAt(signalExcerpt, effectiveAt), extractionConfidence: 90, material: true,
+      claimType: "athletic_momentum", claimText: momentumExcerpt.slice(0, 600), structuredValue: { signal: "competitive_momentum" },
+      sourceExcerpt: momentumExcerpt, effectiveAt: preparedMomentumEffectiveAt(momentumExcerpt, effectiveAt), extractionConfidence: 90, material: true,
     });
   }
-  if (preparedEvidenceSignalSupported("audience_signal", signalExcerpt)) {
+  const audienceExcerpt = preparedEvidenceSignalExcerptForAthlete({
+    athleteName: record.athlete_name, claimType: "audience_signal", sourceExcerpt: signalExcerpt,
+  });
+  if (audienceExcerpt) {
     claims.push({
-      claimType: "audience_signal", claimText: signalExcerpt.slice(0, 600), structuredValue: { signal: "public_audience_or_creator_presence" },
-      sourceExcerpt: signalExcerpt, effectiveAt, extractionConfidence: 88, material: true,
+      claimType: "audience_signal", claimText: audienceExcerpt.slice(0, 600), structuredValue: { signal: "public_audience_or_creator_presence" },
+      sourceExcerpt: audienceExcerpt, effectiveAt, extractionConfidence: 88, material: true,
     });
   }
-  if (preparedEvidenceSignalSupported("commercial_achievability_signal", signalExcerpt)) {
+  const commercialExcerpt = preparedEvidenceSignalExcerptForAthlete({
+    athleteName: record.athlete_name, claimType: "commercial_achievability_signal", sourceExcerpt: signalExcerpt,
+  });
+  if (commercialExcerpt) {
     claims.push({
-      claimType: "commercial_achievability_signal", claimText: signalExcerpt.slice(0, 600), structuredValue: { signal: "public_commercial_context" },
-      sourceExcerpt: signalExcerpt, effectiveAt, extractionConfidence: 86, material: true,
+      claimType: "commercial_achievability_signal", claimText: commercialExcerpt.slice(0, 600), structuredValue: { signal: "public_commercial_context" },
+      sourceExcerpt: commercialExcerpt, effectiveAt, extractionConfidence: 86, material: true,
     });
   }
   return {
