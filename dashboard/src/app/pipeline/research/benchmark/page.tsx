@@ -93,6 +93,16 @@ type SocialBladeHistoryPlan = {
   }>;
   pilotMaximumCredits: number;
   pilotLimit: number;
+  apifyConfigured: boolean;
+  apifyPilotRecords: Array<{
+    id: string;
+    athleteName: string;
+    sport: string;
+    handle: string;
+    cutoff: string;
+    historyDays: number;
+  }>;
+  apifyPilotMaximumChargeUsd: number;
 };
 
 const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
@@ -101,6 +111,9 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   pilotRecords: [],
   pilotMaximumCredits: 0,
   pilotLimit: 5,
+  apifyConfigured: false,
+  apifyPilotRecords: [],
+  apifyPilotMaximumChargeUsd: 0.5,
 };
 
 type BenchmarkMetrics = {
@@ -749,6 +762,36 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const runApifySocialBladePilot = async () => {
+    const candidate = socialBladePlan.apifyPilotRecords[0];
+    if (!socialBladePlan.apifyConfigured || !candidate || socialBladePlan.apifyPilotMaximumChargeUsd <= 0) return;
+    setWorking(true);
+    setMessage(`Checking one exact Instagram handle for ${candidate.athleteName} against Social Blade's dated public history. Hard Apify ceiling: $${socialBladePlan.apifyPilotMaximumChargeUsd.toFixed(2)}…`);
+    try {
+      const response = await fetch("/api/research/golden-records/social-blade-history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "apify_public_31_day",
+          recordId: candidate.id,
+          confirmedMaximumChargeUsd: socialBladePlan.apifyPilotMaximumChargeUsd,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Apify Social Blade pilot failed");
+      const cost = typeof payload.actualApifyCostUsd === "number" ? `$${payload.actualApifyCostUsd.toFixed(3)}` : "provider-reported cost unavailable";
+      setMessage(payload.matched
+        ? `Recovered one exact pre-cutoff audience snapshot for ${payload.athleteName} and wrote ${payload.claimsWritten} safe claims. Apify cost: ${cost}; scoring tokens and outreach mutations stayed at zero.`
+        : `No usable exact-handle pre-cutoff snapshot was returned. Apify cost: ${cost}. The lane stopped after one profile and wrote no evidence.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Apify Social Blade pilot failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const prepareHistoricalEvidence = async () => {
     setWorking(true);
     setMessage(evidencePreparationMode === "age_recovery"
@@ -1053,6 +1096,20 @@ export default function ResearchBenchmarkPage() {
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               Reuse Instagram history
+            </button>
+            <button
+              disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.apifyConfigured || socialBladePlan.apifyPilotRecords.length === 0}
+              onClick={() => void runApifySocialBladePilot()}
+              title={!socialBladePlan.apifyConfigured
+                ? "APIFY_API_KEY is required"
+                : socialBladePlan.apifyPilotRecords.length === 0
+                  ? "No remaining positive cutoff is inside the public 31-day window"
+                  : undefined}
+              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+            >
+              {socialBladePlan.apifyPilotRecords.length
+                ? `Check ${socialBladePlan.apifyPilotRecords[0].athleteName} · ≤$${socialBladePlan.apifyPilotMaximumChargeUsd.toFixed(2)}`
+                : "Public history window exhausted"}
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured || socialBladePlan.pilotRecords.length === 0}

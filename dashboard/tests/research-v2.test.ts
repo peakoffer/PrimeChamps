@@ -72,6 +72,7 @@ import {
 } from "../src/lib/research/historical-social-snapshot.ts";
 import { prepareHistoricalInstagramSnapshot } from "../src/lib/research/historical-instagram-history.ts";
 import {
+  prepareApifyPublicSocialBladeInstagramSnapshot,
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
 } from "../src/lib/research/social-blade-history.ts";
@@ -420,6 +421,46 @@ test("Social Blade recovery uses the cheapest sufficient tier and only exact, re
       data: { id: { username: "example.athlete" }, daily: [{ date: "2026-03-01T00:00:00.000Z", followers: 120_000 }] },
     },
   }), null);
+});
+
+test("Apify public Social Blade recovery requires an exact dated daily row and never backdates a current profile", () => {
+  const snapshot = prepareApifyPublicSocialBladeInstagramSnapshot({
+    expectedHandle: "@example.athlete",
+    evidenceCutoffAt: "2026-08-05T23:59:59.000Z",
+    rows: [
+      {
+        recordType: "profile", platform: "instagram", username: "example.athlete",
+        followers: 130_000, uploads: 250, scrapedAt: "2026-08-13T12:00:00.000Z",
+        url: "https://socialblade.com/instagram/user/example.athlete",
+      },
+      { recordType: "dailyStat", platform: "instagram", username: "example.athlete", date: "2026-08-06", followers: 125_000, uploads: 245 },
+      { recordType: "dailyStat", platform: "instagram", username: "example.athlete", date: "2026-08-05", followers: 124_000, following: 400, uploads: 244 },
+      { recordType: "dailyStat", platform: "instagram", username: "different.person", date: "2026-08-05", followers: 999_999, uploads: 999 },
+    ],
+  });
+  assert.equal(snapshot?.capturedAt, "2026-08-05T00:00:00.000Z");
+  assert.equal(snapshot?.followers, 124_000);
+  assert.equal(snapshot?.media, 244);
+  assert.deepEqual(snapshot?.claims.map((claim) => claim.claimType), [
+    "audience_signal", "creator_behavior_signal",
+  ]);
+
+  assert.equal(prepareApifyPublicSocialBladeInstagramSnapshot({
+    expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-08-05T23:59:59.000Z",
+    rows: [{
+      recordType: "profile", platform: "instagram", username: "example.athlete",
+      followers: 130_000, uploads: 250, scrapedAt: "2026-08-13T12:00:00.000Z",
+    }],
+  }), null, "a current profile row is not historical evidence");
+  assert.equal(prepareApifyPublicSocialBladeInstagramSnapshot({
+    expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-08-05T23:59:59.000Z",
+    rows: [{
+      recordType: "dailyStat", platform: "instagram", username: "different.person",
+      date: "2026-08-05", followers: 130_000,
+    }],
+  }), null, "a different handle cannot be substituted");
 });
 
 test("historical workbook conversion locks Dylan's truth and preserves row-level provenance", () => {
