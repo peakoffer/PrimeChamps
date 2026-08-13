@@ -1726,6 +1726,19 @@ test("age evidence revalidation preserves athlete profiles without inheriting an
     text: "Margo Hayes Makes History\nMargo Hayes has been climbing since she was 10 years old and making waves ever since.",
   });
   assert.equal(childhood.attributableAge, null);
+
+  const editorialPronounAge = validatePreparedAgeEvidenceForSource({
+    athleteName: "Lola Gallardo",
+    title: "Coming Out Day: full interviews",
+    domain: "espn.com",
+    observedAt: new Date("2025-07-22T09:36:54Z"),
+    text: "Spain women's national team goalkeeper Lola Gallardo [she/her], 28, has spent the bulk of her club career with Atletico Madrid.",
+  });
+  assert.deepEqual(editorialPronounAge.attributableAge?.parsed, {
+    age: 28,
+    birthYear: null,
+    precision: "stated_age",
+  });
 });
 
 test("historical discovery is tightly bounded and deduplicates URLs and domains", () => {

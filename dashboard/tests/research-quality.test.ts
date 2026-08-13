@@ -264,6 +264,16 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
     "Rebekah Allick | Born January 26, 2004 | middle blocker",
     now
   )?.parsed.age, 22);
+  assert.deepEqual(parseAgeEvidenceForAthlete(
+    "Lola Gallardo",
+    "Spain goalkeeper Lola Gallardo [she/her], 28, has spent the bulk of her career with Atletico Madrid.",
+    now
+  )?.parsed, { age: 28, birthYear: null, precision: "stated_age" });
+  assert.equal(parseAgeEvidenceForAthlete(
+    "Lola Gallardo",
+    "Lola Gallardo spoke alongside Marta Silva [she/her], 28, has spent her career in Spain.",
+    now
+  ), null);
   assert.equal(isCredibleAgeSourceUrl("https://usavolleyball.org/story/2026-/"), false);
   assert.equal(isCredibleAgeSourceUrl("https://cev.eu/player/kendall-kipp"), true);
 });

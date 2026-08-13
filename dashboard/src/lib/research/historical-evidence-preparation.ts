@@ -9,7 +9,7 @@ export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-blind-signal-recovery-v3";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-current-athletic-relevance-v5";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v3";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v4";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -490,7 +490,7 @@ function statedAgeSharesAthleteClause(name: string, evidence: string) {
   const surname = name.trim().split(/\s+/).at(-1)?.toLowerCase();
   if (!surname) return false;
   const lower = evidence.toLowerCase();
-  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)/i.exec(evidence);
+  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)|(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*\d{1,2}\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i.exec(evidence);
   if (!ageMatch || ageMatch.index === undefined) return false;
   const beforeAge = lower.slice(0, ageMatch.index);
   const surnameIndex = beforeAge.lastIndexOf(surname);

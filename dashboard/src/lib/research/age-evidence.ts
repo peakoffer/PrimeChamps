@@ -156,6 +156,21 @@ export function parseAgeEvidenceForAthlete(
         evidence: text.slice(nameWindowStart, evidenceEnd).trim(),
       };
     }
+
+    // Editorial profiles sometimes put a current age immediately after the
+    // athlete's name and optional pronouns: "Lola Gallardo [she/her], 28, has
+    // spent...". Keep this pattern anchored to the text immediately following
+    // the matched surname so a nearby teammate's age can never be inherited.
+    const editorialAge = evidence.match(
+      /^\s*(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*(\d{1,2})\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i
+    );
+    const age = Number(editorialAge?.[1]);
+    if (Number.isFinite(age) && age >= 10 && age <= 80) {
+      return {
+        parsed: { age, birthYear: null, precision: "stated_age" as const },
+        evidence: text.slice(nameWindowStart, evidenceEnd).trim(),
+      };
+    }
   }
   return null;
 }
