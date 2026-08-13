@@ -7,8 +7,8 @@ import {
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-blind-signal-recovery-v3";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-current-athletic-relevance-v5";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-attributed-instagram-recovery-v4";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-13-attributed-instagram-profile-v6";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v4";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -21,7 +21,7 @@ export function historicalEvidenceQueryPlanVersion(mode: HistoricalEvidencePrepa
 
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
-  queriesPerRecord: 3,
+  queriesPerRecord: 4,
   searchResultsPerQuery: 8,
   archiveUrlsPerRecord: 8,
   archiveBodyCharacters: 120_000,
@@ -79,7 +79,7 @@ export type CommonCrawlCapture = {
 };
 
 export type PreparedEvidenceClaim = {
-  claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
+  claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athlete_profile" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
   claimText: string;
   structuredValue: Record<string, unknown>;
   sourceExcerpt: string;
@@ -447,6 +447,74 @@ export function archivedHtmlToText(html: string) {
     .slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters);
 }
 
+const RESERVED_INSTAGRAM_PATHS = new Set([
+  "about", "accounts", "developer", "directory", "explore", "legal", "p", "reel", "reels", "stories", "tv",
+]);
+
+function compactIdentityToken(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * Extracts a personal Instagram handle only when the archived athlete page
+ * itself attributes it. A generic footer/social link is insufficient.
+ */
+export function extractAttributedInstagramHandle(input: {
+  athleteName: string;
+  title: string;
+  html: string;
+  text?: string;
+}) {
+  const text = input.text || archivedHtmlToText(input.html);
+  const athleteToken = compactIdentityToken(input.athleteName);
+  const nameTokens = input.athleteName.split(/\s+/).map(compactIdentityToken).filter((token) => token.length >= 4);
+  if (!athleteToken || nameTokens.length < 2) return null;
+
+  const hrefHandles = Array.from(input.html.matchAll(
+    /(?:https?:)?\/\/(?:www\.)?instagram\.com\/([a-z0-9._]{2,30})(?:[/?#"'])/gi
+  ), (match) => String(match[1]).toLowerCase());
+  const visibleHandles = Array.from(text.matchAll(/@([a-z0-9._]{2,30})\b/gi), (match) => ({
+    handle: String(match[1]).toLowerCase(),
+    index: match.index || 0,
+  }));
+  const labeledHandles = Array.from(text.matchAll(
+    /\binstagram(?:\s+(?:account|handle|profile))?\s*(?:(?:is|:|[-–—])\s*@?|@)([a-z0-9._]{2,30})\b/gi
+  ), (match) => ({ handle: String(match[1]).toLowerCase(), index: match.index || 0 }));
+  const allHandles = Array.from(new Set([
+    ...hrefHandles,
+    ...visibleHandles.map((item) => item.handle),
+    ...labeledHandles.map((item) => item.handle),
+  ].filter((handle) => !RESERVED_INSTAGRAM_PATHS.has(handle) && !/^instagram$/i.test(handle))));
+  if (!allHandles.length) return null;
+
+  const scored = allHandles.map((handle) => {
+    const visible = [...visibleHandles, ...labeledHandles].filter((item) => item.handle === handle);
+    const positions = visible.length ? visible.map((item) => item.index) : [Math.max(0, text.toLowerCase().indexOf(handle))];
+    const contexts = positions.map((index) => text.slice(Math.max(0, index - 500), Math.min(text.length, index + 500)));
+    const bestContext = contexts.sort((left, right) => right.length - left.length)[0] || "";
+    const normalizedContext = normalizeEvidenceText(bestContext);
+    const contextNamesAthlete = ` ${normalizedContext} `.includes(` ${normalizeEvidenceText(input.athleteName)} `);
+    const handleToken = compactIdentityToken(handle);
+    const handleMatchesName = nameTokens.some((token) => handleToken.includes(token));
+    const explicitlyInstagram = visible.some((item) => /instagram/i.test(
+      text.slice(Math.max(0, item.index - 80), Math.min(text.length, item.index + handle.length + 80))
+    ));
+    const inInstagramHref = hrefHandles.includes(handle);
+    const titleNamesAthlete = compactIdentityToken(input.title).includes(athleteToken);
+    const score = (contextNamesAthlete ? 4 : 0)
+      + (handleMatchesName ? 3 : 0)
+      + (explicitlyInstagram ? 2 : 0)
+      + (inInstagramHref ? 2 : 0)
+      + (titleNamesAthlete && allHandles.length === 1 ? 1 : 0);
+    return { handle, score, context: bestContext, contextNamesAthlete, handleMatchesName };
+  }).sort((left, right) => right.score - left.score || left.handle.localeCompare(right.handle));
+  const winner = scored[0];
+  if (!winner || winner.score < 5 || (!winner.contextNamesAthlete && !winner.handleMatchesName)
+    || (scored[1] && scored[1].score === winner.score)) return null;
+  const excerpt = `${input.title}. ${winner.context}`.replace(/\s+/g, " ").trim().slice(0, 1_000);
+  return { handle: winner.handle, excerpt };
+}
+
 function validHistoricalDate(value: string, cutoff: number) {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp) || timestamp < Date.UTC(1990, 0, 1) || timestamp > cutoff) return null;
@@ -750,6 +818,27 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     });
   }
+  const instagramProfile = extractAttributedInstagramHandle({
+    athleteName: record.athlete_name,
+    title,
+    html: input.html,
+    text,
+  });
+  if (instagramProfile) {
+    claims.push({
+      claimType: "athlete_profile",
+      claimText: `${record.athlete_name}'s Instagram handle is @${instagramProfile.handle}.`,
+      structuredValue: {
+        athlete_name: record.athlete_name,
+        platform: "instagram",
+        handle: instagramProfile.handle,
+      },
+      sourceExcerpt: instagramProfile.excerpt,
+      effectiveAt,
+      extractionConfidence: 96,
+      material: true,
+    });
+  }
   const signalExcerpt = `${title}\n${excerpt}`.slice(0, 1_200);
   const momentumExcerpt = preparedEvidenceSignalExcerptForAthlete({
     athleteName: record.athlete_name, claimType: "athletic_momentum", sourceExcerpt: signalExcerpt,
@@ -842,6 +931,7 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
   return [
+    `"${record.athlete_name}" "${record.sport}" (Instagram OR "Instagram handle" OR "post shared by") (profile OR followers OR "social media") before:${before}`,
     `"${record.athlete_name}" "${record.sport}" ("Instagram followers" OR "TikTok followers" OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
     `"${record.athlete_name}" "${record.sport}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") before:${before}`,
     `"${record.athlete_name}" "${record.sport}" (interview OR podcast OR YouTube OR "behind the scenes" OR "content creator" OR "personal brand" OR represented OR management OR agency OR "business inquiries" OR collaboration) before:${before}`,

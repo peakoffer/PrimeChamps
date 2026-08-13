@@ -50,6 +50,8 @@ type GoldenRecord = {
 type EvidenceSummary = {
   totalRecords: number;
   readyForFreeze: number;
+  readyFit: number;
+  readyNotFit: number;
   recordsWithAnySafeEvidence: number;
   safeClaimCount: number;
   blockerCounts: Record<string, number>;
@@ -232,6 +234,8 @@ const INITIAL_SUMMARY: BenchmarkSummary = {
 const INITIAL_EVIDENCE_SUMMARY: EvidenceSummary = {
   totalRecords: 0,
   readyForFreeze: 0,
+  readyFit: 0,
+  readyNotFit: 0,
   recordsWithAnySafeEvidence: 0,
   safeClaimCount: 0,
   blockerCounts: {},
@@ -328,6 +332,7 @@ export default function ResearchBenchmarkPage() {
   const [benchmarkReadiness, setBenchmarkReadiness] = useState(INITIAL_BENCHMARK_READINESS);
   const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
   const [excludedSignalRecoveryCount, setExcludedSignalRecoveryCount] = useState(0);
+  const [completedExcludedSignalRecordIds, setCompletedExcludedSignalRecordIds] = useState<string[]>([]);
   const [developmentSignalRecoveryCount, setDevelopmentSignalRecoveryCount] = useState(0);
   const [heldOutSignalRecoveryCount, setHeldOutSignalRecoveryCount] = useState(0);
   const [socialBladePlan, setSocialBladePlan] = useState(INITIAL_SOCIAL_BLADE_PLAN);
@@ -363,6 +368,7 @@ export default function ResearchBenchmarkPage() {
       setEvidencePreparationRuns(preparationPayload.runs || []);
       setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
       setExcludedSignalRecoveryCount(preparationPayload.excludedSignalRecoveryCount || 0);
+      setCompletedExcludedSignalRecordIds(preparationPayload.completedExcludedSignalRecordIds || []);
       setDevelopmentSignalRecoveryCount(preparationPayload.developmentSignalRecoveryCount || 0);
       setHeldOutSignalRecoveryCount(preparationPayload.heldOutSignalRecoveryCount || 0);
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
@@ -398,11 +404,10 @@ export default function ResearchBenchmarkPage() {
     && ["queued", "running", "failed"].includes(latestHeldOutRun.status)
     ? latestHeldOutRun
     : undefined;
-  const completedExcludedSignalRecordIds = useMemo(() => new Set(evidencePreparationRuns
-    .filter((run) => run.status === "completed"
-      && run.checkpoint?.preparation_mode === "signal_recovery"
-      && run.checkpoint?.benchmark_split === "excluded")
-    .flatMap((run) => run.record_ids)), [evidencePreparationRuns]);
+  const completedExcludedSignalRecordIdSet = useMemo(
+    () => new Set(completedExcludedSignalRecordIds),
+    [completedExcludedSignalRecordIds]
+  );
   const interruptedExcludedSignalRun = evidencePreparationRuns.find((run) => run.status === "failed"
     && run.checkpoint?.preparation_mode === "signal_recovery"
     && (run.checkpoint?.benchmark_split === "excluded"
@@ -419,12 +424,12 @@ export default function ResearchBenchmarkPage() {
     .filter((record) => record.benchmark_split === "excluded"
       && record.fit_label === "fit"
       && record.evidence_blockers.includes("fit record lacks both audience and creator-behavior evidence")
-      && !completedExcludedSignalRecordIds.has(record.id))
+      && !completedExcludedSignalRecordIdSet.has(record.id))
     .sort((left, right) => left.evidence_blockers.length - right.evidence_blockers.length
       || right.safe_evidence_source_count - left.safe_evidence_source_count
       || right.safe_evidence_claim_count - left.safe_evidence_claim_count
       || left.athlete_name.localeCompare(right.athlete_name))
-    .slice(0, 10), [completedExcludedSignalRecordIds, records]);
+    .slice(0, 10), [completedExcludedSignalRecordIdSet, records]);
   const nextExcludedSignalRecoveryRecords = useMemo(() => interruptedExcludedRecordIds.length
     ? interruptedExcludedRecordIds.map((recordId) => records.find((record) => record.id === recordId))
       .filter((record): record is GoldenRecord => Boolean(record))
@@ -987,8 +992,8 @@ export default function ResearchBenchmarkPage() {
 
         <section className="mb-6 grid gap-3 md:grid-cols-4">
           {[
-            { label: "Ground truth ready", value: summary.readyForSplit, detail: `${summary.readyFit} positive + ${summary.readyNotFit} negative · target 40 + 40` },
-            { label: "Evidence packets", value: `${evidenceSummary.readyForFreeze} / ${evidenceSummary.totalRecords}`, detail: `${evidenceSummary.recordsWithAnySafeEvidence} have any safe evidence · ${evidenceSummary.safeClaimCount} safe claims` },
+            { label: "Fresh labeled pool", value: summary.readyForSplit, detail: `${summary.readyFit} positive + ${summary.readyNotFit} negative · never scored` },
+            { label: "Fresh evidence ready", value: `${evidenceSummary.readyForFreeze} / ${evidenceSummary.totalRecords}`, detail: `${evidenceSummary.readyFit} positive + ${evidenceSummary.readyNotFit} negative · gap ${Math.max(0, 16 - evidenceSummary.readyFit)} + ${Math.max(0, 16 - evidenceSummary.readyNotFit)}` },
             { label: "Frozen development", value: summary.development, detail: "Used for iterative prompt and rubric tuning" },
             { label: "Locked held out", value: summary.heldOut, detail: `${summary.lockedHeldOut} locked · ${summary.revealedHeldOut} revealed` },
           ].map((metric) => (

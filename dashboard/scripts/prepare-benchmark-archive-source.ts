@@ -7,6 +7,7 @@ import {
   waybackCdxUrl,
   type HistoricalSearchCandidate,
 } from "../src/lib/research/historical-evidence-preparation.ts";
+import { ONLYFANS_HISTORICAL_DATASET } from "../src/lib/research/historical-benchmark.ts";
 
 config({ path: ".env.local", quiet: true });
 
@@ -17,6 +18,10 @@ function argument(name: string) {
 
 const athleteName = argument("athlete");
 const canonicalUrl = argument("url");
+const requiredClaim = argument("required-claim") || "adult_eligibility";
+if (!new Set(["adult_eligibility", "athlete_profile"]).has(requiredClaim)) {
+  throw new Error("--required-claim must be adult_eligibility or athlete_profile");
+}
 if (!athleteName || !canonicalUrl) {
   throw new Error("Usage requires --athlete=\"Athlete Name\" and --url=https://public-source.example/profile");
 }
@@ -31,7 +36,7 @@ const admin = createClient(supabaseUrl, serviceKey, {
 const { data: matches, error: recordError } = await admin.from("research_golden_records")
   .select("id,organization_id,athlete_name,sport,fit_label,evidence_cutoff_at,stratification_tags")
   .ilike("athlete_name", athleteName)
-  .contains("stratification_tags", ["dylan_outcome_ground_truth"])
+  .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
   .limit(3);
 if (recordError) throw recordError;
 if (matches?.length !== 1) throw new Error(`Expected one Dylan benchmark record for ${athleteName}; found ${matches?.length || 0}`);
@@ -71,8 +76,8 @@ const prepared = extractPreparedArchivedEvidence({
   html,
 });
 if (!prepared.evidence) throw new Error(`Archived source rejected: ${prepared.rejectionReason || "unknown reason"}`);
-if (!prepared.evidence.claims.some((claim) => claim.claimType === "adult_eligibility")) {
-  throw new Error("Archived source did not contain athlete-attributable age evidence");
+if (!prepared.evidence.claims.some((claim) => claim.claimType === requiredClaim)) {
+  throw new Error(`Archived source did not contain the required ${requiredClaim} evidence`);
 }
 
 const item = prepared.evidence;
@@ -99,7 +104,7 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   metadata: {
     preparation_method: "operator_supplied_authoritative_archive_source",
     capture_timestamp: item.captureTimestamp,
-    verification: "shared_exact_name_sport_age_and_cutoff_extractor",
+    verification: `shared_exact_name_sport_${requiredClaim}_and_cutoff_extractor`,
     evaluation_only: true,
     scoring_tokens_spent: 0,
   },

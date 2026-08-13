@@ -81,6 +81,7 @@ import {
   commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
   extractCommonCrawlWarcBody,
+  extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
@@ -1113,6 +1114,8 @@ test("benchmark finalist gates require two independent identity and adult source
   }]);
   assert.equal(summary.totalRecords, 2);
   assert.equal(summary.readyForFreeze, 1);
+  assert.equal(summary.readyFit, 1);
+  assert.equal(summary.readyNotFit, 0);
   assert.equal(summary.recordsWithAnySafeEvidence, 1);
   assert.equal(summary.safeClaimCount, 7);
   assert.equal(summary.blockerCounts["fewer than four supported public claims exist before the cutoff"], 1);
@@ -1712,6 +1715,61 @@ test("archived evidence extraction requires exact identity and sport and preserv
   assert.ok(!siblingAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
 });
 
+test("archived Instagram handles require athlete attribution and reject publisher footer accounts", () => {
+  assert.equal(extractAttributedInstagramHandle({
+    athleteName: "Tessa Thyssen",
+    title: "Connecté avec Tessa Thyssen",
+    html: '<main>Tessa Thyssen is a professional surfing athlete. Her latest photo was posted on Instagram (<a href="https://www.instagram.com/tessathyssen/">@tessathyssen</a>).</main>',
+  })?.handle, "tessathyssen");
+  assert.equal(extractAttributedInstagramHandle({
+    athleteName: "Crystal Pittman",
+    title: "Crystal Pittman fighter profile",
+    html: '<main>Crystal Pittman is a professional combat sports athlete. A post shared by Crystal Pittman (<a href="https://instagram.com/the_rugged_beauty/">@the_rugged_beauty</a>).</main>',
+  })?.handle, "the_rugged_beauty");
+  assert.equal(extractAttributedInstagramHandle({
+    athleteName: "Catarina Guimaraes",
+    title: "Catarina Guimaraes | Track & Field",
+    html: '<main>Catarina Guimaraes is a Team USA track and field athlete. <a href="https://instagram.com/catarinaguimaraes04/">Instagram</a></main>',
+  })?.handle, "catarinaguimaraes04");
+  assert.equal(extractAttributedInstagramHandle({
+    athleteName: "Jane Doe",
+    title: "Jane Doe volleyball profile",
+    html: '<main>Jane Doe is a volleyball athlete.</main><footer>Follow the publisher on Instagram <a href="https://instagram.com/volleyball_news/">@volleyball_news</a></footer>',
+  }), null);
+
+  const record = {
+    id: "golden-tessa",
+    athlete_name: "Tessa Thyssen",
+    sport: "Surfing",
+    fit_label: "fit" as const,
+    evidence_cutoff_at: "2026-07-07T12:00:00Z",
+  };
+  const candidate = {
+    query: '"Tessa Thyssen" Surfing Instagram before:2026-07-07',
+    title: "Connecté avec Tessa Thyssen",
+    url: "https://example.test/tessa-thyssen",
+    snippet: "Tessa Thyssen shares her latest Instagram post.",
+  };
+  const capture = {
+    timestamp: "20250215035606",
+    capturedAt: "2025-02-15T03:56:06.000Z",
+    originalUrl: candidate.url,
+    statusCode: "200",
+    digest: "TESSA123",
+    mimeType: "text/html",
+    archivedUrl: `https://web.archive.org/web/20250215035606id_/${candidate.url}`,
+  };
+  const prepared = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture,
+    html: '<html><head><title>Connecté avec Tessa Thyssen</title></head><body><main><p>Tessa Thyssen is a professional surfing athlete.</p><p>Her latest photo was posted on Instagram (<a href="https://instagram.com/tessathyssen/">@tessathyssen</a>).</p></main></body></html>',
+  });
+  const profile = prepared.evidence?.claims.find((claim) => claim.claimType === "athlete_profile");
+  assert.equal(profile?.structuredValue.platform, "instagram");
+  assert.equal(profile?.structuredValue.handle, "tessathyssen");
+});
+
 test("age evidence revalidation preserves athlete profiles without inheriting another person's age", () => {
   const norma = validatePreparedAgeEvidenceForSource({
     athleteName: "Norma Dumont",
@@ -1803,7 +1861,7 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     sport: "Volleyball",
     evidence_cutoff_at: "2024-06-01T12:00:00Z",
   });
-  assert.equal(signalRecovery.length, 3);
+  assert.equal(signalRecovery.length, 4);
   assert.ok(signalRecovery.every((query) => query.includes("before:2024-06-01")));
   assert.ok(signalRecovery.some((query) => /content creator|followers|personal brand/.test(query)));
   assert.ok(signalRecovery.some((query) => /socialblade|hypeauditor|favikon/.test(query)));
@@ -1871,6 +1929,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   const workflow = readFileSync(new URL("../src/workflows/benchmark-evidence.ts", import.meta.url), "utf8");
   const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
   const instagramHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/reuse-instagram-history/route.ts", import.meta.url), "utf8");
+  const socialBladeHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/social-blade-history/route.ts", import.meta.url), "utf8");
   const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
   assert.match(workflow, /"use workflow"/);
@@ -1953,6 +2012,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(instagramHistoryRoute, /new_actor_run_started: false/);
   assert.match(instagramHistoryRoute, /providerSpendUsd: 0/);
   assert.match(instagramHistoryRoute, /outreachMutationsAllowed: false/);
+  assert.match(instagramHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
+  assert.match(instagramHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
+  assert.match(socialBladeHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
+  assert.match(socialBladeHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runner, /signalPreparedIds/);
   assert.match(runner, /Execution is gated by the evidence itself/);

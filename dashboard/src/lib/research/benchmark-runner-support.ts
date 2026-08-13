@@ -428,11 +428,17 @@ export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
 }>) {
   const blockerCounts: Record<string, number> = {};
   let readyForFreeze = 0;
+  let readyFit = 0;
+  let readyNotFit = 0;
   let recordsWithAnySafeEvidence = 0;
   let safeClaimCount = 0;
   for (const entry of entries) {
     const readiness = benchmarkEvidenceFreezeReadiness(entry);
-    if (readiness.ready) readyForFreeze += 1;
+    if (readiness.ready) {
+      readyForFreeze += 1;
+      if (entry.fitLabel === "fit") readyFit += 1;
+      else readyNotFit += 1;
+    }
     if (entry.selection.evidence.length > 0) recordsWithAnySafeEvidence += 1;
     safeClaimCount += entry.selection.evidence.length;
     for (const reason of readiness.reasons) blockerCounts[reason] = (blockerCounts[reason] || 0) + 1;
@@ -440,6 +446,8 @@ export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
   return {
     totalRecords: entries.length,
     readyForFreeze,
+    readyFit,
+    readyNotFit,
     recordsWithAnySafeEvidence,
     safeClaimCount,
     blockerCounts,

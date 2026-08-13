@@ -7,6 +7,7 @@ import {
   type SocialBladeHistoryTier,
   type SocialBladeInstagramResponse,
 } from "@/lib/research/social-blade-history";
+import { ONLYFANS_HISTORICAL_DATASET } from "@/lib/research/historical-benchmark";
 
 export const maxDuration = 300;
 
@@ -35,6 +36,7 @@ async function buildCandidatePlan(organizationId: string) {
     .eq("organization_id", organizationId)
     .eq("benchmark_split", "excluded")
     .eq("fit_label", "fit")
+    .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
     .not("evidence_cutoff_at", "is", null);
   if (recordError) throw recordError;
   const recordIds = (records || []).map((record) => record.id);

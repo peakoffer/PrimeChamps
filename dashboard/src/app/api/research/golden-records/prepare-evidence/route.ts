@@ -247,6 +247,7 @@ export async function GET() {
       baselineRemainingCount: baselineRemaining.length,
       ageRecoveryRemainingCount: ageRecoveryRemaining.length,
       excludedSignalRecoveryCount: excludedEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
+      completedExcludedSignalRecordIds: Array.from(signalRecoveryCompleted),
       developmentSignalRecoveryCount: developmentEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
       heldOutSignalRecoveryCount: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true"
         ? heldOutEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length
