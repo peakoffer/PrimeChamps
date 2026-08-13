@@ -2021,6 +2021,21 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   assert.equal(archivedSocialCandidate.length, 1);
 });
 
+test("historical signal recovery uses a known cutoff-safe Instagram handle without increasing query volume", () => {
+  const queries = buildHistoricalSignalRecoveryQueries({
+    athlete_name: "Example Athlete",
+    sport: "Surfing",
+    evidence_cutoff_at: "2026-08-05T12:00:00.000Z",
+    instagram_handle: "@example.athlete",
+  });
+  assert.equal(queries.length, 4);
+  assert.match(queries[0], /"@example\.athlete"/);
+  assert.match(queries[0], /site:socialblade\.com/);
+  assert.match(queries[1], /"@example\.athlete"/);
+  assert.match(queries[2], /sponsor/);
+  assert.match(queries[3], /content creator/);
+});
+
 test("generated material signals require explicit athlete-relevant language", () => {
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "Skip to main content Instagram YouTube"), false);
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);

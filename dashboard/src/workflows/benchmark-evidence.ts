@@ -143,6 +143,30 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     .in("id", input.recordIds);
   if (error) throw error;
   if ((data || []).length !== input.recordIds.length) throw new FatalError("One or more evidence-preparation records were not found in this organization");
+  const { data: profileClaims, error: profileClaimError } = await admin.from("research_evidence_claims")
+    .select("golden_record_id,structured_value,effective_at")
+    .eq("organization_id", input.organizationId)
+    .in("golden_record_id", input.recordIds)
+    .eq("claim_type", "athlete_profile")
+    .eq("eligible_for_scoring", true)
+    .order("effective_at", { ascending: false });
+  if (profileClaimError) throw profileClaimError;
+  const instagramHandleByRecord = new Map<string, string>();
+  const cutoffByRecord = new Map((data || []).map((record) => [String(record.id), Date.parse(String(record.evidence_cutoff_at))]));
+  for (const claim of profileClaims || []) {
+    const recordId = String(claim.golden_record_id);
+    if (instagramHandleByRecord.has(recordId)) continue;
+    const value = claim.structured_value as Record<string, unknown> | null;
+    const handle = typeof value?.handle === "string"
+      ? value.handle.trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "")
+      : "";
+    const cutoff = cutoffByRecord.get(recordId);
+    if (String(value?.platform || "").toLowerCase() !== "instagram"
+      || !handle
+      || !Number.isFinite(cutoff)
+      || Date.parse(String(claim.effective_at)) > cutoff!) continue;
+    instagramHandleByRecord.set(recordId, handle);
+  }
   const byId = new Map((data || []).map((record) => [String(record.id), record as Record<string, unknown>]));
   const records = input.recordIds.map((id) => {
     const record = byId.get(id);
@@ -154,6 +178,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       sport: String(record.sport),
       fit_label: record.fit_label as "fit" | "not_fit",
       evidence_cutoff_at: String(record.evidence_cutoff_at),
+      instagram_handle: instagramHandleByRecord.get(String(record.id)) || null,
     } satisfies EvidencePreparationRecord;
   });
   const queryBuilder = input.preparationMode === "age_recovery"

@@ -7,7 +7,7 @@ import {
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-attributed-instagram-recovery-v4";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-13-attributed-instagram-profile-v6";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v4";
 
@@ -36,6 +36,7 @@ export type EvidencePreparationRecord = {
   sport: string;
   fit_label: "fit" | "not_fit";
   evidence_cutoff_at: string;
+  instagram_handle?: string | null;
 };
 
 export type HistoricalSearchCandidate = {
@@ -926,13 +927,22 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
   ];
 }
 
-export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at">) {
+export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at" | "instagram_handle">) {
   const cutoff = new Date(record.evidence_cutoff_at);
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
-  return [
+  const handle = typeof record.instagram_handle === "string"
+    ? record.instagram_handle.trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "")
+    : "";
+  const profileQueries = handle ? [
+    `"${record.athlete_name}" "@${handle}" (followers OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
+    `"${record.athlete_name}" "@${handle}" (Instagram OR profile OR posts OR creator OR followers) before:${before}`,
+  ] : [
     `"${record.athlete_name}" "${record.sport}" (Instagram OR "Instagram handle" OR "post shared by") (profile OR followers OR "social media") before:${before}`,
     `"${record.athlete_name}" "${record.sport}" ("Instagram followers" OR "TikTok followers" OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
+  ];
+  return [
+    ...profileQueries,
     `"${record.athlete_name}" "${record.sport}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") before:${before}`,
     `"${record.athlete_name}" "${record.sport}" (interview OR podcast OR YouTube OR "behind the scenes" OR "content creator" OR "personal brand" OR represented OR management OR agency OR "business inquiries" OR collaboration) before:${before}`,
   ];
