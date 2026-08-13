@@ -227,6 +227,7 @@ export async function runApifyActor<T>(
   options: {
     datasetLimit?: number;
     timeoutMs?: number;
+    actorTimeoutSecs?: number;
     maxItems?: number;
     maxTotalChargeUsd?: number;
   } = {}
@@ -241,6 +242,7 @@ export async function runApifyActorWithUsage<T>(
   options: {
     datasetLimit?: number;
     timeoutMs?: number;
+    actorTimeoutSecs?: number;
     maxItems?: number;
     maxTotalChargeUsd?: number;
   } = {}
@@ -258,6 +260,9 @@ export async function runApifyActorWithUsage<T>(
   }
   if (options.maxTotalChargeUsd && options.maxTotalChargeUsd > 0) {
     runParameters.set("maxTotalChargeUsd", String(options.maxTotalChargeUsd));
+  }
+  if (options.actorTimeoutSecs && options.actorTimeoutSecs > 0) {
+    runParameters.set("timeout", String(Math.max(30, Math.min(300, Math.floor(options.actorTimeoutSecs)))));
   }
   const runQuery = runParameters.size > 0 ? `?${runParameters.toString()}` : "";
   const runPayload = await apifyFetch<{ data?: ApifyRun }>(
