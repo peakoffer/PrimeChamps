@@ -75,11 +75,9 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
   admin: ReturnType<typeof createAdminClient>;
   organizationId: string;
   eligible: GoldenPreparationCandidate[];
-  baselineCompleted: Set<string>;
   recoveryCompleted: Set<string>;
 }) {
   const candidates = input.eligible.filter((record) => record.fit_label === "fit"
-    && input.baselineCompleted.has(record.id)
     && !input.recoveryCompleted.has(record.id));
   if (!candidates.length) return [];
   const recordIds = candidates.map((record) => record.id);
@@ -176,11 +174,15 @@ export async function GET() {
     const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
     const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
     const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
-    const ageRecoveryRemaining = baselineRemaining.length ? [] : await unresolvedFitRecordsForAgeRecovery({
-      admin, organizationId: user.organizationId, eligible, baselineCompleted, recoveryCompleted,
+    // Current leakage-safe evidence is the source of truth. A parser-version
+    // bump must not force broad baseline reprocessing ahead of a fit record
+    // whose momentum and creator gates already pass and only needs identity or
+    // adult corroboration.
+    const ageRecoveryRemaining = await unresolvedFitRecordsForAgeRecovery({
+      admin, organizationId: user.organizationId, eligible, recoveryCompleted,
     });
-    const preparationMode: HistoricalEvidencePreparationMode = baselineRemaining.length ? "baseline" : "age_recovery";
-    const nextRecords = baselineRemaining.length ? baselineRemaining : ageRecoveryRemaining;
+    const preparationMode: HistoricalEvidencePreparationMode = ageRecoveryRemaining.length ? "age_recovery" : "baseline";
+    const nextRecords = ageRecoveryRemaining.length ? ageRecoveryRemaining : baselineRemaining;
     return NextResponse.json({
       eligibleRecordCount: nextRecords.length,
       totalEligibleRecordCount: eligible.length,
@@ -286,13 +288,13 @@ export async function POST(request: NextRequest) {
     const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
     const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
     const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
-    const preparationMode: HistoricalEvidencePreparationMode = requestedMode
-      || (baselineRemaining.length ? "baseline" : "age_recovery");
-    const ageRecoveryRemaining = preparationMode === "age_recovery"
+    const ageRecoveryRemaining = requestedMode !== "signal_recovery"
       ? await unresolvedFitRecordsForAgeRecovery({
-        admin, organizationId: user.organizationId, eligible, baselineCompleted, recoveryCompleted,
+        admin, organizationId: user.organizationId, eligible, recoveryCompleted,
       })
       : [];
+    const preparationMode: HistoricalEvidencePreparationMode = requestedMode
+      || (ageRecoveryRemaining.length ? "age_recovery" : "baseline");
     const signalRecoveryRemaining = preparationMode === "signal_recovery"
       ? eligible.filter((record) => !signalRecoveryCompleted.has(record.id))
       : [];

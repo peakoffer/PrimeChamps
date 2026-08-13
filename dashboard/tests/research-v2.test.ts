@@ -1718,6 +1718,13 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /readiness\.momentum\.passed/);
   assert.match(route, /readiness\.creatorPotential\.passed/);
   assert.match(route, /!readiness\.adult\.passed \|\| !readiness\.identity\.passed/);
+  const ageSelectorStart = route.indexOf("async function unresolvedFitRecordsForAgeRecovery");
+  const ageSelectorEnd = route.indexOf("function eligibleForEvidencePreparation", ageSelectorStart);
+  const ageSelector = route.slice(ageSelectorStart, ageSelectorEnd);
+  assert.ok(ageSelectorStart >= 0 && ageSelectorEnd > ageSelectorStart);
+  assert.doesNotMatch(ageSelector, /baselineCompleted/);
+  assert.match(route, /ageRecoveryRemaining\.length \? "age_recovery" : "baseline"/);
+  assert.match(route, /ageRecoveryRemaining\.length \? ageRecoveryRemaining : baselineRemaining/);
   assert.match(route, /eligibleForSignalRecovery/);
   assert.match(route, /body\.benchmarkSplit === "excluded"/);
   assert.match(route, /benchmarkSplit: preparationMode === "signal_recovery" \? signalRecoverySplit : null/);
