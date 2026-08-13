@@ -355,6 +355,7 @@ export async function POST(request: NextRequest) {
         recordIds,
         maxApifyChargeUsd,
         preparationMode,
+        benchmarkSplit: preparationMode === "signal_recovery" ? signalRecoverySplit : null,
         queryPlanVersion,
         reuseProviderRunId,
       }]);

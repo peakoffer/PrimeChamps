@@ -32,6 +32,7 @@ type EvidencePreparationWorkflowInput = {
   recordIds: string[];
   maxApifyChargeUsd: number;
   preparationMode: HistoricalEvidencePreparationMode;
+  benchmarkSplit: "excluded" | "development" | "held_out" | null;
   queryPlanVersion: string;
   reuseProviderRunId?: string;
 };
@@ -477,6 +478,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
           query_plan_version: input.queryPlanVersion,
           preparation_mode: input.preparationMode,
+          benchmark_split: input.benchmarkSplit,
           provider_run_id: discovery.providerRunId,
           discovery_reused: discovery.discoveryReused,
           source_apify_cost_microusd: discovery.sourceApifyCostMicrousd,
@@ -537,6 +539,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
             query_plan_version: input.queryPlanVersion,
             preparation_mode: input.preparationMode,
+            benchmark_split: input.benchmarkSplit,
             last_record_id: record.id,
             processed_record_ids: results.map((result) => result.recordId),
             provider_run_id: discovery.providerRunId,
@@ -554,6 +557,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       scoringTokensSpent: 0,
       excludedUnsupportedSignals: signalReconciliation.excludedUnsupportedSignals,
       preparationMode: input.preparationMode,
+      benchmarkSplit: input.benchmarkSplit,
       queryPlanVersion: input.queryPlanVersion,
       records: results,
     };
@@ -571,6 +575,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
           query_plan_version: input.queryPlanVersion,
           preparation_mode: input.preparationMode,
+          benchmark_split: input.benchmarkSplit,
           provider_run_id: discovery.providerRunId,
           processed_record_ids: results.map((result) => result.recordId),
           scoring_tokens_spent: 0,

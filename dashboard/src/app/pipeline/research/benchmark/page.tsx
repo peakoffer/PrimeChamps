@@ -403,7 +403,8 @@ export default function ResearchBenchmarkPage() {
     .flatMap((run) => run.record_ids)), [evidencePreparationRuns]);
   const interruptedExcludedSignalRun = evidencePreparationRuns.find((run) => run.status === "failed"
     && run.checkpoint?.preparation_mode === "signal_recovery"
-    && run.checkpoint?.benchmark_split === "excluded"
+    && (run.checkpoint?.benchmark_split === "excluded"
+      || run.record_ids.every((recordId) => records.find((record) => record.id === recordId)?.benchmark_split === "excluded"))
     && Boolean(run.checkpoint?.provider_run_id));
   const interruptedExcludedRecordIds = useMemo(() => {
     if (!interruptedExcludedSignalRun) return [];

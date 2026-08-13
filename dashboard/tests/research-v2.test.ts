@@ -1713,6 +1713,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /!readiness\.adult\.passed \|\| !readiness\.identity\.passed/);
   assert.match(route, /eligibleForSignalRecovery/);
   assert.match(route, /body\.benchmarkSplit === "excluded"/);
+  assert.match(route, /benchmarkSplit: preparationMode === "signal_recovery" \? signalRecoverySplit : null/);
   assert.match(route, /excludedSignalRecoveryCount/);
   assert.match(route, /requestedMode === "signal_recovery" \? signalRecoverySplit : "excluded"/);
   assert.match(route, /heldOutSignalRecoveryCount/);
@@ -1723,12 +1724,14 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /query_plan_version: queryPlanVersion/);
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(workflow, /query_plan_version: input\.queryPlanVersion/);
+  assert.match(workflow, /benchmark_split: input\.benchmarkSplit/);
   assert.match(benchmarkPage, /Recover fresh positives/);
   assert.match(benchmarkPage, /benchmarkSplit: "excluded"/);
   assert.match(benchmarkPage, /maxApifyChargeUsd: 0\.5/);
   assert.match(benchmarkPage, /recordIds: nextExcludedSignalRecoveryRecords/);
   assert.match(benchmarkPage, /Resume saved recovery/);
   assert.match(benchmarkPage, /processed_record_ids/);
+  assert.match(benchmarkPage, /run\.record_ids\.every/);
   assert.match(workflow, /readApifyRunDatasetWithUsage<SearchPage>\(input\.reuseProviderRunId, 1_000\)/);
   assert.match(instagramHistoryRoute, /listApifyActorRuns/);
   assert.match(instagramHistoryRoute, /readApifyDatasetItems/);
