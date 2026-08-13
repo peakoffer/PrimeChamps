@@ -8,6 +8,7 @@ import {
   isGoldenRecordReadyForSplit,
   maskGoldenRecordForBlindLabeling,
   parseGoldenRecordInput,
+  selectActiveBenchmarkCohort,
   stratifiedSample,
   summarizeGoldenRecords,
 } from "@/lib/research/v2";
@@ -209,11 +210,32 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
 
     if (action === "assign_splits") {
+      const { data: activeHeldOut, error: activeHeldOutError } = await admin
+        .from("research_golden_records")
+        .select("benchmark_split,benchmark_cohort_version,split_assigned_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+        .eq("organization_id", user.organizationId)
+        .eq("benchmark_split", "held_out")
+        .contains("stratification_tags", ["dylan_outcome_ground_truth"])
+        .not("benchmark_cohort_version", "is", null)
+        .not("held_out_locked_at", "is", null)
+        .is("held_out_revealed_at", null);
+      if (activeHeldOutError) throw activeHeldOutError;
+      const activeCohort = selectActiveBenchmarkCohort(
+        (activeHeldOut || []) as Array<Record<string, unknown>>
+      );
+      if (activeCohort.activeVersions.length) {
+        return NextResponse.json({
+          error: activeCohort.conflict
+            ? `Multiple active benchmark cohorts already exist (${activeCohort.activeVersions.join(", ")}). Resolve that conflict before freezing another cohort.`
+            : `Benchmark cohort ${activeCohort.cohortVersion} is still locked and unrevealed. Complete or retire it before freezing another cohort.`,
+        }, { status: 409 });
+      }
       const { data: candidates, error: readyError } = await admin
         .from("research_golden_records")
         .select("id,athlete_name,sport,fit_label,achievability_label,final_outcome,point_in_time_reliability,label_order_fit_before_outcome,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,labeled_at,benchmark_split,stratification_tags")
         .eq("organization_id", user.organizationId)
         .eq("benchmark_split", "excluded")
+        .contains("stratification_tags", ["dylan_outcome_ground_truth"])
         .order("id", { ascending: true });
       if (readyError) throw readyError;
       const ready = (candidates || []).filter((record) =>

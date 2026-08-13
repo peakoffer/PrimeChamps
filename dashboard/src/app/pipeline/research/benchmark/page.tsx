@@ -164,6 +164,8 @@ type BenchmarkReadiness = {
   canRunHeldOut: boolean;
   heldOutEvaluationEnabled: boolean;
   strictTargetReady: boolean;
+  activeCohortConflict?: boolean;
+  activeCohortVersions?: string[];
 };
 
 const INITIAL_BENCHMARK_READINESS: BenchmarkReadiness = {
@@ -396,12 +398,14 @@ export default function ResearchBenchmarkPage() {
 
   const activeEvidenceRun = evidencePreparationRuns.find((run) => run.status === "queued" || run.status === "running");
   const latestEvidenceRun = evidencePreparationRuns[0];
-  const latestDevelopmentRun = benchmarkRuns.find((run) => run.benchmark_split === "development"
-    && (!benchmarkReadiness.development.cohortVersion
-      || run.metrics.cohort_version === benchmarkReadiness.development.cohortVersion));
-  const latestHeldOutRun = benchmarkRuns.find((run) => run.benchmark_split === "held_out"
-    && (!benchmarkReadiness.heldOut.cohortVersion
-      || run.metrics.cohort_version === benchmarkReadiness.heldOut.cohortVersion));
+  const latestDevelopmentRun = benchmarkReadiness.development.cohortVersion
+    ? benchmarkRuns.find((run) => run.benchmark_split === "development"
+      && run.metrics.cohort_version === benchmarkReadiness.development.cohortVersion)
+    : undefined;
+  const latestHeldOutRun = benchmarkReadiness.heldOut.cohortVersion
+    ? benchmarkRuns.find((run) => run.benchmark_split === "held_out"
+      && run.metrics.cohort_version === benchmarkReadiness.heldOut.cohortVersion)
+    : undefined;
   const activeDevelopmentRun = latestDevelopmentRun
     && ["queued", "running", "failed"].includes(latestDevelopmentRun.status)
     ? latestDevelopmentRun
@@ -1015,8 +1019,8 @@ export default function ResearchBenchmarkPage() {
           {[
             { label: "Fresh labeled pool", value: summary.readyForSplit, detail: `${summary.readyFit} positive + ${summary.readyNotFit} negative · never scored` },
             { label: "Fresh evidence ready", value: `${evidenceSummary.readyForFreeze} / ${evidenceSummary.totalRecords}`, detail: `${evidenceSummary.readyFit} positive + ${evidenceSummary.readyNotFit} negative · gap ${Math.max(0, 16 - evidenceSummary.readyFit)} + ${Math.max(0, 16 - evidenceSummary.readyNotFit)}` },
-            { label: "Frozen development", value: summary.development, detail: "Used for iterative prompt and rubric tuning" },
-            { label: "Locked held out", value: summary.heldOut, detail: `${summary.lockedHeldOut} locked · ${summary.revealedHeldOut} revealed` },
+            { label: "Development archive", value: summary.development, detail: "Historical frozen cases across completed cohorts" },
+            { label: "Held-out archive", value: summary.heldOut, detail: `${summary.lockedHeldOut} ever locked · ${summary.revealedHeldOut} revealed` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{metric.label}</p>
@@ -1040,7 +1044,7 @@ export default function ResearchBenchmarkPage() {
                 event.currentTarget.value = "";
               }} />
             </label>
-            <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+            <button disabled={working || evidenceSummary.readyFit < 16 || evidenceSummary.readyNotFit < 16 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.development.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
               Freeze benchmark cohort
             </button>
             <button
@@ -1100,7 +1104,9 @@ export default function ResearchBenchmarkPage() {
               <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">Development evaluation</p>
               <h2 className="mt-2 text-base font-medium text-zinc-100">Latest Sonnet · bounded balanced runs · explicit cost ceilings</h2>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                {benchmarkReadiness.development.fit} positive + {benchmarkReadiness.development.notFit} negative development cases are frozen. The {benchmarkReadiness.heldOut.total}-case held-out set remains locked and cannot run from this screen.
+                {benchmarkReadiness.development.cohortVersion
+                  ? `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative development cases are active. The ${benchmarkReadiness.heldOut.total}-case held-out set remains locked.`
+                  : "No active benchmark cohort. Prepare at least 16 leakage-safe evidence packets per label, then freeze a fresh development and held-out cohort."}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

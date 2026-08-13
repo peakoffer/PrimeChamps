@@ -176,6 +176,47 @@ export function isGoldenRecordReadyForSplit(record: Record<string, unknown>) {
     && Boolean(record.labeled_at);
 }
 
+export type ActiveBenchmarkCohortSelection = {
+  cohortVersion: string | null;
+  conflict: boolean;
+  activeVersions: string[];
+};
+
+/**
+ * A benchmark cohort remains active only while its held-out records are locked
+ * and unrevealed. Completed/revealed cohorts are immutable archive history and
+ * must never be reused for development calibration.
+ */
+export function selectActiveBenchmarkCohort(
+  records: Array<Record<string, unknown>>
+): ActiveBenchmarkCohortSelection {
+  const assignedAtByVersion = new Map<string, number>();
+  for (const record of records) {
+    const cohortVersion = typeof record.benchmark_cohort_version === "string"
+      ? record.benchmark_cohort_version.trim()
+      : "";
+    if (record.benchmark_split !== "held_out"
+      || !cohortVersion
+      || !record.held_out_locked_at
+      || record.held_out_revealed_at) continue;
+    const assignedAt = typeof record.split_assigned_at === "string"
+      ? Date.parse(record.split_assigned_at)
+      : Number.NaN;
+    assignedAtByVersion.set(
+      cohortVersion,
+      Math.max(assignedAtByVersion.get(cohortVersion) || 0, Number.isFinite(assignedAt) ? assignedAt : 0)
+    );
+  }
+  const activeVersions = Array.from(assignedAtByVersion)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([version]) => version);
+  return {
+    cohortVersion: activeVersions.length === 1 ? activeVersions[0] : null,
+    conflict: activeVersions.length > 1,
+    activeVersions,
+  };
+}
+
 export function maskGoldenRecordForBlindLabeling(record: Record<string, unknown>): Record<string, unknown> & {
   outcome_masked: boolean;
   label_conflict: boolean;

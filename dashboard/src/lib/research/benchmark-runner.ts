@@ -5,6 +5,7 @@ import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
   calculateBenchmarkMetrics,
   evaluateBenchmarkReleaseReadiness,
+  selectActiveBenchmarkCohort,
   stratifiedSample,
   type BenchmarkCaseResult,
   type BenchmarkMetrics,
@@ -42,7 +43,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v21";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v22";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -619,9 +620,32 @@ export async function startBenchmarkRun(input: {
   const caseLimit = Math.max(2, Math.min(MAX_CASES_PER_RUN, Math.round(input.caseLimit || DEFAULT_CASES_PER_RUN)));
   const costLimitMicrousd = Math.max(50_000, Math.min(MAX_COST_LIMIT_MICROUSD,
     Math.round(input.costLimitMicrousd || DEFAULT_COST_LIMIT_MICROUSD)));
+  const { data: activeHeldOutRecords, error: activeCohortError } = await admin.from("research_golden_records")
+    .select("benchmark_split,benchmark_cohort_version,split_assigned_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+    .eq("organization_id", input.organizationId)
+    .eq("benchmark_split", "held_out")
+    .contains("stratification_tags", ["dylan_outcome_ground_truth"])
+    .not("benchmark_cohort_version", "is", null)
+    .not("held_out_locked_at", "is", null)
+    .is("held_out_revealed_at", null);
+  if (activeCohortError) throw activeCohortError;
+  const activeCohort = selectActiveBenchmarkCohort(
+    (activeHeldOutRecords || []) as Array<Record<string, unknown>>
+  );
+  if (activeCohort.conflict) {
+    throw new Error(`Multiple active benchmark cohorts exist (${activeCohort.activeVersions.join(", ")}); scoring is disabled until the cohort conflict is resolved`);
+  }
+  if (!activeCohort.cohortVersion) {
+    throw new Error("No active locked, unrevealed benchmark cohort exists. Freeze a fresh evidence-ready cohort before scoring");
+  }
+  const cohortVersion = activeCohort.cohortVersion;
   const { data: records, error: recordsError } = await admin.from("research_golden_records")
     .select(BENCHMARK_GOLDEN_RECORD_SELECT)
-    .eq("organization_id", input.organizationId).eq("benchmark_split", input.split).order("id", { ascending: true });
+    .eq("organization_id", input.organizationId)
+    .eq("benchmark_split", input.split)
+    .eq("benchmark_cohort_version", cohortVersion)
+    .contains("stratification_tags", ["dylan_outcome_ground_truth"])
+    .order("id", { ascending: true });
   if (recordsError) throw recordsError;
   const typedRecords = (records || []) as Array<BenchmarkGoldenCase & {
     fit_label: "fit" | "not_fit";
@@ -632,10 +656,13 @@ export async function startBenchmarkRun(input: {
   if (!fitCount || !notFitCount) {
     throw new Error(`${input.split} benchmark is not ready: it needs both fit and not-fit records (currently ${fitCount} fit, ${notFitCount} not fit)`);
   }
-  const cohorts = new Set(typedRecords.map((record) => record.benchmark_cohort_version).filter(Boolean));
-  if (cohorts.size !== 1) throw new Error(`${input.split} benchmark must belong to one frozen cohort`);
-  const cohortVersion = Array.from(cohorts)[0] as string;
+  if (typedRecords.some((record) => record.benchmark_cohort_version !== cohortVersion)) {
+    throw new Error(`${input.split} benchmark records do not match the active frozen cohort`);
+  }
   if (input.split === "held_out") {
+    if (caseLimit !== typedRecords.length) {
+      throw new Error(`The one-time held-out release must score the full ${typedRecords.length}-case locked cohort`);
+    }
     if (!input.baselineRunId) {
       throw new Error("A completed full-cohort development benchmark is required before the one-time held-out release");
     }
@@ -884,7 +911,8 @@ async function finalizeRun(admin: AdminClient, run: RunRow) {
     })
       .eq("organization_id", run.organization_id)
       .eq("benchmark_split", "held_out")
-      .in("id", run.metrics.case_ids);
+      .eq("benchmark_cohort_version", run.metrics.cohort_version)
+      .is("held_out_revealed_at", null);
     if (revealError) throw revealError;
   }
   return { completed: true, metrics, resultCount: cases.length };

@@ -9,6 +9,7 @@ import {
   isGoldenRecordReadyForSplit,
   maskGoldenRecordForBlindLabeling,
   parseGoldenRecordInput,
+  selectActiveBenchmarkCohort,
   stratifiedSample,
   summarizeGoldenRecords,
 } from "../src/lib/research/v2.ts";
@@ -655,6 +656,57 @@ test("benchmark splits are deterministic, balanced, and never hold out developme
   assert.equal(first.filter((item) => item.split === "held_out" && item.id.startsWith("fit-")).length, 8);
   assert.equal(first.filter((item) => item.split === "held_out" && item.id.startsWith("not_fit-")).length, 8);
   assert.equal(first.filter((item) => item.split === "held_out" && Number(item.id.split("-").at(-1)) < 10).length, 0);
+});
+
+test("active benchmark cohort ignores revealed archives and fails closed on conflicts", () => {
+  const selection = selectActiveBenchmarkCohort([
+    {
+      benchmark_split: "held_out",
+      benchmark_cohort_version: "archive-v1",
+      split_assigned_at: "2026-08-01T00:00:00.000Z",
+      held_out_locked_at: "2026-08-01T00:00:00.000Z",
+      held_out_revealed_at: "2026-08-02T00:00:00.000Z",
+    },
+    {
+      benchmark_split: "held_out",
+      benchmark_cohort_version: "active-v2",
+      split_assigned_at: "2026-08-12T00:00:00.000Z",
+      held_out_locked_at: "2026-08-12T00:00:00.000Z",
+      held_out_revealed_at: null,
+    },
+    {
+      benchmark_split: "development",
+      benchmark_cohort_version: "unrelated-development",
+      split_assigned_at: "2026-08-13T00:00:00.000Z",
+      held_out_locked_at: null,
+      held_out_revealed_at: null,
+    },
+  ]);
+  assert.deepEqual(selection, {
+    cohortVersion: "active-v2",
+    conflict: false,
+    activeVersions: ["active-v2"],
+  });
+
+  const conflict = selectActiveBenchmarkCohort([
+    {
+      benchmark_split: "held_out",
+      benchmark_cohort_version: "active-v2",
+      split_assigned_at: "2026-08-12T00:00:00.000Z",
+      held_out_locked_at: "2026-08-12T00:00:00.000Z",
+      held_out_revealed_at: null,
+    },
+    {
+      benchmark_split: "held_out",
+      benchmark_cohort_version: "active-v3",
+      split_assigned_at: "2026-08-13T00:00:00.000Z",
+      held_out_locked_at: "2026-08-13T00:00:00.000Z",
+      held_out_revealed_at: null,
+    },
+  ]);
+  assert.equal(conflict.cohortVersion, null);
+  assert.equal(conflict.conflict, true);
+  assert.deepEqual(conflict.activeVersions, ["active-v3", "active-v2"]);
 });
 
 test("a minimum viable balanced cohort locks eight cases per label", () => {
@@ -1366,7 +1418,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v21/);
+  assert.match(source, /research-v2-benchmark-runner-v22/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -2105,8 +2157,20 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
 
 test("fresh cohort assignment uses the evidence-ready 16-per-label gate", () => {
   const route = readFileSync(new URL("../src/app/api/research/golden-records/route.ts", import.meta.url), "utf8");
+  const benchmarkRoute = readFileSync(new URL("../src/app/api/research/benchmarks/route.ts", import.meta.url), "utf8");
+  const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
+  const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.match(route, /if \(perLabel < 16\)/);
   assert.match(route, /at least 16 leakage-safe evidence packets per label/);
+  assert.match(route, /selectActiveBenchmarkCohort/);
+  assert.match(route, /Complete or retire it before freezing another cohort/);
+  assert.match(runner, /No active locked, unrevealed benchmark cohort exists/);
+  assert.match(runner, /\.eq\("benchmark_cohort_version", cohortVersion\)/);
+  assert.match(runner, /one-time held-out release must score the full/);
+  assert.match(benchmarkRoute, /activeCohortVersion/);
+  assert.match(benchmarkRoute, /activeCohortConflict/);
+  assert.match(benchmarkPage, /evidenceSummary\.readyFit < 16/);
+  assert.match(benchmarkPage, /Development archive/);
   assert.doesNotMatch(route, /clean source pool requires 40 resolved-sport/);
 });
 

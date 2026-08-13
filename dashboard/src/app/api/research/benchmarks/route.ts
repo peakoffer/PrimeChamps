@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { calculateBenchmarkMetrics, evaluateBenchmarkReleaseReadiness, type BenchmarkCaseResult } from "@/lib/research/v2";
+import {
+  calculateBenchmarkMetrics,
+  evaluateBenchmarkReleaseReadiness,
+  selectActiveBenchmarkCohort,
+  type BenchmarkCaseResult,
+} from "@/lib/research/v2";
 import { resumeBenchmarkRun, startBenchmarkRun } from "@/lib/research/benchmark-runner";
 
 export const maxDuration = 300;
@@ -61,8 +66,9 @@ export async function GET() {
         .order("created_at", { ascending: false })
         .limit(20),
       admin.from("research_golden_records")
-        .select("benchmark_split,fit_label,achievability_label,point_in_time_reliability,benchmark_cohort_version")
-        .eq("organization_id", user.organizationId),
+        .select("benchmark_split,fit_label,achievability_label,point_in_time_reliability,benchmark_cohort_version,split_assigned_at,held_out_locked_at,held_out_revealed_at")
+        .eq("organization_id", user.organizationId)
+        .contains("stratification_tags", ["dylan_outcome_ground_truth"]),
     ]);
     if (runError) throw runError;
     if (labelError) throw labelError;
@@ -85,14 +91,36 @@ export async function GET() {
       group.push(item);
       casesByRun.set(runId, group);
     }
+    const goldenLabels = (labels || []) as Array<Record<string, unknown>>;
+    const activeCohort = selectActiveBenchmarkCohort(goldenLabels);
+    const activeCohortVersion = activeCohort.cohortVersion;
+    const splitSummary = (split: "development" | "held_out") => {
+      const splitRecords = activeCohortVersion
+        ? goldenLabels.filter((record) => record.benchmark_split === split
+          && record.benchmark_cohort_version === activeCohortVersion)
+        : [];
+      return {
+        total: splitRecords.length,
+        fit: splitRecords.filter((record) => record.fit_label === "fit").length,
+        notFit: splitRecords.filter((record) => record.fit_label === "not_fit").length,
+        cohortVersion: activeCohortVersion,
+      };
+    };
+    const development = splitSummary("development");
+    const heldOut = splitSummary("held_out");
     const benchmarkRuns = (runs || []).map((run) => {
       const cases = casesByRun.get(run.id) || [];
       const calculatedMetrics = cases.length && (run.benchmark_split === "development" || run.status === "completed")
         ? calculateBenchmarkMetrics(cases)
         : null;
-      const splitTotal = run.benchmark_split === "held_out"
-        ? (labels || []).filter((record) => record.benchmark_split === "held_out").length
-        : (labels || []).filter((record) => record.benchmark_split === "development").length;
+      const runCohortVersion = typeof run.metrics === "object" && run.metrics
+        && "cohort_version" in run.metrics && typeof run.metrics.cohort_version === "string"
+        ? run.metrics.cohort_version
+        : null;
+      const splitTotal = goldenLabels.filter((record) =>
+        record.benchmark_split === run.benchmark_split
+        && record.benchmark_cohort_version === runCohortVersion
+      ).length;
       return {
         ...run,
         result_count: cases.length,
@@ -100,28 +128,19 @@ export async function GET() {
         release_readiness: evaluateBenchmarkReleaseReadiness(calculatedMetrics, { minimumCases: Math.max(2, splitTotal) }),
       };
     });
-    const goldenLabels = labels || [];
-    const splitSummary = (split: "development" | "held_out") => {
-      const splitRecords = goldenLabels.filter((record) => record.benchmark_split === split);
-      const cohorts = Array.from(new Set(splitRecords.map((record) => record.benchmark_cohort_version).filter(Boolean)));
-      return {
-        total: splitRecords.length,
-        fit: splitRecords.filter((record) => record.fit_label === "fit").length,
-        notFit: splitRecords.filter((record) => record.fit_label === "not_fit").length,
-        cohortVersion: cohorts.length === 1 ? String(cohorts[0]) : null,
-      };
-    };
-    const development = splitSummary("development");
-    const heldOut = splitSummary("held_out");
     return NextResponse.json({
       runs: benchmarkRuns,
       readiness: {
         development,
         heldOut,
-        canRunDevelopment: development.fit > 0 && development.notFit > 0,
-        canRunHeldOut: heldOut.fit > 0 && heldOut.notFit > 0,
+        activeCohortConflict: activeCohort.conflict,
+        activeCohortVersions: activeCohort.activeVersions,
+        canRunDevelopment: !activeCohort.conflict && development.fit > 0 && development.notFit > 0,
+        canRunHeldOut: !activeCohort.conflict && heldOut.fit > 0 && heldOut.notFit > 0,
         heldOutEvaluationEnabled: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true",
-        strictTargetReady: development.fit + heldOut.fit >= 40 && development.notFit + heldOut.notFit >= 40,
+        strictTargetReady: !activeCohort.conflict
+          && development.fit + heldOut.fit >= 40
+          && development.notFit + heldOut.notFit >= 40,
       },
     });
   } catch (error) {
@@ -171,7 +190,7 @@ export async function POST(request: NextRequest) {
         : "Could not execute Research V2 benchmark";
     const status = message === "Not authenticated" ? 401
       : message === "Forbidden" ? 403
-        : /not ready|not execution-ready|needs both|frozen cohort|held-out|locked|already been evaluated/i.test(message) ? 409
+        : /not ready|not execution-ready|needs both|cohort|held-out|locked|already been evaluated/i.test(message) ? 409
           : 500;
     return NextResponse.json({ error: message }, { status });
   }

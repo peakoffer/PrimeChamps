@@ -97,7 +97,7 @@ Repeat `resume` until `completed` is `true`. A failed run retains its checkpoint
 
 Do not set `RESEARCH_HELD_OUT_EVALUATION_ENABLED=true` until development results are stable and the intended prompt, rubric, evidence policy, model family, and score weighting are frozen.
 
-The server refuses to create a held-out run unless its baseline is a completed full-development-cohort run from the same frozen cohort and every release threshold already passes. A four-case smoke test may authorize a full development calibration, but it can never unlock held-out by itself. The held-out run is accepted only when every selected record is locked and unrevealed. One completed held-out run exhausts that cohort; another release test requires a new frozen cohort. Never tune against held-out records.
+The server refuses to create a held-out run unless its baseline is a completed full-development-cohort run from the same frozen cohort and every release threshold already passes. A four-case smoke test may authorize a full development calibration, but it can never unlock held-out by itself. The held-out run must cover the entire locked split and is accepted only when every selected record is locked and unrevealed. One completed held-out run reveals and exhausts that cohort; it then becomes archive-only. Development scoring resolves exactly one current locked, unrevealed Dylan-ground-truth cohort, and fails closed if no active cohort or conflicting active cohorts exist. Another release test requires a new frozen cohort. Never tune against held-out records.
 
 ## Production acceptance
 

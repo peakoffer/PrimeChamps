@@ -294,7 +294,7 @@ The last fully deployed checkpoint before the Social Blade adapter is `27b3ee7`.
 - Do not run development/release profiles in parallel until the smoke path is understood.
 - Do not retry discovery/enrichment when a durable fork/resume checkpoint can be reused.
 - Do not mark the project production-ready because tests and deployment are green; the locked held-out acceptance thresholds remain unproven.
-- Benchmark runner v21 now requires exact frozen-dossier quotes for every material claim, gives the comparison-stage Auditor the dossier, constrains every corrected dimension by the Researcher and blind Auditor, and reapplies the complete final gate. The server also refuses held-out creation until a complete same-cohort development run passes the full release threshold set. These controls are implemented and tested but remain unproven on a fresh held-out cohort.
+- Benchmark runner v22 now requires exact frozen-dossier quotes for every material claim, gives the comparison-stage Auditor the dossier, constrains every corrected dimension by the Researcher and blind Auditor, and reapplies the complete final gate. The server refuses held-out creation until a complete same-cohort development run passes the full release threshold set. Revealed cohorts are archive-only; all scoring routes resolve exactly one current locked, unrevealed Dylan-ground-truth cohort and fail closed if none or more than one exists. These controls are implemented and tested but remain unproven on a fresh held-out cohort.
 
 ## Definition of the next clean stopping point
 
