@@ -2,8 +2,19 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
-import { calculateBenchmarkMetrics, stratifiedSample, type BenchmarkCaseResult } from "@/lib/research/v2";
-import { buildResearchV2Score, stableEvidenceSetHash } from "@/lib/research/v2-scoring";
+import {
+  calculateBenchmarkMetrics,
+  evaluateBenchmarkReleaseReadiness,
+  stratifiedSample,
+  type BenchmarkCaseResult,
+  type BenchmarkMetrics,
+} from "@/lib/research/v2";
+import {
+  buildAuditorConstrainedResearchV2Score,
+  buildResearchV2Score,
+  passesResearchV2FinalGate,
+  stableEvidenceSetHash,
+} from "@/lib/research/v2-scoring";
 import {
   benchmarkAdultEligibilityGate,
   benchmarkCreatorPotentialGate,
@@ -15,6 +26,7 @@ import {
   buildBenchmarkResearcherPrompt,
   compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
+  evaluateBenchmarkMaterialClaimCitations,
   normalizeOpenRouterBenchmarkUsage,
   projectedBenchmarkCallCostMicrousd,
   selectLeakageSafeBenchmarkEvidence,
@@ -30,7 +42,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v20";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v21";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -61,9 +73,20 @@ const RESEARCHER_SCHEMA = {
         additionalProperties: false,
         properties: {
           claim: { type: "string" },
-          evidence_refs: { type: "array", items: { type: "string" } },
+          evidence_support: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                evidence_ref: { type: "string" },
+                quote: { type: "string" },
+              },
+              required: ["evidence_ref", "quote"],
+            },
+          },
         },
-        required: ["claim", "evidence_refs"],
+        required: ["claim", "evidence_support"],
       },
     },
     critical_gaps: { type: "array", items: { type: "string" } },
@@ -108,6 +131,7 @@ const REVIEW_SCHEMA = {
     corrected_fit_score: { type: "number" },
     corrected_achievability_score: { type: "number" },
     corrected_confidence_score: { type: "number" },
+    unsupported_material_claims: { type: "array", items: { type: "string" } },
     findings: {
       type: "array",
       items: {
@@ -126,7 +150,7 @@ const REVIEW_SCHEMA = {
   },
   required: [
     "verdict", "corrected_fit_score", "corrected_achievability_score",
-    "corrected_confidence_score", "findings", "summary",
+    "corrected_confidence_score", "unsupported_material_claims", "findings", "summary",
   ],
 } as const;
 
@@ -138,7 +162,10 @@ type ResearcherAssessment = {
   research_confidence_score: number;
   fit_label: "fit" | "not_fit" | "uncertain";
   achievability_label: "high" | "medium" | "low" | "uncertain";
-  material_claims: Array<{ claim: string; evidence_refs: string[] }>;
+  material_claims: Array<{
+    claim: string;
+    evidence_support: Array<{ evidence_ref: string; quote: string }>;
+  }>;
   critical_gaps: string[];
   limitations: string[];
   reasoning: string;
@@ -163,6 +190,7 @@ type ReviewAssessment = {
   corrected_fit_score: number;
   corrected_achievability_score: number;
   corrected_confidence_score: number;
+  unsupported_material_claims: string[];
   findings: Array<{
     failure_type: string;
     severity: "critical" | "high" | "medium" | "low";
@@ -442,17 +470,21 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 4,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v4",
+    version: 5,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v5",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
-      above_80_gates: ["two_source_identity", "two_source_21_plus", "material_claim_support", "blind_audit"],
+      above_80_gates: [
+        "two_source_identity", "two_source_21_plus", "current_momentum", "audience",
+        "creator_behavior", "commercial_constraints", "exact_quote_material_claim_support", "blind_audit",
+      ],
+      audit_score_policy: "minimum_of_researcher_blind_auditor_and_review",
       platform_willingness_required: false,
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v4",
+    definition_hash: "research-v2-benchmark-rubric-v5",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -473,7 +505,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 11,
+      version: 12,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -498,15 +530,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v11",
+      content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; each material claim requires an exact frozen-dossier quote; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
+      content_hash: "research-v2-benchmark-researcher-v12",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
-      content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; platform willingness is not required or inferred; unsupported claims are distinct from missing-evidence gaps.",
-      content_hash: "research-v2-benchmark-auditor-v11",
+      content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; the comparison stage rechecks every material claim against the frozen dossier and every corrected dimension is a hard ceiling; platform willingness is not required or inferred.",
+      content_hash: "research-v2-benchmark-auditor-v12",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -604,6 +636,38 @@ export async function startBenchmarkRun(input: {
   if (cohorts.size !== 1) throw new Error(`${input.split} benchmark must belong to one frozen cohort`);
   const cohortVersion = Array.from(cohorts)[0] as string;
   if (input.split === "held_out") {
+    if (!input.baselineRunId) {
+      throw new Error("A completed full-cohort development benchmark is required before the one-time held-out release");
+    }
+    const { data: baseline, error: baselineError } = await admin.from("research_benchmark_runs").select("*")
+      .eq("id", input.baselineRunId)
+      .eq("organization_id", input.organizationId)
+      .eq("benchmark_split", "development")
+      .eq("status", "completed")
+      .maybeSingle();
+    if (baselineError) throw baselineError;
+    if (!baseline) throw new Error("The held-out release baseline must be a completed development benchmark in this organization");
+    const baselineCheckpoint = baseline.metrics as RunCheckpoint;
+    if (baselineCheckpoint.cohort_version !== cohortVersion) {
+      throw new Error("The development baseline and held-out records must belong to the same frozen cohort");
+    }
+    const { count: developmentCohortSize, error: developmentCountError } = await admin.from("research_golden_records")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", input.organizationId)
+      .eq("benchmark_split", "development")
+      .eq("benchmark_cohort_version", cohortVersion);
+    if (developmentCountError) throw developmentCountError;
+    const baselineRows = await benchmarkCaseResultRows(admin, baseline.id);
+    const baselineCases = baselineRows
+      .map((row) => metricsCase(row as Record<string, unknown>))
+      .filter((item): item is BenchmarkCaseResult => Boolean(item));
+    const baselineMetrics = calculateBenchmarkMetrics(baselineCases) as BenchmarkMetrics;
+    const releaseReadiness = evaluateBenchmarkReleaseReadiness(baselineMetrics, {
+      minimumCases: Math.max(2, developmentCohortSize || 0),
+    });
+    if (!releaseReadiness.ready) {
+      throw new Error(`Development release gates have not passed: ${releaseReadiness.reasons.join("; ")}`);
+    }
     if (typedRecords.some((record) => !record.held_out_locked_at || record.held_out_revealed_at)) {
       throw new Error("Every held-out record must be locked and unrevealed");
     }
@@ -695,23 +759,6 @@ export async function startBenchmarkRun(input: {
   return { run, selectedCases: selected.length, readinessFailures: 0 };
 }
 
-function safeRefs(assessment: ResearcherAssessment, evidence: LeakageSafeBenchmarkEvidence[]) {
-  const validRefs = new Set(evidence.map((item) => item.sourceRef));
-  let claimsWithValidSupport = 0;
-  let invalidClaimCount = 0;
-  for (const materialClaim of assessment.material_claims || []) {
-    const refs = Array.isArray(materialClaim.evidence_refs) ? materialClaim.evidence_refs : [];
-    if (refs.length > 0 && refs.every((ref) => validRefs.has(ref))) claimsWithValidSupport += 1;
-    else invalidClaimCount += 1;
-  }
-  const total = (assessment.material_claims || []).length;
-  return {
-    sourceVerificationRate: total > 0 ? claimsWithValidSupport / total : 0,
-    unsupportedClaimCount: invalidClaimCount,
-    unsupportedClaimRate: total > 0 ? Math.min(1, invalidClaimCount / total) : 0,
-  };
-}
-
 function blindPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
   return `You are the independent blind Auditor in a historical athlete benchmark. You have not seen the Researcher's score or any benchmark label, outcome, private correspondence, or post-cutoff information.
 
@@ -730,7 +777,11 @@ All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. 
 Return the required JSON only.`;
 }
 
-function reviewPrompt(researcher: ResearcherAssessment, blind: BlindAssessment) {
+function reviewPrompt(
+  researcher: ResearcherAssessment,
+  blind: BlindAssessment,
+  evidence: LeakageSafeBenchmarkEvidence[]
+) {
   return `You are completing stage two of a blind benchmark audit. The independent assessment below was completed before the Researcher proposal was disclosed. Compare them now without using any historical outcome or golden label.
 
 INDEPENDENT BLIND ASSESSMENT
@@ -739,7 +790,10 @@ ${JSON.stringify(blind)}
 RESEARCHER PROPOSAL
 ${JSON.stringify(researcher)}
 
-Pass only when every material score and claim is supported. Correct a usable proposal when evidence supports different scores. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from public creator, audience, momentum, and accessibility proxies. Missing representation alone is not automatically critical.
+FROZEN PUBLIC EVIDENCE
+${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
+
+Pass only when every material score and claim is supported by the frozen evidence. List every unsupported Researcher claim in unsupported_material_claims, including claims whose quote is present but does not establish the stated conclusion. Correct a usable proposal when evidence supports lower scores. Never raise a Researcher or blind-auditor dimension. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from public creator, audience, momentum, and accessibility proxies. Missing representation alone is not automatically critical.
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. If the proposal passes with no actual research-system error, return an empty findings array; never create a finding whose failure_type is "none". Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
 }
@@ -761,7 +815,7 @@ function normalizeFailureType(value: string) {
 
 async function benchmarkCaseResultRows(admin: AdminClient, runId: string) {
   const { data, error } = await admin.from("research_benchmark_results")
-    .select("*,golden_record:research_golden_records(fit_label,achievability_label)")
+    .select("*,golden_record:research_golden_records(fit_label,achievability_label),audit:research_audits(verdict)")
     .eq("benchmark_run_id", runId);
   if (error) throw error;
   return data || [];
@@ -772,6 +826,8 @@ function metricsCase(row: Record<string, unknown>): BenchmarkCaseResult | null {
   const golden = Array.isArray(relation) ? relation[0] : relation;
   if (!golden || typeof golden !== "object") return null;
   const actual = golden as Record<string, unknown>;
+  const auditRelation = row.audit;
+  const audit = (Array.isArray(auditRelation) ? auditRelation[0] : auditRelation) as Record<string, unknown> | null;
   if (!['fit', 'not_fit'].includes(String(actual.fit_label))
     || !['high', 'medium', 'low'].includes(String(actual.achievability_label))) return null;
   return {
@@ -787,6 +843,9 @@ function metricsCase(row: Record<string, unknown>): BenchmarkCaseResult | null {
     sourceVerificationRate: Math.max(0, Math.min(1, Number(row.source_verification_rate) || 0)),
     unsupportedClaimRate: Math.max(0, Math.min(1, Number(row.unsupported_claim_rate) || 0)),
     pointInTimeCompliant: row.point_in_time_compliant === true,
+    auditVerdict: audit && ['pass', 'corrected', 'fail'].includes(String(audit.verdict))
+      ? audit.verdict as BenchmarkCaseResult["auditVerdict"]
+      : "fail",
     auditorCaughtResearcherFailure: row.auditor_caught_researcher_failure === true,
     researcherFailure: row.researcher_failure === true,
     costMicrousd: integer(row.cost_microusd),
@@ -882,7 +941,7 @@ async function processBenchmarkCase(input: {
     });
     researcher = researcherCall.value;
     researcherUsage = researcherCall.usage;
-    const citationQuality = safeRefs(researcher, modelEvidence);
+    const citationQuality = evaluateBenchmarkMaterialClaimCitations(researcher.material_claims || [], modelEvidence);
     const researcherScore = buildResearchV2Score({
       onlyfansFit: bounded(researcher.onlyfans_fit_score),
       commercialAchievability: bounded(researcher.commercial_achievability_score),
@@ -970,7 +1029,7 @@ async function processBenchmarkCase(input: {
   let reviewUsage = checkpointAssessment.review_usage as ModelUsage | undefined;
   if (!review || !reviewUsage) {
     const reviewCall = await callStructuredSonnet<ReviewAssessment>({
-      prompt: reviewPrompt(researcher, blind),
+      prompt: reviewPrompt(researcher, blind, modelEvidence),
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -984,16 +1043,35 @@ async function processBenchmarkCase(input: {
       .eq("id", researcherScoreId).eq("organization_id", run.organization_id);
     if (error) throw error;
   }
-  const citationQuality = safeRefs(researcher, modelEvidence);
-  const unsupportedCount = citationQuality.unsupportedClaimCount;
+  const citationQuality = evaluateBenchmarkMaterialClaimCitations(researcher.material_claims || [], modelEvidence);
+  const reviewerUnsupportedClaims = Array.from(new Set((review.unsupported_material_claims || [])
+    .filter((claim): claim is string => typeof claim === "string" && Boolean(claim.trim()))
+    .map((claim) => claim.trim())));
+  const materialClaimCount = (researcher.material_claims || []).length;
+  const unsupportedCount = materialClaimCount > 0
+    ? Math.min(materialClaimCount, citationQuality.unsupportedClaimCount + reviewerUnsupportedClaims.length)
+    : 0;
+  const unsupportedClaimRate = materialClaimCount > 0 ? unsupportedCount / materialClaimCount : 1;
   const reviewFindings = (review.findings || []).filter(actionableReviewFinding);
   const criticalReviewFindings = reviewFindings
     .filter((finding) => finding.severity === "critical")
     .map((finding) => finding.details);
-  const proposedCorrected = buildResearchV2Score({
-    onlyfansFit: bounded(review.corrected_fit_score),
-    commercialAchievability: bounded(review.corrected_achievability_score),
-    researchConfidence: bounded(review.corrected_confidence_score),
+  const proposedCorrected = buildAuditorConstrainedResearchV2Score({
+    researcher: {
+      onlyfansFit: bounded(researcher.onlyfans_fit_score),
+      commercialAchievability: bounded(researcher.commercial_achievability_score),
+      researchConfidence: bounded(researcher.research_confidence_score),
+    },
+    independentAudit: {
+      onlyfansFit: bounded(blind.independent_fit_score),
+      commercialAchievability: bounded(blind.independent_achievability_score),
+      researchConfidence: bounded(blind.independent_confidence_score),
+    },
+    reviewCorrection: {
+      onlyfansFit: bounded(review.corrected_fit_score),
+      commercialAchievability: bounded(review.corrected_achievability_score),
+      researchConfidence: bounded(review.corrected_confidence_score),
+    },
     hasCriticalGap: false,
     unsupportedMaterialClaims: unsupportedCount,
   });
@@ -1001,6 +1079,7 @@ async function processBenchmarkCase(input: {
   const criticalGaps = [
     ...(review.verdict === "fail" ? (blind.critical_gaps || []) : []),
     ...criticalReviewFindings,
+    ...reviewerUnsupportedClaims.map((claim) => `Unsupported material claim: ${claim}`),
     ...(proposedFinalist && (!adultGate.passed || !researcher.adult_eligibility_verified || !blind.eligibility_passed)
       ? ["Two-source 21+ eligibility was not verified consistently by the researcher and auditor."] : []),
     ...(proposedFinalist && !momentumGate.passed ? ["No source-backed athletic momentum was verified within 24 months of the evidence cutoff."] : []),
@@ -1011,13 +1090,42 @@ async function processBenchmarkCase(input: {
     || !blind.source_verification_passed
     || citationQuality.sourceVerificationRate < 1 || unsupportedCount > 0 || criticalGaps.length > 0;
   const verdict: "pass" | "corrected" | "fail" = forcedFailure ? "fail" : review.verdict;
-  const corrected = buildResearchV2Score({
-    onlyfansFit: bounded(review.corrected_fit_score),
-    commercialAchievability: bounded(review.corrected_achievability_score),
-    researchConfidence: bounded(review.corrected_confidence_score),
+  const corrected = buildAuditorConstrainedResearchV2Score({
+    researcher: {
+      onlyfansFit: bounded(researcher.onlyfans_fit_score),
+      commercialAchievability: bounded(researcher.commercial_achievability_score),
+      researchConfidence: bounded(researcher.research_confidence_score),
+    },
+    independentAudit: {
+      onlyfansFit: bounded(blind.independent_fit_score),
+      commercialAchievability: bounded(blind.independent_achievability_score),
+      researchConfidence: bounded(blind.independent_confidence_score),
+    },
+    reviewCorrection: {
+      onlyfansFit: bounded(review.corrected_fit_score),
+      commercialAchievability: bounded(review.corrected_achievability_score),
+      researchConfidence: bounded(review.corrected_confidence_score),
+    },
     hasCriticalGap: forcedFailure,
     unsupportedMaterialClaims: unsupportedCount,
   });
+  const passesFinalGate = passesResearchV2FinalGate({
+    ...corrected,
+    identityConfirmed: identityGate.passed && researcher.identity_confirmed && blind.identity_passed,
+    adultEligibilityVerified: adultGate.passed && researcher.adult_eligibility_verified && blind.eligibility_passed,
+    currentAthleticMomentumVerified: momentumGate.passed,
+    meaningfulAudienceVerified: creatorPotentialGate.audienceEvidenceCount > 0,
+    creatorPotentialVerified: creatorPotentialGate.creatorEvidenceCount > 0,
+    commercialConstraintsComplete: blind.commercial_constraints_complete,
+    materialClaimsVerified: citationQuality.sourceVerificationRate === 1
+      && blind.source_verification_passed
+      && unsupportedCount === 0,
+    auditorVerdict: verdict,
+    criticalGapCount: criticalGaps.length,
+  });
+  const finalCorrected = passesFinalGate
+    ? corrected
+    : { ...corrected, priority: Math.min(corrected.priority, 74) };
   const correctedFitLabel = fitLabelForScore(corrected.onlyfansFit);
   const correctedAchievabilityLabel = achievabilityLabelForScore(corrected.commercialAchievability);
   const auditUsage = combinedUsage(blindUsage, reviewUsage);
@@ -1030,7 +1138,7 @@ async function processBenchmarkCase(input: {
     fit_score: corrected.onlyfansFit,
     achievability_score: corrected.commercialAchievability,
     research_confidence_score: corrected.researchConfidence,
-    priority_score: corrected.priority,
+    priority_score: finalCorrected.priority,
     fit_label: correctedFitLabel,
     achievability_label: correctedAchievabilityLabel,
     rubric_version_id: artifacts.rubricVersionId,
@@ -1063,7 +1171,7 @@ async function processBenchmarkCase(input: {
     independent_search_completed: false,
     claim_sample_rate: 1,
     sampled_claim_count: researcher.material_claims.length,
-    unsupported_sampled_claim_count: Math.min(researcher.material_claims.length, citationQuality.unsupportedClaimCount),
+    unsupported_sampled_claim_count: unsupportedCount,
     verdict,
     identity_passed: identityGate.passed && researcher.identity_confirmed && blind.identity_passed,
     eligibility_passed: adultGate.passed && researcher.adult_eligibility_verified && blind.eligibility_passed,
@@ -1084,6 +1192,7 @@ async function processBenchmarkCase(input: {
 
   const findings = [
     ...reviewFindings,
+    ...reviewerUnsupportedClaims.map((details) => ({ failure_type: "unsupported_claim", severity: "critical" as const, details, proposed_fix: "Remove the claim or replace it with directly quoted support from the frozen dossier." })),
     ...(!identityGate.passed ? [{ failure_type: "wrong_entity", severity: "critical" as const, details: "Two-source identity corroboration was not established before the cutoff.", proposed_fix: "Add two independent exact-name sport identity sources from before the cutoff." }] : []),
     ...(!adultGate.passed ? [{ failure_type: "unverified_eligibility", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "Corroborated 21+ eligibility was not established before the cutoff.", proposed_fix: "Add two independent dated birth or age sources from before the cutoff before treating this case as a finalist." }] : []),
     ...(!momentumGate.passed ? [{ failure_type: "stale_information", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "No source-backed athletic momentum was verified within 24 months of the cutoff.", proposed_fix: "Add a dated result, ranking, signing, roster promotion, or comparable current source before treating this case as a finalist." }] : []),
@@ -1125,7 +1234,7 @@ async function processBenchmarkCase(input: {
   const auditorCaught = researcherFailure && finalPredictionCorrect;
   const totalUsage = combinedUsage(researcherUsage, auditUsage);
   const totalCost = researcherUsage.costMicrousd + auditCostMicrousd;
-  const finalHigh = corrected.priority > 80;
+  const finalHigh = passesFinalGate;
   const failureTypes = Array.from(new Set([
     ...findings.map((finding) => normalizeFailureType(finding.failure_type)),
     ...(researcherFailure ? [auditorCaught ? "researcher_miss_caught_by_auditor" : "researcher_and_auditor_missed"] : []),
@@ -1134,12 +1243,12 @@ async function processBenchmarkCase(input: {
     audit_id: audit.id,
     predicted_fit_label: correctedFitLabel,
     predicted_achievability_label: correctedAchievabilityLabel,
-    predicted_priority_score: corrected.priority,
+    predicted_priority_score: finalCorrected.priority,
     fit_correct: correctedFitLabel === record.fit_label,
     achievability_correct: correctedAchievabilityLabel === record.achievability_label,
-    priority_gate_correct: (corrected.priority > 80) === actualPriority,
+    priority_gate_correct: (finalCorrected.priority > 80) === actualPriority,
     source_verification_rate: citationQuality.sourceVerificationRate,
-    unsupported_claim_rate: citationQuality.unsupportedClaimRate,
+    unsupported_claim_rate: unsupportedClaimRate,
     identity_correct: !finalHigh || (identityGate.passed && researcher.identity_confirmed && blind.identity_passed),
     eligibility_verified: !finalHigh || (adultGate.passed && researcher.adult_eligibility_verified && blind.eligibility_passed),
     point_in_time_compliant: selection.pointInTimeCompliant,
@@ -1154,7 +1263,7 @@ async function processBenchmarkCase(input: {
     cache_read_input_tokens: totalUsage.cacheReadInputTokens,
   }).eq("benchmark_run_id", run.id).eq("golden_record_id", record.id).eq("organization_id", run.organization_id);
   if (resultError) throw resultError;
-  return { recordId: record.id, priority: corrected.priority, verdict, failureTypes };
+  return { recordId: record.id, priority: finalCorrected.priority, verdict, failureTypes };
 }
 
 export async function resumeBenchmarkRun(input: { organizationId: string; runId: string }) {

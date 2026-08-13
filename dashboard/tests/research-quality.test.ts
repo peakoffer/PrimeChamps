@@ -754,7 +754,7 @@ test("Instagram-native search isolates batched queries and still requires athlet
   }).confidence >= 70);
 });
 
-test("run audit requires ten unique source-backed priority candidates", () => {
+test("run audit never pads a short list with an unqualified candidate", () => {
   const candidates = Array.from({ length: 10 }, (_, index) => ({
     name: `Athlete ${index}`,
     sport: "volleyball",
@@ -773,9 +773,12 @@ test("run audit requires ten unique source-backed priority candidates", () => {
   }));
   assert.equal(auditResearchResults({ requestedSport: "volleyball", requestedCount: 10, candidates }).passed, true);
   candidates[9].score = 79;
-  const failed = auditResearchResults({ requestedSport: "volleyball", requestedCount: 10, candidates });
-  assert.equal(failed.passed, false);
-  assert.equal(failed.qualifiedCount, 9);
+  const short = auditResearchResults({ requestedSport: "volleyball", requestedCount: 10, candidates });
+  assert.equal(short.passed, true);
+  assert.equal(short.targetMet, false);
+  assert.equal(short.shortfall, 1);
+  assert.equal(short.qualifiedCount, 9);
+  assert.equal(short.returnedCount, 9);
 });
 
 test("weighted research score is deterministic and rejects incomplete dimensions", () => {

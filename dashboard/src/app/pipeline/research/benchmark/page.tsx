@@ -105,6 +105,7 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
 
 type BenchmarkMetrics = {
   cases: number;
+  finalistsAbove80: number;
   precisionAbove80: number | null;
   recallStrongFit: number | null;
   fitAccuracy: number | null;
@@ -149,6 +150,11 @@ type BenchmarkRun = {
     cohort_version?: string;
   };
   calculated_metrics: BenchmarkMetrics | null;
+  release_readiness: {
+    ready: boolean;
+    reasons: string[];
+    minimumCases: number;
+  };
 };
 
 type BenchmarkReadiness = {
@@ -404,6 +410,21 @@ export default function ResearchBenchmarkPage() {
     && ["queued", "running", "failed"].includes(latestHeldOutRun.status)
     ? latestHeldOutRun
     : undefined;
+  const developmentSmokePassed = Boolean(
+    latestDevelopmentRun?.status === "completed"
+    && latestDevelopmentRun.calculated_metrics
+    && latestDevelopmentRun.calculated_metrics.finalistsAbove80 > 0
+    && latestDevelopmentRun.calculated_metrics.precisionAbove80 !== null
+    && latestDevelopmentRun.calculated_metrics.precisionAbove80 >= 0.9
+    && latestDevelopmentRun.calculated_metrics.finalistIdentityAccuracy === 1
+    && latestDevelopmentRun.calculated_metrics.finalistEligibilityVerificationRate === 1
+    && latestDevelopmentRun.calculated_metrics.finalistZeroUnsupportedClaimRate === 1
+    && latestDevelopmentRun.calculated_metrics.finalistAuditPassRate !== null
+    && latestDevelopmentRun.calculated_metrics.finalistAuditPassRate >= 0.9
+    && latestDevelopmentRun.calculated_metrics.sourceVerificationRate === 1
+    && latestDevelopmentRun.calculated_metrics.unsupportedClaimRate === 0
+    && latestDevelopmentRun.calculated_metrics.pointInTimeComplianceRate === 1
+  );
   const completedExcludedSignalRecordIdSet = useMemo(
     () => new Set(completedExcludedSignalRecordIds),
     [completedExcludedSignalRecordIds]
@@ -1108,14 +1129,12 @@ export default function ResearchBenchmarkPage() {
                   <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
                     Start four-case smoke test
                   </button>
-                  {latestDevelopmentRun?.status === "completed"
-                    && (latestDevelopmentRun.calculated_metrics?.precisionAbove80 === null
-                      || (latestDevelopmentRun.calculated_metrics?.precisionAbove80 || 0) >= 0.9)
-                    && latestDevelopmentRun.calculated_metrics?.sourceVerificationRate === 1
-                    && latestDevelopmentRun.calculated_metrics?.unsupportedClaimRate === 0
+                  {developmentSmokePassed
+                    && latestDevelopmentRun
+                    && latestDevelopmentRun.result_count < benchmarkReadiness.development.total
                     && (
-                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(8, 750_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
-                      Start eight-case calibration
+                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(benchmarkReadiness.development.total, 1_500_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                      Start full development calibration ({benchmarkReadiness.development.total})
                     </button>
                   )}
                 </>
@@ -1142,7 +1161,7 @@ export default function ResearchBenchmarkPage() {
                   </button>
                 ) : !latestHeldOutRun && (
                   <button
-                    disabled={working || !benchmarkReadiness.canRunHeldOut || latestDevelopmentRun?.status !== "completed" || heldOutSignalRecoveryCount > 0}
+                    disabled={working || !benchmarkReadiness.canRunHeldOut || latestDevelopmentRun?.release_readiness.ready !== true || heldOutSignalRecoveryCount > 0}
                     onClick={() => void startHeldOutRelease()}
                     className="rounded-lg border border-red-800 px-3 py-2 text-sm font-medium text-red-200 disabled:opacity-40"
                   >
@@ -1151,6 +1170,14 @@ export default function ResearchBenchmarkPage() {
                 )
               )}
             </div>
+            {benchmarkReadiness.heldOutEvaluationEnabled
+              && latestDevelopmentRun?.status === "completed"
+              && latestDevelopmentRun.release_readiness.ready !== true
+              && (
+              <p className="mt-3 text-xs text-amber-300">
+                Held-out remains locked: {latestDevelopmentRun.release_readiness.reasons.join("; ")}.
+              </p>
+            )}
           </div>
 
           {latestDevelopmentRun && (

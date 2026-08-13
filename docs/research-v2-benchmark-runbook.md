@@ -52,6 +52,10 @@ A cohort cannot be frozen on labels alone. Every record must also contain at lea
 6. Golden labels are compared only after the model stages have completed.
 7. Held-out metrics remain concealed while the release run is incomplete.
 
+Material claims use stricter evidence support than a bare citation ID. The Researcher must copy an exact quote for every cited `E` source. The server verifies that the quote exists in the frozen dossier and materially overlaps the claim, while the comparison-stage Auditor receives the same frozen dossier and must separately list any claim the quote does not actually establish. Either failure caps priority below the finalist threshold.
+
+The review stage is a ceiling, never a score-raising step. Final fit, achievability, and confidence dimensions are the minimum of the Researcher, blind Auditor, and review correction. The complete deterministic final gate is applied again before a score can remain above 80.
+
 Start a bounded development run:
 
 ```http
@@ -93,7 +97,7 @@ Repeat `resume` until `completed` is `true`. A failed run retains its checkpoint
 
 Do not set `RESEARCH_HELD_OUT_EVALUATION_ENABLED=true` until development results are stable and the intended prompt, rubric, evidence policy, model family, and score weighting are frozen.
 
-The held-out run is accepted only when every selected record is locked and unrevealed. One completed held-out run exhausts that cohort; another release test requires a new frozen cohort. Never tune against held-out records.
+The server refuses to create a held-out run unless its baseline is a completed full-development-cohort run from the same frozen cohort and every release threshold already passes. A four-case smoke test may authorize a full development calibration, but it can never unlock held-out by itself. The held-out run is accepted only when every selected record is locked and unrevealed. One completed held-out run exhausts that cohort; another release test requires a new frozen cohort. Never tune against held-out records.
 
 ## Production acceptance
 
@@ -103,11 +107,14 @@ A release is not production-ready until the locked held-out run proves all of th
 - 100% finalist corroborated 21+ verification;
 - 100% of finalists have zero unsupported material claims;
 - at least 90% precision among scores above 80;
+- at least 90% audit decision accuracy and finalist audit-pass rate;
 - at least 90% Auditor catch rate for Researcher failures;
 - complete point-in-time compliance;
 - recorded model, prompt, rubric, evidence hash, tokens, cost, latency, and findings for every case.
 
 No metric is considered passed when its denominator is zero. Fewer than ten recommendations is correct when the evidence does not support ten.
+
+The runtime enforces that last rule separately from target coverage. A short or empty qualified list is a valid no-padding result; `targetMet` and `shortfall` report coverage without marking an unsafe candidate as a quality pass.
 
 ## Current data status (2026-08-13)
 

@@ -93,6 +93,8 @@ A candidate counts only when all are true:
 
 The system never pads a result set to reach ten.
 
+`qualityPassed` measures whether the returned subset cleared every gate; it does not fail merely because fewer than the requested number qualify. `targetMet` and `shortfall` report coverage separately.
+
 ## Metrics and iteration
 
 The benchmark reports:
@@ -105,6 +107,8 @@ The benchmark reports:
 - Cost, latency, and token usage.
 
 Each experiment changes exactly one major dimension: source, query strategy, prompt, rubric, model, audit rule, or score weighting. Keep a change only when development metrics improve without degrading the locked held-out split. Do not tune against held-out examples.
+
+The one-time held-out endpoint is server-locked until a complete development run from the same cohort passes every release gate. Citation IDs alone are insufficient: benchmark material claims require exact dossier quotes, semantic overlap, and a second-stage Auditor check. Review scores are hard ceilings across all three dimensions and can never inflate either the Researcher or blind Auditor.
 
 Failure classes are stored explicitly: wrong entity, stale information, point-in-time leakage, unsupported claim, missing source, source retrieval failure, extraction failure, criteria drift, score inflation, missed strong fit, achievability error, Researcher miss caught by Auditor, both roles missed, unverified eligibility, and duplicate evidence.
 

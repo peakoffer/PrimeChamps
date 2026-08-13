@@ -96,6 +96,21 @@ export type LeakageSafeBenchmarkEvidence = {
   structuredValue: Record<string, unknown>;
 };
 
+export type BenchmarkMaterialClaim = {
+  claim: string;
+  evidence_support: Array<{
+    evidence_ref: string;
+    quote: string;
+  }>;
+};
+
+export type BenchmarkMaterialClaimCitationQuality = {
+  sourceVerificationRate: number;
+  unsupportedClaimCount: number;
+  unsupportedClaimRate: number;
+  failures: Array<{ claim: string; reason: string }>;
+};
+
 export type BenchmarkEvidenceSelection = {
   evidence: LeakageSafeBenchmarkEvidence[];
   rejected: Array<{ claimId: string; reason: string }>;
@@ -251,6 +266,69 @@ export function selectLeakageSafeBenchmarkEvidence(input: {
 function normalizedTokens(value: string) {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
     .replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+}
+
+const MATERIAL_CLAIM_STOP_WORDS = new Set([
+  "about", "after", "again", "also", "been", "being", "from", "have", "into", "more", "most",
+  "only", "over", "that", "their", "there", "these", "they", "this", "those", "through", "with",
+]);
+
+function normalizedQuoteText(value: string) {
+  return value.normalize("NFKC").toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+    .replace(/\s+/g, " ").trim();
+}
+
+function materialClaimTokens(value: string) {
+  return normalizedTokens(value).filter((token) => token.length >= 4 && !MATERIAL_CLAIM_STOP_WORDS.has(token));
+}
+
+/**
+ * A benchmark claim is supported only when every citation points to the frozen
+ * dossier, quotes text that is actually present there, and materially overlaps
+ * the claim. Merely returning a valid-looking E-number is never sufficient.
+ */
+export function evaluateBenchmarkMaterialClaimCitations(
+  claims: BenchmarkMaterialClaim[],
+  evidence: LeakageSafeBenchmarkEvidence[]
+): BenchmarkMaterialClaimCitationQuality {
+  const evidenceByRef = new Map(evidence.map((item) => [item.sourceRef, item]));
+  const failures: BenchmarkMaterialClaimCitationQuality["failures"] = [];
+  let supported = 0;
+
+  for (const materialClaim of claims || []) {
+    const claim = typeof materialClaim?.claim === "string" ? materialClaim.claim.trim() : "";
+    const supports = Array.isArray(materialClaim?.evidence_support) ? materialClaim.evidence_support : [];
+    if (claim.length < 12 || supports.length === 0) {
+      failures.push({ claim, reason: "missing_claim_or_quoted_support" });
+      continue;
+    }
+    const claimTokens = materialClaimTokens(claim);
+    const invalidSupport = supports.find((support) => {
+      const item = evidenceByRef.get(typeof support?.evidence_ref === "string" ? support.evidence_ref : "");
+      const quote = typeof support?.quote === "string" ? support.quote.trim() : "";
+      if (!item || quote.length < 12) return true;
+      const dossierText = normalizedQuoteText(`${item.title}\n${item.claim}\n${item.excerpt}`);
+      const normalizedQuote = normalizedQuoteText(quote);
+      if (!dossierText.includes(normalizedQuote)) return true;
+      const quoteTokens = new Set(materialClaimTokens(quote));
+      const overlap = claimTokens.filter((token) => quoteTokens.has(token)).length;
+      return claimTokens.length < 2 || overlap < Math.max(2, Math.ceil(claimTokens.length * 0.5));
+    });
+    if (invalidSupport) {
+      failures.push({ claim, reason: "citation_missing_or_quote_does_not_support_claim" });
+      continue;
+    }
+    supported += 1;
+  }
+
+  const total = (claims || []).length;
+  const unsupportedClaimCount = Math.max(0, total - supported);
+  return {
+    sourceVerificationRate: total > 0 ? supported / total : 0,
+    unsupportedClaimCount,
+    unsupportedClaimRate: total > 0 ? unsupportedClaimCount / total : 0,
+    failures,
+  };
 }
 
 function evidenceNamesAthlete(name: string, evidence: LeakageSafeBenchmarkEvidence) {
@@ -482,6 +560,7 @@ SCORING
 - Missing representation or a public business contact lowers achievability only when the rest of the public proxy evidence is insufficient; it is not an automatic blocker.
 - A strong pre-outreach fit may be supported by verified-adult status, current athletic momentum, a meaningful personal audience, creator-led content, and realistic career-tier accessibility without any platform-specific signal.
 - Cite evidence using only the supplied E-numbers. If evidence is missing, return a lower score and list the gap.
+- For every material claim, copy an exact supporting quote from each cited E-number into evidence_support. Keep the claim close to the quoted wording; a valid E-number without a matching quote is unsupported.
 - Put only failed core gates in critical_gaps. Put optional missing amplifiers and unanswered non-blocking questions in limitations. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
 - Keep reasoning under 120 words and return no more than six material claims, five critical gaps, and five limitations.
 

@@ -384,6 +384,7 @@ export type BenchmarkCaseResult = {
   sourceVerificationRate: number;
   unsupportedClaimRate: number;
   pointInTimeCompliant: boolean;
+  auditVerdict: "pass" | "corrected" | "fail";
   auditorCaughtResearcherFailure: boolean;
   researcherFailure: boolean;
   costMicrousd: number;
@@ -416,6 +417,7 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
   const totalCostMicrousd = results.reduce((total, result) => total + result.costMicrousd, 0);
   return {
     cases: results.length,
+    finalistsAbove80: predictedPriority.length,
     precisionAbove80: rate(truePositivePriority.length, predictedPriority.length),
     recallStrongFit: rate(truePositivePriority.length, truePriority.length),
     falsePositiveRate: rate(falsePositivePriority.length, actualNegative.length),
@@ -457,7 +459,8 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
         && result.eligibilityVerified
         && result.sourceVerificationRate === 1
         && result.unsupportedClaimRate === 0
-        && result.pointInTimeCompliant).length,
+        && result.pointInTimeCompliant
+        && (result.auditVerdict === "pass" || result.auditVerdict === "corrected")).length,
       predictedPriority.length
     ),
     pointInTimeComplianceRate: rate(results.filter((result) => result.pointInTimeCompliant).length, results.length),
@@ -486,4 +489,28 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
       trueNegative: trueNegativePriority.length,
     },
   };
+}
+
+export type BenchmarkMetrics = ReturnType<typeof calculateBenchmarkMetrics>;
+
+export function evaluateBenchmarkReleaseReadiness(
+  metrics: BenchmarkMetrics | null | undefined,
+  options: { minimumCases: number }
+) {
+  const reasons: string[] = [];
+  const minimumCases = Math.max(2, Math.floor(options.minimumCases));
+  if (!metrics) return { ready: false, reasons: ["benchmark metrics are missing"], minimumCases };
+  if (metrics.cases < minimumCases) reasons.push(`only ${metrics.cases}/${minimumCases} required cases completed`);
+  if (metrics.finalistsAbove80 < 1) reasons.push("no score-above-80 finalist exists, so precision and finalist gates are unproven");
+  if (metrics.precisionAbove80 === null || metrics.precisionAbove80 < 0.9) reasons.push("precision above 80 is below 90% or has no denominator");
+  if (metrics.auditDecisionAccuracy === null || metrics.auditDecisionAccuracy < 0.9) reasons.push("audit decision accuracy is below 90% or has no denominator");
+  if (metrics.finalistAuditPassRate === null || metrics.finalistAuditPassRate < 0.9) reasons.push("finalist audit pass rate is below 90% or has no denominator");
+  if (metrics.auditorCatchRate === null || metrics.auditorCatchRate < 0.9) reasons.push("Auditor catch rate is below 90% or has no Researcher-failure denominator");
+  if (metrics.finalistIdentityAccuracy !== 1) reasons.push("finalist identity accuracy is not 100%");
+  if (metrics.finalistEligibilityVerificationRate !== 1) reasons.push("finalist 21+ verification is not 100%");
+  if (metrics.finalistZeroUnsupportedClaimRate !== 1) reasons.push("a finalist has an unsupported material claim");
+  if (metrics.sourceVerificationRate !== 1) reasons.push("source verification is not 100%");
+  if (metrics.unsupportedClaimRate !== 0) reasons.push("the benchmark contains unsupported material claims");
+  if (metrics.pointInTimeComplianceRate !== 1) reasons.push("point-in-time compliance is not 100%");
+  return { ready: reasons.length === 0, reasons, minimumCases };
 }

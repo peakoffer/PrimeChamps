@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { calculateBenchmarkMetrics, type BenchmarkCaseResult } from "@/lib/research/v2";
+import { calculateBenchmarkMetrics, evaluateBenchmarkReleaseReadiness, type BenchmarkCaseResult } from "@/lib/research/v2";
 import { resumeBenchmarkRun, startBenchmarkRun } from "@/lib/research/benchmark-runner";
 
 export const maxDuration = 300;
@@ -17,6 +17,8 @@ function benchmarkCase(row: Record<string, unknown>): BenchmarkCaseResult | null
   const golden = Array.isArray(relation) ? relation[0] : relation;
   if (!golden || typeof golden !== "object") return null;
   const labels = golden as Record<string, unknown>;
+  const auditRelation = row.audit;
+  const audit = (Array.isArray(auditRelation) ? auditRelation[0] : auditRelation) as Record<string, unknown> | null;
   if (!['fit', 'not_fit'].includes(String(labels.fit_label))) return null;
   if (!['high', 'medium', 'low'].includes(String(labels.achievability_label))) return null;
   return {
@@ -34,6 +36,9 @@ function benchmarkCase(row: Record<string, unknown>): BenchmarkCaseResult | null
     sourceVerificationRate: asNumber(row.source_verification_rate),
     unsupportedClaimRate: asNumber(row.unsupported_claim_rate),
     pointInTimeCompliant: row.point_in_time_compliant === true,
+    auditVerdict: audit && ['pass', 'corrected', 'fail'].includes(String(audit.verdict))
+      ? audit.verdict as BenchmarkCaseResult["auditVerdict"]
+      : "fail",
     auditorCaughtResearcherFailure: row.auditor_caught_researcher_failure === true,
     researcherFailure: row.researcher_failure === true,
     costMicrousd: asNumber(row.cost_microusd),
@@ -65,7 +70,7 @@ export async function GET() {
     const runIds = (runs || []).map((run) => run.id);
     const { data: results, error: resultError } = runIds.length
       ? await admin.from("research_benchmark_results")
-          .select("*,golden_record:research_golden_records(fit_label,achievability_label)")
+          .select("*,golden_record:research_golden_records(fit_label,achievability_label),audit:research_audits(verdict)")
           .eq("organization_id", user.organizationId)
           .in("benchmark_run_id", runIds)
       : { data: [], error: null };
@@ -82,12 +87,17 @@ export async function GET() {
     }
     const benchmarkRuns = (runs || []).map((run) => {
       const cases = casesByRun.get(run.id) || [];
+      const calculatedMetrics = cases.length && (run.benchmark_split === "development" || run.status === "completed")
+        ? calculateBenchmarkMetrics(cases)
+        : null;
+      const splitTotal = run.benchmark_split === "held_out"
+        ? (labels || []).filter((record) => record.benchmark_split === "held_out").length
+        : (labels || []).filter((record) => record.benchmark_split === "development").length;
       return {
         ...run,
         result_count: cases.length,
-        calculated_metrics: cases.length && (run.benchmark_split === "development" || run.status === "completed")
-          ? calculateBenchmarkMetrics(cases)
-          : null,
+        calculated_metrics: calculatedMetrics,
+        release_readiness: evaluateBenchmarkReleaseReadiness(calculatedMetrics, { minimumCases: Math.max(2, splitTotal) }),
       };
     });
     const goldenLabels = labels || [];

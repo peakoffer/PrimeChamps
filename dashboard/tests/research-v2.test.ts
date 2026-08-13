@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   assignGoldenRecordSplits,
   calculateBenchmarkMetrics,
+  evaluateBenchmarkReleaseReadiness,
   goldenAthleteKey,
   isGoldenRecordReadyForSplit,
   maskGoldenRecordForBlindLabeling,
@@ -52,6 +53,7 @@ import {
   buildBenchmarkResearcherPrompt,
   compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
+  evaluateBenchmarkMaterialClaimCitations,
   normalizeOpenRouterBenchmarkUsage,
   promptContainsBenchmarkLeakage,
   projectedBenchmarkCallCostMicrousd,
@@ -750,6 +752,7 @@ test("benchmark metrics reward precision rather than score volume", () => {
     sourceVerificationRate: 1,
     unsupportedClaimRate: 0,
     pointInTimeCompliant: true,
+    auditVerdict: "pass" as const,
     auditorCaughtResearcherFailure: false,
     researcherFailure: false,
     costMicrousd: 1_000,
@@ -778,6 +781,47 @@ test("benchmark metrics reward precision rather than score volume", () => {
     cacheCreationInput: 0,
     cacheReadInput: 0,
   });
+});
+
+test("held-out release readiness requires every measured production gate", () => {
+  const positive = {
+    actualFit: "fit" as const,
+    actualAchievability: "high" as const,
+    predictedFit: "fit" as const,
+    predictedAchievability: "high" as const,
+    priorityScore: 88,
+    identityCorrect: true,
+    eligibilityVerified: true,
+    sourceVerificationRate: 1,
+    unsupportedClaimRate: 0,
+    pointInTimeCompliant: true,
+    auditVerdict: "pass" as const,
+    auditorCaughtResearcherFailure: false,
+    researcherFailure: false,
+    costMicrousd: 1_000,
+    latencyMs: 2_000,
+  };
+  const negative = {
+    ...positive,
+    actualFit: "not_fit" as const,
+    actualAchievability: "low" as const,
+    predictedFit: "not_fit" as const,
+    predictedAchievability: "low" as const,
+    priorityScore: 40,
+    researcherFailure: true,
+    auditorCaughtResearcherFailure: true,
+    auditVerdict: "corrected" as const,
+  };
+  const passing = calculateBenchmarkMetrics([positive, negative]);
+  assert.equal(evaluateBenchmarkReleaseReadiness(passing, { minimumCases: 2 }).ready, true);
+
+  const noFinalist = calculateBenchmarkMetrics([{ ...positive, priorityScore: 79 }, negative]);
+  assert.ok(evaluateBenchmarkReleaseReadiness(noFinalist, { minimumCases: 2 }).reasons
+    .some((reason) => reason.includes("no score-above-80 finalist")));
+
+  const failedAudit = calculateBenchmarkMetrics([{ ...positive, auditVerdict: "fail" }, negative]);
+  assert.ok(evaluateBenchmarkReleaseReadiness(failedAudit, { minimumCases: 2 }).reasons
+    .some((reason) => reason.includes("finalist audit pass rate")));
 });
 
 test("V2 priority cannot hide weak achievability or weak research confidence", () => {
@@ -1021,6 +1065,34 @@ test("benchmark evidence selection excludes private outcomes and post-cutoff fac
   assert.ok(selection.rejected.some((item) => item.claimId === "outcome-claim" && item.reason === "outcome_provider_excluded"));
   assert.ok(selection.rejected.some((item) => item.claimId === "future-claim" && item.reason === "after_evidence_cutoff"));
   assert.equal(selection.pointInTimeCompliant, true);
+});
+
+test("benchmark material claims require a real frozen quote that supports the claim", () => {
+  const selection = selectLeakageSafeBenchmarkEvidence({
+    record: BENCHMARK_CASE,
+    sources: BENCHMARK_SOURCES,
+    claims: BENCHMARK_CLAIMS,
+  });
+  const ageEvidence = selection.evidence.find((item) => item.claimId === "age-claim-a")!;
+  const sportEvidence = selection.evidence.find((item) => item.claimId === "sport-claim-a")!;
+  const supported = evaluateBenchmarkMaterialClaimCitations([{
+    claim: "Example Athlete was born January 2, 1998.",
+    evidence_support: [{ evidence_ref: ageEvidence.sourceRef, quote: ageEvidence.claim }],
+  }], selection.evidence);
+  assert.equal(supported.sourceVerificationRate, 1);
+  assert.equal(supported.unsupportedClaimCount, 0);
+
+  const fabricatedQuote = evaluateBenchmarkMaterialClaimCitations([{
+    claim: "Example Athlete was born January 2, 1998.",
+    evidence_support: [{ evidence_ref: ageEvidence.sourceRef, quote: "Example Athlete was born in California in 1998." }],
+  }], selection.evidence);
+  assert.equal(fabricatedQuote.unsupportedClaimCount, 1);
+
+  const irrelevantQuote = evaluateBenchmarkMaterialClaimCitations([{
+    claim: "Example Athlete was born January 2, 1998.",
+    evidence_support: [{ evidence_ref: sportEvidence.sourceRef, quote: sportEvidence.claim }],
+  }], selection.evidence);
+  assert.equal(irrelevantQuote.unsupportedClaimCount, 1);
 });
 
 test("benchmark finalist gates require two independent identity and adult sources", () => {
@@ -1294,7 +1366,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v20/);
+  assert.match(source, /research-v2-benchmark-runner-v21/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -1307,9 +1379,14 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.match(source, /BENCHMARK_PRE_OUTREACH_CALIBRATION/);
   assert.match(source, /const auditorCaught = researcherFailure && finalPredictionCorrect/);
   assert.match(source, /compatible replay checkpoint; start a fresh development smoke test/);
+  assert.match(source, /Development release gates have not passed/);
   assert.ok(!source.includes("researcher.unsupported_claims"), "unsupported researcher claims must come from citation validity, not self-report");
   assert.ok(!source.includes("blind.unsupported_claims"), "blind limitations must not be counted as unsupported material claims");
   assert.match(source, /compactBenchmarkModelEvidence/);
+  assert.match(source, /evaluateBenchmarkMaterialClaimCitations/);
+  assert.match(source, /buildAuditorConstrainedResearchV2Score/);
+  assert.match(source, /passesResearchV2FinalGate/);
+  assert.match(source, /Never raise a Researcher or blind-auditor dimension/);
   assert.match(source, /review\.verdict === "fail" \? \(blind\.critical_gaps/);
   assert.ok(!source.includes('(researcherPriority > 80) !== actualPriority'), "a deliberately selective finalist threshold must not be treated as a classifier miss");
   assert.ok(!source.includes('...(blind.failure_types || []).map(normalizeFailureType)'), "candidate evidence gaps must not be logged as research-system failures");

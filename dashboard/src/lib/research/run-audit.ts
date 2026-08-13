@@ -49,16 +49,25 @@ export function auditResearchResults(input: {
     };
   });
   const qualified = audited.filter((candidate) => candidate.passed);
+  const requestedCount = Math.max(0, Math.floor(input.requestedCount));
+  const returnedCandidates = qualified.slice(0, requestedCount);
   const failureCounts = audited.flatMap((candidate) => candidate.failures).reduce<Record<string, number>>((counts, failure) => {
     counts[failure] = (counts[failure] || 0) + 1;
     return counts;
   }, {});
   return {
-    passed: qualified.length >= input.requestedCount,
+    // Quality is about the candidates returned, not whether discovery filled
+    // a quota. A short list (including an empty one) is correct when the
+    // evidence cannot support more finalists; targetMet reports coverage
+    // separately without encouraging score inflation or padding.
+    passed: returnedCandidates.every((candidate) => candidate.passed),
+    targetMet: qualified.length >= requestedCount,
+    shortfall: Math.max(0, requestedCount - qualified.length),
     requestedSport: input.requestedSport,
-    requestedCount: input.requestedCount,
+    requestedCount,
     auditedCount: audited.length,
     qualifiedCount: qualified.length,
+    returnedCount: returnedCandidates.length,
     priorityThreshold: RESEARCH_PRIORITY_THRESHOLD,
     failureCounts,
     candidates: audited,

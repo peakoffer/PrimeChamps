@@ -68,7 +68,7 @@ Import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evid
 - Hard budget: one discovery wave, eight requested discovery candidates, no more than six Instagram enrichments, three requested finalists, no more than three audits.
 - Mode: `is_evaluation = true`; no live-pipeline writes are allowed.
 - Final status: `completed` at `2026-08-12 22:28:22.648+00`, with no workflow error.
-- Final funnel: 44 sourced, six admitted discoveries, four Instagram-enriched and scored candidates, zero qualified finalists, and zero returned finalists. `quality_passed` is false.
+- Final funnel: 44 sourced, six admitted discoveries, four Instagram-enriched and scored candidates, zero qualified finalists, and zero returned finalists. The historical row stored `quality_passed=false` under the former quota-based meaning; current code correctly treats a short or empty safe list as a no-padding quality pass and reports coverage separately through `targetMet`/`shortfall`.
 - Scored candidates: Devon Newberry 79, Madisen Skinner 77, Mimi Colyer 77, and Anna DeBeer 68. No Researcher proposal exceeded 80, so triggering zero paid blind audits was expected and correct.
 - Anthropic usage was 21,887 Researcher input tokens and 3,620 output tokens across four scored candidates. Audit token usage was zero. Apify recorded four Instagram profiles, one Instagram search run, and one batched age run. The run stored provider operations but not a reliable all-in dollar total; do not invent one.
 - Isolation was proven after completion: zero live athletes created, zero candidates missing the test-data flag, and zero completion notifications.
@@ -294,6 +294,7 @@ The last fully deployed checkpoint before the Social Blade adapter is `27b3ee7`.
 - Do not run development/release profiles in parallel until the smoke path is understood.
 - Do not retry discovery/enrichment when a durable fork/resume checkpoint can be reused.
 - Do not mark the project production-ready because tests and deployment are green; the locked held-out acceptance thresholds remain unproven.
+- Benchmark runner v21 now requires exact frozen-dossier quotes for every material claim, gives the comparison-stage Auditor the dossier, constrains every corrected dimension by the Researcher and blind Auditor, and reapplies the complete final gate. The server also refuses held-out creation until a complete same-cohort development run passes the full release threshold set. These controls are implemented and tested but remain unproven on a fresh held-out cohort.
 
 ## Definition of the next clean stopping point
 
