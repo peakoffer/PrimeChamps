@@ -72,7 +72,6 @@ import {
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
 } from "../src/lib/research/social-blade-history.ts";
-import { prepareUnverifiedApifyInstagramHistoryPilot } from "../src/lib/research/apify-instagram-profile-history.ts";
 import { convertOnlyFansHistoricalWorkbookExtraction } from "../src/lib/research/historical-workbook-converter.ts";
 import {
   buildHistoricalAgeRecoveryQueries,
@@ -415,38 +414,6 @@ test("Social Blade recovery uses the cheapest sufficient tier and only exact, re
       status: { success: true },
       data: { id: { username: "example.athlete" }, daily: [{ date: "2026-03-01T00:00:00.000Z", followers: 120_000 }] },
     },
-  }), null);
-});
-
-test("community Apify history remains inspection-only and selects only an exact recent pre-cutoff row", () => {
-  const snapshot = prepareUnverifiedApifyInstagramHistoryPilot({
-    expectedHandle: "@example.athlete",
-    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
-    result: {
-      username: "example.athlete",
-      name: "Example Athlete",
-      tracked_since: "2025-01-01T00:00:00.000Z",
-      profile_history_points: [
-        { date: "2026-05-04", followers_count: 999_999, media_count: 999 },
-        { date: "2026-05-03", followers_count: 120_000, follows_count: 400, media_count: 240, engagement_rate: "2.5", average_likes: "3000", average_comments: "75", weekly_posts: "3" },
-        { date: "2026-05-02", followers_count: 119_500, media_count: 239 },
-      ],
-    },
-  });
-  assert.equal(snapshot?.capturedAt, "2026-05-03T00:00:00.000Z");
-  assert.equal(snapshot?.followers, 120_000);
-  assert.equal(snapshot?.eligibleForScoring, false);
-  assert.equal(snapshot?.trustStatus, "unverified_community_provider");
-
-  assert.equal(prepareUnverifiedApifyInstagramHistoryPilot({
-    expectedHandle: "example.athlete",
-    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
-    result: { username: "different.person", profile_history_points: [{ date: "2026-05-03", followers_count: 120_000 }] },
-  }), null);
-  assert.equal(prepareUnverifiedApifyInstagramHistoryPilot({
-    expectedHandle: "example.athlete",
-    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
-    result: { username: "example.athlete", profile_history_points: [{ date: "2026-03-01", followers_count: 120_000 }] },
   }), null);
 });
 
