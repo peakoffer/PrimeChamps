@@ -75,6 +75,28 @@ export function instagramHandleFromUrl(value: string) {
   }
 }
 
+export function independentSourcePublishesInstagramHandle(input: {
+  athleteName: string;
+  handle: string;
+  supportingUrl: string;
+  supportingTitle: string;
+  evidence: string;
+}) {
+  try {
+    const url = new URL(input.supportingUrl);
+    if (!/^https?:$/.test(url.protocol) || /(^|\.)instagram\.com$/i.test(url.hostname)) return false;
+  } catch {
+    return false;
+  }
+  const sourceText = `${input.supportingTitle} ${input.evidence}`;
+  if (!nameSignals(input.athleteName, sourceText).full) return false;
+  const escapedHandle = input.handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(?:@${escapedHandle}\\b|instagram\\.com\\/${escapedHandle}(?:\\/|\\b)|instagram(?:\\s+(?:account|profile|handle|username))?\\s*(?:is|:|-)?\\s*@?${escapedHandle}\\b)`,
+    "i"
+  ).test(sourceText);
+}
+
 function instagramHandlesFromText(value: string) {
   const handles = new Set<string>();
   for (const match of value.matchAll(/instagram(?:\s+(?:handle|username|profile))?\s*[:\-]?(?:\s*@|\s+@?)([a-z0-9_.]{3,30})\b/ig)) {
@@ -325,4 +347,51 @@ export function scoreInstagramProfileIdentity(input: {
     reasons.push("unverified same-name profile lacks team, league, or source-context corroboration");
   }
   return { confidence: Math.round(Math.max(0, Math.min(100, confidence))), reasons };
+}
+
+/**
+ * A numeric similarity score is not identity proof. Finalist identity needs
+ * two distinct signals: the live Instagram profile plus either an independent
+ * athlete source that publishes the handle, or Instagram's verified assertion
+ * on an exact-name sport profile paired with external athlete/sport evidence.
+ */
+export function evaluateCorroboratedInstagramIdentity(input: {
+  athleteName: string;
+  sport: string;
+  searchCandidate: InstagramSearchCandidate;
+  profile: { fullName: string; bio: string; verified?: boolean };
+  externalSportIdentityVerified: boolean;
+}) {
+  const profileText = `${input.profile.fullName} ${input.profile.bio}`;
+  const exactProfileName = normalize(input.profile.fullName) === normalize(input.athleteName);
+  const exactNameHandle = compact(input.searchCandidate.handle) === compact(input.athleteName);
+  const sportTokens = normalize(input.sport).split(" ").filter((token) => token.length >= 3);
+  const normalizedProfile = normalize(profileText);
+  const profileHasSportSignal = sportTokens.some((token) => normalizedProfile.includes(token))
+    || /\b(?:athlet\w*|player\w*|olympian|surfer|fighter|gymnast|rider|driver|swimmer|golfer|wrestler|boxer|skater|cyclist|runner|diver|rower)\b/i.test(profileText);
+  const organizationalOrFanRisk = /\b(?:team|league|federation|association|academy|club)\b/i.test(input.profile.fullName)
+    || /\b(?:fan\s?page|fan account|updates account|supporters)\b/i.test(profileText);
+  const independentHandleSource = input.searchCandidate.reasons.includes("named source publishes Instagram handle")
+    || input.searchCandidate.reasons.includes("named athlete source corroborates profile ownership");
+  const externallyCorroboratedHandle = independentHandleSource
+    && (exactProfileName || exactNameHandle)
+    && !organizationalOrFanRisk;
+  const verifiedPlatformIdentity = input.profile.verified === true
+    && exactProfileName
+    && profileHasSportSignal
+    && input.externalSportIdentityVerified
+    && !organizationalOrFanRisk;
+  const passed = externallyCorroboratedHandle || verifiedPlatformIdentity;
+  return {
+    passed,
+    reasons: [
+      exactProfileName ? "live Instagram display name exactly matches" : null,
+      exactNameHandle ? "live Instagram handle exactly matches the athlete name" : null,
+      profileHasSportSignal ? "live Instagram profile contains a sport or athlete signal" : null,
+      independentHandleSource ? "independent athlete source publishes the Instagram handle" : null,
+      verifiedPlatformIdentity ? "verified Instagram identity agrees with external athlete/sport evidence" : null,
+      organizationalOrFanRisk ? "profile has organization or fan-account risk" : null,
+      !passed ? "identity lacks two independent exact-person signals" : null,
+    ].filter((reason): reason is string => Boolean(reason)),
+  };
 }

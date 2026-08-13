@@ -54,9 +54,9 @@ Import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evid
 - Previously verified production-gate checkpoint: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`.
 - The Social Blade pilot adapter landed at `37bff04`, split-safe checkpoints at `d4f6185`, and archive retry throttling at `3efd01b`. Confirm the current `main` Vercel deployment is `READY` before resuming paid work; do not assume an older hash in this handoff is still the tip.
 - Production alias is attached to `crm.prime-champs.com`; `/` returns a 307 to login and `/login` returns 200.
-- Active prompt version: `research-v9-corroborated-21-plus-finalist-gate`.
+- Active prompt version: `research-v10-corroborated-identity-and-21-plus-gates`.
 - The 2026-08-12 smoke run resolved `claude-sonnet-5` dynamically through Anthropic's model catalog.
-- Typecheck passes, focused lint has zero errors, and all 81 unit tests pass. The benchmark page retains one pre-existing React effect warning.
+- Typecheck passes, focused lint has zero errors, and all 82 unit tests pass. The benchmark page retains one pre-existing React effect warning.
 - Full repository lint has zero errors and 53 pre-existing warnings unrelated to this checkpoint.
 - Local Turbopack production builds can hang after compilation on this machine. Vercel's exact Git production build is the authoritative build proof and is green.
 

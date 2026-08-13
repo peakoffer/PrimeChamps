@@ -910,6 +910,9 @@ test("live research evaluation exits before athlete writes and suppresses notifi
     assert.ok(!workflow.includes(`from("${forbiddenTable}")`), `research workflow must not touch ${forbiddenTable}`);
   }
   assert.match(workflow, /athlete\.age_corroborated === true/);
+  assert.match(workflow, /athlete\.identity_corroborated === true/);
+  assert.match(workflow, /evaluateCorroboratedInstagramIdentity/);
+  assert.match(workflow, /research-v2\.2-rubric-corroborated-identity-and-21-plus-v3/);
   assert.match(workflow, /two independent agreeing public sources/);
 });
 

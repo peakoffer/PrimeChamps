@@ -125,11 +125,11 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 ## Current production checkpoint — 13 August 2026
 
 - The source-backed finalist gate began at `1763655`; the Social Blade adapter landed at `37bff04`, and archive retry throttling at `3efd01b`. Always confirm the current `main` deployment is READY before resuming paid work rather than treating an older hash in this document as authoritative.
-- Research prompt `research-v9-corroborated-21-plus-finalist-gate` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
+- Research prompt `research-v10-corroborated-identity-and-21-plus-gates` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
 - A proposed priority above 80 remains 79 until audit. The final score is the minimum of the Researcher dimensions, blind-Auditor dimensions, and review correction, followed by objective guardrails.
 - Finalists now require deterministic source matches for current momentum and creator behavior, a meaningful measured audience, commercial achievability of at least 70, complete commercial constraints, zero unsupported material claims, and an independent audit.
 - Evaluation mode is regression-checked to exit before athlete inserts and to suppress notifications. The research workflow contains no message, draft, or outreach-table writes.
-- Type checking, focused lint, 77 unit tests, and the Vercel production build pass. The live root redirects to login and the login page returns 200.
+- Type checking, focused lint, 82 unit tests, and the Vercel production build pass. The live root redirects to login and the login page returns 200.
 - Dylan's enriched 100-row workbook was locked against the original source and imported with exact `41/3/23/33` outcomes. It added 420 pre-decision detail sources/claims across 76 athletes with zero future claims or eligible outcome-like leakage.
 - The post-import readiness audit finds 12/100 freeze-ready cases, but the fresh excluded pool is only `0 fit / 4 not-fit` ready. A new cohort requires `16/16`; targeted evidence recovery is the next dependency.
 - Bounded evaluation-only volleyball smoke run `6c898a22-c961-4612-8c5b-7dd14517c2a3` completed safely: 44 sourced, six admitted discoveries, four scored, and zero finalists. Its best score was 79, no blind audit was eligible, and it created zero live athletes or notifications. See `docs/RESEARCH_V2_CLAUDE_HANDOFF.md` for the full checkpoint and next actions.

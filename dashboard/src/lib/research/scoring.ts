@@ -1,4 +1,4 @@
-export const RESEARCH_PROMPT_VERSION = "research-v9-corroborated-21-plus-finalist-gate";
+export const RESEARCH_PROMPT_VERSION = "research-v10-corroborated-identity-and-21-plus-gates";
 export const DEFAULT_RESEARCH_OBJECTIVE = "onlyfans_creator" as const;
 
 export type ResearchObjective = typeof DEFAULT_RESEARCH_OBJECTIVE;

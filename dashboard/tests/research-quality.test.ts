@@ -13,6 +13,8 @@ import { compileRecruitingProfile } from "../src/lib/research/intelligence.ts";
 import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.ts";
 import {
   buildInstagramHandleGuesses,
+  evaluateCorroboratedInstagramIdentity,
+  independentSourcePublishesInstagramHandle,
   instagramHandleFromUrl,
   rankInstagramNativeSearchCandidates,
   rankInstagramSearchCandidates,
@@ -530,6 +532,109 @@ test("Instagram identity accepts a handle published by a named athlete roster", 
     searchCandidate: strongSelfDeclaredAthlete[0],
     profile: { fullName: "Olivia Babcock", bio: "Pitt VB Nike athlete LOVB student athlete" },
   }).confidence >= 70);
+});
+
+test("Instagram finalist identity requires two independent exact-person signals", () => {
+  assert.equal(independentSourcePublishesInstagramHandle({
+    athleteName: "Brooke Mosher",
+    handle: "brookemosher9",
+    supportingUrl: "https://example.edu/athletes/brooke-mosher",
+    supportingTitle: "Brooke Mosher - University Athletics",
+    evidence: "Brooke Mosher lists Instagram @brookemosher9.",
+  }), true);
+  assert.equal(independentSourcePublishesInstagramHandle({
+    athleteName: "Brooke Mosher",
+    handle: "brookemosher9",
+    supportingUrl: "https://www.instagram.com/brookemosher9/",
+    supportingTitle: "Brooke Mosher",
+    evidence: "Brooke Mosher on Instagram @brookemosher9.",
+  }), false);
+  assert.equal(independentSourcePublishesInstagramHandle({
+    athleteName: "Brooke Mosher",
+    handle: "brookemosher9",
+    supportingUrl: "https://example.edu/athletes/brooke-mosher",
+    supportingTitle: "Brooke Mosher - University Athletics",
+    evidence: "Brooke Mosher has a social profile.",
+  }), false);
+
+  const independentlyPublishedHandle = evaluateCorroboratedInstagramIdentity({
+    athleteName: "Brooke Mosher",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "brookemosher9",
+      url: "https://www.instagram.com/brookemosher9/",
+      title: "Brooke Mosher - University Athletics",
+      snippet: "Brooke Mosher, setter. Instagram brookemosher9.",
+      searchConfidence: 95,
+      reasons: ["named source publishes Instagram handle", "full name matches"],
+    },
+    profile: { fullName: "Brooke Mosher", bio: "Volleyball setter" },
+    externalSportIdentityVerified: true,
+  });
+  assert.equal(independentlyPublishedHandle.passed, true);
+
+  const verifiedPlatformIdentity = evaluateCorroboratedInstagramIdentity({
+    athleteName: "Alyssa Solomon",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "alyssajaeee",
+      url: "https://www.instagram.com/alyssajaeee/",
+      title: "Alyssa Solomon",
+      snippet: "Volleyball athlete",
+      searchConfidence: 78,
+      reasons: ["live Instagram user search returned this profile"],
+    },
+    profile: { fullName: "Alyssa Solomon", bio: "Volleyball athlete", verified: true },
+    externalSportIdentityVerified: true,
+  });
+  assert.equal(verifiedPlatformIdentity.passed, true);
+
+  const unverifiedSameName = evaluateCorroboratedInstagramIdentity({
+    athleteName: "Mimi Colyer",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "mimicolyer",
+      url: "https://www.instagram.com/mimicolyer/",
+      title: "Mimi Colyer",
+      snippet: "Professional volleyball athlete",
+      searchConfidence: 83,
+      reasons: ["live Instagram user search returned this profile"],
+    },
+    profile: { fullName: "Mimi Colyer", bio: "Professional volleyball athlete" },
+    externalSportIdentityVerified: true,
+  });
+  assert.equal(unverifiedSameName.passed, false);
+
+  assert.equal(evaluateCorroboratedInstagramIdentity({
+    athleteName: "Alyssa Solomon",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "alyssajaeee",
+      url: "https://www.instagram.com/alyssajaeee/",
+      title: "Alyssa Solomon",
+      snippet: "Volleyball athlete",
+      searchConfidence: 78,
+      reasons: ["live Instagram user search returned this profile"],
+    },
+    profile: { fullName: "Alyssa Solomon", bio: "Volleyball athlete", verified: true },
+    externalSportIdentityVerified: false,
+  }).passed, false);
+
+  const fanAccount = evaluateCorroboratedInstagramIdentity({
+    athleteName: "Hena Kurtagic",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "henakurtagicfp",
+      url: "https://www.instagram.com/henakurtagicfp/",
+      title: "Hena Kurtagic",
+      snippet: "Fan account",
+      searchConfidence: 92,
+      reasons: ["named source publishes Instagram handle"],
+    },
+    profile: { fullName: "Hena Kurtagic", bio: "Fan account and updates" },
+    externalSportIdentityVerified: true,
+  });
+  assert.equal(fanAccount.passed, false);
 });
 
 test("Instagram-native search isolates batched queries and still requires athlete corroboration", () => {

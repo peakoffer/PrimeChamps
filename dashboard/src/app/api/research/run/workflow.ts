@@ -22,6 +22,8 @@ import {
 } from "@/lib/research/evidence-quality";
 import {
   buildInstagramHandleGuesses,
+  evaluateCorroboratedInstagramIdentity,
+  independentSourcePublishesInstagramHandle,
   instagramHandleFromUrl,
   rankInstagramSearchCandidates,
   scoreInstagramProfileIdentity,
@@ -147,7 +149,7 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
 } as const;
 
 const RESEARCH_V2_RUBRIC_DEFINITION = {
-  version: "v2.1",
+  version: "v2.2",
   dimensions: {
     onlyfans_fit: "Public-evidence opportunity quality, independent of price or access",
     commercial_achievability: "Access, representation, likely economics, geography, and realistic close probability",
@@ -157,6 +159,7 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   final_gate: {
     priority_above: 80,
     exact_identity_required: true,
+    corroborated_identity_required: true,
     corroborated_21_plus_required: true,
     onlyfans_fit_minimum: 80,
     commercial_achievability_minimum: 70,
@@ -170,8 +173,8 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   },
 } as const;
 
-const RESEARCHER_PROMPT_RECORD = "Research V2.1 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires two independent agreeing sources proving 21+ eligibility.";
-const AUDITOR_PROMPT_RECORD = "Research V2.1 blind auditor: independently verify exact identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
+const RESEARCHER_PROMPT_RECORD = "Research V2.2 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity and two independent agreeing sources proving 21+ eligibility.";
+const AUDITOR_PROMPT_RECORD = "Research V2.2 blind auditor: independently verify corroborated exact-person Instagram identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
 
 const RESEARCH_AUDIT_BLIND_SCHEMA = {
   type: "object",
@@ -476,6 +479,8 @@ interface EnrichedAthlete extends DiscoveredAthlete {
   average_comments?: number;
   identity_confidence?: number;
   identity_evidence?: string[];
+  identity_corroborated?: boolean;
+  identity_corroboration_evidence?: string[];
   latest_posts?: Array<{
     caption?: string;
     timestamp?: string;
@@ -558,7 +563,9 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
       context: typeof raw.context === "string" ? raw.context : "Previously audited strong-fit candidate",
       source: typeof raw.source === "string" ? raw.source : "Prime Champs candidate memory",
       evidence: Array.isArray(evidence) ? evidence : [],
-      known_instagram_handle: Number(row.identity_confidence || 0) >= 70 && typeof row.instagram_handle === "string"
+      known_instagram_handle: Number(row.identity_confidence || 0) >= 70
+        && raw.identity_corroborated === true
+        && typeof row.instagram_handle === "string"
         ? row.instagram_handle
         : undefined,
       discovery_lane: "memory",
@@ -642,15 +649,15 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     .eq("organization_id", input.organizationId)
     .eq("rubric_key", "onlyfans_fit_achievability_confidence")
     .eq("status", "active")
-    .neq("version", 2);
+    .neq("version", 3);
   if (rubricArchiveError) throw rubricArchiveError;
   const { data: rubric, error: rubricError } = await supabase.from("research_rubric_versions").upsert({
     organization_id: input.organizationId,
     rubric_key: "onlyfans_fit_achievability_confidence",
-    version: 2,
-    name: "OnlyFans fit, achievability, confidence, and priority v2.1",
+    version: 3,
+    name: "OnlyFans fit, achievability, confidence, and priority v2.2",
     definition: RESEARCH_V2_RUBRIC_DEFINITION,
-    definition_hash: "research-v2.1-rubric-corroborated-21-plus-v2",
+    definition_hash: "research-v2.2-rubric-corroborated-identity-and-21-plus-v3",
     status: "active",
     activated_at: new Date().toISOString(),
   }, { onConflict: "organization_id,rubric_key,version" }).select("id").single();
@@ -663,13 +670,13 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
       .eq("prompt_key", promptKey)
       .eq("role", role)
       .eq("status", "active")
-      .neq("version", 2);
+      .neq("version", 3);
     if (promptArchiveError) throw promptArchiveError;
     const { data, error } = await supabase.from("research_prompt_versions").upsert({
       organization_id: input.organizationId,
       prompt_key: promptKey,
       role,
-      version: 2,
+      version: 3,
       content,
       content_hash: contentHash,
       output_schema: role === "auditor"
@@ -682,8 +689,8 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     return data.id as string;
   };
   const [researcherPromptVersionId, auditorPromptVersionId] = await Promise.all([
-    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.1-researcher-corroborated-21-plus-v2"),
-    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.1-blind-auditor-corroborated-21-plus-v2"),
+    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.2-researcher-corroborated-identity-and-21-plus-v3"),
+    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.2-blind-auditor-corroborated-identity-and-21-plus-v3"),
   ]);
 
   const ensureModel = async (capability: "judgment" | "audit") => {
@@ -843,6 +850,7 @@ async function persistResearchV2EvidenceAndScore(
     unsourced_claim_count: claims.filter((claim) => claim.support_status !== "supported").length,
     critical_gap_count: athlete.age_verified === true
       && athlete.age_corroborated === true
+      && athlete.identity_corroborated === true
       && (athlete.identity_confidence || 0) >= 70 ? 0 : 1,
     is_final: false,
     input_tokens: athlete.researcher_input_tokens || 0,
@@ -2289,20 +2297,35 @@ async function findInstagramCandidatesWithOpenAI(athletes: DiscoveredAthlete[]) 
       const instagramSource = sourceByUrl.get(canonicalResearchUrl(instagramUrl));
       const handle = instagramHandleFromUrl(instagramUrl);
       const evidence = typeof identity.evidence === "string" ? identity.evidence.trim() : "";
-      if (!athlete || !handle || (!supportingSource && !instagramSource)) continue;
-      if (!evidenceNamesAthlete(`${identity.supporting_title || ""} ${evidence}`, athlete.name)) continue;
+      const supportingTitle = typeof identity.supporting_title === "string" && identity.supporting_title.trim()
+        ? identity.supporting_title.trim()
+        : supportingSource?.title || "";
+      if (!athlete || !handle) continue;
+      const independentHandleSource = Boolean(supportingSource) && independentSourcePublishesInstagramHandle({
+        athleteName: athlete.name,
+        handle,
+        supportingUrl,
+        supportingTitle,
+        evidence,
+      });
+      const instagramProfileWasConsulted = Boolean(instagramSource)
+        || (Boolean(supportingSource) && instagramHandleFromUrl(supportingUrl) === handle);
+      if (!independentHandleSource && !instagramProfileWasConsulted) continue;
+      if (!evidenceNamesAthlete(`${supportingTitle} ${evidence}`, athlete.name)) continue;
 
       const candidate: InstagramSearchCandidate = {
         handle,
         url: `https://www.instagram.com/${handle}/`,
-        title: typeof identity.supporting_title === "string"
-          ? identity.supporting_title
+        title: supportingTitle
+          ? supportingTitle
           : supportingSource?.title || instagramSource?.title || `${athlete.name} Instagram`,
         snippet: `${athlete.name} ${athlete.sport} athlete — ${evidence}`,
         searchConfidence: 90,
         reasons: [
           "live web search found the personal profile",
-          "named source publishes Instagram handle",
+          independentHandleSource
+            ? "named source publishes Instagram handle"
+            : "current Instagram profile was consulted",
         ],
       };
       byCandidateKey.set(researchCandidateKey(athlete.name, athlete.sport), [candidate]);
@@ -2419,19 +2442,34 @@ async function findInstagramCandidatesWithOpenRouter(athletes: DiscoveredAthlete
       const instagramSource = sourceByUrl.get(canonicalResearchUrl(instagramUrl));
       const handle = instagramHandleFromUrl(instagramUrl);
       const evidence = typeof identity.evidence === "string" ? identity.evidence.trim() : "";
-      if (!athlete || !handle || (!supportingSource && !instagramSource)) continue;
-      if (!evidenceNamesAthlete(`${identity.supporting_title || ""} ${evidence}`, athlete.name)) continue;
+      const supportingTitle = typeof identity.supporting_title === "string" && identity.supporting_title.trim()
+        ? identity.supporting_title.trim()
+        : supportingSource?.title || "";
+      if (!athlete || !handle) continue;
+      const independentHandleSource = Boolean(supportingSource) && independentSourcePublishesInstagramHandle({
+        athleteName: athlete.name,
+        handle,
+        supportingUrl,
+        supportingTitle,
+        evidence,
+      });
+      const instagramProfileWasConsulted = Boolean(instagramSource)
+        || (Boolean(supportingSource) && instagramHandleFromUrl(supportingUrl) === handle);
+      if (!independentHandleSource && !instagramProfileWasConsulted) continue;
+      if (!evidenceNamesAthlete(`${supportingTitle} ${evidence}`, athlete.name)) continue;
       byCandidateKey.set(researchCandidateKey(athlete.name, athlete.sport), [{
         handle,
         url: `https://www.instagram.com/${handle}/`,
-        title: typeof identity.supporting_title === "string"
-          ? identity.supporting_title
+        title: supportingTitle
+          ? supportingTitle
           : supportingSource?.title || instagramSource?.title || `${athlete.name} Instagram`,
         snippet: `${athlete.name} ${athlete.sport} athlete — ${evidence}`,
         searchConfidence: 90,
         reasons: [
           `OpenRouter ${data.model || OPENROUTER_IDENTITY_MODEL} web search found the personal profile`,
-          "named source publishes Instagram handle",
+          independentHandleSource
+            ? "named source publishes Instagram handle"
+            : "current Instagram profile was consulted",
         ],
       }]);
     }
@@ -2849,18 +2887,29 @@ async function enrichAthletesWithInstagram(
           return [{ candidate, profile, identity }];
         }).sort((left, right) => right.identity.confidence - left.identity.confidence);
         const best = evaluatedProfiles[0];
-        if (!best || best.identity.confidence < 70) {
-          log(`  Instagram identity did not verify for ${athlete.name}`);
+        const corroboratedIdentity = best ? evaluateCorroboratedInstagramIdentity({
+          athleteName: athlete.name,
+          sport: athlete.sport,
+          searchCandidate: best.candidate,
+          profile: best.profile,
+          externalSportIdentityVerified: athlete.discovery_verification?.passed === true,
+        }) : null;
+        if (!best || best.identity.confidence < 70 || corroboratedIdentity?.passed !== true) {
+          log(`  Instagram identity did not verify with two independent signals for ${athlete.name}`);
           await supabase.from("research_candidates").update({
             identity_status: best ? "conflict" : "unresolved",
             identity_confidence: best?.identity.confidence || 0,
             instagram_handle: best?.candidate.handle || null,
             disposition: "rejected",
-            disposition_reason: "Instagram identity confidence did not reach 70",
+            disposition_reason: best && best.identity.confidence >= 70
+              ? "Instagram identity lacked two independent exact-person signals"
+              : "Instagram identity confidence did not reach 70",
             gate_results: {
               sport_evidence: athlete.discovery_verification,
               identity_resolved: false,
               identity_reasons: best?.identity.reasons || [],
+              identity_corroborated: false,
+              identity_corroboration_reasons: corroboratedIdentity?.reasons || [],
             },
           }).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
           return null;
@@ -2890,6 +2939,8 @@ async function enrichAthletesWithInstagram(
             gate_results: {
               sport_evidence: athlete.discovery_verification,
               identity_resolved: true,
+              identity_corroborated: true,
+              identity_corroboration_reasons: corroboratedIdentity.reasons,
               public_account: false,
               audience_in_range: audienceInRange,
             },
@@ -2913,6 +2964,8 @@ async function enrichAthletesWithInstagram(
           average_comments: profile.averageComments ?? undefined,
           identity_confidence: identity.confidence,
           identity_evidence: identity.reasons,
+          identity_corroborated: corroboratedIdentity.passed,
+          identity_corroboration_evidence: corroboratedIdentity.reasons,
           latest_posts: profile.latestPosts.slice(0, 6).map((post) => ({
             caption: post.caption?.slice(0, 500),
             timestamp: post.timestamp,
@@ -2934,6 +2987,8 @@ async function enrichAthletesWithInstagram(
             sport_evidence: athlete.discovery_verification,
             identity_resolved: true,
             identity_reasons: identity.reasons,
+            identity_corroborated: corroboratedIdentity.passed,
+            identity_corroboration_reasons: corroboratedIdentity.reasons,
             public_account: true,
             active_account: profile.isActive,
             last_posted_at: profile.lastPostedAt,
@@ -3325,7 +3380,7 @@ async function persistPartialScoringCheckpoint(
     const { error } = await supabase.from("research_candidates").update({
       raw_candidate: candidate,
       source_evidence: candidate.evidence || [],
-      identity_status: (candidate.identity_confidence || 0) >= 70 ? "verified" : "probable",
+      identity_status: (candidate.identity_confidence || 0) >= 70 && candidate.identity_corroborated === true ? "verified" : "probable",
       identity_confidence: candidate.identity_confidence || 0,
       instagram_handle: candidate.instagram_handle || null,
       follower_count: candidate.follower_count || null,
@@ -3450,7 +3505,8 @@ async function scoreAthletes(
           disposition_reason: `Scoring failed after retry: ${message}`.slice(0, 500),
           gate_results: {
             sport_evidence: athlete.discovery_verification,
-            identity_resolved: (athlete.identity_confidence || 0) >= 70,
+            identity_resolved: (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true,
+            identity_corroborated: athlete.identity_corroborated === true,
             scoring_completed: false,
           },
         }).eq("research_log_id", input.researchLogId)
@@ -3784,7 +3840,7 @@ CANDIDATE (NO PROPOSED SCORE):
 - Sport: ${athlete.sport}
 - Instagram: @${athlete.instagram_handle}
 - Profile name/bio: ${athlete.bio || "not available"}
-- Identity confidence: ${athlete.identity_confidence || 0}/100; ${athlete.identity_evidence?.join("; ") || "no identity explanation"}
+- Identity confidence: ${athlete.identity_confidence || 0}/100; corroborated: ${athlete.identity_corroborated === true ? "yes" : "no"}; ${athlete.identity_corroboration_evidence?.join("; ") || athlete.identity_evidence?.join("; ") || "no identity explanation"}
 - Age: ${athlete.age_verified && athlete.age_corroborated
     ? `${athlete.age} corroborated by ${athlete.age_sources?.map((source) => source.source).join("; ") || "two independent sources"}`
     : "not corroborated by two independent sources"}
@@ -3934,7 +3990,9 @@ Return pass only if the proposed dimensions are justified and there is no critic
   }));
   const passesFinal = passesResearchV2FinalGate({
     ...correctedWithObjectiveGuardrails,
-    identityConfirmed: blind.identity_passed,
+    identityConfirmed: athlete.identity_corroborated === true
+      && (athlete.identity_confidence || 0) >= 70
+      && blind.identity_passed,
     adultEligibilityVerified: athlete.age_verified === true
       && athlete.age_corroborated === true
       && typeof athlete.age === "number"
@@ -4164,6 +4222,7 @@ async function auditPriorityCandidates(
         input.config.profileSnapshot?.parameters.follower_min ?? input.config.followerMin
       );
       return (athlete.identity_confidence || 0) >= 70
+        && athlete.identity_corroborated === true
         && athlete.age_verified === true
         && athlete.age_corroborated === true
         && typeof athlete.age === "number"
@@ -4211,7 +4270,7 @@ async function persistScoringAudit(
       const { error } = await supabase.from("research_candidates").update({
         raw_candidate: athlete,
         source_evidence: athlete.evidence || [],
-        identity_status: (athlete.identity_confidence || 0) >= 70 ? "verified" : "probable",
+        identity_status: (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true ? "verified" : "probable",
         identity_confidence: athlete.identity_confidence || 0,
         instagram_handle: athlete.instagram_handle || null,
         follower_count: athlete.follower_count || null,
@@ -4229,8 +4288,10 @@ async function persistScoringAudit(
         is_minor: athlete.is_minor ?? null,
         gate_results: {
           sport_evidence: athlete.discovery_verification,
-          identity_resolved: (athlete.identity_confidence || 0) >= 70,
+          identity_resolved: (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true,
           identity_reasons: athlete.identity_evidence || [],
+          identity_corroborated: athlete.identity_corroborated === true,
+          identity_corroboration_reasons: athlete.identity_corroboration_evidence || [],
           public_account: athlete.is_private === false,
           active_account: athlete.account_active === true,
           last_posted_at: athlete.last_posted_at || null,
@@ -4298,7 +4359,7 @@ ATHLETE PROFILE:
     ? `${athlete.age} (${athlete.age_sources?.map((source) => source.source).join("; ") || athlete.age_source || "source URLs unavailable"}; ${athlete.age_precision || "precision unknown"})`
     : "not verified"}
 - Instagram: @${athlete.instagram_handle} (${athlete.instagram_url || "profile URL unavailable"})
-- Instagram identity confidence: ${athlete.identity_confidence || 0}/100 (${athlete.identity_evidence?.join("; ") || "no identity evidence"})
+- Instagram identity confidence: ${athlete.identity_confidence || 0}/100; corroborated: ${athlete.identity_corroborated === true ? "yes" : "no"} (${athlete.identity_corroboration_evidence?.join("; ") || athlete.identity_evidence?.join("; ") || "no identity evidence"})
 - Followers: ${athlete.follower_count?.toLocaleString() || "unknown"}
 - Following: ${athlete.following_count?.toLocaleString() || "unknown"}
 - Posts: ${athlete.posts_count || "unknown"}
@@ -5176,7 +5237,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         onlyfansFit: athlete.onlyfans_fit_score,
         commercialAchievability: athlete.commercial_achievability_score,
         researchConfidence: athlete.research_confidence_score,
-        identityConfirmed: (athlete.identity_confidence || 0) >= 70,
+        identityConfirmed: (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true,
         adultEligibilityVerified: athlete.age_verified === true
           && athlete.age_corroborated === true
           && typeof athlete.age === "number"
@@ -5287,7 +5348,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             raw_candidate: athlete,
             source_evidence: sourceEvidence,
             identity_status: athlete.instagram_handle
-              ? (athlete.identity_confidence || 0) >= 70
+              ? (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true
                 ? "verified"
                 : "probable"
               : "unresolved",
@@ -5308,8 +5369,12 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             gate_results: {
               sport_evidence: athlete.discovery_verification,
               sport_correct: athlete.discovery_verification?.sportMatched === true,
-              identity_resolved: Boolean(athlete.instagram_handle) && (athlete.identity_confidence || 0) >= 70,
+              identity_resolved: Boolean(athlete.instagram_handle)
+                && (athlete.identity_confidence || 0) >= 70
+                && athlete.identity_corroborated === true,
               identity_reasons: athlete.identity_evidence || [],
+              identity_corroborated: athlete.identity_corroborated === true,
+              identity_corroboration_reasons: athlete.identity_corroboration_evidence || [],
               professional_source_present: athlete.discovery_verification?.sourcePresent === true,
               public_account: athlete.is_private === false,
               active_account: athlete.account_active === true,
