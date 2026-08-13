@@ -23,6 +23,15 @@ type ApifyRun = {
   chargedEventCounts?: Record<string, number>;
 };
 
+export type ApifyActorRunHistory = {
+  id: string;
+  status: ApifyRunStatus;
+  startedAt: string;
+  finishedAt?: string | null;
+  defaultDatasetId: string;
+  usageTotalUsd?: number;
+};
+
 export type ApifyRunUsage = {
   runId: string;
   usageTotalUsd: number | null;
@@ -335,6 +344,35 @@ export async function readApifyRunDatasetWithUsage<T>(
         : {},
     },
   };
+}
+
+export async function listApifyActorRuns(
+  actorId: string,
+  options: { limit?: number; startedAfter?: string; startedBefore?: string } = {}
+): Promise<ApifyActorRunHistory[]> {
+  const parameters = new URLSearchParams({
+    status: "SUCCEEDED",
+    desc: "1",
+    limit: String(Math.max(1, Math.min(options.limit || 1_000, 1_000))),
+  });
+  if (options.startedAfter) parameters.set("startedAfter", options.startedAfter);
+  if (options.startedBefore) parameters.set("startedBefore", options.startedBefore);
+  const payload = await apifyFetch<{ data?: { items?: ApifyActorRunHistory[] } }>(
+    `/acts/${encodeURIComponent(actorPath(actorId))}/runs?${parameters.toString()}`
+  );
+  return (payload.data?.items || []).filter((run) => run.status === "SUCCEEDED"
+    && /^[A-Za-z0-9_-]{8,80}$/.test(run.id)
+    && /^[A-Za-z0-9_-]{8,80}$/.test(run.defaultDatasetId)
+    && Number.isFinite(Date.parse(run.startedAt))
+  );
+}
+
+export async function readApifyDatasetItems<T>(datasetId: string, limit = 1_000): Promise<T[]> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(normalizedDatasetId)) throw new Error("Apify dataset ID is invalid");
+  return apifyFetch<T[]>(
+    `/datasets/${normalizedDatasetId}/items?clean=true&limit=${Math.max(1, Math.min(limit, 1_000))}`
+  );
 }
 
 export async function runApifyGoogleSearch(

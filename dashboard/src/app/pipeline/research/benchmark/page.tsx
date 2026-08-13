@@ -646,6 +646,22 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const reuseInstagramHistory = async () => {
+    setWorking(true);
+    setMessage("Scanning existing Apify Instagram profile runs for exact pre-decision snapshots…");
+    try {
+      const response = await fetch("/api/research/golden-records/reuse-instagram-history", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Instagram history recovery failed");
+      setMessage(`Matched ${payload.matched}/${payload.candidates} dated Instagram profiles and wrote ${payload.claimsWritten} evidence claims from existing runs. New provider spend and scoring tokens: $0.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Instagram history recovery failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const prepareHistoricalEvidence = async () => {
     setWorking(true);
     setMessage(evidencePreparationMode === "age_recovery"
@@ -939,6 +955,13 @@ export default function ResearchBenchmarkPage() {
             </label>
             <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
               Freeze benchmark cohort
+            </button>
+            <button
+              disabled={working || Boolean(activeEvidenceRun)}
+              onClick={() => void reuseInstagramHistory()}
+              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+            >
+              Reuse Instagram history
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}

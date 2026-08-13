@@ -67,6 +67,7 @@ import {
   prepareHistoricalEvidenceDetails,
   prepareHistoricalSocialSnapshot,
 } from "../src/lib/research/historical-social-snapshot.ts";
+import { prepareHistoricalInstagramSnapshot } from "../src/lib/research/historical-instagram-history.ts";
 import { convertOnlyFansHistoricalWorkbookExtraction } from "../src/lib/research/historical-workbook-converter.ts";
 import {
   buildHistoricalAgeRecoveryQueries,
@@ -317,6 +318,41 @@ test("historical social snapshots require dated pre-decision provenance", () => 
       sourceDocumentReference: "snapshot.pdf",
     },
   }), /metrics require the Instagram handle/);
+});
+
+test("existing Apify Instagram history becomes evidence only for exact pre-cutoff handles", () => {
+  const snapshot = prepareHistoricalInstagramSnapshot({
+    athleteName: "Example Athlete",
+    sport: "Beach volleyball",
+    expectedHandle: "@example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
+    capturedAt: "2026-04-20T10:00:00.000Z",
+    profile: {
+      username: "example.athlete",
+      followersCount: 120_000,
+      followsCount: 400,
+      postsCount: 240,
+      latestPosts: [
+        { likesCount: 4_000, commentsCount: 100, timestamp: "2026-04-18T10:00:00.000Z" },
+        { likesCount: 2_000, commentsCount: 50, timestamp: "2026-04-10T10:00:00.000Z" },
+      ],
+    },
+  });
+  assert.equal(snapshot?.followers, 120_000);
+  assert.deepEqual(snapshot?.claims.map((claim) => claim.claimType), [
+    "athlete_profile", "audience_signal", "social_engagement_signal", "creator_behavior_signal",
+  ]);
+  assert.equal(snapshot?.claims[2].structuredValue.engagement_rate_percent, 2.5625);
+  assert.equal(prepareHistoricalInstagramSnapshot({
+    athleteName: "Example Athlete", sport: "Beach volleyball", expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z", capturedAt: "2026-05-04T10:00:00.000Z",
+    profile: { username: "example.athlete", followersCount: 120_000 },
+  }), null);
+  assert.equal(prepareHistoricalInstagramSnapshot({
+    athleteName: "Example Athlete", sport: "Beach volleyball", expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z", capturedAt: "2026-04-20T10:00:00.000Z",
+    profile: { username: "different.person", followersCount: 120_000 },
+  }), null);
 });
 
 test("historical workbook conversion locks Dylan's truth and preserves row-level provenance", () => {
@@ -1589,6 +1625,7 @@ test("generated material signals require explicit athlete-relevant language", ()
 test("evidence preparation is durable, replay-safe, zero-scoring, and isolated from outreach", () => {
   const workflow = readFileSync(new URL("../src/workflows/benchmark-evidence.ts", import.meta.url), "utf8");
   const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
+  const instagramHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/reuse-instagram-history/route.ts", import.meta.url), "utf8");
   const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
   assert.match(workflow, /"use workflow"/);
@@ -1639,6 +1676,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(benchmarkPage, /Resume saved recovery/);
   assert.match(benchmarkPage, /processed_record_ids/);
   assert.match(workflow, /readApifyRunDatasetWithUsage<SearchPage>\(input\.reuseProviderRunId, 1_000\)/);
+  assert.match(instagramHistoryRoute, /listApifyActorRuns/);
+  assert.match(instagramHistoryRoute, /readApifyDatasetItems/);
+  assert.match(instagramHistoryRoute, /new_actor_run_started: false/);
+  assert.match(instagramHistoryRoute, /providerSpendUsd: 0/);
+  assert.match(instagramHistoryRoute, /outreachMutationsAllowed: false/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runner, /signalPreparedIds/);
   assert.match(runner, /Execution is gated by the evidence itself/);
