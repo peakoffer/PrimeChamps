@@ -1616,6 +1616,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /latestSummary\?\.providerRunId/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
+  assert.match(route, /readiness\.momentum\.passed/);
+  assert.match(route, /readiness\.creatorPotential\.passed/);
+  assert.match(route, /!readiness\.adult\.passed \|\| !readiness\.identity\.passed/);
   assert.match(route, /eligibleForSignalRecovery/);
   assert.match(route, /body\.benchmarkSplit === "excluded"/);
   assert.match(route, /excludedSignalRecoveryCount/);

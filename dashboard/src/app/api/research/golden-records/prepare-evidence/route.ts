@@ -83,15 +83,25 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
   ]);
   if (sourceError) throw sourceError;
   if (claimError) throw claimError;
-  return candidates.filter((record) => {
+  return candidates.map((record) => {
     const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
     const selection = selectLeakageSafeBenchmarkEvidence({
       record: benchmarkRecord,
       sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
       claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
     });
-    return !benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel: "fit", selection }).ready;
-  });
+    const readiness = benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel: "fit", selection });
+    return { record, readiness, safeClaims: selection.evidence.length };
+  }).filter(({ readiness }) => !readiness.ready
+    && readiness.momentum.passed
+    && readiness.creatorPotential.passed
+    && (!readiness.adult.passed || !readiness.identity.passed)
+  ).sort((left, right) => left.readiness.reasons.length - right.readiness.reasons.length
+    || right.readiness.adult.independentSources - left.readiness.adult.independentSources
+    || right.readiness.identity.independentSources - left.readiness.identity.independentSources
+    || right.safeClaims - left.safeClaims
+    || left.record.athlete_name.localeCompare(right.record.athlete_name)
+  ).map(({ record }) => record);
 }
 
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
