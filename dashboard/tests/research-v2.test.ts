@@ -82,15 +82,18 @@ import {
   dedupeHistoricalSearchCandidates,
   extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
+  normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
   preparedMomentumEffectiveAt,
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
+  selectWikimediaRevisionCapture,
   selectWaybackCapture,
   validatePreparedAgeEvidenceForSource,
   waybackCdxUrl,
+  wikimediaRevisionApiUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
@@ -1488,6 +1491,76 @@ test("Common Crawl fallback selects bounded pre-cutoff captures and extracts the
   assert.equal(extractCommonCrawlWarcBody(warc.replace("200 OK", "404 Not Found")), null);
 });
 
+test("Wikimedia revision fallback retrieves the last cutoff-safe article revision and exposes dated age evidence", () => {
+  const canonicalUrl = "https://en.wikipedia.org/wiki/Lola_Gallardo";
+  const cutoff = "2026-08-05T12:00:00Z";
+  const apiUrl = new URL(wikimediaRevisionApiUrl(canonicalUrl, cutoff)!);
+  assert.equal(apiUrl.hostname, "en.wikipedia.org");
+  assert.equal(apiUrl.pathname, "/w/api.php");
+  assert.equal(apiUrl.searchParams.get("rvdir"), "older");
+  assert.equal(apiUrl.searchParams.get("rvstart"), "2026-08-05T12:00:00.000Z");
+  assert.equal(apiUrl.searchParams.get("rvlimit"), "1");
+
+  const content = "{{Short description|Spanish footballer}}\n{{Infobox football biography\n| name = Lola Gallardo\n| birth_date = {{Birth date and age|df=yes|1993|6|10}}\n| position = Goalkeeper\n}}";
+  const capture = selectWikimediaRevisionCapture({
+    query: {
+      pages: [{
+        revisions: [{
+          revid: 1_340_650_263,
+          timestamp: "2026-02-26T22:26:03Z",
+          sha1: "historicalsha1",
+          slots: { main: { content } },
+        }],
+      }],
+    },
+  }, canonicalUrl, cutoff);
+  assert.equal(capture?.revisionId, 1_340_650_263);
+  assert.equal(capture?.capturedAt, "2026-02-26T22:26:03.000Z");
+  assert.match(capture?.historicalUrl || "", /oldid=1340650263/);
+  assert.match(capture?.content || "", /date of birth: 1993-06-10/);
+  assert.equal(normalizeWikipediaWikitext("{{dob|2000|1|2}}"), "date of birth: 2000-01-02");
+
+  const prepared = extractPreparedArchivedEvidence({
+    record: {
+      id: "golden-lola",
+      athlete_name: "Lola Gallardo",
+      sport: "Football",
+      fit_label: "fit",
+      evidence_cutoff_at: cutoff,
+    },
+    candidate: {
+      query: "Lola Gallardo date of birth football",
+      title: "Lola Gallardo",
+      url: canonicalUrl,
+      snippet: "Lola Gallardo is a Spanish football goalkeeper.",
+    },
+    capture: {
+      timestamp: capture!.timestamp,
+      capturedAt: capture!.capturedAt,
+      originalUrl: canonicalUrl,
+      statusCode: "200",
+      digest: capture!.sha1,
+      mimeType: "text/x-wiki",
+      archivedUrl: capture!.historicalUrl,
+    },
+    html: capture!.content,
+  });
+  assert.equal(prepared.rejectionReason, null);
+  assert.ok(prepared.evidence?.claims.some((claim) => claim.claimType === "sport_identity"));
+  assert.equal(
+    prepared.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility")?.structuredValue.birth_date,
+    "1993-06-10"
+  );
+
+  assert.equal(selectWikimediaRevisionCapture({
+    query: { pages: [{ revisions: [{
+      revid: 99,
+      timestamp: "2026-08-06T00:00:00Z",
+      slots: { main: { content } },
+    }] }] },
+  }, canonicalUrl, cutoff), null);
+});
+
 test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
   const record = {
     id: "golden-jane",
@@ -1748,6 +1821,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /selectCommonCrawlCapture/);
   assert.match(workflow, /Range: `bytes=\$\{capture\.offset\}-\$\{lastByte\}`/);
   assert.match(workflow, /archiveProvider: "common_crawl"/);
+  assert.match(workflow, /archiveProvider: "wikimedia_revision"/);
+  assert.match(workflow, /HISTORICAL_ARCHIVE_PROVIDER_VERSION/);
   assert.match(workflow, /from\("research_evidence_claims"\)\.delete\(\)/);
   assert.match(workflow, /reconcilePreparedSignalClaims/);
   for (const forbiddenTable of ["athletes", "research_candidates", "pipeline_athletes", "messages", "outreach_touchpoints", "channel_messages"]) {
@@ -1765,6 +1840,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /archive_fallback_available: true/);
   assert.doesNotMatch(route, /status: 429, headers: \{ "retry-after"/);
   assert.match(route, /completedRecordIds/);
+  assert.match(route, /requiredArchiveProviderVersion/);
+  assert.match(route, /archiveProviderReplay/);
+  assert.match(route, /archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /readiness\.momentum\.passed/);
   assert.match(route, /readiness\.creatorPotential\.passed/);

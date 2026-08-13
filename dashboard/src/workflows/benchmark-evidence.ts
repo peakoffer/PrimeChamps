@@ -3,6 +3,7 @@ import { readApifyRunDatasetWithUsage, runApifyActorWithUsage } from "@/lib/apif
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
@@ -14,8 +15,10 @@ import {
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
+  selectWikimediaRevisionCapture,
   selectWaybackCapture,
   waybackCdxUrl,
+  wikimediaRevisionApiUrl,
   type CommonCrawlCapture,
   type EvidencePreparationRecord,
   type HistoricalSearchCandidate,
@@ -234,7 +237,7 @@ async function reconcilePreparedSignalClaims(input: {
     .in("golden_record_id", input.recordIds)
     .in("claim_type", ["athletic_momentum", "audience_signal", "commercial_achievability_signal"])
     .eq("eligible_for_scoring", true)
-    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl"]);
+    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision"]);
   if (error) throw error;
   const unsupportedIds = ((data || []) as unknown as StoredPreparedSignalClaim[])
     .filter((claim) => !preparedEvidenceSignalSupported(claim.claim_type, claim.source_excerpt || ""))
@@ -386,6 +389,48 @@ async function retrieveCommonCrawlEvidenceCandidate(input: {
   return { evidence: null, rejectionReason: "no_common_crawl_html_capture_before_cutoff" };
 }
 
+async function retrieveWikimediaRevisionEvidenceCandidate(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+}) {
+  const apiUrl = wikimediaRevisionApiUrl(input.candidate.url, input.record.evidence_cutoff_at);
+  if (!apiUrl) return { evidence: null, rejectionReason: "not_a_wikipedia_article" };
+  const response = await fetch(apiUrl, {
+    headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(30_000),
+    cache: "no-store",
+  });
+  if (!response.ok) return { evidence: null, rejectionReason: "wikimedia_revision_lookup_failed" };
+  const capture = selectWikimediaRevisionCapture(
+    await response.json() as unknown,
+    input.candidate.url,
+    input.record.evidence_cutoff_at
+  );
+  if (!capture) return { evidence: null, rejectionReason: "no_wikipedia_revision_before_cutoff" };
+  const prepared = extractPreparedArchivedEvidence({
+    record: input.record,
+    candidate: input.candidate,
+    capture: {
+      timestamp: capture.timestamp,
+      capturedAt: capture.capturedAt,
+      originalUrl: input.candidate.url,
+      statusCode: "200",
+      digest: capture.sha1,
+      mimeType: "text/x-wiki",
+      archivedUrl: capture.historicalUrl,
+    },
+    html: capture.content,
+  });
+  return {
+    evidence: prepared.evidence ? {
+      ...prepared.evidence,
+      archiveProvider: "wikimedia_revision" as const,
+      providerRequestId: String(capture.revisionId),
+    } : null,
+    rejectionReason: prepared.rejectionReason,
+  };
+}
+
 async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
@@ -395,6 +440,19 @@ async function retrieveArchivedEvidenceCandidate(input: {
   "use step";
 
   const { candidate } = input;
+  try {
+    const wikimedia = await retrieveWikimediaRevisionEvidenceCandidate({ record: input.record, candidate });
+    if (wikimedia.evidence) {
+      return {
+        evidence: wikimedia.evidence,
+        rejectionReason: null,
+        rateLimited: false,
+        waybackRateLimited: false,
+      };
+    }
+  } catch {
+    // Continue to the generic archive providers when Wikimedia is unavailable.
+  }
   let waybackRateLimited = false;
   if (!input.skipWayback) {
     try {
@@ -614,6 +672,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         checkpoint: {
           phase: "archive_retrieval",
           extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+          archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
           query_plan_version: input.queryPlanVersion,
           preparation_mode: input.preparationMode,
           benchmark_split: input.benchmarkSplit,
@@ -682,6 +741,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           checkpoint: {
             phase: "record_persisted",
             extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+            archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
             query_plan_version: input.queryPlanVersion,
             preparation_mode: input.preparationMode,
             benchmark_split: input.benchmarkSplit,
@@ -704,6 +764,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       preparationMode: input.preparationMode,
       benchmarkSplit: input.benchmarkSplit,
       queryPlanVersion: input.queryPlanVersion,
+      archiveProviderVersion: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
       records: results,
     };
     await updatePreparationRun({
@@ -718,6 +779,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         checkpoint: {
           phase: "completed",
           extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+          archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
           query_plan_version: input.queryPlanVersion,
           preparation_mode: input.preparationMode,
           benchmark_split: input.benchmarkSplit,

@@ -4,6 +4,7 @@ import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVIDENCE_PREPARATION_LIMITS,
+  HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
@@ -59,12 +60,18 @@ function archiveRateLimitRetryAfterSeconds(run: Pick<EvidencePreparationRunRow, 
 
 type SignalRecoverySplit = "excluded" | "development" | "held_out";
 
-function completedRecordIds(runs: EvidencePreparationRunRow[], queryPlanVersion: string) {
+function completedRecordIds(
+  runs: EvidencePreparationRunRow[],
+  queryPlanVersion: string,
+  requiredArchiveProviderVersion?: string
+) {
   return new Set(runs.flatMap((run) => {
     const checkpoint = run.checkpoint as Record<string, unknown> | null;
     return run.status === "completed"
       && checkpoint?.query_plan_version === queryPlanVersion
       && checkpoint?.extraction_version === HISTORICAL_EVIDENCE_EXTRACTION_VERSION
+      && (!requiredArchiveProviderVersion
+        || checkpoint?.archive_provider_version === requiredArchiveProviderVersion)
       && Array.isArray(run.record_ids)
       ? run.record_ids.filter((id): id is string => typeof id === "string")
       : [];
@@ -171,7 +178,11 @@ export async function GET() {
     const heldOutEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "held_out"));
     const runRows = (runs || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
-    const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
+    const recoveryCompleted = completedRecordIds(
+      runRows,
+      HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
+      HISTORICAL_ARCHIVE_PROVIDER_VERSION
+    );
     const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
     const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
     // Current leakage-safe evidence is the source of truth. A parser-version
@@ -286,7 +297,11 @@ export async function POST(request: NextRequest) {
     if (recentRunError) throw recentRunError;
     const runRows = (recentRuns || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
-    const recoveryCompleted = completedRecordIds(runRows, HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION);
+    const recoveryCompleted = completedRecordIds(
+      runRows,
+      HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
+      HISTORICAL_ARCHIVE_PROVIDER_VERSION
+    );
     const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
     const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
     const ageRecoveryRemaining = requestedMode !== "signal_recovery"
@@ -329,8 +344,11 @@ export async function POST(request: NextRequest) {
       const providerRunId = typeof checkpoint?.provider_run_id === "string"
         ? checkpoint.provider_run_id
         : typeof summary?.providerRunId === "string" ? summary.providerRunId : undefined;
+      const archiveProviderReplay = preparationMode === "age_recovery"
+        && checkpoint?.archive_provider_version !== HISTORICAL_ARCHIVE_PROVIDER_VERSION;
       return (run.status === "failed" || run.status === "cancelled"
-          || checkpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION)
+          || checkpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION
+          || archiveProviderReplay)
         && checkpoint?.query_plan_version === queryPlanVersion
         && Array.isArray(run.record_ids)
         && recordIds.every((recordId) => run.record_ids.includes(recordId))
@@ -357,6 +375,7 @@ export async function POST(request: NextRequest) {
         preparation_mode: preparationMode,
         benchmark_split: preparationMode === "signal_recovery" ? signalRecoverySplit : null,
         extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+        archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
         query_plan_version: queryPlanVersion,
         evaluation_only: true,
         scoring_tokens_spent: 0,

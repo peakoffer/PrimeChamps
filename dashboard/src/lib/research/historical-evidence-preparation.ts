@@ -9,6 +9,7 @@ export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-
 export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-blind-signal-recovery-v3";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-12-current-athletic-relevance-v5";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v2";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -100,7 +101,7 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
-  archiveProvider?: "internet_archive_wayback" | "common_crawl";
+  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision";
   providerRequestId?: string;
 };
 
@@ -275,6 +276,86 @@ export function extractCommonCrawlWarcBody(value: string) {
   if (contentType && !/html|xhtml|text\//i.test(contentType)) return null;
   const body = value.slice(httpHeaderEnd + 4).trim();
   return body || null;
+}
+
+export type WikimediaRevisionCapture = {
+  revisionId: number;
+  timestamp: string;
+  capturedAt: string;
+  sha1: string | null;
+  content: string;
+  historicalUrl: string;
+};
+
+function wikipediaPageParts(value: string) {
+  try {
+    const url = new URL(canonicalHistoricalArchiveUrl(value));
+    if (!/^[a-z0-9-]+\.wikipedia\.org$/i.test(url.hostname) || !url.pathname.startsWith("/wiki/")) return null;
+    const title = decodeURIComponent(url.pathname.slice("/wiki/".length)).replace(/_/g, " ").trim();
+    if (!title || title.includes("/")) return null;
+    return { origin: url.origin, title };
+  } catch {
+    return null;
+  }
+}
+
+export function wikimediaRevisionApiUrl(canonicalUrl: string, evidenceCutoffAt: string) {
+  const page = wikipediaPageParts(canonicalUrl);
+  const cutoff = new Date(evidenceCutoffAt);
+  if (!page || !Number.isFinite(cutoff.getTime())) return null;
+  const params = new URLSearchParams({
+    action: "query",
+    prop: "revisions",
+    titles: page.title,
+    rvlimit: "1",
+    rvprop: "ids|timestamp|sha1|content",
+    rvslots: "main",
+    rvstart: cutoff.toISOString(),
+    rvdir: "older",
+    formatversion: "2",
+    format: "json",
+  });
+  return `${page.origin}/w/api.php?${params.toString()}`;
+}
+
+export function selectWikimediaRevisionCapture(
+  payload: unknown,
+  canonicalUrl: string,
+  evidenceCutoffAt: string
+): WikimediaRevisionCapture | null {
+  const page = wikipediaPageParts(canonicalUrl);
+  const cutoff = Date.parse(evidenceCutoffAt);
+  if (!page || !Number.isFinite(cutoff) || !payload || typeof payload !== "object") return null;
+  const query = (payload as Record<string, unknown>).query;
+  if (!query || typeof query !== "object") return null;
+  const pages = (query as Record<string, unknown>).pages;
+  if (!Array.isArray(pages) || !pages[0] || typeof pages[0] !== "object") return null;
+  const revisions = (pages[0] as Record<string, unknown>).revisions;
+  if (!Array.isArray(revisions) || !revisions[0] || typeof revisions[0] !== "object") return null;
+  const revision = revisions[0] as Record<string, unknown>;
+  const revisionId = Number(revision.revid);
+  const revisionTimestamp = typeof revision.timestamp === "string" ? Date.parse(revision.timestamp) : Number.NaN;
+  const capturedAt = Number.isFinite(revisionTimestamp) ? new Date(revisionTimestamp).toISOString() : "";
+  const slots = revision.slots;
+  const main = slots && typeof slots === "object" ? (slots as Record<string, unknown>).main : null;
+  const content = main && typeof main === "object" ? (main as Record<string, unknown>).content : null;
+  if (!Number.isSafeInteger(revisionId) || revisionId < 1 || !capturedAt
+    || Date.parse(capturedAt) > cutoff || typeof content !== "string" || !content.trim()) return null;
+  return {
+    revisionId,
+    timestamp: capturedAt.replace(/[-:TZ.]/g, "").slice(0, 14),
+    capturedAt,
+    sha1: typeof revision.sha1 === "string" ? revision.sha1 : null,
+    content: normalizeWikipediaWikitext(content),
+    historicalUrl: `${page.origin}/w/index.php?title=${encodeURIComponent(page.title.replace(/ /g, "_"))}&oldid=${revisionId}`,
+  };
+}
+
+export function normalizeWikipediaWikitext(value: string) {
+  return value.replace(
+    /\{\{\s*(?:birth[ _-]*date(?:[ _-]*and[ _-]*age)?|dob)\s*\|(?:\s*df\s*=\s*(?:yes|y|1)\s*\|)?\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})[^}]*\}\}/gi,
+    (_match, year: string, month: string, day: string) => `date of birth: ${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
+  );
 }
 
 export function waybackCdxUrl(canonicalUrl: string, evidenceCutoffAt: string) {
