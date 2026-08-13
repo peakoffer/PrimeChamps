@@ -101,6 +101,26 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   pilotLimit: 5,
 };
 
+type ApifyInstagramHistoryPilotPlan = {
+  configured: boolean;
+  candidateCount: number;
+  pilotRecord: {
+    id: string;
+    athleteName: string;
+    sport: string;
+    handle: string;
+    cutoff: string;
+  } | null;
+  maximumChargeUsd: number;
+};
+
+const INITIAL_APIFY_HISTORY_PILOT_PLAN: ApifyInstagramHistoryPilotPlan = {
+  configured: false,
+  candidateCount: 0,
+  pilotRecord: null,
+  maximumChargeUsd: 0.02,
+};
+
 type BenchmarkMetrics = {
   cases: number;
   precisionAbove80: number | null;
@@ -331,6 +351,7 @@ export default function ResearchBenchmarkPage() {
   const [developmentSignalRecoveryCount, setDevelopmentSignalRecoveryCount] = useState(0);
   const [heldOutSignalRecoveryCount, setHeldOutSignalRecoveryCount] = useState(0);
   const [socialBladePlan, setSocialBladePlan] = useState(INITIAL_SOCIAL_BLADE_PLAN);
+  const [apifyHistoryPilotPlan, setApifyHistoryPilotPlan] = useState(INITIAL_APIFY_HISTORY_PILOT_PLAN);
   const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -344,19 +365,21 @@ export default function ResearchBenchmarkPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, preparationResponse, benchmarkResponse, socialBladeResponse] = await Promise.all([
+      const [response, preparationResponse, benchmarkResponse, socialBladeResponse, apifyHistoryResponse] = await Promise.all([
         fetch("/api/research/golden-records", { cache: "no-store" }),
         fetch("/api/research/golden-records/prepare-evidence", { cache: "no-store" }),
         fetch("/api/research/benchmarks", { cache: "no-store" }),
         fetch("/api/research/golden-records/social-blade-history", { cache: "no-store" }),
+        fetch("/api/research/golden-records/apify-instagram-history-pilot", { cache: "no-store" }),
       ]);
-      const [payload, preparationPayload, benchmarkPayload, socialBladePayload] = await Promise.all([
-        response.json(), preparationResponse.json(), benchmarkResponse.json(), socialBladeResponse.json(),
+      const [payload, preparationPayload, benchmarkPayload, socialBladePayload, apifyHistoryPayload] = await Promise.all([
+        response.json(), preparationResponse.json(), benchmarkResponse.json(), socialBladeResponse.json(), apifyHistoryResponse.json(),
       ]);
       if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
       if (!preparationResponse.ok) throw new Error(preparationPayload.error || "Could not load evidence preparation");
       if (!benchmarkResponse.ok) throw new Error(benchmarkPayload.error || "Could not load benchmark runs");
       if (!socialBladeResponse.ok) throw new Error(socialBladePayload.error || "Could not load Social Blade recovery plan");
+      if (!apifyHistoryResponse.ok) throw new Error(apifyHistoryPayload.error || "Could not load Apify history pilot plan");
       setRecords(payload.records || []);
       setSummary(payload.summary || INITIAL_SUMMARY);
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
@@ -369,6 +392,7 @@ export default function ResearchBenchmarkPage() {
       setBenchmarkRuns(benchmarkPayload.runs || []);
       setBenchmarkReadiness(benchmarkPayload.readiness || INITIAL_BENCHMARK_READINESS);
       setSocialBladePlan(socialBladePayload || INITIAL_SOCIAL_BLADE_PLAN);
+      setApifyHistoryPilotPlan(apifyHistoryPayload || INITIAL_APIFY_HISTORY_PILOT_PLAN);
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
@@ -719,6 +743,33 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const runApifyHistoryPilot = async () => {
+    const record = apifyHistoryPilotPlan.pilotRecord;
+    if (!apifyHistoryPilotPlan.configured || !record) return;
+    setWorking(true);
+    setMessage(`Testing one unverified Apify history feed for @${record.handle} with a hard $${apifyHistoryPilotPlan.maximumChargeUsd.toFixed(2)} ceiling…`);
+    try {
+      const response = await fetch("/api/research/golden-records/apify-instagram-history-pilot", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          recordId: record.id,
+          confirmedMaximumChargeUsd: apifyHistoryPilotPlan.maximumChargeUsd,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Apify history pilot failed");
+      const snapshot = payload.snapshot;
+      setMessage(snapshot
+        ? `Inspection only: @${snapshot.handle} returned ${snapshot.followers?.toLocaleString?.() ?? "unknown"} followers on ${snapshot.capturedAt.slice(0, 10)} from ${snapshot.historyPointCount} history rows. Actual Actor usage: ${typeof payload.actualUsageUsd === "number" ? `$${payload.actualUsageUsd.toFixed(4)}` : "not reported"}. No evidence, scoring tokens, pipeline records, or outreach were written.`
+        : `The one-profile Apify pilot returned no exact history row within 31 days before ${record.cutoff.slice(0, 10)}. No evidence, scoring tokens, pipeline records, or outreach were written.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Apify history pilot failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const prepareHistoricalEvidence = async () => {
     setWorking(true);
     setMessage(evidencePreparationMode === "age_recovery"
@@ -1035,6 +1086,16 @@ export default function ResearchBenchmarkPage() {
                 : socialBladePlan.pilotRecords.length === 0
                   ? "Historical audience complete"
                   : `Run ${socialBladePlan.pilotRecords.length}-profile pilot · ≤${socialBladePlan.pilotMaximumCredits} credits`}
+            </button>
+            <button
+              disabled={working || Boolean(activeEvidenceRun) || !apifyHistoryPilotPlan.configured || !apifyHistoryPilotPlan.pilotRecord}
+              onClick={() => void runApifyHistoryPilot()}
+              title="Inspection only. Results are never eligible for scoring without independent validation."
+              className="whitespace-nowrap rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 disabled:opacity-40"
+            >
+              {apifyHistoryPilotPlan.pilotRecord
+                ? `Test cheaper history · ≤$${apifyHistoryPilotPlan.maximumChargeUsd.toFixed(2)}`
+                : "No history pilot target"}
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || archiveCoolingDown || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}
