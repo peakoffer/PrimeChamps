@@ -274,6 +274,8 @@ test("verified age selection requires authoritative evidence or independent corr
   }], ["volleyballworld.com"]);
   assert.equal(trusted?.birthYear, 2003);
   assert.equal(trusted?.source, "https://volleyballworld.com/players/lexi-rodriguez");
+  assert.equal(trusted?.corroborated, false, "one authoritative source is safety evidence, not finalist eligibility");
+  assert.equal(trusted?.corroboratingSources.length, 1);
 
   const wikipediaOnly = selectVerifiedAthleteAge("Camilla Lamina", [{
     title: "Camilla Lamina - Wikipedia",
@@ -292,6 +294,19 @@ test("verified age selection requires authoritative evidence or independent corr
     link: "https://example-sports-news.com/camilla-lamina",
   }], ["volleyballworld.com"]);
   assert.equal(corroborated?.birthYear, 2002);
+  assert.equal(corroborated?.corroborated, true);
+  assert.equal(corroborated?.corroboratingSources.length, 2);
+
+  const conflictingTrusted = selectVerifiedAthleteAge("Lexi Rodriguez", [{
+    title: "Lexi Rodriguez - Player profile",
+    snippet: "Lexi Rodriguez (born March 12, 2003) is an American volleyball player.",
+    link: "https://volleyballworld.com/players/lexi-rodriguez",
+  }, {
+    title: "Lexi Rodriguez biography",
+    snippet: "Lexi Rodriguez was born March 12, 2001.",
+    link: "https://example-sports-news.com/lexi-rodriguez",
+  }], ["volleyballworld.com"]);
+  assert.equal(conflictingTrusted?.corroborated, false, "conflicting dates cannot manufacture corroboration");
 
   const contaminated = selectVerifiedAthleteAge("Rebekah Allick", [{
     title: "Volleyball roster",
@@ -822,7 +837,7 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /lookupAthleteAgesWithOpenAI/);
   assert.match(workflowSource, /lookupAthleteAgesWithApify/);
   assert.match(workflowSource, /Apify Google Search age batch/);
-  assert.match(workflowSource, /batch\.filter\(\(athlete\) => !apifyAgeByCandidate\.has/);
+  assert.match(workflowSource, /apifyAgeByCandidate\.get\(researchCandidateKey\(athlete\.name, athlete\.sport\)\)\?\.corroborated !== true/);
   assert.match(workflowSource, /source_linked_age_batch_call_cap/);
   assert.match(workflowSource, /APIFY_GOOGLE_DOSSIER_FALLBACK/);
   assert.match(workflowSource, /findInstagramCandidatesWithOpenAI/);

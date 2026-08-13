@@ -37,6 +37,7 @@ import { auditResearchResults, RESEARCH_PRIORITY_THRESHOLD } from "@/lib/researc
 import {
   selectVerifiedAthleteAge,
   type AthleteAgeSearchResult,
+  type VerifiedAthleteAge,
 } from "@/lib/research/age-evidence";
 import {
   buildAuditorConstrainedResearchV2Score,
@@ -146,7 +147,7 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
 } as const;
 
 const RESEARCH_V2_RUBRIC_DEFINITION = {
-  version: "v2",
+  version: "v2.1",
   dimensions: {
     onlyfans_fit: "Public-evidence opportunity quality, independent of price or access",
     commercial_achievability: "Access, representation, likely economics, geography, and realistic close probability",
@@ -155,6 +156,8 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   },
   final_gate: {
     priority_above: 80,
+    exact_identity_required: true,
+    corroborated_21_plus_required: true,
     onlyfans_fit_minimum: 80,
     commercial_achievability_minimum: 70,
     research_confidence_minimum: 80,
@@ -167,8 +170,8 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   },
 } as const;
 
-const RESEARCHER_PROMPT_RECORD = "Research V2 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score.";
-const AUDITOR_PROMPT_RECORD = "Research V2 blind auditor: independently verify identity, adult eligibility, current momentum, meaningful audience, creator potential, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
+const RESEARCHER_PROMPT_RECORD = "Research V2.1 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires two independent agreeing sources proving 21+ eligibility.";
+const AUDITOR_PROMPT_RECORD = "Research V2.1 blind auditor: independently verify exact identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
 
 const RESEARCH_AUDIT_BLIND_SCHEMA = {
   type: "object",
@@ -487,6 +490,8 @@ interface EnrichedAthlete extends DiscoveredAthlete {
   age_source?: string;
   age_evidence?: string;
   age_precision?: "birth_date" | "stated_age" | "birth_year";
+  age_corroborated?: boolean;
+  age_sources?: VerifiedAthleteAge["corroboratingSources"];
   is_minor?: boolean;
   signal_snapshot_id?: string;
   momentum_metrics?: {
@@ -599,6 +604,8 @@ interface ScoredAthlete extends EnrichedAthlete {
   age_source?: string;
   age_evidence?: string;
   age_precision?: "birth_date" | "stated_age" | "birth_year";
+  age_corroborated?: boolean;
+  age_sources?: VerifiedAthleteAge["corroboratingSources"];
   athlete_id?: string;
   pipeline_stage?: string;
   career_stage?: ResearchCareerStage;
@@ -630,24 +637,39 @@ type ResearchV2Artifacts = {
 };
 
 async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringModel: string): Promise<ResearchV2Artifacts> {
+  const { error: rubricArchiveError } = await supabase.from("research_rubric_versions")
+    .update({ status: "archived" })
+    .eq("organization_id", input.organizationId)
+    .eq("rubric_key", "onlyfans_fit_achievability_confidence")
+    .eq("status", "active")
+    .neq("version", 2);
+  if (rubricArchiveError) throw rubricArchiveError;
   const { data: rubric, error: rubricError } = await supabase.from("research_rubric_versions").upsert({
     organization_id: input.organizationId,
     rubric_key: "onlyfans_fit_achievability_confidence",
-    version: 1,
-    name: "OnlyFans fit, achievability, confidence, and priority v1",
+    version: 2,
+    name: "OnlyFans fit, achievability, confidence, and priority v2.1",
     definition: RESEARCH_V2_RUBRIC_DEFINITION,
-    definition_hash: "research-v2-rubric-fit-achievability-confidence-v1",
+    definition_hash: "research-v2.1-rubric-corroborated-21-plus-v2",
     status: "active",
     activated_at: new Date().toISOString(),
   }, { onConflict: "organization_id,rubric_key,version" }).select("id").single();
   if (rubricError) throw rubricError;
 
   const ensurePrompt = async (promptKey: string, role: "researcher" | "auditor", content: string, contentHash: string) => {
+    const { error: promptArchiveError } = await supabase.from("research_prompt_versions")
+      .update({ status: "archived" })
+      .eq("organization_id", input.organizationId)
+      .eq("prompt_key", promptKey)
+      .eq("role", role)
+      .eq("status", "active")
+      .neq("version", 2);
+    if (promptArchiveError) throw promptArchiveError;
     const { data, error } = await supabase.from("research_prompt_versions").upsert({
       organization_id: input.organizationId,
       prompt_key: promptKey,
       role,
-      version: 1,
+      version: 2,
       content,
       content_hash: contentHash,
       output_schema: role === "auditor"
@@ -660,8 +682,8 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     return data.id as string;
   };
   const [researcherPromptVersionId, auditorPromptVersionId] = await Promise.all([
-    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2-researcher-v1"),
-    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2-blind-auditor-v1"),
+    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.1-researcher-corroborated-21-plus-v2"),
+    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.1-blind-auditor-corroborated-21-plus-v2"),
   ]);
 
   const ensureModel = async (capability: "judgment" | "audit") => {
@@ -819,7 +841,9 @@ async function persistResearchV2EvidenceAndScore(
       pre_audit_priority: athlete.score,
     },
     unsourced_claim_count: claims.filter((claim) => claim.support_status !== "supported").length,
-    critical_gap_count: athlete.age_verified === true && (athlete.identity_confidence || 0) >= 70 ? 0 : 1,
+    critical_gap_count: athlete.age_verified === true
+      && athlete.age_corroborated === true
+      && (athlete.identity_confidence || 0) >= 70 ? 0 : 1,
     is_final: false,
     input_tokens: athlete.researcher_input_tokens || 0,
     output_tokens: athlete.researcher_output_tokens || 0,
@@ -832,8 +856,8 @@ async function persistResearchV2EvidenceAndScore(
 }
 
 function explainResearchHold(athlete: ScoredAthlete) {
-  if (athlete.age_verified !== true) {
-    return "age was not verified by a matching trustworthy public source";
+  if (athlete.age_verified !== true || athlete.age_corroborated !== true) {
+    return "21+ eligibility was not corroborated by two independent agreeing public sources";
   }
   if (typeof athlete.age === "number" && athlete.age < ONLYFANS_CREATOR_PROFILE.targetAgeMin) {
     return `source-verified age ${athlete.age} requires manual review for this adult-content partnership channel`;
@@ -2958,6 +2982,8 @@ type AthleteAgeLookupResult = {
   source: string | null;
   evidence: string | null;
   precision: "birth_date" | "stated_age" | "birth_year" | null;
+  corroborated: boolean;
+  corroboratingSources: VerifiedAthleteAge["corroboratingSources"];
   researchEvidence: NonNullable<DiscoveredAthlete["evidence"]>;
 };
 
@@ -3010,13 +3036,13 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
       if (!verifiedAge) continue;
       byCandidateKey.set(researchCandidateKey(athlete.name, athlete.sport), {
         ...verifiedAge,
-        researchEvidence: [{
-          url: verifiedAge.source,
-          title: `${athlete.name} age source`,
-          claim: `${athlete.name}: ${verifiedAge.evidence}`.slice(0, 1_400),
+        researchEvidence: verifiedAge.corroboratingSources.map((ageSource, index) => ({
+          url: ageSource.source,
+          title: `${athlete.name} age source ${index + 1}`,
+          claim: `${athlete.name}: ${ageSource.evidence}`.slice(0, 1_400),
           provider: "Apify Google Search age batch",
-          sourceExcerpt: verifiedAge.evidence,
-        }],
+          sourceExcerpt: ageSource.evidence,
+        })),
       });
     }
     log(`Apify Google resolved ${byCandidateKey.size}/${athletes.length} source-verified ages`, {
@@ -3065,6 +3091,7 @@ ${athleteBrief}
 
 RULES:
 - Prefer official federation, league, tour, team, college, Olympics, or athlete-profile sources. Use a reputable biography source only when an official source is unavailable.
+- Return up to three records per athlete from independent domains. For an adult candidate, make a reasonable bounded effort to return two agreeing sources; never duplicate the same domain to manufacture corroboration.
 - Return a record only when the consulted page clearly ties the exact athlete name to a date of birth, stated age, or birth year.
 - source_url must be the exact page consulted. evidence must include the athlete's name and the published age fact.
 - Never infer age from graduation year, appearance, team seniority, or another person on the same page.
@@ -3123,6 +3150,7 @@ Return only the strict JSON object.`,
     }));
     const payload = parseStructuredJsonObject<{ records?: Array<Record<string, unknown>> }>(outputText);
     const records = Array.isArray(payload.records) ? payload.records : [];
+    const recordsByAthlete = new Map<string, AthleteAgeSearchResult[]>();
     for (const record of records) {
       const athleteName = typeof record.athlete_name === "string" ? record.athlete_name.trim() : "";
       const athlete = athleteByName.get(athleteName.toLowerCase());
@@ -3131,21 +3159,33 @@ Return only the strict JSON object.`,
       const sourceTitle = typeof record.source_title === "string" ? record.source_title.trim() : source?.title || "";
       const evidence = typeof record.evidence === "string" ? record.evidence.trim() : "";
       if (!athlete || !source?.url || !evidenceNamesAthlete(athlete.name, `${sourceTitle} ${evidence}`)) continue;
-      const verifiedAge = selectVerifiedAthleteAge(athlete.name, [{
+      const key = researchCandidateKey(athlete.name, athlete.sport);
+      const ageResults = recordsByAthlete.get(key) || [];
+      ageResults.push({
         title: sourceTitle,
         snippet: evidence,
         link: source.url,
-      }], trustedAgeDomainsForSport(athlete.sport));
+      });
+      recordsByAthlete.set(key, ageResults);
+    }
+    for (const athlete of athletes) {
+      const key = researchCandidateKey(athlete.name, athlete.sport);
+      const ageResults = recordsByAthlete.get(key) || [];
+      const verifiedAge = selectVerifiedAthleteAge(
+        athlete.name,
+        ageResults,
+        trustedAgeDomainsForSport(athlete.sport)
+      );
       if (!verifiedAge) continue;
-      byCandidateKey.set(researchCandidateKey(athlete.name, athlete.sport), {
+      byCandidateKey.set(key, {
         ...verifiedAge,
-        researchEvidence: [{
-          url: source.url,
-          title: sourceTitle,
-          claim: `${athlete.name}: ${evidence}`.slice(0, 1_400),
+        researchEvidence: verifiedAge.corroboratingSources.map((ageSource, index) => ({
+          url: ageSource.source,
+          title: `${athlete.name} age source ${index + 1}`,
+          claim: `${athlete.name}: ${ageSource.evidence}`.slice(0, 1_400),
           provider: `OpenAI ${OPENAI_RESEARCH_MODEL} age web search`,
-          sourceExcerpt: evidence,
-        }],
+          sourceExcerpt: ageSource.evidence,
+        })),
       });
     }
     log(`OpenAI resolved ${byCandidateKey.size}/${athletes.length} source-verified ages`, {
@@ -3171,6 +3211,8 @@ async function lookupAthleteAge(
     source: null,
     evidence: null,
     precision: null,
+    corroborated: false,
+    corroboratingSources: [],
     researchEvidence: [],
   };
   if (!APIFY_API_KEY && !PERPLEXITY_API_KEY) {
@@ -3192,7 +3234,7 @@ async function lookupAthleteAge(
       log(`    Reused source-linked age evidence for ${athleteName}`);
     }
 
-    if (PERPLEXITY_API_KEY && !perplexityDisabledReason && !verifiedAge) {
+    if (PERPLEXITY_API_KEY && !perplexityDisabledReason && !verifiedAge?.corroborated) {
       try {
         const response = await fetchWithTimeout("https://api.perplexity.ai/search", {
           method: "POST",
@@ -3215,7 +3257,7 @@ async function lookupAthleteAge(
             snippet: result.snippet,
             link: result.url,
           })));
-          verifiedAge = selectAge(organicResults);
+          verifiedAge = selectAge(organicResults) || verifiedAge;
         }
       } catch (error) {
         log(`    Perplexity age lookup failed for ${athleteName}: ${error}`);
@@ -3235,7 +3277,7 @@ async function lookupAthleteAge(
       // official player profile. A second, still-bounded query explicitly
       // searches the sport's authoritative sources so a valid DOB/age is not
       // missed merely because it was below Google's first result page.
-      const ageQueries = verifiedAge ? [] : [
+      const ageQueries = verifiedAge?.corroborated ? [] : [
         `"${athleteName}" ${sport} athlete "date of birth" OR born OR birthday`,
         `"${athleteName}" ("date of birth" OR born OR age) (${sportSiteFilter})`,
       ];
@@ -3250,7 +3292,7 @@ async function lookupAthleteAge(
         snippet: result.snippet,
         link: result.url,
       })));
-      verifiedAge = verifiedAge || selectAge(organicResults);
+      verifiedAge = selectAge(organicResults) || verifiedAge;
       researchEvidence = providerResults.flatMap((result) => {
         const sourceText = `${result.title || ""} ${result.snippet || ""}`;
         if (!result.url?.startsWith("http") || !evidenceNamesAthlete(athleteName, sourceText)) return [];
@@ -3352,16 +3394,33 @@ async function scoreAthletes(
     const batch = pendingAthletes.slice(index, index + scoringBatchSize);
     const apifyAgeByCandidate = await lookupAthleteAgesWithApify(batch);
     const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(
-      batch.filter((athlete) => !apifyAgeByCandidate.has(researchCandidateKey(athlete.name, athlete.sport)))
+      batch.filter((athlete) =>
+        apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))?.corroborated !== true
+      )
     );
     const batchScores = await Promise.all(batch.map(async (athlete) => {
       // Verify age before semantic scoring. Otherwise Claude is asked to score
       // a profile with "age unknown" and the verified source is attached only
       // afterward, producing a systematic penalty that cannot be recovered.
       log(`    🔍 Verifying age for ${athlete.name} with source-linked web research...`);
-      const ageInfo = apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))
-        || openAiAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))
-        || await lookupAthleteAge(athlete.name, athlete.sport, athlete.evidence);
+      const candidateKey = researchCandidateKey(athlete.name, athlete.sport);
+      const apifyAge = apifyAgeByCandidate.get(candidateKey);
+      const openAiAge = openAiAgeByCandidate.get(candidateKey);
+      const preferredAge = apifyAge?.corroborated
+        ? apifyAge
+        : openAiAge?.corroborated
+          ? openAiAge
+          : apifyAge || openAiAge;
+      const fallbackAge = preferredAge?.corroborated
+        ? null
+        : await lookupAthleteAge(athlete.name, athlete.sport, [
+            ...(athlete.evidence || []),
+            ...(apifyAge?.researchEvidence || []),
+            ...(openAiAge?.researchEvidence || []),
+          ]);
+      const ageInfo = fallbackAge?.corroborated
+        ? fallbackAge
+        : preferredAge || fallbackAge || await lookupAthleteAge(athlete.name, athlete.sport, athlete.evidence);
       const mergedEvidence = Array.from(new Map([
         ...(athlete.evidence || []),
         ...ageInfo.researchEvidence,
@@ -3371,10 +3430,12 @@ async function scoreAthletes(
         evidence: mergedEvidence,
         ...(ageInfo.age !== null ? {
           age: ageInfo.age,
-          age_verified: true,
+          age_verified: ageInfo.isMinor === true || ageInfo.corroborated,
           age_source: ageInfo.source || undefined,
           age_evidence: ageInfo.evidence || undefined,
           age_precision: ageInfo.precision || undefined,
+          age_corroborated: ageInfo.corroborated,
+          age_sources: ageInfo.corroboratingSources,
           is_minor: ageInfo.isMinor === true,
         } : {}),
       };
@@ -3412,11 +3473,13 @@ async function scoreAthletes(
               age_source: ageInfo.source || undefined,
               age_evidence: ageInfo.evidence || undefined,
               age_precision: ageInfo.precision || undefined,
+              age_corroborated: ageInfo.corroborated,
+              age_sources: ageInfo.corroboratingSources,
               reasoning: `${score.reasoning} [BLOCKED: Web research confirmed age is ${ageInfo.age} - minor]`,
               concerns: [...(score.concerns || []), `Age verified as ${ageInfo.age} via web research - MINOR`],
             };
             log(`    ⛔ MINOR CONFIRMED: ${athlete.name} is ${ageInfo.age} years old`);
-          } else {
+          } else if (ageInfo.corroborated) {
             const objectiveScore = applyResearchObjectiveScoreGuardrails({
               score: score.score,
               objective: config.partnershipGoal,
@@ -3440,12 +3503,30 @@ async function scoreAthletes(
               age_source: ageInfo.source || undefined,
               age_evidence: ageInfo.evidence || undefined,
               age_precision: ageInfo.precision || undefined,
+              age_corroborated: true,
+              age_sources: ageInfo.corroboratingSources,
               reasoning: `${score.reasoning} [Age verified: ${ageInfo.age}]${objectiveHold}`,
               concerns: (score.concerns || []).filter((c: string) =>
                 !c.toLowerCase().includes("age") && !c.toLowerCase().includes("verify")
               ).concat(objectiveHold ? [objectiveHold.replace(/^ \[|\]$/g, "")] : []),
             };
             log(`    ✅ Adult confirmed: ${athlete.name} is ${ageInfo.age} years old`);
+          } else {
+            score = {
+              ...score,
+              score: Math.min(score.score, 74),
+              is_minor: false,
+              age_verified: false,
+              age: ageInfo.age,
+              age_source: ageInfo.source || undefined,
+              age_evidence: ageInfo.evidence || undefined,
+              age_precision: ageInfo.precision || undefined,
+              age_corroborated: false,
+              age_sources: ageInfo.corroboratingSources,
+              reasoning: `${score.reasoning} [HOLD: adult age has only one authoritative source; two independent agreeing sources are required]`,
+              concerns: [...(score.concerns || []), "Adult age has not been corroborated by a second independent source"],
+            };
+            log(`    ⚠️ Adult age found but not corroborated for ${athlete.name}`);
           }
       } else if (score.score >= 40) {
           score = {
@@ -3704,7 +3785,9 @@ CANDIDATE (NO PROPOSED SCORE):
 - Instagram: @${athlete.instagram_handle}
 - Profile name/bio: ${athlete.bio || "not available"}
 - Identity confidence: ${athlete.identity_confidence || 0}/100; ${athlete.identity_evidence?.join("; ") || "no identity explanation"}
-- Age: ${athlete.age_verified ? `${athlete.age} via ${athlete.age_source}` : "not source-verified"}
+- Age: ${athlete.age_verified && athlete.age_corroborated
+    ? `${athlete.age} corroborated by ${athlete.age_sources?.map((source) => source.source).join("; ") || "two independent sources"}`
+    : "not corroborated by two independent sources"}
 - Followers / engagement / latest activity: ${athlete.follower_count || 0} / ${athlete.engagement_rate ?? "unknown"}% / ${athlete.last_posted_at || "unknown"}
 - Instagram profile / bio: ${athlete.instagram_url || "missing"} / ${(athlete.bio || "not available").slice(0, 500)}
 - Recent Instagram posts: ${(athlete.latest_posts || []).slice(0, 6).map((post) => `${post.timestamp || "unknown date"} (${post.url || "missing URL"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "none"}
@@ -3852,7 +3935,11 @@ Return pass only if the proposed dimensions are justified and there is no critic
   const passesFinal = passesResearchV2FinalGate({
     ...correctedWithObjectiveGuardrails,
     identityConfirmed: blind.identity_passed,
-    adultEligibilityVerified: blind.eligibility_passed,
+    adultEligibilityVerified: athlete.age_verified === true
+      && athlete.age_corroborated === true
+      && typeof athlete.age === "number"
+      && athlete.age >= 21
+      && blind.eligibility_passed,
     currentAthleticMomentumVerified: deterministicEvidence.currentMomentum && blind.current_momentum_passed,
     meaningfulAudienceVerified: deterministicEvidence.meaningfulAudience && blind.audience_evidence_passed,
     creatorPotentialVerified: deterministicEvidence.creatorPotential && blind.creator_evidence_passed,
@@ -4017,7 +4104,10 @@ async function persistAuditExecutionFailure(
     unsupported_sampled_claim_count: 0,
     verdict: "fail",
     identity_passed: false,
-    eligibility_passed: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 21,
+    eligibility_passed: athlete.age_verified === true
+      && athlete.age_corroborated === true
+      && typeof athlete.age === "number"
+      && athlete.age >= 21,
     source_verification_passed: false,
     point_in_time_passed: true,
     commercial_constraints_complete: false,
@@ -4075,6 +4165,7 @@ async function auditPriorityCandidates(
       );
       return (athlete.identity_confidence || 0) >= 70
         && athlete.age_verified === true
+        && athlete.age_corroborated === true
         && typeof athlete.age === "number"
         && athlete.age >= 21
         && evidence.currentMomentum
@@ -4143,9 +4234,15 @@ async function persistScoringAudit(
           public_account: athlete.is_private === false,
           active_account: athlete.account_active === true,
           last_posted_at: athlete.last_posted_at || null,
-          adult_age_verified: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 21 && athlete.age_source?.startsWith("http"),
+          adult_age_verified: athlete.age_verified === true
+            && athlete.age_corroborated === true
+            && typeof athlete.age === "number"
+            && athlete.age >= 21
+            && (athlete.age_sources || []).filter((source) => source.source.startsWith("http")).length >= 2,
           age_evidence: athlete.age_evidence || null,
           age_precision: athlete.age_precision || null,
+          age_corroborated: athlete.age_corroborated === true,
+          age_sources: athlete.age_sources || [],
           priority_score: athlete.score >= RESEARCH_PRIORITY_THRESHOLD,
           quality_audit: audited || null,
         },
@@ -4197,8 +4294,8 @@ ATHLETE PROFILE:
 - Source-linked research evidence: ${athlete.evidence?.slice(0, 6).map((item) =>
     `${item.title || item.url || "Source"} (${item.url || "URL unavailable"}): ${(item.sourceExcerpt || item.claim).slice(0, 700)}`
   ).join(" | ") || "No additional source excerpt available"}
-- Source-verified age: ${athlete.age_verified === true && typeof athlete.age === "number"
-    ? `${athlete.age} (${athlete.age_source || "source URL unavailable"}; ${athlete.age_precision || "precision unknown"})`
+- Corroborated age: ${athlete.age_verified === true && athlete.age_corroborated === true && typeof athlete.age === "number"
+    ? `${athlete.age} (${athlete.age_sources?.map((source) => source.source).join("; ") || athlete.age_source || "source URLs unavailable"}; ${athlete.age_precision || "precision unknown"})`
     : "not verified"}
 - Instagram: @${athlete.instagram_handle} (${athlete.instagram_url || "profile URL unavailable"})
 - Instagram identity confidence: ${athlete.identity_confidence || 0}/100 (${athlete.identity_evidence?.join("; ") || "no identity evidence"})
@@ -4216,7 +4313,7 @@ ATHLETE PROFILE:
 HARD GATES (not weighted points):
 - The person and Instagram identity must resolve to the same real professional athlete
 - Professional status must have a direct or reputable current source
-- Age must be source-verified as 18 or older before Approval
+- Age must be corroborated by two independent agreeing public sources as 21 or older before a finalist can score above 80
 - The account must be public and active
 - A failed gate must be described in concerns and cannot be recommended for Approval
 - An 80+ proposal must include at least one momentum_evidence citation and one creator_evidence citation copied from the supplied dossier. Each source_url must be an exact URL shown above and each source_excerpt must be text actually present at that URL. Return an empty evidence array when the dossier does not support the claim.
@@ -4231,8 +4328,9 @@ DIMENSION CALIBRATION:
 - A source-verified age in range, emerging career stage, in-range audience, current activity, and at least one concrete creator signal support 80+ active-thesis fit.
 
 ⚠️ CRITICAL AGE REQUIREMENT ⚠️
-- Athletes MUST be 18 years or older
+- Athletes MUST have two independent agreeing public sources establishing age 21+ to qualify above 80
 - If the athlete is under 18, or if their age suggests they might be a minor, score them 0
+- Ages 18-20 and single-source adult ages remain below 80 pending eligibility or corroboration
 - Look for age indicators in bio, context, or if they're described as "junior", "youth", "teen", etc.
 - When in doubt about age, note it as a concern
 
@@ -5079,7 +5177,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         commercialAchievability: athlete.commercial_achievability_score,
         researchConfidence: athlete.research_confidence_score,
         identityConfirmed: (athlete.identity_confidence || 0) >= 70,
-        adultEligibilityVerified: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 21,
+        adultEligibilityVerified: athlete.age_verified === true
+          && athlete.age_corroborated === true
+          && typeof athlete.age === "number"
+          && athlete.age >= 21,
         currentAthleticMomentumVerified: athlete.audit_current_momentum_verified === true,
         meaningfulAudienceVerified: athlete.audit_meaningful_audience_verified === true,
         creatorPotentialVerified: athlete.audit_creator_potential_verified === true,
@@ -5137,7 +5238,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       score: a.score,
     })));
 
-    // Persist every safe finalist with an explicit disposition. Source-verified
+    // Persist every safe finalist with an explicit disposition. Corroborated
     // adults enter Approval, unknown-age adults remain held in Research, and
     // likely minors are recorded only in the run audit (never in the pipeline).
     let addedCount = 0;
@@ -5164,14 +5265,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
                 claim: `Instagram profile @${athlete.instagram_handle}`,
               }
             : null,
-          athlete.age_source
-            ? {
+          ...(athlete.age_sources || []).map((ageSource, index) => ({
                 type: "age",
-                provider: "Apify Google Search",
-                source: athlete.age_source,
-                claim: athlete.age ? `Public source reports age ${athlete.age}` : "Age source",
-              }
-            : null,
+                provider: "Age corroboration",
+                source: ageSource.source,
+                claim: athlete.age
+                  ? `Independent source ${index + 1} supports age ${athlete.age}`
+                  : `Independent age source ${index + 1}`,
+              })),
         ].filter(Boolean);
 
         const { data: candidateRecord, error: candidateError } = await supabase
@@ -5213,9 +5314,15 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               public_account: athlete.is_private === false,
               active_account: athlete.account_active === true,
               last_posted_at: athlete.last_posted_at || null,
-              adult_age_verified: athlete.age_verified === true && typeof athlete.age === "number" && athlete.age >= 21 && athlete.age_source?.startsWith("http"),
+              adult_age_verified: athlete.age_verified === true
+                && athlete.age_corroborated === true
+                && typeof athlete.age === "number"
+                && athlete.age >= 21
+                && (athlete.age_sources || []).filter((source) => source.source.startsWith("http")).length >= 2,
               age_evidence: athlete.age_evidence || null,
               age_precision: athlete.age_precision || null,
+              age_corroborated: athlete.age_corroborated === true,
+              age_sources: athlete.age_sources || [],
               current_momentum_verified: athlete.audit_current_momentum_verified === true,
               meaningful_audience_verified: athlete.audit_meaningful_audience_verified === true,
               creator_potential_verified: athlete.audit_creator_potential_verified === true,

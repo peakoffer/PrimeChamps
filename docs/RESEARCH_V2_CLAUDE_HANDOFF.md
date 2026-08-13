@@ -52,9 +52,9 @@ Import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evid
 ## Current production checkpoint
 
 - Previously verified production-gate checkpoint: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`.
-- Current production checkpoint before the Social Blade pilot adapter: `27b3ee7` — `Reuse pre-decision Instagram snapshots`. Confirm the current `main` Vercel deployment is `READY` before resuming paid work.
+- The Social Blade pilot adapter landed at `37bff04`, split-safe checkpoints at `d4f6185`, and archive retry throttling at `3efd01b`. Confirm the current `main` Vercel deployment is `READY` before resuming paid work; do not assume an older hash in this handoff is still the tip.
 - Production alias is attached to `crm.prime-champs.com`; `/` returns a 307 to login and `/login` returns 200.
-- Active prompt version: `research-v8-source-backed-finalist-gates`.
+- Active prompt version: `research-v9-corroborated-21-plus-finalist-gate`.
 - The 2026-08-12 smoke run resolved `claude-sonnet-5` dynamically through Anthropic's model catalog.
 - Typecheck passes, focused lint has zero errors, and all 81 unit tests pass. The benchmark page retains one pre-existing React effect warning.
 - Full repository lint has zero errors and 53 pre-existing warnings unrelated to this checkpoint.

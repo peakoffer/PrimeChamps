@@ -82,7 +82,7 @@ A candidate counts only when all are true:
 - Achievability is at least 70.
 - Research confidence is at least 80.
 - The athlete and personal account are identity-confirmed.
-- Age 21+ is source-verified.
+- Age 21+ is corroborated by two independent agreeing public sources. One authoritative source may block a minor or hold an adult, but can never qualify a finalist.
 - Instagram is public and recently active.
 - A meaningful audience meets the active minimum or the bounded exceptional-engagement rule.
 - Current athletic momentum and creator potential each have an exact dossier URL and matching source excerpt.
@@ -122,10 +122,10 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 | Evaluation | Internal Supabase harness and unit/CI regressions first | Smallest debuggable system with no new platform dependency | Braintrust for scaled comparisons; Langfuse for self-hosted tracing; Promptfoo for broader CI matrices |
 | Paid influencer data | No Modash contract now | The annual price is not justified before proving a measured data gap | Revisit with volume and coverage evidence |
 
-## Current production checkpoint — 12 August 2026
+## Current production checkpoint — 13 August 2026
 
-- Production gate checkpoint `1763655` (`Require source-backed research finalists`) was verified READY as Vercel deployment `dpl_39DMEHCxpkkBkpS5RvCPrhMmfxEb` on `https://crm.prime-champs.com`. The enriched-import checkpoint is `3e6b90d`; confirm the current `main` deployment before resuming paid work.
-- Research prompt `research-v8-source-backed-finalist-gates` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
+- The source-backed finalist gate began at `1763655`; the Social Blade adapter landed at `37bff04`, and archive retry throttling at `3efd01b`. Always confirm the current `main` deployment is READY before resuming paid work rather than treating an older hash in this document as authoritative.
+- Research prompt `research-v9-corroborated-21-plus-finalist-gate` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
 - A proposed priority above 80 remains 79 until audit. The final score is the minimum of the Researcher dimensions, blind-Auditor dimensions, and review correction, followed by objective guardrails.
 - Finalists now require deterministic source matches for current momentum and creator behavior, a meaningful measured audience, commercial achievability of at least 70, complete commercial constraints, zero unsupported material claims, and an independent audit.
 - Evaluation mode is regression-checked to exit before athlete inserts and to suppress notifications. The research workflow contains no message, draft, or outreach-table writes.

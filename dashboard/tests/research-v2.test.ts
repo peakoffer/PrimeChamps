@@ -909,6 +909,8 @@ test("live research evaluation exits before athlete writes and suppresses notifi
   for (const forbiddenTable of ["messages", "channel_messages", "outreach_touchpoints", "message_drafts"]) {
     assert.ok(!workflow.includes(`from("${forbiddenTable}")`), `research workflow must not touch ${forbiddenTable}`);
   }
+  assert.match(workflow, /athlete\.age_corroborated === true/);
+  assert.match(workflow, /two independent agreeing public sources/);
 });
 
 test("evidence set hashes are order-independent but content-sensitive", () => {

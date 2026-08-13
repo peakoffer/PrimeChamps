@@ -180,12 +180,28 @@ export type VerifiedAthleteAge = ParsedAgeEvidence & {
   source: string;
   hostname: string;
   evidence: string;
+  corroborated: boolean;
+  corroboratingSources: Array<{
+    source: string;
+    hostname: string;
+    evidence: string;
+    age: number;
+    birthYear: number | null;
+    precision: ParsedAgeEvidence["precision"];
+  }>;
 };
 
+function agesAgree(left: VerifiedAthleteAge, right: VerifiedAthleteAge) {
+  if (left.birthYear !== null && right.birthYear !== null) {
+    return left.birthYear === right.birthYear;
+  }
+  return Math.abs(left.age - right.age) <= 1;
+}
+
 /**
- * Select age evidence without calling a provider. One trusted source is
- * sufficient; lower-authority results require two distinct domains that agree
- * on the birth year. Every parsed age must be attributable to the named athlete.
+ * Select age evidence without calling a provider. One trusted source is useful
+ * for safety screening, but `corroborated` is true only when two independent
+ * domains agree. Every parsed age must be attributable to the named athlete.
  */
 export function selectVerifiedAthleteAge(
   athleteName: string,
@@ -209,7 +225,7 @@ export function selectVerifiedAthleteAge(
       trustedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
   };
 
-  const corroborationCandidates: VerifiedAthleteAge[] = [];
+  const candidates: Array<VerifiedAthleteAge & { trusted: boolean }> = [];
   for (const result of results) {
     const text = `${result.title || ""} ${result.snippet || ""}`;
     if (!matchesAthleteName(text)) continue;
@@ -224,22 +240,61 @@ export function selectVerifiedAthleteAge(
       source,
       hostname: sourceHostname(source),
       evidence: attributableAge.evidence.slice(0, 1_000),
+      corroborated: false,
+      corroboratingSources: [],
     };
-    if (isTrusted(candidate.source)) return candidate;
-    corroborationCandidates.push(candidate);
+    candidates.push({ ...candidate, trusted: isTrusted(candidate.source) });
   }
 
-  const candidatesByBirthYear = new Map<number, VerifiedAthleteAge[]>();
-  for (const candidate of corroborationCandidates) {
-    if (candidate.birthYear === null) continue;
-    const matches = candidatesByBirthYear.get(candidate.birthYear) || [];
-    matches.push(candidate);
-    candidatesByBirthYear.set(candidate.birthYear, matches);
+  for (const candidate of candidates) {
+    const independentMatches = Array.from(new Map(
+      candidates
+        .filter((other) => other.hostname && agesAgree(candidate, other))
+        .map((other) => [other.hostname, other] as const)
+    ).values());
+    if (independentMatches.length < 2) continue;
+    const primary = independentMatches.find((match) => match.trusted) || candidate;
+    return {
+      age: primary.age,
+      birthYear: primary.birthYear,
+      precision: primary.precision,
+      isMinor: primary.isMinor,
+      source: primary.source,
+      hostname: primary.hostname,
+      evidence: primary.evidence,
+      corroborated: true,
+      corroboratingSources: independentMatches.map((match) => ({
+        source: match.source,
+        hostname: match.hostname,
+        evidence: match.evidence,
+        age: match.age,
+        birthYear: match.birthYear,
+        precision: match.precision,
+      })),
+    };
   }
-  for (const matches of candidatesByBirthYear.values()) {
-    if (new Set(matches.map((candidate) => candidate.hostname).filter(Boolean)).size >= 2) {
-      return matches[0];
-    }
-  }
-  return null;
+
+  // A single authoritative source remains useful for safety screening, but it
+  // is explicitly not corroborated and therefore cannot satisfy the 21+
+  // finalist gate. Untrusted single-source biography results remain rejected.
+  const trusted = candidates.find((candidate) => candidate.trusted);
+  if (!trusted) return null;
+  return {
+    age: trusted.age,
+    birthYear: trusted.birthYear,
+    precision: trusted.precision,
+    isMinor: trusted.isMinor,
+    source: trusted.source,
+    hostname: trusted.hostname,
+    evidence: trusted.evidence,
+    corroborated: false,
+    corroboratingSources: [{
+      source: trusted.source,
+      hostname: trusted.hostname,
+      evidence: trusted.evidence,
+      age: trusted.age,
+      birthYear: trusted.birthYear,
+      precision: trusted.precision,
+    }],
+  };
 }
