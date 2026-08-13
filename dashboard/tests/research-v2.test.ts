@@ -2127,6 +2127,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(workflow, /query_plan_version: input\.queryPlanVersion/);
   assert.match(workflow, /benchmark_split: input\.benchmarkSplit/);
+  assert.match(route, /No active locked, unrevealed benchmark cohort exists/);
+  assert.match(route, /activeCohortVersion/);
+  assert.match(route, /\.contains\("stratification_tags", \["dylan_outcome_ground_truth"\]\)/);
   assert.match(benchmarkPage, /Recover fresh positives/);
   assert.match(benchmarkPage, /benchmarkSplit: "excluded"/);
   assert.match(benchmarkPage, /maxApifyChargeUsd: 0\.5/);

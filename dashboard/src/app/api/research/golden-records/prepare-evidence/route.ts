@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { start } from "workflow/api";
 import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { selectActiveBenchmarkCohort } from "@/lib/research/v2";
 import {
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
@@ -29,6 +30,8 @@ type GoldenPreparationCandidate = {
   athlete_name: string;
   sport: string;
   benchmark_split: string;
+  benchmark_cohort_version: string | null;
+  split_assigned_at: string | null;
   label_order_fit_before_outcome: boolean;
   fit_label: string;
   achievability_label: string;
@@ -166,6 +169,7 @@ async function unresolvedRecordsForBaseline(input: {
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
   const outcomeGroundTruth = record.stratification_tags?.includes("dylan_outcome_ground_truth") === true;
   return record.benchmark_split === "excluded"
+    && outcomeGroundTruth
     && record.sport !== "Needs enrichment"
     && record.sport !== "Unknown"
     && (record.label_order_fit_before_outcome === true || outcomeGroundTruth)
@@ -183,6 +187,7 @@ function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
 function eligibleForSignalRecovery(record: GoldenPreparationCandidate, split: SignalRecoverySplit) {
   if (split === "excluded") return eligibleForEvidencePreparation(record);
   return record.benchmark_split === split
+    && record.stratification_tags?.includes("dylan_outcome_ground_truth") === true
     && record.sport !== "Needs enrichment"
     && record.sport !== "Unknown"
     && (record.fit_label === "fit" || record.fit_label === "not_fit")
@@ -203,7 +208,7 @@ export async function GET() {
     const admin = createAdminClient();
     const [{ data: candidates, error: candidateError }, { data: runs, error: runError }] = await Promise.all([
       admin.from("research_golden_records")
-        .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+        .select("id,athlete_name,sport,benchmark_split,benchmark_cohort_version,split_assigned_at,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
         .eq("organization_id", user.organizationId)
         .in("benchmark_split", ["excluded", "development", "held_out"])
         .order("updated_at", { ascending: true }),
@@ -216,10 +221,20 @@ export async function GET() {
     if (candidateError) throw candidateError;
     if (runError) throw runError;
     const allCandidates = (candidates || []) as GoldenPreparationCandidate[];
+    const activeCohort = selectActiveBenchmarkCohort(
+      allCandidates as unknown as Array<Record<string, unknown>>
+    );
+    const inActiveCohort = (record: GoldenPreparationCandidate) =>
+      Boolean(activeCohort.cohortVersion)
+      && record.benchmark_cohort_version === activeCohort.cohortVersion;
     const eligible = allCandidates.filter(eligibleForEvidencePreparation);
-    const developmentEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "development"));
+    const developmentEligible = allCandidates.filter((record) =>
+      inActiveCohort(record) && eligibleForSignalRecovery(record, "development")
+    );
     const excludedEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "excluded"));
-    const heldOutEligible = allCandidates.filter((record) => eligibleForSignalRecovery(record, "held_out"));
+    const heldOutEligible = allCandidates.filter((record) =>
+      inActiveCohort(record) && eligibleForSignalRecovery(record, "held_out")
+    );
     const runRows = (runs || []) as EvidencePreparationRunRow[];
     const baselineCompleted = completedRecordIds(runRows, HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION);
     const recoveryCompleted = completedRecordIds(
@@ -252,6 +267,8 @@ export async function GET() {
       heldOutSignalRecoveryCount: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true"
         ? heldOutEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length
         : 0,
+      activeCohortConflict: activeCohort.conflict,
+      activeCohortVersion: activeCohort.cohortVersion,
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
       defaultMaxApifyChargeUsd: EVIDENCE_PREPARATION_LIMITS.defaultMaxApifyChargeUsd,
       scoringTokensSpentByPreparation: 0,
@@ -318,11 +335,36 @@ export async function POST(request: NextRequest) {
       && process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED !== "true") {
       return NextResponse.json({ error: "Held-out evidence preparation is disabled outside the one-time release window." }, { status: 409 });
     }
+    let activeCohortVersion: string | null = null;
+    if (requestedMode === "signal_recovery" && signalRecoverySplit !== "excluded") {
+      const { data: activeHeldOut, error: activeCohortError } = await admin.from("research_golden_records")
+        .select("benchmark_split,benchmark_cohort_version,split_assigned_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+        .eq("organization_id", user.organizationId)
+        .eq("benchmark_split", "held_out")
+        .contains("stratification_tags", ["dylan_outcome_ground_truth"])
+        .not("benchmark_cohort_version", "is", null)
+        .not("held_out_locked_at", "is", null)
+        .is("held_out_revealed_at", null);
+      if (activeCohortError) throw activeCohortError;
+      const activeCohort = selectActiveBenchmarkCohort(
+        (activeHeldOut || []) as Array<Record<string, unknown>>
+      );
+      if (activeCohort.conflict || !activeCohort.cohortVersion) {
+        return NextResponse.json({
+          error: activeCohort.conflict
+            ? "Evidence recovery is disabled because multiple active benchmark cohorts exist."
+            : "No active locked, unrevealed benchmark cohort exists. Archived development and held-out records cannot be recovered or rescored.",
+        }, { status: 409 });
+      }
+      activeCohortVersion = activeCohort.cohortVersion;
+    }
     let query = admin.from("research_golden_records")
-      .select("id,athlete_name,sport,benchmark_split,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
+      .select("id,athlete_name,sport,benchmark_split,benchmark_cohort_version,split_assigned_at,label_order_fit_before_outcome,fit_label,achievability_label,decision_at,evidence_cutoff_at,decisive_information_publicly_knowable,point_in_time_reliability,labeled_at,held_out_locked_at,held_out_revealed_at,stratification_tags")
       .eq("organization_id", user.organizationId)
       .eq("benchmark_split", requestedMode === "signal_recovery" ? signalRecoverySplit : "excluded")
+      .contains("stratification_tags", ["dylan_outcome_ground_truth"])
       .order("updated_at", { ascending: true });
+    if (activeCohortVersion) query = query.eq("benchmark_cohort_version", activeCohortVersion);
     if (requestedIds.length) query = query.in("id", requestedIds);
     const { data, error } = await query.limit(500);
     if (error) throw error;
