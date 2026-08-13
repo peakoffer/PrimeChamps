@@ -1589,6 +1589,7 @@ test("generated material signals require explicit athlete-relevant language", ()
 test("evidence preparation is durable, replay-safe, zero-scoring, and isolated from outreach", () => {
   const workflow = readFileSync(new URL("../src/workflows/benchmark-evidence.ts", import.meta.url), "utf8");
   const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
+  const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
   assert.match(workflow, /"use workflow"/);
   assert.match(workflow, /"use step"/);
@@ -1627,6 +1628,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /query_plan_version: queryPlanVersion/);
   assert.match(workflow, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
   assert.match(workflow, /query_plan_version: input\.queryPlanVersion/);
+  assert.match(benchmarkPage, /Recover fresh positives/);
+  assert.match(benchmarkPage, /benchmarkSplit: "excluded"/);
+  assert.match(benchmarkPage, /maxApifyChargeUsd: 0\.5/);
+  assert.match(benchmarkPage, /recordIds: excludedSignalRecoveryRecords/);
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runner, /signalPreparedIds/);
   assert.match(runner, /Execution is gated by the evidence itself/);

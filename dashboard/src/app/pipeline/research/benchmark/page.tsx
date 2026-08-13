@@ -68,7 +68,7 @@ type EvidencePreparationRun = {
   error_message: string | null;
   checkpoint?: {
     preparation_mode?: "baseline" | "age_recovery" | "signal_recovery";
-    benchmark_split?: "development" | "held_out" | null;
+    benchmark_split?: "excluded" | "development" | "held_out" | null;
   } | null;
   created_at: string;
 };
@@ -299,6 +299,7 @@ export default function ResearchBenchmarkPage() {
   const [benchmarkRuns, setBenchmarkRuns] = useState<BenchmarkRun[]>([]);
   const [benchmarkReadiness, setBenchmarkReadiness] = useState(INITIAL_BENCHMARK_READINESS);
   const [eligibleEvidenceRecords, setEligibleEvidenceRecords] = useState(0);
+  const [excludedSignalRecoveryCount, setExcludedSignalRecoveryCount] = useState(0);
   const [developmentSignalRecoveryCount, setDevelopmentSignalRecoveryCount] = useState(0);
   const [heldOutSignalRecoveryCount, setHeldOutSignalRecoveryCount] = useState(0);
   const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
@@ -330,6 +331,7 @@ export default function ResearchBenchmarkPage() {
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
       setEvidencePreparationRuns(preparationPayload.runs || []);
       setEligibleEvidenceRecords(preparationPayload.eligibleRecordCount || 0);
+      setExcludedSignalRecoveryCount(preparationPayload.excludedSignalRecoveryCount || 0);
       setDevelopmentSignalRecoveryCount(preparationPayload.developmentSignalRecoveryCount || 0);
       setHeldOutSignalRecoveryCount(preparationPayload.heldOutSignalRecoveryCount || 0);
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
@@ -364,6 +366,21 @@ export default function ResearchBenchmarkPage() {
     && ["queued", "running", "failed"].includes(latestHeldOutRun.status)
     ? latestHeldOutRun
     : undefined;
+  const completedExcludedSignalRecordIds = useMemo(() => new Set(evidencePreparationRuns
+    .filter((run) => run.status === "completed"
+      && run.checkpoint?.preparation_mode === "signal_recovery"
+      && run.checkpoint?.benchmark_split === "excluded")
+    .flatMap((run) => run.record_ids)), [evidencePreparationRuns]);
+  const excludedSignalRecoveryRecords = useMemo(() => records
+    .filter((record) => record.benchmark_split === "excluded"
+      && record.fit_label === "fit"
+      && record.evidence_blockers.includes("fit record lacks both audience and creator-behavior evidence")
+      && !completedExcludedSignalRecordIds.has(record.id))
+    .sort((left, right) => left.evidence_blockers.length - right.evidence_blockers.length
+      || right.safe_evidence_source_count - left.safe_evidence_source_count
+      || right.safe_evidence_claim_count - left.safe_evidence_claim_count
+      || left.athlete_name.localeCompare(right.athlete_name))
+    .slice(0, 10), [completedExcludedSignalRecordIds, records]);
 
   useEffect(() => {
     if (!activeEvidenceRun) return;
@@ -661,6 +678,36 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const recoverExcludedSignals = async () => {
+    if (!excludedSignalRecoveryRecords.length) return;
+    setWorking(true);
+    setMessage("Starting a capped creator and commercial signal recovery run for the closest fresh positive cases…");
+    try {
+      const response = await fetch("/api/research/golden-records/prepare-evidence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          recordIds: excludedSignalRecoveryRecords.map((record) => record.id),
+          maxRecords: excludedSignalRecoveryRecords.length,
+          maxApifyChargeUsd: 0.5,
+          preparationMode: "signal_recovery",
+          benchmarkSplit: "excluded",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Fresh signal recovery failed to start");
+      setMessage(payload.discoveryReused
+        ? `Queued ${payload.records} fresh positive cases from a saved discovery checkpoint. New Apify spend and scoring-token spend are zero.`
+        : `Queued ${payload.records} fresh positive cases with a $${payload.maxApifyChargeUsd.toFixed(2)} discovery ceiling. Scoring tokens and outreach mutations remain zero.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Fresh signal recovery failed to start");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const recoverHeldOutSignals = async () => {
     setWorking(true);
     setMessage("Starting blind creator and commercial signal recovery for locked held-out cases…");
@@ -876,6 +923,16 @@ export default function ResearchBenchmarkPage() {
             </label>
             <button disabled={working || summary.readyFit < 40 || summary.readyNotFit < 40 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
               Freeze benchmark cohort
+            </button>
+            <button
+              disabled={working || Boolean(activeEvidenceRun) || excludedSignalRecoveryCount === 0 || excludedSignalRecoveryRecords.length === 0}
+              onClick={() => void recoverExcludedSignals()}
+              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+            >
+              {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
+                && activeEvidenceRun.checkpoint.benchmark_split === "excluded"
+                ? `Preparing fresh evidence ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
+                : `Recover fresh positives (${excludedSignalRecoveryRecords.length})`}
             </button>
             <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
               {activeEvidenceRun
