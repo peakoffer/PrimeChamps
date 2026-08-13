@@ -16,6 +16,7 @@ export const maxDuration = 300;
 
 const MAX_PILOT_RECORDS = 5;
 const MAX_PILOT_CREDITS = 10;
+const MAX_OFFICIAL_PILOT_ATTEMPTS = 5;
 const APIFY_PUBLIC_HISTORY_ACTOR = process.env.APIFY_SOCIAL_BLADE_ACTOR?.trim() || "solidcode/socialblade-scraper";
 const APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0.5;
 const APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2;
@@ -31,6 +32,7 @@ type Candidate = {
   credits: number;
   ageDays: number;
   apifyPublicAttempted: boolean;
+  officialHistoryAttempted: boolean;
 };
 
 function normalizeHandle(value: unknown) {
@@ -56,13 +58,18 @@ async function buildCandidatePlan(organizationId: string) {
     .in("golden_record_id", recordIds)
     .eq("eligible_for_scoring", true);
   if (claimError) throw claimError;
-  const { data: apifyPublicSources, error: apifyPublicSourceError } = await admin.from("research_evidence_sources")
-    .select("golden_record_id")
+  const { data: historySources, error: historySourceError } = await admin.from("research_evidence_sources")
+    .select("golden_record_id,provider")
     .eq("organization_id", organizationId)
     .in("golden_record_id", recordIds)
-    .eq("provider", "apify_social_blade_public_history");
-  if (apifyPublicSourceError) throw apifyPublicSourceError;
-  const apifyPublicAttemptedRecordIds = new Set((apifyPublicSources || []).map((source) => source.golden_record_id));
+    .in("provider", ["apify_social_blade_public_history", "social_blade_instagram_history"]);
+  if (historySourceError) throw historySourceError;
+  const apifyPublicAttemptedRecordIds = new Set((historySources || [])
+    .filter((source) => source.provider === "apify_social_blade_public_history")
+    .map((source) => source.golden_record_id));
+  const officialHistoryAttemptedRecordIds = new Set((historySources || [])
+    .filter((source) => source.provider === "social_blade_instagram_history")
+    .map((source) => source.golden_record_id));
 
   const recordById = new Map((records || []).map((record) => [record.id, record]));
   const handleByRecord = new Map<string, { handle: string; effectiveAt: string }>();
@@ -106,6 +113,7 @@ async function buildCandidatePlan(organizationId: string) {
       credits: tier.credits,
       ageDays: tier.ageDays,
       apifyPublicAttempted: apifyPublicAttemptedRecordIds.has(record.id),
+      officialHistoryAttempted: officialHistoryAttemptedRecordIds.has(record.id),
     }];
   }).sort((left, right) => right.safeClaimCount - left.safeClaimCount
     || left.credits - right.credits
@@ -123,8 +131,23 @@ async function countApifyPublicHistoryAttempts(organizationId: string) {
   return count || 0;
 }
 
-function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number) {
-  const pilot = candidates.slice(0, MAX_PILOT_RECORDS);
+async function countOfficialHistoryAttempts(organizationId: string) {
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("research_evidence_sources")
+    .select("golden_record_id")
+    .eq("organization_id", organizationId)
+    .eq("provider", "social_blade_instagram_history");
+  if (error) throw error;
+  return new Set((data || []).map((source) => source.golden_record_id)).size;
+}
+
+function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, officialHistoryAttemptCount: number) {
+  const officialPilotExhausted = officialHistoryAttemptCount >= MAX_OFFICIAL_PILOT_ATTEMPTS;
+  // Paid history is deliberately checkpointed one exact handle at a time. The
+  // page reloads and re-audits readiness before it can authorize another call.
+  const pilot = officialPilotExhausted
+    ? []
+    : candidates.filter((candidate) => !candidate.officialHistoryAttempted).slice(0, 1);
   const apifyPilotExhausted = apifyPublicAttemptCount >= APIFY_PUBLIC_HISTORY_FAILURE_LIMIT;
   const apifyPilot = apifyPilotExhausted
     ? []
@@ -143,6 +166,9 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number) {
     })),
     pilotMaximumCredits: pilot.reduce((sum, candidate) => sum + candidate.credits, 0),
     pilotLimit: MAX_PILOT_RECORDS,
+    officialPilotAttemptCount: officialHistoryAttemptCount,
+    officialPilotAttemptLimit: MAX_OFFICIAL_PILOT_ATTEMPTS,
+    officialPilotExhausted,
     apifyConfigured: Boolean(process.env.APIFY_API_KEY),
     apifyPilotRecords: apifyPilot.map((candidate) => ({
       id: candidate.id,
@@ -181,14 +207,83 @@ async function fetchSocialBladeHistory(candidate: Candidate) {
   return { payload, sourceUrl: url.toString() };
 }
 
+function officialAttemptRequestId(candidate: Candidate) {
+  return `${candidate.handle}:${candidate.tier}:${candidate.cutoff.slice(0, 10)}:attempt`;
+}
+
+async function reserveOfficialHistoryAttempt(input: {
+  organizationId: string;
+  candidate: Candidate;
+}) {
+  const admin = createAdminClient();
+  const provider = "social_blade_instagram_history";
+  const providerRequestId = officialAttemptRequestId(input.candidate);
+  const sourceRow = {
+    organization_id: input.organizationId,
+    golden_record_id: input.candidate.id,
+    canonical_url: `https://socialblade.com/instagram/user/${input.candidate.handle}`,
+    domain: "socialblade.com",
+    title: `@${input.candidate.handle} Instagram history lookup (${input.candidate.cutoff.slice(0, 10)} cutoff)`,
+    publisher: "Social Blade Business API",
+    source_type: "social",
+    provider,
+    provider_request_id: providerRequestId,
+    published_at: null,
+    retrieved_at: new Date().toISOString(),
+    historical_as_of: null,
+    retrieval_status: "error",
+    eligible_before_cutoff: false,
+    exclusion_reason: "Paid history lookup reserved; no cutoff-safe response has been accepted yet.",
+    metadata: {
+      handle: input.candidate.handle,
+      evidence_cutoff_at: input.candidate.cutoff,
+      history_tier: input.candidate.tier,
+      maximum_credits_for_request: input.candidate.credits,
+      attempt_state: "reserved",
+      scoring_tokens_spent: 0,
+      outreach_mutations_allowed: false,
+    },
+  };
+  const { data, error } = await admin.from("research_evidence_sources").insert(sourceRow).select("id").single();
+  if (error?.code === "23505") return null;
+  if (error) throw error;
+  return data.id as string;
+}
+
+async function persistOfficialHistoryFailure(input: {
+  sourceId: string;
+  candidate: Candidate;
+  reason: string;
+}) {
+  const admin = createAdminClient();
+  const { error } = await admin.from("research_evidence_sources").update({
+    retrieved_at: new Date().toISOString(),
+    retrieval_status: "error",
+    eligible_before_cutoff: false,
+    exclusion_reason: input.reason.slice(0, 500),
+    metadata: {
+      handle: input.candidate.handle,
+      evidence_cutoff_at: input.candidate.cutoff,
+      history_tier: input.candidate.tier,
+      maximum_credits_for_request: input.candidate.credits,
+      attempt_state: "failed",
+      failure_reason: input.reason.slice(0, 500),
+      scoring_tokens_spent: 0,
+      outreach_mutations_allowed: false,
+    },
+  }).eq("id", input.sourceId);
+  if (error) throw error;
+}
+
 export async function GET() {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
-    const [candidates, apifyPublicAttemptCount] = await Promise.all([
+    const [candidates, apifyPublicAttemptCount, officialHistoryAttemptCount] = await Promise.all([
       buildCandidatePlan(user.organizationId),
       countApifyPublicHistoryAttempts(user.organizationId),
+      countOfficialHistoryAttempts(user.organizationId),
     ]);
-    return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount) });
+    return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount, officialHistoryAttemptCount) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not prepare Social Blade history plan";
     const status = message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 500;
@@ -203,7 +298,6 @@ export async function POST(request: NextRequest) {
       provider?: string;
       recordId?: string;
       confirmedMaximumChargeUsd?: number;
-      maxRecords?: number;
       confirmedMaximumCredits?: number;
     };
     if (body.provider === "apify_public_31_day") {
@@ -410,10 +504,20 @@ export async function POST(request: NextRequest) {
     if (!process.env.SOCIAL_BLADE_CLIENT_ID || !process.env.SOCIAL_BLADE_TOKEN) {
       return NextResponse.json({ error: "Add SOCIAL_BLADE_CLIENT_ID and SOCIAL_BLADE_TOKEN to the server environment first" }, { status: 503 });
     }
-    const maxRecords = Math.max(1, Math.min(MAX_PILOT_RECORDS, Math.floor(Number(body.maxRecords) || MAX_PILOT_RECORDS)));
-    const allCandidates = await buildCandidatePlan(user.organizationId);
-    const candidates = allCandidates.slice(0, maxRecords);
+    const officialHistoryAttemptCount = await countOfficialHistoryAttempts(user.organizationId);
+    if (officialHistoryAttemptCount >= MAX_OFFICIAL_PILOT_ATTEMPTS) {
+      return NextResponse.json({
+        error: "The paid history pilot is closed after five checkpointed attempts. Audit readiness before authorizing another provider or budget.",
+        attempts: officialHistoryAttemptCount,
+      }, { status: 409 });
+    }
+    const allCandidates = (await buildCandidatePlan(user.organizationId))
+      .filter((candidate) => !candidate.officialHistoryAttempted);
+    const candidates = allCandidates.slice(0, 1);
     if (!candidates.length) return NextResponse.json({ ok: true, attempted: 0, matched: 0, claimsWritten: 0, maximumCreditsAuthorized: 0, outreachMutationsAllowed: false });
+    if (body.recordId !== candidates[0].id) {
+      return NextResponse.json({ error: "Refresh the plan before starting the next one-profile paid pilot" }, { status: 409 });
+    }
     const maximumCredits = candidates.reduce((sum, candidate) => sum + candidate.credits, 0);
     if (maximumCredits > MAX_PILOT_CREDITS || Number(body.confirmedMaximumCredits) !== maximumCredits) {
       return NextResponse.json({
@@ -431,6 +535,15 @@ export async function POST(request: NextRequest) {
     const failures: Array<{ recordId: string; athleteName: string; reason: string }> = [];
     for (const candidate of candidates) {
       if (maximumCreditsAttempted + candidate.credits > maximumCredits) break;
+      const reservedSourceId = await reserveOfficialHistoryAttempt({
+        organizationId: user.organizationId,
+        candidate,
+      });
+      if (!reservedSourceId) {
+        return NextResponse.json({
+          error: "This exact paid lookup is already reserved or completed; refresh before attempting another profile",
+        }, { status: 409 });
+      }
       maximumCreditsAttempted += candidate.credits;
       try {
         const { payload, sourceUrl } = await fetchSocialBladeHistory(candidate);
@@ -442,12 +555,13 @@ export async function POST(request: NextRequest) {
           maximumSnapshotAgeDays: 31,
         });
         if (!snapshot) {
-          failures.push({ recordId: candidate.id, athleteName: candidate.athleteName, reason: "No exact-handle snapshot within 31 days before the cutoff" });
+          const reason = "No exact-handle snapshot within 31 days before the cutoff";
+          await persistOfficialHistoryFailure({ sourceId: reservedSourceId, candidate, reason });
+          failures.push({ recordId: candidate.id, athleteName: candidate.athleteName, reason });
           continue;
         }
         matched += 1;
         const provider = "social_blade_instagram_history";
-        const providerRequestId = `${snapshot.handle}:${candidate.tier}:${snapshot.capturedAt.slice(0, 10)}`;
         const sourceRow = {
           organization_id: user.organizationId,
           golden_record_id: candidate.id,
@@ -457,7 +571,7 @@ export async function POST(request: NextRequest) {
           publisher: "Social Blade Business API",
           source_type: "social",
           provider,
-          provider_request_id: providerRequestId,
+          provider_request_id: officialAttemptRequestId(candidate),
           published_at: snapshot.capturedAt,
           retrieved_at: new Date().toISOString(),
           historical_as_of: snapshot.capturedAt,
@@ -471,23 +585,14 @@ export async function POST(request: NextRequest) {
             snapshot_age_days: snapshot.snapshotAgeDays,
             history_tier: candidate.tier,
             maximum_credits_for_request: candidate.credits,
+            attempt_state: "matched",
             scoring_tokens_spent: 0,
             outreach_mutations_allowed: false,
           },
         };
-        const { data: existingSource, error: existingSourceError } = await admin.from("research_evidence_sources")
-          .select("id").eq("organization_id", user.organizationId).eq("golden_record_id", candidate.id)
-          .eq("provider", provider).eq("provider_request_id", providerRequestId).maybeSingle();
-        if (existingSourceError) throw existingSourceError;
-        let sourceId = existingSource?.id;
-        if (sourceId) {
-          const { error } = await admin.from("research_evidence_sources").update(sourceRow).eq("id", sourceId);
-          if (error) throw error;
-        } else {
-          const { data: inserted, error } = await admin.from("research_evidence_sources").insert(sourceRow).select("id").single();
-          if (error) throw error;
-          sourceId = inserted.id;
-        }
+        const sourceId = reservedSourceId;
+        const { error: sourceUpdateError } = await admin.from("research_evidence_sources").update(sourceRow).eq("id", sourceId);
+        if (sourceUpdateError) throw sourceUpdateError;
         sourcesWritten += 1;
         for (const claim of snapshot.claims) {
           const claimRow = {
@@ -519,10 +624,12 @@ export async function POST(request: NextRequest) {
           claimsWritten += 1;
         }
       } catch (error) {
+        const reason = error instanceof Error ? error.message : "Social Blade lookup failed";
+        await persistOfficialHistoryFailure({ sourceId: reservedSourceId, candidate, reason });
         failures.push({
           recordId: candidate.id,
           athleteName: candidate.athleteName,
-          reason: error instanceof Error ? error.message : "Social Blade lookup failed",
+          reason,
         });
       }
     }

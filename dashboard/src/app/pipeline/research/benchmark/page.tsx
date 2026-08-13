@@ -93,6 +93,9 @@ type SocialBladeHistoryPlan = {
   }>;
   pilotMaximumCredits: number;
   pilotLimit: number;
+  officialPilotAttemptCount: number;
+  officialPilotAttemptLimit: number;
+  officialPilotExhausted: boolean;
   apifyConfigured: boolean;
   apifyPilotRecords: Array<{
     id: string;
@@ -113,6 +116,9 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   pilotRecords: [],
   pilotMaximumCredits: 0,
   pilotLimit: 5,
+  officialPilotAttemptCount: 0,
+  officialPilotAttemptLimit: 5,
+  officialPilotExhausted: false,
   apifyConfigured: false,
   apifyPilotRecords: [],
   apifyPilotMaximumChargeUsd: 0.5,
@@ -745,19 +751,20 @@ export default function ResearchBenchmarkPage() {
   const runSocialBladePilot = async () => {
     if (!socialBladePlan.configured || !socialBladePlan.pilotRecords.length || socialBladePlan.pilotMaximumCredits <= 0) return;
     setWorking(true);
-    setMessage(`Running an exact-handle ${socialBladePlan.pilotRecords.length}-profile Social Blade pilot with a hard ${socialBladePlan.pilotMaximumCredits}-credit ceiling…`);
+    const candidate = socialBladePlan.pilotRecords[0];
+    setMessage(`Checking one exact Instagram handle for ${candidate.athleteName} with a hard ${socialBladePlan.pilotMaximumCredits}-credit ceiling…`);
     try {
       const response = await fetch("/api/research/golden-records/social-blade-history", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          maxRecords: socialBladePlan.pilotRecords.length,
+          recordId: candidate.id,
           confirmedMaximumCredits: socialBladePlan.pilotMaximumCredits,
         }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Social Blade pilot failed");
-      setMessage(`Social Blade pilot matched ${payload.matched}/${payload.attempted} exact pre-cutoff profiles and wrote ${payload.claimsWritten} evidence claims. At most ${payload.maximumCreditsAttempted} credits were attempted; scoring tokens and outreach mutations stayed at zero.${payload.failures?.length ? ` ${payload.failures.length} profiles produced no usable cutoff-safe snapshot.` : ""}`);
+      setMessage(`Social Blade checkpoint matched ${payload.matched}/${payload.attempted} exact pre-cutoff profile and wrote ${payload.claimsWritten} evidence claims. At most ${payload.maximumCreditsAttempted} credits were attempted; scoring tokens and outreach mutations stayed at zero.${payload.failures?.length ? " This profile produced no usable cutoff-safe snapshot and will not be retried." : ""}`);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Social Blade pilot failed");
@@ -1120,16 +1127,22 @@ export default function ResearchBenchmarkPage() {
                 : "Public history window exhausted"}
             </button>
             <button
-              disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured || socialBladePlan.pilotRecords.length === 0}
+              disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured || socialBladePlan.officialPilotExhausted || socialBladePlan.pilotRecords.length === 0}
               onClick={() => void runSocialBladePilot()}
-              title={!socialBladePlan.configured ? "Add the two server-side Social Blade credentials first" : undefined}
+              title={!socialBladePlan.configured
+                ? "Add the two server-side Social Blade credentials first"
+                : socialBladePlan.officialPilotExhausted
+                  ? "Five checkpointed paid attempts have completed; audit readiness before spending more"
+                  : undefined}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               {!socialBladePlan.configured
                 ? "Social Blade not connected"
+                : socialBladePlan.officialPilotExhausted
+                  ? "Paid history pilot paused"
                 : socialBladePlan.pilotRecords.length === 0
                   ? "Historical audience complete"
-                  : `Run ${socialBladePlan.pilotRecords.length}-profile pilot · ≤${socialBladePlan.pilotMaximumCredits} credits`}
+                  : `Check ${socialBladePlan.pilotRecords[0].athleteName} · ≤${socialBladePlan.pilotMaximumCredits} credits`}
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || archiveCoolingDown || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}

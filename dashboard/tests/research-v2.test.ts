@@ -2125,6 +2125,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   const socialBladeHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/social-blade-history/route.ts", import.meta.url), "utf8");
   const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
+  const socialBladeAttemptMigration = readFileSync(new URL("../../supabase/migrations/20260813213119_lock_social_blade_paid_attempts.sql", import.meta.url), "utf8");
   assert.match(workflow, /"use workflow"/);
   assert.match(workflow, /"use step"/);
   assert.match(workflow, /discoverHistoricalEvidence\.maxRetries = 0/);
@@ -2214,6 +2215,17 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0\.5/);
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2/);
+  assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_PILOT_ATTEMPTS = 5/);
+  assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);
+  assert.match(socialBladeHistoryRoute, /reserveOfficialHistoryAttempt/);
+  assert.match(socialBladeHistoryRoute, /persistOfficialHistoryFailure/);
+  assert.match(socialBladeHistoryRoute, /error\?\.code === "23505"/);
+  assert.match(socialBladeHistoryRoute, /candidates\.filter\(\(candidate\) => !candidate\.officialHistoryAttempted\)\.slice\(0, 1\)/);
+  assert.match(socialBladeHistoryRoute, /body\.recordId !== candidates\[0\]\.id/);
+  assert.match(socialBladeHistoryRoute, /The paid history pilot is closed after five checkpointed attempts/);
+  assert.doesNotMatch(socialBladeHistoryRoute, /maxRecords\?: number/);
+  assert.match(benchmarkPage, /recordId: candidate\.id/);
+  assert.match(benchmarkPage, /This profile produced no usable cutoff-safe snapshot and will not be retried/);
   assert.match(socialBladeHistoryRoute, /apifyPublicAttemptedRecordIds/);
   assert.match(socialBladeHistoryRoute, /retrieval_status: "error"/);
   assert.match(socialBladeHistoryRoute, /eligible_before_cutoff: false/);
@@ -2226,6 +2238,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(migration, /research_evidence_sources_golden_historical_url_uidx/);
   assert.match(migration, /research_evidence_claims_golden_source_type_uidx/);
   assert.match(migration, /revoke all on table public\.research_evidence_preparation_runs from anon, authenticated/);
+  assert.match(socialBladeAttemptMigration, /create unique index if not exists research_evidence_sources_social_blade_attempt_uidx/);
+  assert.match(socialBladeAttemptMigration, /where provider = 'social_blade_instagram_history'/);
+  assert.match(socialBladeAttemptMigration, /provider_request_id is not null/);
 });
 
 test("fresh cohort assignment uses the evidence-ready 16-per-label gate", () => {
