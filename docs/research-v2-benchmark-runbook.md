@@ -109,8 +109,12 @@ A release is not production-ready until the locked held-out run proves all of th
 
 No metric is considered passed when its denominator is zero. Fewer than ten recommendations is correct when the evidence does not support ten.
 
-## Current data status (2026-08-12)
+## Current data status (2026-08-13)
 
-Dylan's enriched source supplies the complete 100-case outcome benchmark: 44 positive and 56 negative. It was compared cell-for-cell with the original locked 100-row benchmark and Evidence Index, then imported as 420 individually dated detail sources and claims. All 100 cases are point-in-time compliant; 79 contain some safe evidence and 12 pass the current freeze gate.
+Dylan's enriched source supplies the complete 100-case outcome benchmark: 44 positive and 56 negative. It was compared cell-for-cell with the original locked 100-row benchmark and Evidence Index, then imported as 420 individually dated detail sources and claims. All 100 cases are point-in-time compliant. The corrected bounded-batch audit, which no longer truncates at Supabase's 1,000-row default, finds 26 evidence-ready cases.
 
-The original cohort has already been revealed and is never held out again. The next cohort route uses only excluded, never-evaluated, evidence-ready cases and requires 16 per label so eight per label can remain locked held-out. Current fresh-pool readiness is zero positive and four negative. Recover 16 positive and 12 additional negative cases before attempting a new split. Do not run a paid scoring benchmark merely because the workbook import succeeded.
+The original cohort has already been revealed and is never held out again. The next cohort route uses only excluded, never-evaluated, evidence-ready cases and requires 16 per label so eight per label can remain locked held-out. Current fresh-pool readiness is zero positive and 13 negative. Recover 16 positive and three additional negative cases before attempting a new split. Do not run a paid scoring benchmark merely because the workbook import succeeded.
+
+Audience-at-decision is the dominant positive gap. A capped Google/Wayback recovery batch spent $0.061, added 27 safe non-audience claims across seven records, and found zero historical audience evidence. A zero-spend scan of prior Apify Instagram profile runs also found no exact pre-cutoff snapshot for the 14 known positive handles. Do not repeat either lane blindly.
+
+The next bounded lane is Social Blade's official Instagram history API. Every known positive cutoff is within one year as of 2026-08-13, so each lookup needs at most the two-credit `extended` tier. The owner-only route previews a deterministic five-record pilot and requires the caller to confirm its exact credit ceiling (maximum ten). It accepts only an exact returned handle and the newest daily metric row no later than—and no more than 31 days before—the historical cutoff. It writes audience, engagement, and creator-behavior claims only; Social Blade alone never creates an athlete identity claim. Run the readiness audit immediately after the pilot and stop if its evidence-ready gain does not justify continuing.

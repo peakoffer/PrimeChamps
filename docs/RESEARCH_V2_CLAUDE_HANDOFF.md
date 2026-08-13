@@ -1,6 +1,6 @@
 # OnlyFans Athlete Research V2 — Claude Handoff
 
-**Checkpoint date:** 2026-08-12  
+**Checkpoint date:** 2026-08-13
 **Repository:** `/Users/zacharyvanheyningen/Projects/primechamps`  
 **GitHub:** `peakoffer/PrimeChamps`  
 **Local branch:** `codex/research-engine-quality-loop`  
@@ -52,11 +52,11 @@ Import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evid
 ## Current production checkpoint
 
 - Previously verified production-gate checkpoint: `176365551120fbfab3357ae5618da201b8e62086` — `Require source-backed research finalists`.
-- Enriched-import code checkpoint: `3e6b90d` — `Import enriched historical benchmark evidence`. Confirm the current `main` Vercel deployment is `READY` before resuming paid work.
+- Current production checkpoint before the Social Blade pilot adapter: `27b3ee7` — `Reuse pre-decision Instagram snapshots`. Confirm the current `main` Vercel deployment is `READY` before resuming paid work.
 - Production alias is attached to `crm.prime-champs.com`; `/` returns a 307 to login and `/login` returns 200.
 - Active prompt version: `research-v8-source-backed-finalist-gates`.
 - The 2026-08-12 smoke run resolved `claude-sonnet-5` dynamically through Anthropic's model catalog.
-- Typecheck passes, focused lint has zero errors, and all 77 unit tests pass.
+- Typecheck passes, focused lint has zero errors, and all 81 unit tests pass. The benchmark page retains one pre-existing React effect warning.
 - Full repository lint has zero errors and 53 pre-existing warnings unrelated to this checkpoint.
 - Local Turbopack production builds can hang after compilation on this machine. Vercel's exact Git production build is the authoritative build proof and is green.
 
@@ -167,6 +167,9 @@ Primary implementation files:
 - `dashboard/src/lib/research/benchmark-runner.ts` — historical development/held-out model stages and checkpoints.
 - `dashboard/src/lib/research/benchmark-runner-support.ts` — benchmark evidence/finalist gates, leakage controls, metrics, cost accounting.
 - `dashboard/src/lib/research/historical-social-snapshot.ts` — strict pre-decision mailbox snapshot validation.
+- `dashboard/src/lib/research/historical-instagram-history.ts` — exact-handle, pre-cutoff reuse of already-paid Apify profile snapshots.
+- `dashboard/src/lib/research/social-blade-history.ts` — exact-handle Social Blade tier selection and cutoff-safe daily metric normalization.
+- `dashboard/src/app/api/research/golden-records/social-blade-history/route.ts` — owner-only five-profile historical audience pilot with an explicit credit ceiling.
 - `dashboard/src/lib/research/historical-workbook-converter.ts` — deterministic extracted-workbook conversion and locked-source comparison.
 - `dashboard/scripts/convert-onlyfans-historical-workbook-extraction.ts` — converts spreadsheet-tool extraction JSON into the importer's 100-record contract.
 - `dashboard/scripts/import-onlyfans-historical-benchmark.ts` — dry-run/apply importer with required backup.
@@ -181,20 +184,22 @@ Primary implementation files:
 - Historical benchmark: OpenRouter latest structured-output Sonnet is preferred when configured; direct Anthropic is fallback. Exact provider/model/release/price is stored per run.
 - Identity and Instagram metrics: Apify exact-name search plus separate profile verification.
 - Perplexity is an optional degraded fallback, not the primary discovery path.
-- Modash is intentionally deferred; the $10k-$16.2k annual API cost is unjustified without a measured coverage gap.
+- Modash is intentionally deferred; the $10k-$16.2k annual API cost is unjustified. Social Blade is the bounded historical-audience recovery lane: its official Business API exposes Instagram daily follower/post/engagement history, with one-year `extended` requests costing at most two credits per profile. The 14 known positive handles all have cutoffs within one year as of 2026-08-13.
 
-Required environment-variable names are documented in the app/Vercel configuration. Never print, paste into chat, log, or commit their values. Important names include `OPENAI_API_KEY`, `APIFY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, Supabase server credentials, and `RESEARCH_EVALUATION_SECRET` or `CRON_SECRET`.
+Required environment-variable names are documented in the app/Vercel configuration. Never print, paste into chat, log, or commit their values. Important names include `OPENAI_API_KEY`, `APIFY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `SOCIAL_BLADE_CLIENT_ID`, `SOCIAL_BLADE_TOKEN`, Supabase server credentials, and `RESEARCH_EVALUATION_SECRET` or `CRON_SECRET`.
 
 ## Historical benchmark status
 
 - Dylan source truth: 100/100 outcomes, 44 positive and 56 negative.
 - Enriched workbook validation: zero locked-source differences, zero duplicate names/refs, 748 detail ledger rows covering all 100 athletes, zero post-cutoff rows, and 420 usable claim rows across 76 athletes. The other 24 correctly contain only `Not available` audit notes.
 - Controlled import: 100 updates, zero creates, zero conflicts, 420 deterministic detail sources and 420 detail claims. All 420 sources are cutoff-safe, 406 claims are scoring-eligible, 12 medium-confidence claims remain excluded, one mailbox age hint remains excluded, and one outcome-like commercial excerpt remains excluded. Zero eligible outcome-like claims and zero future claims were found after import.
-- Current full readiness audit: 100/100 point-in-time compliant; 79 records with safe evidence; 12/100 pass the freeze gate. Identity 34/100, two-source adult age 11/100, current momentum 39/100, audience 12/100, creator behavior 45/100, and both audience + creator 6/100.
-- Positive readiness: 2/44 pass all freeze gates; identity 23/44, age 8/44, momentum 26/44, audience 2/44, creator behavior 28/44, audience + creator 2/44.
-- Negative readiness: 10/56 pass all freeze gates; identity 11/56, age 3/56, momentum 13/56, audience 10/56, creator behavior 17/56, audience + creator 4/56.
-- Fresh cohort gate uses only currently excluded, never-evaluated records. Those contain zero ready positives and four ready negatives. The route requires 16 ready records per label before it can lock eight fresh held-out examples per label. Therefore the immediate recovery target is 16 excluded positives and 12 additional excluded negatives.
+- The corrected audit reads evidence claims in bounded batches instead of silently stopping at Supabase's default 1,000-row response cap. It currently finds 26 total evidence-ready records.
+- Existing assignments are 16 development records, 16 already-revealed held-out records, and 68 fresh excluded records. Of the fresh excluded pool, zero positives and 13 negatives are evidence-ready.
+- The fresh cohort route requires 16 evidence-ready records per label before it can freeze eight fresh held-out examples per label. The immediate gap is therefore 16 excluded positives and three excluded negatives.
 - Six records still have unresolved sport. Audience-at-decision and independent age/identity corroboration are the largest gaps.
+- One capped excluded-positive recovery run (`81896c04-9f22-4c30-ac68-4845abafa6ab`) spent $0.061 on a single saved Google discovery batch, processed seven records before the Internet Archive rate-limited, and added 27 safe claims. It recovered identity/momentum/creator details but zero audience claims. Three unprocessed records can resume from the saved paid discovery output with zero new Apify spend.
+- Existing Apify Instagram history was then scanned without starting new Actor runs. Fourteen positive records had exact, pre-cutoff handle evidence, but zero matching stored profile snapshots existed before their cutoffs. Do not reinterpret current or post-cutoff scrapes as historical evidence.
+- Social Blade is the next measured pilot. All 14 known positive cutoffs fall between 2025-10-07 and 2026-08-05, so the official API needs at most 28 credits for all records; start with five records and a hard ten-credit ceiling, then audit actual match/readiness gain before continuing.
 - The original revealed cohort `onlyfans-athlete-v1-2026-08-12-149b1a6e` must never be reused as held-out.
 - Original held-out run `8ddf4794-9107-4d97-ade1-e1b027b9b6f9` completed 16/16 for about $0.813. It safely returned no >80 finalists but achieved only 50% audit decisions, so it did not prove production readiness.
 - A fresh held-out cohort must be locked only after development calibration is frozen.
@@ -220,9 +225,11 @@ Required environment-variable names are documented in the app/Vercel configurati
 
 - Run `npm run audit:historical-benchmark` before and after each recovery batch.
 - Work only on excluded, never-evaluated records intended for the next cohort. Do not change or reuse the revealed held-out cohort.
-- Reach at least 16 evidence-ready excluded positives and 16 evidence-ready excluded negatives. Current state is `0 positive / 4 negative`, so the minimum gap is `16 positive / 12 negative`.
+- Reach at least 16 evidence-ready excluded positives and 16 evidence-ready excluded negatives. Current state is `0 positive / 13 negative`, so the minimum gap is `16 positive / 3 negative`.
 - Prioritize positives with an existing historical Instagram handle, creator behavior, and momentum, then recover two-source identity, two-source 21+, and an audience snapshot. Do not spend age-research money on cases that still lack audience/creator viability.
 - Use bounded evidence-preparation batches; inspect each batch before the next. Do not run Researcher/Auditor scoring during evidence recovery.
+- Do not buy another Google/Wayback discovery run for the same audience gap: the measured seven-record batch produced zero audience evidence. Resume the saved three-record checkpoint only if its non-audience identity/momentum evidence is still useful.
+- Configure the server-only `SOCIAL_BLADE_CLIENT_ID` and `SOCIAL_BLADE_TOKEN`, then run only the five-profile pilot shown in the Golden benchmark UI. The request must explicitly confirm the exact plan ceiling and can never exceed ten credits. Accept only exact handles and Social Blade daily rows no more than 31 days before the decision cutoff. Audit readiness gain before buying or using further credits.
 - A mailbox statement can seed a query but cannot satisfy two-source age. Medium/low identity claims and outcome-like commercial excerpts remain non-scoring.
 
 ### 4. Build the development benchmark
@@ -266,7 +273,7 @@ git status --short --branch
 git log --oneline -12
 ```
 
-The code checkpoint for the enriched import is `3e6b90d`. Use `git log --oneline -12` for the final documentation/push commit above it.
+The last fully deployed checkpoint before the Social Blade adapter is `27b3ee7`. Use `git log --oneline -12` for the newest documentation/push commit above it.
 
 ## Known traps
 
@@ -276,6 +283,7 @@ The code checkpoint for the enriched import is `3e6b90d`. Use `git log --oneline
 - Do not reset a record's old benchmark split during an evidence import. The importer preserves it; a fresh split is created only by the explicit cohort-freeze route.
 - Do not reuse the revealed held-out cohort.
 - Do not use a provider run or profile scrape as proof that audience/creator evidence exists; inspect the actual normalized claims.
+- Social Blade proves metrics for an exact public handle; it does not independently prove that the handle belongs to the named athlete. Never generate an identity claim from Social Blade alone.
 - Do not accept model-generated creator strings without exact URL/excerpt matching.
 - Do not let the review stage raise either the Researcher or blind-Auditor score.
 - Do not treat a 79 pre-audit hold as a weak score; inspect `researcher_proposed_score` and audit eligibility.

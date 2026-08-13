@@ -1,0 +1,138 @@
+export type SocialBladeHistoryTier = "default" | "extended" | "archive" | "vault";
+
+export type SocialBladeDailyInstagramMetric = {
+  date?: string;
+  followers?: number;
+  following?: number;
+  media?: number;
+  avg_likes?: number;
+  avg_comments?: number;
+};
+
+export type SocialBladeInstagramResponse = {
+  status?: { success?: boolean; status?: number; error?: string };
+  info?: { credits?: { available?: number } };
+  data?: {
+    id?: { id?: string; username?: string; display_name?: string };
+    daily?: SocialBladeDailyInstagramMetric[];
+  };
+};
+
+export type SocialBladeHistoricalClaim = {
+  claimType: "audience_signal" | "social_engagement_signal" | "creator_behavior_signal";
+  claimText: string;
+  structuredValue: Record<string, unknown>;
+  material: true;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+function normalizeHandle(value: unknown) {
+  return typeof value === "string" ? value.trim().replace(/^@/, "").toLowerCase() : "";
+}
+
+function validMetric(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function socialBladeHistoryTierForCutoff(
+  evidenceCutoffAt: string,
+  now = new Date()
+): { tier: SocialBladeHistoryTier; credits: number; ageDays: number } | null {
+  const cutoff = Date.parse(evidenceCutoffAt);
+  const current = now.getTime();
+  if (!Number.isFinite(cutoff) || !Number.isFinite(current) || cutoff > current) return null;
+  const ageDays = Math.ceil((current - cutoff) / DAY_MS);
+  if (ageDays <= 30) return { tier: "default", credits: 1, ageDays };
+  if (ageDays <= 365) return { tier: "extended", credits: 2, ageDays };
+  if (ageDays <= 1_095) return { tier: "archive", credits: 3, ageDays };
+  if (ageDays <= 3_650) return { tier: "vault", credits: 5, ageDays };
+  return null;
+}
+
+/**
+ * Converts one Social Blade response into cutoff-safe public social signals.
+ * The account must be an exact handle match, and only the newest row at or
+ * before the decision cutoff can be used. Social Blade does not prove that an
+ * account belongs to the athlete, so this deliberately emits no identity claim.
+ */
+export function prepareSocialBladeInstagramSnapshot(input: {
+  expectedHandle: string;
+  evidenceCutoffAt: string;
+  response: SocialBladeInstagramResponse;
+  maximumSnapshotAgeDays?: number;
+}) {
+  const expectedHandle = normalizeHandle(input.expectedHandle);
+  const returnedHandle = normalizeHandle(input.response.data?.id?.username);
+  const cutoff = Date.parse(input.evidenceCutoffAt);
+  const maximumSnapshotAgeDays = Math.max(1, Math.min(90, input.maximumSnapshotAgeDays ?? 31));
+  if (!expectedHandle || returnedHandle !== expectedHandle || !Number.isFinite(cutoff)) return null;
+  if (input.response.status?.success !== true) return null;
+
+  const row = (input.response.data?.daily || [])
+    .map((metric) => ({ metric, timestamp: typeof metric.date === "string" ? Date.parse(metric.date) : Number.NaN }))
+    .filter(({ timestamp }) => Number.isFinite(timestamp) && timestamp <= cutoff)
+    .sort((left, right) => right.timestamp - left.timestamp)[0];
+  if (!row) return null;
+  const snapshotAgeDays = Math.floor((cutoff - row.timestamp) / DAY_MS);
+  if (snapshotAgeDays < 0 || snapshotAgeDays > maximumSnapshotAgeDays) return null;
+
+  const followers = validMetric(row.metric.followers);
+  const following = validMetric(row.metric.following);
+  const media = validMetric(row.metric.media);
+  const averageLikes = validMetric(row.metric.avg_likes);
+  const averageComments = validMetric(row.metric.avg_comments);
+  if (followers === null && media === null) return null;
+
+  const capturedAt = new Date(row.timestamp).toISOString();
+  const structuredBase = {
+    platform: "instagram",
+    handle: expectedHandle,
+    captured_at: capturedAt,
+    evidence_cutoff_at: new Date(cutoff).toISOString(),
+    snapshot_age_days: snapshotAgeDays,
+    provider: "social_blade",
+  };
+  const claims: SocialBladeHistoricalClaim[] = [];
+  if (followers !== null) {
+    claims.push({
+      claimType: "audience_signal",
+      claimText: `Public Instagram account @${expectedHandle} had ${Math.round(followers).toLocaleString("en-US")} followers on ${capturedAt.slice(0, 10)}.`,
+      structuredValue: { ...structuredBase, followers: Math.round(followers), following: following === null ? null : Math.round(following) },
+      material: true,
+    });
+  }
+  if (followers !== null && followers > 0 && averageLikes !== null && averageComments !== null) {
+    const engagementRatePercent = Math.round(((averageLikes + averageComments) / followers) * 100 * 10_000) / 10_000;
+    claims.push({
+      claimType: "social_engagement_signal",
+      claimText: `Public Instagram account @${expectedHandle} averaged ${Math.round(averageLikes).toLocaleString("en-US")} likes and ${Math.round(averageComments).toLocaleString("en-US")} comments (${engagementRatePercent}% engagement) on ${capturedAt.slice(0, 10)}.`,
+      structuredValue: {
+        ...structuredBase,
+        average_likes: averageLikes,
+        average_comments: averageComments,
+        engagement_rate_percent: engagementRatePercent,
+      },
+      material: true,
+    });
+  }
+  if (media !== null) {
+    claims.push({
+      claimType: "creator_behavior_signal",
+      claimText: `Public Instagram account @${expectedHandle} had ${Math.round(media).toLocaleString("en-US")} published posts on ${capturedAt.slice(0, 10)}.`,
+      structuredValue: { ...structuredBase, posts: Math.round(media) },
+      material: true,
+    });
+  }
+  if (!claims.length) return null;
+
+  return {
+    handle: expectedHandle,
+    returnedDisplayName: input.response.data?.id?.display_name || null,
+    capturedAt,
+    snapshotAgeDays,
+    followers: followers === null ? null : Math.round(followers),
+    media: media === null ? null : Math.round(media),
+    claims,
+  };
+}

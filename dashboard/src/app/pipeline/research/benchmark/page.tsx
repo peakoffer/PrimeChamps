@@ -75,6 +75,30 @@ type EvidencePreparationRun = {
   created_at: string;
 };
 
+type SocialBladeHistoryPlan = {
+  configured: boolean;
+  candidateCount: number;
+  pilotRecords: Array<{
+    id: string;
+    athleteName: string;
+    sport: string;
+    handle: string;
+    cutoff: string;
+    historyTier: "default" | "extended" | "archive" | "vault";
+    maximumCredits: number;
+  }>;
+  pilotMaximumCredits: number;
+  pilotLimit: number;
+};
+
+const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
+  configured: false,
+  candidateCount: 0,
+  pilotRecords: [],
+  pilotMaximumCredits: 0,
+  pilotLimit: 5,
+};
+
 type BenchmarkMetrics = {
   cases: number;
   precisionAbove80: number | null;
@@ -304,6 +328,7 @@ export default function ResearchBenchmarkPage() {
   const [excludedSignalRecoveryCount, setExcludedSignalRecoveryCount] = useState(0);
   const [developmentSignalRecoveryCount, setDevelopmentSignalRecoveryCount] = useState(0);
   const [heldOutSignalRecoveryCount, setHeldOutSignalRecoveryCount] = useState(0);
+  const [socialBladePlan, setSocialBladePlan] = useState(INITIAL_SOCIAL_BLADE_PLAN);
   const [evidencePreparationMode, setEvidencePreparationMode] = useState<"baseline" | "age_recovery">("baseline");
   const [selected, setSelected] = useState<GoldenRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -317,17 +342,19 @@ export default function ResearchBenchmarkPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, preparationResponse, benchmarkResponse] = await Promise.all([
+      const [response, preparationResponse, benchmarkResponse, socialBladeResponse] = await Promise.all([
         fetch("/api/research/golden-records", { cache: "no-store" }),
         fetch("/api/research/golden-records/prepare-evidence", { cache: "no-store" }),
         fetch("/api/research/benchmarks", { cache: "no-store" }),
+        fetch("/api/research/golden-records/social-blade-history", { cache: "no-store" }),
       ]);
-      const [payload, preparationPayload, benchmarkPayload] = await Promise.all([
-        response.json(), preparationResponse.json(), benchmarkResponse.json(),
+      const [payload, preparationPayload, benchmarkPayload, socialBladePayload] = await Promise.all([
+        response.json(), preparationResponse.json(), benchmarkResponse.json(), socialBladeResponse.json(),
       ]);
       if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
       if (!preparationResponse.ok) throw new Error(preparationPayload.error || "Could not load evidence preparation");
       if (!benchmarkResponse.ok) throw new Error(benchmarkPayload.error || "Could not load benchmark runs");
+      if (!socialBladeResponse.ok) throw new Error(socialBladePayload.error || "Could not load Social Blade recovery plan");
       setRecords(payload.records || []);
       setSummary(payload.summary || INITIAL_SUMMARY);
       setEvidenceSummary(payload.evidenceSummary || INITIAL_EVIDENCE_SUMMARY);
@@ -339,6 +366,7 @@ export default function ResearchBenchmarkPage() {
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
       setBenchmarkRuns(benchmarkPayload.runs || []);
       setBenchmarkReadiness(benchmarkPayload.readiness || INITIAL_BENCHMARK_READINESS);
+      setSocialBladePlan(socialBladePayload || INITIAL_SOCIAL_BLADE_PLAN);
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
@@ -653,10 +681,34 @@ export default function ResearchBenchmarkPage() {
       const response = await fetch("/api/research/golden-records/reuse-instagram-history", { method: "POST" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Instagram history recovery failed");
-      setMessage(`Matched ${payload.matched}/${payload.candidates} dated Instagram profiles and wrote ${payload.claimsWritten} evidence claims from existing runs. New provider spend and scoring tokens: $0.`);
+      setMessage(`Matched ${payload.matched}/${payload.candidates} dated Instagram profiles after scanning ${payload.historicalRunsAvailable || 0} saved runs (${payload.datasetsRead || 0} datasets readable, ${payload.datasetsUnavailable || 0} unavailable). Wrote ${payload.claimsWritten} claims; new provider spend and scoring tokens: $0.`);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Instagram history recovery failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const runSocialBladePilot = async () => {
+    if (!socialBladePlan.configured || !socialBladePlan.pilotRecords.length || socialBladePlan.pilotMaximumCredits <= 0) return;
+    setWorking(true);
+    setMessage(`Running an exact-handle ${socialBladePlan.pilotRecords.length}-profile Social Blade pilot with a hard ${socialBladePlan.pilotMaximumCredits}-credit ceiling…`);
+    try {
+      const response = await fetch("/api/research/golden-records/social-blade-history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          maxRecords: socialBladePlan.pilotRecords.length,
+          confirmedMaximumCredits: socialBladePlan.pilotMaximumCredits,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Social Blade pilot failed");
+      setMessage(`Social Blade pilot matched ${payload.matched}/${payload.attempted} exact pre-cutoff profiles and wrote ${payload.claimsWritten} evidence claims. At most ${payload.maximumCreditsAttempted} credits were attempted; scoring tokens and outreach mutations stayed at zero.${payload.failures?.length ? ` ${payload.failures.length} profiles produced no usable cutoff-safe snapshot.` : ""}`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Social Blade pilot failed");
     } finally {
       setWorking(false);
     }
@@ -962,6 +1014,18 @@ export default function ResearchBenchmarkPage() {
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               Reuse Instagram history
+            </button>
+            <button
+              disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured || socialBladePlan.pilotRecords.length === 0}
+              onClick={() => void runSocialBladePilot()}
+              title={!socialBladePlan.configured ? "Add the two server-side Social Blade credentials first" : undefined}
+              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+            >
+              {!socialBladePlan.configured
+                ? "Social Blade not connected"
+                : socialBladePlan.pilotRecords.length === 0
+                  ? "Historical audience complete"
+                  : `Run ${socialBladePlan.pilotRecords.length}-profile pilot · ≤${socialBladePlan.pilotMaximumCredits} credits`}
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}

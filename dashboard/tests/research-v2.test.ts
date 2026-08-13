@@ -68,6 +68,10 @@ import {
   prepareHistoricalSocialSnapshot,
 } from "../src/lib/research/historical-social-snapshot.ts";
 import { prepareHistoricalInstagramSnapshot } from "../src/lib/research/historical-instagram-history.ts";
+import {
+  prepareSocialBladeInstagramSnapshot,
+  socialBladeHistoryTierForCutoff,
+} from "../src/lib/research/social-blade-history.ts";
 import { convertOnlyFansHistoricalWorkbookExtraction } from "../src/lib/research/historical-workbook-converter.ts";
 import {
   buildHistoricalAgeRecoveryQueries,
@@ -352,6 +356,56 @@ test("existing Apify Instagram history becomes evidence only for exact pre-cutof
     athleteName: "Example Athlete", sport: "Beach volleyball", expectedHandle: "example.athlete",
     evidenceCutoffAt: "2026-05-03T12:00:00.000Z", capturedAt: "2026-04-20T10:00:00.000Z",
     profile: { username: "different.person", followersCount: 120_000 },
+  }), null);
+});
+
+test("Social Blade recovery uses the cheapest sufficient tier and only exact, recent pre-cutoff rows", () => {
+  const now = new Date("2026-08-13T12:00:00.000Z");
+  assert.deepEqual(socialBladeHistoryTierForCutoff("2026-08-03T12:00:00.000Z", now), {
+    tier: "default", credits: 1, ageDays: 10,
+  });
+  assert.deepEqual(socialBladeHistoryTierForCutoff("2025-10-07T12:00:00.000Z", now), {
+    tier: "extended", credits: 2, ageDays: 310,
+  });
+
+  const snapshot = prepareSocialBladeInstagramSnapshot({
+    expectedHandle: "@example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
+    response: {
+      status: { success: true, status: 200 },
+      data: {
+        id: { username: "example.athlete", display_name: "Example Athlete" },
+        daily: [
+          { date: "2026-05-04T00:00:00.000Z", followers: 999_999, media: 999, avg_likes: 99_999, avg_comments: 999 },
+          { date: "2026-05-03T00:00:00.000Z", followers: 120_000, following: 400, media: 240, avg_likes: 3_000, avg_comments: 75 },
+          { date: "2026-05-02T00:00:00.000Z", followers: 119_500, media: 239, avg_likes: 2_900, avg_comments: 70 },
+        ],
+      },
+    },
+  });
+  assert.equal(snapshot?.capturedAt, "2026-05-03T00:00:00.000Z");
+  assert.equal(snapshot?.followers, 120_000);
+  assert.deepEqual(snapshot?.claims.map((claim) => claim.claimType), [
+    "audience_signal", "social_engagement_signal", "creator_behavior_signal",
+  ]);
+  assert.equal(snapshot?.claims[1].structuredValue.engagement_rate_percent, 2.5625);
+  assert.ok(snapshot?.claims.every((claim) => !claim.claimText.includes("Beach volleyball")));
+
+  assert.equal(prepareSocialBladeInstagramSnapshot({
+    expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
+    response: {
+      status: { success: true },
+      data: { id: { username: "different.person" }, daily: [{ date: "2026-05-03T00:00:00.000Z", followers: 120_000 }] },
+    },
+  }), null);
+  assert.equal(prepareSocialBladeInstagramSnapshot({
+    expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
+    response: {
+      status: { success: true },
+      data: { id: { username: "example.athlete" }, daily: [{ date: "2026-03-01T00:00:00.000Z", followers: 120_000 }] },
+    },
   }), null);
 });
 
