@@ -728,7 +728,11 @@ export default function ResearchBenchmarkPage() {
       const response = await fetch("/api/research/golden-records/prepare-evidence", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ maxRecords: 10, maxApifyChargeUsd: 0.75, preparationMode: evidencePreparationMode }),
+        body: JSON.stringify({
+          maxRecords: evidencePreparationMode === "age_recovery" ? 10 : 3,
+          maxApifyChargeUsd: evidencePreparationMode === "age_recovery" ? 0.75 : 0.5,
+          preparationMode: evidencePreparationMode,
+        }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Evidence preparation failed to start");
@@ -1051,7 +1055,7 @@ export default function ResearchBenchmarkPage() {
                 ? `Preparing ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
                 : evidencePreparationMode === "age_recovery"
                   ? `Recover age evidence (${Math.min(eligibleEvidenceRecords, 10)})`
-                  : `Build evidence packets (${Math.min(eligibleEvidenceRecords, 10)})`}
+                  : `Build evidence packets (${Math.min(eligibleEvidenceRecords, 3)})`}
             </button>
           </div>
         </div>

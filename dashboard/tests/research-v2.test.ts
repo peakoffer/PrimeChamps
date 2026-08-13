@@ -1858,11 +1858,14 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /archiveProviderReplay/);
   assert.match(route, /archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
+  assert.match(route, /unresolvedRecordsForBaseline/);
+  assert.match(route, /filter\(\(\{ readiness \}\) => !readiness\.ready\)/);
+  assert.match(route, /Number\(left\.record\.fit_label === "fit"\)/);
   assert.match(route, /readiness\.momentum\.passed/);
   assert.match(route, /readiness\.creatorPotential\.passed/);
   assert.match(route, /!readiness\.adult\.passed \|\| !readiness\.identity\.passed/);
   const ageSelectorStart = route.indexOf("async function unresolvedFitRecordsForAgeRecovery");
-  const ageSelectorEnd = route.indexOf("function eligibleForEvidencePreparation", ageSelectorStart);
+  const ageSelectorEnd = route.indexOf("async function unresolvedRecordsForBaseline", ageSelectorStart);
   const ageSelector = route.slice(ageSelectorStart, ageSelectorEnd);
   assert.ok(ageSelectorStart >= 0 && ageSelectorEnd > ageSelectorStart);
   assert.doesNotMatch(ageSelector, /baselineCompleted/);
@@ -1875,6 +1878,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /requestedMode === "signal_recovery" \? signalRecoverySplit : "excluded"/);
   assert.match(route, /heldOutSignalRecoveryCount/);
   assert.match(route, /RESEARCH_HELD_OUT_EVALUATION_ENABLED/);
+  assert.match(benchmarkPage, /maxRecords: evidencePreparationMode === "age_recovery" \? 10 : 3/);
+  assert.match(benchmarkPage, /maxApifyChargeUsd: evidencePreparationMode === "age_recovery" \? 0\.75 : 0\.5/);
   assert.match(workflow, /preparationMode === "signal_recovery"/);
   assert.match(workflow, /fresh excluded, development, or locked held-out evidence recovery/);
   assert.match(route, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);

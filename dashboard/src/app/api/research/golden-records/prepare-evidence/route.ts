@@ -119,6 +119,50 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
   ).map(({ record }) => record);
 }
 
+async function unresolvedRecordsForBaseline(input: {
+  admin: ReturnType<typeof createAdminClient>;
+  organizationId: string;
+  eligible: GoldenPreparationCandidate[];
+  baselineCompleted: Set<string>;
+}) {
+  const candidates = input.eligible.filter((record) => !input.baselineCompleted.has(record.id));
+  if (!candidates.length) return [];
+  const recordIds = candidates.map((record) => record.id);
+  const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
+    input.admin.from("research_evidence_sources").select(
+      "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
+    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
+    input.admin.from("research_evidence_claims").select(
+      "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
+    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
+  ]);
+  if (sourceError) throw sourceError;
+  if (claimError) throw claimError;
+  return candidates.map((record) => {
+    const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
+    const selection = selectLeakageSafeBenchmarkEvidence({
+      record: benchmarkRecord,
+      sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
+      claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
+    });
+    const fitLabel = record.fit_label as "fit" | "not_fit";
+    return {
+      record,
+      readiness: benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel, selection }),
+      safeClaims: selection.evidence.length,
+    };
+  }).filter(({ readiness }) => !readiness.ready)
+    // The fresh pool currently needs three negatives and fifteen positives.
+    // Baseline editorial retrieval can close identity-only negative gaps; it
+    // cannot replace the historical audience provider required by positives.
+    .sort((left, right) => Number(left.record.fit_label === "fit") - Number(right.record.fit_label === "fit")
+      || left.readiness.reasons.length - right.readiness.reasons.length
+      || right.readiness.identity.independentSources - left.readiness.identity.independentSources
+      || right.safeClaims - left.safeClaims
+      || left.record.athlete_name.localeCompare(right.record.athlete_name)
+    ).map(({ record }) => record);
+}
+
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
   const outcomeGroundTruth = record.stratification_tags?.includes("dylan_outcome_ground_truth") === true;
   return record.benchmark_split === "excluded"
@@ -184,7 +228,9 @@ export async function GET() {
       HISTORICAL_ARCHIVE_PROVIDER_VERSION
     );
     const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
-    const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
+    const baselineRemaining = await unresolvedRecordsForBaseline({
+      admin, organizationId: user.organizationId, eligible, baselineCompleted,
+    });
     // Current leakage-safe evidence is the source of truth. A parser-version
     // bump must not force broad baseline reprocessing ahead of a fit record
     // whose momentum and creator gates already pass and only needs identity or
@@ -303,7 +349,9 @@ export async function POST(request: NextRequest) {
       HISTORICAL_ARCHIVE_PROVIDER_VERSION
     );
     const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
-    const baselineRemaining = eligible.filter((record) => !baselineCompleted.has(record.id));
+    const baselineRemaining = await unresolvedRecordsForBaseline({
+      admin, organizationId: user.organizationId, eligible, baselineCompleted,
+    });
     const ageRecoveryRemaining = requestedMode !== "signal_recovery"
       ? await unresolvedFitRecordsForAgeRecovery({
         admin, organizationId: user.organizationId, eligible, recoveryCompleted,
