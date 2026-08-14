@@ -2410,8 +2410,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /filter\(\(\{ readiness \}\) => !readiness\.ready\)/);
   assert.match(route, /Number\(left\.record\.fit_label === "fit"\)/);
   assert.match(route, /readiness\.momentum\.passed/);
-  assert.match(route, /readiness\.creatorPotential\.passed/);
-  assert.match(route, /!readiness\.adult\.passed \|\| !readiness\.identity\.passed/);
+  assert.match(route, /!readiness\.adult\.passed/);
+  assert.match(route, /Number\(right\.readiness\.creatorPotential\.passed\)/);
   const ageSelectorStart = route.indexOf("async function unresolvedFitRecordsForAgeRecovery");
   const ageSelectorEnd = route.indexOf("async function unresolvedRecordsForBaseline", ageSelectorStart);
   const ageSelector = route.slice(ageSelectorStart, ageSelectorEnd);

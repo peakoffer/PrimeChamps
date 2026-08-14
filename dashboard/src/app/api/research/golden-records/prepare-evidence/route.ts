@@ -114,9 +114,10 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
     return { record, readiness, safeClaims: selection.evidence.length };
   }).filter(({ readiness }) => !readiness.ready
     && readiness.momentum.passed
-    && readiness.creatorPotential.passed
-    && (!readiness.adult.passed || !readiness.identity.passed)
-  ).sort((left, right) => left.readiness.reasons.length - right.readiness.reasons.length
+    && !readiness.adult.passed
+  ).sort((left, right) => Number(right.readiness.creatorPotential.passed) - Number(left.readiness.creatorPotential.passed)
+    || Number(right.readiness.identity.passed) - Number(left.readiness.identity.passed)
+    || left.readiness.reasons.length - right.readiness.reasons.length
     || right.readiness.adult.independentSources - left.readiness.adult.independentSources
     || right.readiness.identity.independentSources - left.readiness.identity.independentSources
     || right.safeClaims - left.safeClaims
