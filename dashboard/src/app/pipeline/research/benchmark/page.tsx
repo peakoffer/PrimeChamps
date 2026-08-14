@@ -96,6 +96,7 @@ type SocialBladeHistoryPlan = {
   officialPilotAttemptCount: number;
   officialPilotAttemptLimit: number;
   officialPilotExhausted: boolean;
+  officialValidationPassed: boolean;
   apifyConfigured: boolean;
   apifyPilotRecords: Array<{
     id: string;
@@ -119,6 +120,7 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   officialPilotAttemptCount: 0,
   officialPilotAttemptLimit: 5,
   officialPilotExhausted: false,
+  officialValidationPassed: false,
   apifyConfigured: false,
   apifyPilotRecords: [],
   apifyPilotMaximumChargeUsd: 0.5,
@@ -764,7 +766,7 @@ export default function ResearchBenchmarkPage() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Social Blade pilot failed");
-      setMessage(`Social Blade checkpoint matched ${payload.matched}/${payload.attempted} exact pre-cutoff profile and wrote ${payload.claimsWritten} evidence claims. At most ${payload.maximumCreditsAttempted} credits were attempted; scoring tokens and outreach mutations stayed at zero.${payload.failures?.length ? " This profile produced no usable cutoff-safe snapshot and will not be retried." : ""}`);
+      setMessage(`Social Blade checkpoint matched ${payload.matched}/${payload.attempted} exact pre-cutoff profile and wrote ${payload.claimsWritten} evidence claims. At most ${payload.maximumCreditsAttempted} credits were attempted${typeof payload.creditsRemaining === "number" ? `; ${payload.creditsRemaining} credits remain` : ""}; scoring tokens and outreach mutations stayed at zero.${payload.failures?.length ? " This profile produced no usable cutoff-safe snapshot and will not be retried." : ""}`);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Social Blade pilot failed");
@@ -1132,17 +1134,17 @@ export default function ResearchBenchmarkPage() {
               title={!socialBladePlan.configured
                 ? "Add the two server-side Social Blade credentials first"
                 : socialBladePlan.officialPilotExhausted
-                  ? "Five checkpointed paid attempts have completed; audit readiness before spending more"
+                  ? "The checkpointed recovery allowance is complete; audit readiness before spending more"
                   : undefined}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               {!socialBladePlan.configured
                 ? "Social Blade not connected"
                 : socialBladePlan.officialPilotExhausted
-                  ? "Paid history pilot paused"
+                  ? "Paid history recovery complete"
                 : socialBladePlan.pilotRecords.length === 0
                   ? "Historical audience complete"
-                  : `Check ${socialBladePlan.pilotRecords[0].athleteName} · ≤${socialBladePlan.pilotMaximumCredits} credits`}
+                  : `${socialBladePlan.officialValidationPassed ? "Recover" : "Check"} ${socialBladePlan.pilotRecords[0].athleteName} · ≤${socialBladePlan.pilotMaximumCredits} credits`}
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || archiveCoolingDown || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}

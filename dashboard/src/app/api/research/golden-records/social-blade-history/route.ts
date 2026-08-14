@@ -17,6 +17,7 @@ export const maxDuration = 300;
 const MAX_PILOT_RECORDS = 5;
 const MAX_PILOT_CREDITS = 10;
 const MAX_OFFICIAL_PILOT_ATTEMPTS = 5;
+const MAX_OFFICIAL_RECOVERY_ATTEMPTS = 16;
 const APIFY_PUBLIC_HISTORY_ACTOR = process.env.APIFY_SOCIAL_BLADE_ACTOR?.trim() || "solidcode/socialblade-scraper";
 const APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0.5;
 const APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2;
@@ -134,15 +135,24 @@ async function countApifyPublicHistoryAttempts(organizationId: string) {
 async function countOfficialHistoryAttempts(organizationId: string) {
   const admin = createAdminClient();
   const { data, error } = await admin.from("research_evidence_sources")
-    .select("golden_record_id")
+    .select("golden_record_id,retrieval_status,eligible_before_cutoff")
     .eq("organization_id", organizationId)
     .eq("provider", "social_blade_instagram_history");
   if (error) throw error;
-  return new Set((data || []).map((source) => source.golden_record_id)).size;
+  const attempts = new Set((data || []).map((source) => source.golden_record_id)).size;
+  const matched = new Set((data || []).filter((source) =>
+    source.retrieval_status === "retrieved" && source.eligible_before_cutoff === true
+  ).map((source) => source.golden_record_id)).size;
+  return { attempts, matched };
 }
 
-function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, officialHistoryAttemptCount: number) {
-  const officialPilotExhausted = officialHistoryAttemptCount >= MAX_OFFICIAL_PILOT_ATTEMPTS;
+function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, officialHistoryStats: { attempts: number; matched: number }) {
+  const officialValidationPassed = officialHistoryStats.attempts >= MAX_OFFICIAL_PILOT_ATTEMPTS
+    && officialHistoryStats.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS;
+  const officialAttemptLimit = officialValidationPassed
+    ? MAX_OFFICIAL_RECOVERY_ATTEMPTS
+    : MAX_OFFICIAL_PILOT_ATTEMPTS;
+  const officialPilotExhausted = officialHistoryStats.attempts >= officialAttemptLimit;
   // Paid history is deliberately checkpointed one exact handle at a time. The
   // page reloads and re-audits readiness before it can authorize another call.
   const pilot = officialPilotExhausted
@@ -166,9 +176,10 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
     })),
     pilotMaximumCredits: pilot.reduce((sum, candidate) => sum + candidate.credits, 0),
     pilotLimit: MAX_PILOT_RECORDS,
-    officialPilotAttemptCount: officialHistoryAttemptCount,
-    officialPilotAttemptLimit: MAX_OFFICIAL_PILOT_ATTEMPTS,
+    officialPilotAttemptCount: officialHistoryStats.attempts,
+    officialPilotAttemptLimit: officialAttemptLimit,
     officialPilotExhausted,
+    officialValidationPassed,
     apifyConfigured: Boolean(process.env.APIFY_API_KEY),
     apifyPilotRecords: apifyPilot.map((candidate) => ({
       id: candidate.id,
@@ -278,12 +289,12 @@ async function persistOfficialHistoryFailure(input: {
 export async function GET() {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
-    const [candidates, apifyPublicAttemptCount, officialHistoryAttemptCount] = await Promise.all([
+    const [candidates, apifyPublicAttemptCount, officialHistoryStats] = await Promise.all([
       buildCandidatePlan(user.organizationId),
       countApifyPublicHistoryAttempts(user.organizationId),
       countOfficialHistoryAttempts(user.organizationId),
     ]);
-    return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount, officialHistoryAttemptCount) });
+    return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount, officialHistoryStats) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not prepare Social Blade history plan";
     const status = message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 500;
@@ -504,11 +515,18 @@ export async function POST(request: NextRequest) {
     if (!process.env.SOCIAL_BLADE_CLIENT_ID || !process.env.SOCIAL_BLADE_TOKEN) {
       return NextResponse.json({ error: "Add SOCIAL_BLADE_CLIENT_ID and SOCIAL_BLADE_TOKEN to the server environment first" }, { status: 503 });
     }
-    const officialHistoryAttemptCount = await countOfficialHistoryAttempts(user.organizationId);
-    if (officialHistoryAttemptCount >= MAX_OFFICIAL_PILOT_ATTEMPTS) {
+    const officialHistoryStats = await countOfficialHistoryAttempts(user.organizationId);
+    const officialValidationPassed = officialHistoryStats.attempts >= MAX_OFFICIAL_PILOT_ATTEMPTS
+      && officialHistoryStats.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS;
+    const officialAttemptLimit = officialValidationPassed
+      ? MAX_OFFICIAL_RECOVERY_ATTEMPTS
+      : MAX_OFFICIAL_PILOT_ATTEMPTS;
+    if (officialHistoryStats.attempts >= officialAttemptLimit) {
       return NextResponse.json({
-        error: "The paid history pilot is closed after five checkpointed attempts. Audit readiness before authorizing another provider or budget.",
-        attempts: officialHistoryAttemptCount,
+        error: officialValidationPassed
+          ? "The verified paid-history recovery is closed after sixteen checkpointed attempts. Audit readiness before authorizing more spend."
+          : "The paid history pilot is closed after five checkpointed attempts because five exact matches were not proven.",
+        attempts: officialHistoryStats.attempts,
       }, { status: 409 });
     }
     const allCandidates = (await buildCandidatePlan(user.organizationId))
@@ -585,6 +603,7 @@ export async function POST(request: NextRequest) {
             snapshot_age_days: snapshot.snapshotAgeDays,
             history_tier: candidate.tier,
             maximum_credits_for_request: candidate.credits,
+            credits_remaining_after_request: creditsRemaining,
             attempt_state: "matched",
             scoring_tokens_spent: 0,
             outreach_mutations_allowed: false,
