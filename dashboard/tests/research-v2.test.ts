@@ -5,6 +5,7 @@ import {
   assignGoldenRecordSplits,
   calculateBenchmarkMetrics,
   evaluateBenchmarkReleaseReadiness,
+  freshBenchmarkLabelDeficits,
   goldenAthleteKey,
   isGoldenRecordReadyForSplit,
   maskGoldenRecordForBlindLabeling,
@@ -13,6 +14,16 @@ import {
   stratifiedSample,
   summarizeGoldenRecords,
 } from "../src/lib/research/v2.ts";
+
+test("fresh evidence recovery stops spending on a label whose quota is full", () => {
+  const entries = [
+    ...Array.from({ length: 5 }, () => ({ fitLabel: "fit" as const, ready: true })),
+    ...Array.from({ length: 16 }, () => ({ fitLabel: "not_fit" as const, ready: true })),
+    { fitLabel: "fit" as const, ready: false },
+    { fitLabel: "not_fit" as const, ready: false },
+  ];
+  assert.deepEqual(freshBenchmarkLabelDeficits(entries), { fit: 11, not_fit: 0 });
+});
 import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
@@ -2452,8 +2463,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION/);
   assert.match(route, /unresolvedFitRecordsForAgeRecovery/);
   assert.match(route, /unresolvedRecordsForBaseline/);
-  assert.match(route, /filter\(\(\{ readiness \}\) => !readiness\.ready\)/);
-  assert.match(route, /Number\(left\.record\.fit_label === "fit"\)/);
+  assert.match(route, /&& !readiness\.ready/);
+  assert.match(route, /freshBenchmarkLabelDeficits/);
+  assert.match(route, /deficits\[record\.fit_label as "fit" \| "not_fit"\] > 0/);
   assert.match(route, /readiness\.momentum\.passed/);
   assert.match(route, /!readiness\.adult\.passed/);
   assert.match(route, /Number\(right\.readiness\.creatorPotential\.passed\)/);

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { start } from "workflow/api";
 import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { selectActiveBenchmarkCohort } from "@/lib/research/v2";
+import { freshBenchmarkLabelDeficits, selectActiveBenchmarkCohort } from "@/lib/research/v2";
 import {
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
@@ -138,7 +138,10 @@ async function unresolvedRecordsForBaseline(input: {
 }) {
   const candidates = input.eligible.filter((record) => !input.baselineCompleted.has(record.id));
   if (!candidates.length) return [];
-  const recordIds = candidates.map((record) => record.id);
+  // Readiness across the whole fresh pool determines which label still needs
+  // recovery. Looking only at not-yet-processed records can spend on a label
+  // whose 16-case benchmark quota is already complete.
+  const recordIds = input.eligible.map((record) => record.id);
   const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
     input.admin.from("research_evidence_sources").select(
       "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
@@ -149,7 +152,7 @@ async function unresolvedRecordsForBaseline(input: {
   ]);
   if (sourceError) throw sourceError;
   if (claimError) throw claimError;
-  return candidates.map((record) => {
+  const entries = input.eligible.map((record) => {
     const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
     const selection = selectLeakageSafeBenchmarkEvidence({
       record: benchmarkRecord,
@@ -162,11 +165,17 @@ async function unresolvedRecordsForBaseline(input: {
       readiness: benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel, selection }),
       safeClaims: selection.evidence.length,
     };
-  }).filter(({ readiness }) => !readiness.ready)
-    // The fresh pool currently needs three negatives and fifteen positives.
-    // Baseline editorial retrieval can close identity-only negative gaps; it
-    // cannot replace the historical audience provider required by positives.
-    .sort((left, right) => Number(left.record.fit_label === "fit") - Number(right.record.fit_label === "fit")
+  });
+  const deficits = freshBenchmarkLabelDeficits(entries.map(({ record, readiness }) => ({
+    fitLabel: record.fit_label as "fit" | "not_fit",
+    ready: readiness.ready,
+  })));
+  return entries.filter(({ record, readiness }) => !input.baselineCompleted.has(record.id)
+      && !readiness.ready
+      && deficits[record.fit_label as "fit" | "not_fit"] > 0
+    )
+    .sort((left, right) => deficits[right.record.fit_label as "fit" | "not_fit"]
+      - deficits[left.record.fit_label as "fit" | "not_fit"]
       || left.readiness.reasons.length - right.readiness.reasons.length
       || right.readiness.identity.independentSources - left.readiness.identity.independentSources
       || right.safeClaims - left.safeClaims

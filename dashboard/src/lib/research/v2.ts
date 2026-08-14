@@ -24,6 +24,7 @@ export const GOLDEN_REASONS = [
 ] as const;
 export const GOLDEN_SPLITS = ["development", "held_out", "excluded"] as const;
 export const POINT_IN_TIME_RELIABILITY = ["strong", "partial", "unusable"] as const;
+export const MINIMUM_FRESH_BENCHMARK_RECORDS_PER_LABEL = 16;
 
 export type GoldenFitLabel = typeof GOLDEN_FIT_LABELS[number];
 export type GoldenAchievabilityLabel = typeof GOLDEN_ACHIEVABILITY_LABELS[number];
@@ -31,6 +32,18 @@ export type GoldenOutcome = typeof GOLDEN_OUTCOMES[number];
 export type GoldenReason = typeof GOLDEN_REASONS[number];
 export type GoldenSplit = typeof GOLDEN_SPLITS[number];
 export type PointInTimeReliability = typeof POINT_IN_TIME_RELIABILITY[number];
+
+export function freshBenchmarkLabelDeficits(
+  entries: Array<{ fitLabel: "fit" | "not_fit"; ready: boolean }>,
+  targetPerLabel = MINIMUM_FRESH_BENCHMARK_RECORDS_PER_LABEL
+) {
+  const readyFit = entries.filter((entry) => entry.ready && entry.fitLabel === "fit").length;
+  const readyNotFit = entries.filter((entry) => entry.ready && entry.fitLabel === "not_fit").length;
+  return {
+    fit: Math.max(0, targetPerLabel - readyFit),
+    not_fit: Math.max(0, targetPerLabel - readyNotFit),
+  };
+}
 
 export function hasOutcomeGroundTruth(record: Record<string, unknown>) {
   return Array.isArray(record.stratification_tags)
