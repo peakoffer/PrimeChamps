@@ -1163,6 +1163,39 @@ test("benchmark evidence selection excludes private outcomes and post-cutoff fac
   assert.equal(selection.pointInTimeCompliant, true);
 });
 
+test("readiness selection does not crowd out late audience evidence behind generic claims", () => {
+  const source: BenchmarkEvidenceSourceRow = {
+    ...BENCHMARK_SOURCES[0],
+    id: "dense-public-source",
+    canonical_url: "https://public.test/example-athlete",
+    domain: "public.test",
+    title: "Example Athlete public profile",
+    source_type: "social",
+    provider: "social_blade_instagram_history",
+    published_at: "2025-06-01T00:00:00Z",
+  };
+  const claims: BenchmarkEvidenceClaimRow[] = Array.from({ length: 35 }, (_, index) => ({
+    ...BENCHMARK_CLAIMS[0],
+    id: `generic-${index}`,
+    evidence_source_id: source.id,
+    claim_type: "candidate_evidence",
+    claim_text: `Example Athlete generic public fact ${index}.`,
+    source_excerpt: `Example Athlete generic public fact ${index}.`,
+  }));
+  claims.push({
+    ...BENCHMARK_CLAIMS[0], id: "late-audience", evidence_source_id: source.id,
+    claim_type: "audience_signal", claim_text: "Example Athlete had 120,000 followers.",
+    source_excerpt: "Example Athlete had 120,000 followers.",
+  }, {
+    ...BENCHMARK_CLAIMS[0], id: "late-creator", evidence_source_id: source.id,
+    claim_type: "creator_behavior_signal", claim_text: "Example Athlete had 400 published posts.",
+    source_excerpt: "Example Athlete had 400 published posts.",
+  });
+  const selection = selectLeakageSafeBenchmarkEvidence({ record: BENCHMARK_CASE, sources: [source], claims });
+  assert.equal(selection.evidence.length, 37);
+  assert.equal(benchmarkCreatorPotentialGate(BENCHMARK_CASE, selection.evidence).passed, true);
+});
+
 test("benchmark material claims require a real frozen quote that supports the claim", () => {
   const selection = selectLeakageSafeBenchmarkEvidence({
     record: BENCHMARK_CASE,

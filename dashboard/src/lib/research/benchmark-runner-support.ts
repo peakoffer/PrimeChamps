@@ -195,7 +195,10 @@ export function selectLeakageSafeBenchmarkEvidence(input: {
 }): BenchmarkEvidenceSelection {
   const { record } = input;
   const cutoff = validTimestamp(record.evidence_cutoff_at);
-  const maximumClaims = Math.max(1, Math.min(60, input.maximumClaims ?? 30));
+  // Readiness must consider the complete supported dossier. Model prompts are
+  // compacted separately by claim type, so a small gate-level slice can hide a
+  // late-arriving audience or age source behind generic archived claims.
+  const maximumClaims = Math.max(1, Math.min(500, input.maximumClaims ?? 500));
   const sourceById = new Map(input.sources.map((source) => [source.id, source]));
   const rejected: BenchmarkEvidenceSelection["rejected"] = [];
   const accepted: LeakageSafeBenchmarkEvidence[] = [];
