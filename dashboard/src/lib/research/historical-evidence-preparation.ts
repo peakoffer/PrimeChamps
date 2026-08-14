@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-multilingual-age-extraction-v9";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-direct-timegate-resume-v7";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-prioritize-cutoff-references-v8";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -1201,7 +1201,8 @@ export function dedupeHistoricalSearchCandidates(
     const text = `${candidate.title}\n${candidate.snippet}\n${candidate.url}`;
     const normalized = normalizeEvidenceText(text);
     const handle = normalizeEvidenceText(options.instagramHandle || "").replace(/\s+/g, "");
-    return (options.athleteName && benchmarkSourceNamesAthlete(options.athleteName, text) ? 20 : 0)
+    return (candidate.query.startsWith("Cutoff-safe external profiles referenced by ") ? 25 : 0)
+      + (options.athleteName && benchmarkSourceNamesAthlete(options.athleteName, text) ? 20 : 0)
       + (options.sport && benchmarkSourceSupportsSport(options.sport, text) ? 12 : 0)
       + (/\b(?:born|birth date|birthdate|birthday|date of birth|dob|age|date de naissance|fecha de nacimiento|geburtsdatum)\b/i.test(text) ? 8 : 0)
       + (handle && normalized.replace(/\s+/g, "").includes(handle) ? 6 : 0);

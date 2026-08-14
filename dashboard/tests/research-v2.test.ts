@@ -1905,6 +1905,18 @@ test("cutoff Wikipedia references expose only trusted exact-athlete profile link
     wikitext: "https://www.tapology.com/fightcenter/fighters/48572-gaston-reyno",
   });
   assert.equal(gaston[0]?.url, "https://www.tapology.com/fightcenter/fighters/48572-gaston-reyno");
+  const prioritized = dedupeHistoricalSearchCandidates([{
+    query: '"Olivia Macdonald" "Beach volleyball" age',
+    title: "Olivia Macdonald age",
+    url: "https://olympics.com/en/athletes/olivia-macdonald",
+    snippet: "Olivia Macdonald beach volleyball date of birth",
+    position: 1,
+  }, ...candidates], {
+    preferAuthoritativeAgeSources: true,
+    athleteName: "Olivia Macdonald",
+    sport: "Beach volleyball",
+  });
+  assert.deepEqual(prioritized.slice(0, 2).map((candidate) => candidate.url), candidates.map((candidate) => candidate.url));
 });
 
 test("age recovery can add one free-only record while reusing paid discovery", () => {
