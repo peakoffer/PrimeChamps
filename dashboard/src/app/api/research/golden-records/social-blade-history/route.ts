@@ -11,6 +11,13 @@ import {
   type SocialBladeInstagramResponse,
 } from "@/lib/research/social-blade-history";
 import { ONLYFANS_HISTORICAL_DATASET } from "@/lib/research/historical-benchmark";
+import {
+  benchmarkEvidenceFreezeReadiness,
+  selectLeakageSafeBenchmarkEvidence,
+  type BenchmarkEvidenceClaimRow,
+  type BenchmarkEvidenceSourceRow,
+  type BenchmarkGoldenCase,
+} from "@/lib/research/benchmark-runner-support";
 
 export const maxDuration = 300;
 
@@ -43,7 +50,7 @@ function normalizeHandle(value: unknown) {
 async function buildCandidatePlan(organizationId: string) {
   const admin = createAdminClient();
   const { data: records, error: recordError } = await admin.from("research_golden_records")
-    .select("id,athlete_name,sport,evidence_cutoff_at")
+    .select("id,athlete_name,sport,benchmark_split,benchmark_cohort_version,evidence_cutoff_at,decision_at,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at")
     .eq("organization_id", organizationId)
     .eq("benchmark_split", "excluded")
     .eq("fit_label", "fit")
@@ -54,21 +61,19 @@ async function buildCandidatePlan(organizationId: string) {
   if (!recordIds.length) return [] as Candidate[];
 
   const { data: claims, error: claimError } = await admin.from("research_evidence_claims")
-    .select("golden_record_id,claim_type,structured_value,effective_at,eligible_for_scoring")
+    .select("id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason")
     .eq("organization_id", organizationId)
-    .in("golden_record_id", recordIds)
-    .eq("eligible_for_scoring", true);
+    .in("golden_record_id", recordIds);
   if (claimError) throw claimError;
-  const { data: historySources, error: historySourceError } = await admin.from("research_evidence_sources")
-    .select("golden_record_id,provider")
+  const { data: evidenceSources, error: historySourceError } = await admin.from("research_evidence_sources")
+    .select("id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason")
     .eq("organization_id", organizationId)
-    .in("golden_record_id", recordIds)
-    .in("provider", ["apify_social_blade_public_history", "social_blade_instagram_history"]);
+    .in("golden_record_id", recordIds);
   if (historySourceError) throw historySourceError;
-  const apifyPublicAttemptedRecordIds = new Set((historySources || [])
+  const apifyPublicAttemptedRecordIds = new Set((evidenceSources || [])
     .filter((source) => source.provider === "apify_social_blade_public_history")
     .map((source) => source.golden_record_id));
-  const officialHistoryAttemptedRecordIds = new Set((historySources || [])
+  const officialHistoryAttemptedRecordIds = new Set((evidenceSources || [])
     .filter((source) => source.provider === "social_blade_instagram_history")
     .map((source) => source.golden_record_id));
 
@@ -97,6 +102,24 @@ async function buildCandidatePlan(organizationId: string) {
 
   return (records || []).flatMap((record): Candidate[] => {
     if (!record.evidence_cutoff_at) return [];
+    const benchmarkRecord = record as BenchmarkGoldenCase;
+    const selection = selectLeakageSafeBenchmarkEvidence({
+      record: benchmarkRecord,
+      sources: ((evidenceSources || []) as BenchmarkEvidenceSourceRow[])
+        .filter((source) => source.golden_record_id === record.id),
+      claims: ((claims || []) as BenchmarkEvidenceClaimRow[])
+        .filter((claim) => claim.golden_record_id === record.id),
+    });
+    const readiness = benchmarkEvidenceFreezeReadiness({
+      record: benchmarkRecord,
+      fitLabel: "fit",
+      selection,
+    });
+    // Paid history is a last-mile audience/creator recovery tool. Never spend
+    // credits on a record that still fails identity, 21+, or current-momentum
+    // gates because a Social Blade response cannot resolve those blockers.
+    if (!readiness.identity.passed || !readiness.adult.passed || !readiness.momentum.passed
+      || readiness.creatorPotential.passed) return [];
     const handle = handleByRecord.get(record.id)?.handle;
     const existingSignals = signalTypesByRecord.get(record.id) || new Set<string>();
     const alreadyComplete = (existingSignals.has("audience_signal") || existingSignals.has("social_engagement_signal"))

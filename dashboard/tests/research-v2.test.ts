@@ -2485,6 +2485,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /officialValidationPassed/);
   assert.match(socialBladeHistoryRoute, /officialHistoryStats\.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS/);
   assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);
+  assert.match(socialBladeHistoryRoute, /benchmarkEvidenceFreezeReadiness/);
+  assert.match(socialBladeHistoryRoute, /!readiness\.identity\.passed \|\| !readiness\.adult\.passed \|\| !readiness\.momentum\.passed/);
+  assert.match(socialBladeHistoryRoute, /readiness\.creatorPotential\.passed/);
   assert.match(socialBladeHistoryRoute, /reserveOfficialHistoryAttempt/);
   assert.match(socialBladeHistoryRoute, /persistOfficialHistoryFailure/);
   assert.match(socialBladeHistoryRoute, /error\?\.code === "23505"/);
