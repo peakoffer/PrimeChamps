@@ -2239,6 +2239,23 @@ test("age evidence revalidation preserves athlete profiles without inheriting an
   assert.equal(frenchBirthDate.attributableAge?.parsed.precision, "birth_date");
   assert.equal(frenchBirthDate.attributableAge?.parsed.birthYear, 1998);
 
+  const spanishParentheticalBirthDate = validatePreparedAgeEvidenceForSource({
+    athleteName: "Carlos Gimeno",
+    title: "Carlos Gimeno salta desde una plataforma para adultos",
+    domain: "as.com",
+    observedAt: new Date("2025-07-23T04:02:01Z"),
+    text: "Carlos Gimeno salta desde una plataforma para adultos. Carlos Gimeno (Gran Canaria, 24-10-1989) es un deportista profesional de saltos de gran altura.",
+  });
+  assert.equal(spanishParentheticalBirthDate.officialCompactBirthDate?.birthDate, "1989-10-24");
+  const ambiguousParentheticalBirthDate = validatePreparedAgeEvidenceForSource({
+    athleteName: "Carlos Gimeno",
+    title: "Carlos Gimeno profile",
+    domain: "example.com",
+    observedAt: new Date("2025-07-23T04:02:01Z"),
+    text: "Carlos Gimeno (Gran Canaria, 10-11-1989) is a cliff diving athlete.",
+  });
+  assert.equal(ambiguousParentheticalBirthDate.officialCompactBirthDate, null);
+
   const editorialPronounAge = validatePreparedAgeEvidenceForSource({
     athleteName: "Lola Gallardo",
     title: "Coming Out Day: full interviews",

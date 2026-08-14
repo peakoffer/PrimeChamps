@@ -812,6 +812,24 @@ function extractOfficialCompactBirthDate(name: string, text: string, domain: str
   return normalized ? { birthDate: normalized, evidence: match[0].slice(0, 500) } : null;
 }
 
+function extractAthleteCenteredParentheticalBirthDate(name: string, text: string) {
+  const escapedName = name.trim().split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+");
+  const parenthetical = text.match(new RegExp(`\\b${escapedName}\\s*\\(([^()\\r\\n]{0,120})\\)`, "i"));
+  if (!parenthetical) return null;
+  const numeric = parenthetical[1].match(/(?:^|,\s*)(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b/);
+  if (!numeric) return null;
+  const day = Number(numeric[1]);
+  const month = Number(numeric[2]);
+  const year = Number(numeric[3]);
+  // Numeric dates where both leading fields are 12 or below are ambiguous.
+  // Only accept an unmistakable day-first biography date here.
+  if (day <= 12) return null;
+  const birthDate = normalizeNumericBirthDate(year, month, day);
+  return birthDate ? { birthDate, evidence: parenthetical[0].slice(0, 500) } : null;
+}
+
 export function validatePreparedAgeEvidenceForSource(input: {
   athleteName: string;
   text: string;
@@ -833,6 +851,10 @@ export function validatePreparedAgeEvidenceForSource(input: {
   const normalizedTitle = normalizeEvidenceText(input.title || "");
   const athleteCenteredPage = Boolean(normalizedName && normalizedTitle.includes(normalizedName));
   if (!athleteCenteredPage) return { attributableAge: null, officialCompactBirthDate: null };
+  const parentheticalBirthDate = extractAthleteCenteredParentheticalBirthDate(input.athleteName, input.text);
+  if (parentheticalBirthDate) {
+    return { attributableAge: null, officialCompactBirthDate: parentheticalBirthDate };
+  }
 
   // Exact birth facts on an athlete-titled profile can sit behind substantial
   // profile navigation. A wider window is safe for birth dates/years, but not
