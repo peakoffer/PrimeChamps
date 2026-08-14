@@ -11,6 +11,7 @@ import {
   buildHistoricalSignalRecoveryQueries,
   commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
+  extractWikimediaExternalProfileCandidates,
   extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
   preparedEvidenceSignalSupported,
@@ -125,7 +126,32 @@ async function discoverWikimediaAgeCandidates(records: EvidencePreparationRecord
             athleteName: record.athlete_name,
             sport: record.sport,
           });
-          grouped.set(record.id, [...(grouped.get(record.id) || []), ...candidates]);
+          const referencedProfiles: HistoricalSearchCandidate[] = [];
+          for (const candidate of candidates) {
+            try {
+              const revisionResponse = await fetch(wikimediaRevisionApiUrl(candidate.url, record.evidence_cutoff_at)!, {
+                headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+                signal: AbortSignal.timeout(20_000),
+                cache: "no-store",
+              });
+              if (!revisionResponse.ok) continue;
+              const revision = selectWikimediaRevisionCapture(
+                await revisionResponse.json() as unknown,
+                candidate.url,
+                record.evidence_cutoff_at
+              );
+              if (!revision) continue;
+              referencedProfiles.push(...extractWikimediaExternalProfileCandidates({
+                athleteName: record.athlete_name,
+                sport: record.sport,
+                wikipediaUrl: candidate.url,
+                wikitext: revision.content,
+              }));
+            } catch {
+              // The Wikipedia page remains usable when reference expansion is unavailable.
+            }
+          }
+          grouped.set(record.id, [...(grouped.get(record.id) || []), ...candidates, ...referencedProfiles]);
           if (candidates.length) break;
         }
       } catch {

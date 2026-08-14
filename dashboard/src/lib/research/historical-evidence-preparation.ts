@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-multilingual-age-extraction-v9";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-wayback-candidate-retry-v5";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-wikimedia-profile-references-v6";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -1117,6 +1117,34 @@ const AUTHORITATIVE_AGE_SOURCE_DOMAINS = new Set([
   "uci.org", "uec.ch", "lequipe.fr", "sunn.fr", "volleyballworld.com",
   "fivb.com", "arizonawildcats.com", "volleybox.net",
 ]);
+
+export function extractWikimediaExternalProfileCandidates(input: {
+  athleteName: string;
+  sport: string;
+  wikipediaUrl: string;
+  wikitext: string;
+}) {
+  const query = `Cutoff-safe external profiles referenced by ${input.wikipediaUrl}`;
+  const candidates = Array.from(input.wikitext.matchAll(/https?:\/\/[^\s\]|}<>'"]+/gi), (match) => {
+    const url = canonicalHistoricalArchiveUrl(decodeHtmlEntities(match[0]).replace(/[.,;:]+$/, ""));
+    return {
+      query,
+      title: `${input.athleteName} ${input.sport} profile`,
+      url,
+      snippet: `${input.athleteName} ${input.sport} athlete profile cited by a cutoff-safe Wikipedia revision.`,
+    } satisfies HistoricalSearchCandidate;
+  }).filter((candidate) => {
+    const domain = benchmarkSourceDomain(candidate.url);
+    return AUTHORITATIVE_AGE_SOURCE_DOMAINS.has(domain)
+      && domain !== "wikipedia.org"
+      && benchmarkSourceNamesAthlete(input.athleteName, candidate.url);
+  });
+  return dedupeHistoricalSearchCandidates(candidates, {
+    preferAuthoritativeAgeSources: true,
+    athleteName: input.athleteName,
+    sport: input.sport,
+  }).slice(0, 4);
+}
 
 export function dedupeHistoricalSearchCandidates(
   candidates: HistoricalSearchCandidate[],

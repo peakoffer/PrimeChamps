@@ -85,6 +85,7 @@ import {
   commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
   extractCommonCrawlWarcBody,
+  extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
   historicalDiscoveryReplayCoverageMatches,
@@ -1855,6 +1856,31 @@ test("multilingual Wikimedia discovery stays bounded and exact-name attributable
     germanAge.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility")?.structuredValue.birth_date,
     "1998-08-15"
   );
+});
+
+test("cutoff Wikipedia references expose only trusted exact-athlete profile links", () => {
+  const candidates = extractWikimediaExternalProfileCandidates({
+    athleteName: "Olivia Macdonald",
+    sport: "Beach volleyball",
+    wikipediaUrl: "https://de.wikipedia.org/wiki/Olivia_MacDonald",
+    wikitext: `
+      [https://beach.volleybox.net/de/olivia-macdonald-p28369 Profil]
+      [https://arizonawildcats.com/sports/womens-beach-volleyball/roster/olivia-macdonald/8112 Roster]
+      [https://www.fivb.com/en/beachvolleyball/rankingwomen Generic ranking]
+      [https://facebook.com/oliviamacdonald Social]
+    `,
+  });
+  assert.deepEqual(candidates.map((candidate) => candidate.url), [
+    "https://arizonawildcats.com/sports/womens-beach-volleyball/roster/olivia-macdonald/8112",
+    "https://beach.volleybox.net/de/olivia-macdonald-p28369",
+  ]);
+  const gaston = extractWikimediaExternalProfileCandidates({
+    athleteName: "Gaston Reyno",
+    sport: "Bare-knuckle boxing",
+    wikipediaUrl: "https://es.wikipedia.org/wiki/Gast%C3%B3n_Reyno",
+    wikitext: "https://www.tapology.com/fightcenter/fighters/48572-gaston-reyno",
+  });
+  assert.equal(gaston[0]?.url, "https://www.tapology.com/fightcenter/fighters/48572-gaston-reyno");
 });
 
 test("age recovery can add one free-only record while reusing paid discovery", () => {
