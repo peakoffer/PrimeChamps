@@ -117,8 +117,8 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
     && !readiness.adult.passed
   ).sort((left, right) => Number(right.readiness.creatorPotential.passed) - Number(left.readiness.creatorPotential.passed)
     || Number(right.readiness.identity.passed) - Number(left.readiness.identity.passed)
-    || left.readiness.reasons.length - right.readiness.reasons.length
     || right.readiness.adult.independentSources - left.readiness.adult.independentSources
+    || left.readiness.reasons.length - right.readiness.reasons.length
     || right.readiness.identity.independentSources - left.readiness.identity.independentSources
     || right.safeClaims - left.safeClaims
     || left.record.athlete_name.localeCompare(right.record.athlete_name)

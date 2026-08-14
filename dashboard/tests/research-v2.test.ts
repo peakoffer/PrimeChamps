@@ -2434,6 +2434,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   const ageSelector = route.slice(ageSelectorStart, ageSelectorEnd);
   assert.ok(ageSelectorStart >= 0 && ageSelectorEnd > ageSelectorStart);
   assert.doesNotMatch(ageSelector, /baselineCompleted/);
+  assert.ok(
+    ageSelector.indexOf("right.readiness.adult.independentSources")
+      < ageSelector.indexOf("left.readiness.reasons.length"),
+    "age recovery should close one-source adult gaps before broad zero-source cases"
+  );
   assert.match(route, /ageRecoveryRemaining\.length \? "age_recovery" : "baseline"/);
   assert.match(route, /ageRecoveryRemaining\.length \? ageRecoveryRemaining : baselineRemaining/);
   assert.match(route, /eligibleForSignalRecovery/);
