@@ -6,9 +6,9 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-12-authoritative-age-recovery-v2";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-14-sport-handle-age-recovery-v3";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-13-footer-safe-instagram-profile-v7";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-context-safe-age-extraction-v8";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v4";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -604,6 +604,24 @@ function extractBirthDate(text: string) {
     const second = Number(numeric[2]);
     return normalizeNumericBirthDate(Number(numeric[3]), first > 12 ? second : first, first > 12 ? first : second);
   }
+  const localizedDayFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|date\s+de\s+naissance|n[eé](?:e)?(?:\s+le)?|fecha\s+de\s+nacimiento|nacid[oa]|geburtsdatum|geboren)\s*[:\-]?\s*(?:[A-Za-zÀ-ÿ]+\s+)?(\d{1,2})(?:st|nd|rd|th|er|e)?(?:\s+of)?\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})\b/i);
+  if (localizedDayFirst) {
+    const monthNames: Record<string, number> = {
+      jan: 1, january: 1, janvier: 1, januar: 1,
+      feb: 2, february: 2, fevrier: 2, februar: 2,
+      mar: 3, march: 3, mars: 3, marz: 3, maerz: 3,
+      apr: 4, april: 4, avril: 4, may: 5, mai: 5,
+      jun: 6, june: 6, juin: 6, juni: 6,
+      jul: 7, july: 7, juillet: 7, juli: 7,
+      aug: 8, august: 8, aout: 8,
+      sep: 9, sept: 9, september: 9, septembre: 9,
+      oct: 10, october: 10, octobre: 10, oktober: 10,
+      nov: 11, november: 11, novembre: 11,
+      dec: 12, december: 12, decembre: 12, dezember: 12,
+    };
+    const monthToken = localizedDayFirst[2].normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return normalizeNumericBirthDate(Number(localizedDayFirst[3]), monthNames[monthToken], Number(localizedDayFirst[1]));
+  }
   const match = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)(?:\s+([A-Za-z]+))?\s+(\d{1,2})\s*,?\s*(\d{4})\b/i);
   if (!match) return text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|age)\s*[:\-]?\s*(\d{4})\s*(?:[-/•]|\s)\s*([A-Za-z]+|\d{1,2})\s*(?:[-/•]|\s)\s*(\d{1,2})\b/i)
     ? normalizeYearFirstBirthDate(text)
@@ -612,7 +630,7 @@ function extractBirthDate(text: string) {
     jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
     may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
     sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
-    dec: 12, december: 12,
+    dec: 12, december: 12, aout: 8, août: 8,
   };
   const monthToken = match[2] && months[match[2].toLowerCase()] ? match[2] : match[1];
   const month = months[monthToken.toLowerCase()];
@@ -635,7 +653,7 @@ function normalizeYearFirstBirthDate(text: string) {
     jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
     may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
     sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
-    dec: 12, december: 12,
+    dec: 12, december: 12, aout: 8, août: 8,
   };
   const year = Number(match[1]);
   const month = /^\d+$/.test(match[2]) ? Number(match[2]) : monthNames[match[2].toLowerCase()];
@@ -926,7 +944,30 @@ export function buildHistoricalEvidenceQueries(record: Pick<EvidencePreparationR
   ];
 }
 
-export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at">) {
+function authoritativeAgeDomainsForSport(sport: string) {
+  const normalized = normalizeEvidenceText(sport);
+  if (/combat|mma|boxing|kickbox/.test(normalized)) {
+    return "(site:tapology.com OR site:sherdog.com OR site:ufc.com OR site:bkfc.com)";
+  }
+  if (/cliff diving|high diving|diving/.test(normalized)) {
+    return "(site:redbull.com OR site:worldaquatics.com OR site:olympics.com)";
+  }
+  if (/bmx|cycling|mountain biking/.test(normalized)) {
+    return "(site:uci.org OR site:uec.ch OR site:lequipe.fr OR site:sunn.fr)";
+  }
+  if (/volleyball/.test(normalized)) {
+    return "(site:volleyballworld.com OR site:fivb.com OR site:arizonawildcats.com OR site:beach.volleybox.net)";
+  }
+  if (/football|soccer/.test(normalized)) {
+    return "(site:fifa.com OR site:uefa.com OR site:espn.com OR site:olympics.com)";
+  }
+  if (/track|running|athletics/.test(normalized)) {
+    return "(site:worldathletics.org OR site:teamusa.com OR site:olympics.com)";
+  }
+  return "(site:olympics.com OR site:teamusa.com OR site:espn.com OR site:paralympic.org)";
+}
+
+export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at" | "instagram_handle">) {
   const cutoff = new Date(record.evidence_cutoff_at);
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
@@ -934,10 +975,17 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
   const baseline = buildHistoricalEvidenceQueries(record);
   const sportExpression = baseline[0]?.slice(`"${record.athlete_name}" `.length).split(" athlete profile biography ")[0]
     || `"${record.sport}"`;
+  const handle = typeof record.instagram_handle === "string"
+    ? record.instagram_handle.trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "")
+    : "";
+  const handleOrProfile = handle
+    ? `("@${handle}" OR "${handle}") (born OR "date of birth" OR birthdate OR age)`
+    : `("player profile" OR "athlete bio") (birth OR age)`;
   return [
     `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthdate OR birthday OR DOB) ${excludeSocial} before:${before}`,
-    `"${record.athlete_name}" (born OR "date of birth" OR age) (site:wikipedia.org OR site:olympedia.org OR site:paralympic.org OR site:teamusa.com OR site:worldathletics.org OR site:espn.com OR site:tapology.com OR site:sherdog.com) before:${before}`,
-    `"${record.athlete_name}" ${sportExpression} ("player profile" OR "athlete bio") (birth OR age) ${excludeSocial} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} (born OR "date of birth" OR age) (site:wikipedia.org OR site:olympedia.org OR site:paralympic.org) before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} (born OR "date of birth" OR birthdate OR DOB) ${authoritativeAgeDomainsForSport(record.sport)} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} ${handleOrProfile} ${excludeSocial} before:${before}`,
   ];
 }
 
@@ -967,15 +1015,33 @@ const HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS = new Set([
 ]);
 const AUTHORITATIVE_AGE_SOURCE_DOMAINS = new Set([
   "wikipedia.org", "olympedia.org", "paralympic.org", "teamusa.com",
-  "worldathletics.org", "espn.com", "tapology.com", "sherdog.com",
+  "worldathletics.org", "worldaquatics.com", "olympics.com", "espn.com",
+  "tapology.com", "sherdog.com", "ufc.com", "bkfc.com", "redbull.com",
+  "uci.org", "uec.ch", "lequipe.fr", "sunn.fr", "volleyballworld.com",
+  "fivb.com", "arizonawildcats.com", "volleybox.net",
 ]);
 
 export function dedupeHistoricalSearchCandidates(
   candidates: HistoricalSearchCandidate[],
-  options: { preferAuthoritativeAgeSources?: boolean; allowSocialProfiles?: boolean } = {}
+  options: {
+    preferAuthoritativeAgeSources?: boolean;
+    allowSocialProfiles?: boolean;
+    athleteName?: string;
+    sport?: string;
+    instagramHandle?: string | null;
+  } = {}
 ) {
   const seenUrls = new Set<string>();
   const seenDomains = new Map<string, number>();
+  const relevance = (candidate: HistoricalSearchCandidate) => {
+    const text = `${candidate.title}\n${candidate.snippet}\n${candidate.url}`;
+    const normalized = normalizeEvidenceText(text);
+    const handle = normalizeEvidenceText(options.instagramHandle || "").replace(/\s+/g, "");
+    return (options.athleteName && benchmarkSourceNamesAthlete(options.athleteName, text) ? 20 : 0)
+      + (options.sport && benchmarkSourceSupportsSport(options.sport, text) ? 12 : 0)
+      + (/\b(?:born|birth date|birthdate|birthday|date of birth|dob|age|date de naissance|fecha de nacimiento|geburtsdatum)\b/i.test(text) ? 8 : 0)
+      + (handle && normalized.replace(/\s+/g, "").includes(handle) ? 6 : 0);
+  };
   return candidates
     .filter((candidate) => isPublicHttpUrl(candidate.url))
     .sort((left, right) => {
@@ -984,7 +1050,9 @@ export function dedupeHistoricalSearchCandidates(
         const rightPriority = AUTHORITATIVE_AGE_SOURCE_DOMAINS.has(benchmarkSourceDomain(right.url)) ? 0 : 1;
         if (leftPriority !== rightPriority) return leftPriority - rightPriority;
       }
-      return (left.position ?? 999) - (right.position ?? 999) || left.url.localeCompare(right.url);
+      return relevance(right) - relevance(left)
+        || (left.position ?? 999) - (right.position ?? 999)
+        || left.url.localeCompare(right.url);
     })
     .filter((candidate) => {
       const normalized = normalizedUrlForComparison(candidate.url);

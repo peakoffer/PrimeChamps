@@ -17,7 +17,14 @@ const MONTHS: Record<string, number> = {
   oct: 10, october: 10,
   nov: 11, november: 11,
   dec: 12, december: 12,
+  aout: 8, août: 8,
 };
+
+const BIRTH_FACT = "(?:born|birth\\s*date|birthdate|birthday|date\\s+of\\s+birth|dob|date\\s+de\\s+naissance|n[eé](?:e)?(?:\\s+le)?|fecha\\s+de\\s+nacimiento|nacid[oa]|geburtsdatum|geboren|data\\s+de\\s+nascimento|nascid[oa])";
+
+function birthFactRegex(suffix: string, flags = "i") {
+  return new RegExp(`\\b${BIRTH_FACT}(?=\\s|[:\\-])${suffix}`, flags);
+}
 
 function ageAt(year: number, month: number, day: number, now: Date) {
   let age = now.getUTCFullYear() - year;
@@ -26,7 +33,7 @@ function ageAt(year: number, month: number, day: number, now: Date) {
 }
 
 export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvidence | null {
-  const iso = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\b[^0-9]{0,80}\(?\s*(\d{4})-(\d{1,2})-(\d{1,2})\b/i);
+  const iso = text.match(birthFactRegex("[^0-9]{0,80}\\(?\\s*(\\d{4})-(\\d{1,2})-(\\d{1,2})\\b"));
   if (iso) {
     const year = Number(iso[1]);
     const month = Number(iso[2]);
@@ -36,7 +43,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const numeric = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b/i);
+  const numeric = text.match(birthFactRegex("\\s*[:\\-]?\\s*(\\d{1,2})[\\/.-](\\d{1,2})[\\/.-](\\d{4})\\b"));
   if (numeric) {
     const first = Number(numeric[1]);
     const second = Number(numeric[2]);
@@ -48,7 +55,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const textual = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*([A-Za-z]+)(?:\s+([A-Za-z]+))?\s+(\d{1,2})\s*,?\s*(\d{4})\b/i);
+  const textual = text.match(birthFactRegex("\\s*[:\\-]?\\s*([A-Za-zÀ-ÿ]+)(?:\\s+([A-Za-zÀ-ÿ]+))?\\s+(\\d{1,2})(?:st|nd|rd|th|er|e)?\\s*,?\\s*(\\d{4})\\b"));
   if (textual) {
     const month = MONTHS[(textual[2] && MONTHS[textual[2].toLowerCase()] ? textual[2] : textual[1]).toLowerCase()];
     const day = Number(textual[3]);
@@ -58,10 +65,10 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const dayFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob)\s*[:\-]?\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b/i);
+  const dayFirst = text.match(birthFactRegex("\\s*[:\\-]?\\s*(?:[A-Za-zÀ-ÿ]+\\s+)?(\\d{1,2})(?:st|nd|rd|th|er|e)?(?:\\s+of)?\\s+([A-Za-zÀ-ÿ]+)\\s+(\\d{4})\\b"));
   if (dayFirst) {
     const day = Number(dayFirst[1]);
-    const month = MONTHS[dayFirst[2].toLowerCase()];
+    const month = MONTHS[dayFirst[2].normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()];
     const year = Number(dayFirst[3]);
     if (month && day >= 1 && day <= 31 && year >= 1970) {
       return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
@@ -78,10 +85,11 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const yearFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|age)\s*[:\-]?\s*(\d{4})\s*(?:[-/•]|\s)\s*([A-Za-z]+|\d{1,2})\s*(?:[-/•]|\s)\s*(\d{1,2})\b/i);
+  const yearFirst = text.match(new RegExp(`\\b(?:${BIRTH_FACT}|age)(?=\\s|[:\\-])\\s*[:\\-]?\\s*(\\d{4})\\s*(?:[-/•]|\\s)\\s*([A-Za-zÀ-ÿ]+|\\d{1,2})\\s*(?:[-/•]|\\s)\\s*(\\d{1,2})\\b`, "i"));
   if (yearFirst) {
     const year = Number(yearFirst[1]);
-    const month = /^\d+$/.test(yearFirst[2]) ? Number(yearFirst[2]) : MONTHS[yearFirst[2].toLowerCase()];
+    const monthToken = yearFirst[2].normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const month = /^\d+$/.test(yearFirst[2]) ? Number(yearFirst[2]) : MONTHS[monthToken];
     const day = Number(yearFirst[3]);
     if (month && month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1970) {
       return { age: ageAt(year, month, day, now), birthYear: year, precision: "birth_date" };
@@ -96,7 +104,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     ? ""
     : text.slice(Math.max(0, stated.index - 80), stated.index).toLowerCase();
   const historicalAgeContext = /(?:since|when|while)\s+(?:she|he|they|the athlete)\s+(?:was|were)\s*$/.test(statedContext)
-    || /\b(?:began|started|learned|first)\b[^.!?]{0,55}\bat\s*$/.test(statedContext);
+    || /\b(?:began|started|learned|first|moved|joined|left|signed|became|played|competed|won|took\s+up|turned\s+pro)\b[^.!?]{0,70}\bat\s*$/.test(statedContext);
   if (!historicalAgeContext && Number.isFinite(statedAge) && statedAge >= 10 && statedAge <= 80) {
     return {
       age: statedAge,
@@ -105,7 +113,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     };
   }
 
-  const yearOnly = text.match(/\b(?:born|birth\s*year|date\s+of\s+birth|dob)\b[^0-9]{0,40}(20\d{2}|19\d{2})\b/i);
+  const yearOnly = text.match(new RegExp(`\\b(?:${BIRTH_FACT}|birth\\s*year)(?=\\s|[:\\-])[^0-9]{0,40}(20\\d{2}|19\\d{2})\\b`, "i"));
   if (yearOnly) {
     const year = Number(yearOnly[1]);
     // Without month/day, use the youngest possible current age so the 21+

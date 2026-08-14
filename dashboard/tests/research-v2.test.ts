@@ -1994,6 +1994,35 @@ test("age evidence revalidation preserves athlete profiles without inheriting an
   });
   assert.equal(childhood.attributableAge, null);
 
+  const childhoodMove = validatePreparedAgeEvidenceForSource({
+    athleteName: "Olivia Macdonald",
+    title: "Olivia Macdonald is halfway around the world making a name for herself",
+    domain: "arizona.edu",
+    observedAt: new Date("2026-01-25T09:55:20Z"),
+    text: "Olivia Macdonald is a beach volleyball athlete. Macdonald moved out of the house at 11 years old to attend boarding school.",
+  });
+  assert.equal(childhoodMove.attributableAge, null);
+
+  const ordinalBirthDate = validatePreparedAgeEvidenceForSource({
+    athleteName: "Crystal Pittman",
+    title: "Crystal Pittman fighter profile",
+    domain: "tapology.com",
+    observedAt: new Date("2026-07-16T07:15:36Z"),
+    text: "Crystal Pittman is a combat sports fighter. Born: Wednesday 21st of May 1986.",
+  });
+  assert.equal(ordinalBirthDate.attributableAge?.parsed.precision, "birth_date");
+  assert.equal(ordinalBirthDate.attributableAge?.parsed.birthYear, 1986);
+
+  const frenchBirthDate = validatePreparedAgeEvidenceForSource({
+    athleteName: "Eddy Clerte",
+    title: "SUNN x Eddy Clerte",
+    domain: "sunn.fr",
+    observedAt: new Date("2026-07-01T00:00:00Z"),
+    text: "Eddy Clerte est un pilote de BMX. Eddy Clerte, né le 15 août 1998, est un passionné de BMX.",
+  });
+  assert.equal(frenchBirthDate.attributableAge?.parsed.precision, "birth_date");
+  assert.equal(frenchBirthDate.attributableAge?.parsed.birthYear, 1998);
+
   const editorialPronounAge = validatePreparedAgeEvidenceForSource({
     athleteName: "Lola Gallardo",
     title: "Coming Out Day: full interviews",
@@ -2029,11 +2058,14 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     athlete_name: "Jane Doe",
     sport: "Volleyball",
     evidence_cutoff_at: "2024-06-01T12:00:00Z",
+    instagram_handle: "jane.volley",
   });
-  assert.equal(ageRecovery.length, 3);
+  assert.equal(ageRecovery.length, 4);
   assert.ok(ageRecovery.every((query) => /birth|born|age/i.test(query)));
   assert.ok(ageRecovery.every((query) => query.includes("before:2024-06-01")));
-  assert.ok(ageRecovery.some((query) => query.includes("site:wikipedia.org") && query.includes("site:worldathletics.org")));
+  assert.ok(ageRecovery.some((query) => query.includes("site:wikipedia.org")));
+  assert.ok(ageRecovery.some((query) => query.includes("site:volleyballworld.com")));
+  assert.ok(ageRecovery.some((query) => query.includes('"@jane.volley"')));
   const signalRecovery = buildHistoricalSignalRecoveryQueries({
     athlete_name: "Jane Doe",
     sport: "Volleyball",
@@ -2064,6 +2096,11 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     { query: "q", title: "World Athletics", url: "https://worldathletics.org/athletes/nick-ponzio", snippet: "", position: 4 },
   ], { preferAuthoritativeAgeSources: true });
   assert.deepEqual(agePrioritized.slice(0, 2).map((item) => item.title), ["World Athletics", "Wikipedia"]);
+  const relevantAgeCandidates = dedupeHistoricalSearchCandidates([
+    { query: "q", title: "Carlos Gimeno Valero tennis profile", url: "https://espn.com/tennis/carlos-gimeno-valero", snippet: "Carlos Gimeno Valero plays tennis. Date of birth 2001.", position: 1 },
+    { query: "q", title: "Carlos Gimeno cliff diver profile", url: "https://redbull.com/athlete/carlos-gimeno", snippet: "Carlos Gimeno competes in cliff diving. Date of birth 24 October 1989.", position: 4 },
+  ], { preferAuthoritativeAgeSources: true, athleteName: "Carlos Gimeno", sport: "Cliff Diving" });
+  assert.equal(relevantAgeCandidates[0]?.title, "Carlos Gimeno cliff diver profile");
   const archivedSocialCandidate = dedupeHistoricalSearchCandidates([
     { query: "q", title: "Instagram profile", url: "https://www.instagram.com/jane", snippet: "", position: 1 },
   ], { allowSocialProfiles: true });

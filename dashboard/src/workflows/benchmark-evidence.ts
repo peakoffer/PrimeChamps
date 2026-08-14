@@ -19,6 +19,7 @@ import {
   selectWaybackCapture,
   waybackCdxUrl,
   wikimediaRevisionApiUrl,
+  validatePreparedAgeEvidenceForSource,
   type CommonCrawlCapture,
   type EvidencePreparationRecord,
   type HistoricalSearchCandidate,
@@ -73,6 +74,24 @@ type StoredPreparedSignalClaim = {
   id: string;
   claim_type: string;
   source_excerpt: string | null;
+};
+
+type StoredPreparedAdultClaim = {
+  id: string;
+  golden_record_id: string;
+  source_excerpt: string | null;
+  effective_at: string | null;
+  research_evidence_sources: {
+    provider: string;
+    domain: string;
+    title: string | null;
+    historical_as_of: string | null;
+  } | Array<{
+    provider: string;
+    domain: string;
+    title: string | null;
+    historical_as_of: string | null;
+  }>;
 };
 
 function cleanText(value: unknown, maximum = 700) {
@@ -238,6 +257,9 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       dedupeHistoricalSearchCandidates(grouped.get(record.id) || [], {
         preferAuthoritativeAgeSources: input.preparationMode === "age_recovery",
         allowSocialProfiles: input.preparationMode === "signal_recovery",
+        athleteName: record.athlete_name,
+        sport: record.sport,
+        instagramHandle: record.instagram_handle,
       }),
     ])),
     providerRunId: provider.usage.runId,
@@ -278,6 +300,56 @@ async function reconcilePreparedSignalClaims(input: {
   return { excludedUnsupportedSignals: unsupportedIds.length };
 }
 reconcilePreparedSignalClaims.maxRetries = 2;
+
+async function reconcilePreparedAdultClaims(input: {
+  organizationId: string;
+  recordIds: string[];
+}) {
+  "use step";
+
+  const admin = createAdminClient({ disableRealtime: true });
+  const [{ data: records, error: recordError }, { data: claims, error: claimError }] = await Promise.all([
+    admin.from("research_golden_records").select("id,athlete_name")
+      .eq("organization_id", input.organizationId).in("id", input.recordIds),
+    admin.from("research_evidence_claims")
+      .select("id,golden_record_id,source_excerpt,effective_at,research_evidence_sources!inner(provider,domain,title,historical_as_of)")
+      .eq("organization_id", input.organizationId)
+      .in("golden_record_id", input.recordIds)
+      .eq("claim_type", "adult_eligibility")
+      .eq("eligible_for_scoring", true)
+      .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision"]),
+  ]);
+  if (recordError) throw recordError;
+  if (claimError) throw claimError;
+  const athleteByRecord = new Map((records || []).map((record) => [String(record.id), String(record.athlete_name)]));
+  const unsupportedIds = ((claims || []) as unknown as StoredPreparedAdultClaim[]).flatMap((claim) => {
+    const athleteName = athleteByRecord.get(claim.golden_record_id);
+    const source = Array.isArray(claim.research_evidence_sources)
+      ? claim.research_evidence_sources[0]
+      : claim.research_evidence_sources;
+    if (!athleteName || !source) return [claim.id];
+    const observedAtRaw = source.historical_as_of || claim.effective_at || "";
+    const observedAt = Number.isFinite(Date.parse(observedAtRaw)) ? new Date(observedAtRaw) : new Date();
+    const validation = validatePreparedAgeEvidenceForSource({
+      athleteName,
+      text: claim.source_excerpt || "",
+      domain: source.domain,
+      title: source.title || "",
+      observedAt,
+    });
+    return validation.attributableAge || validation.officialCompactBirthDate ? [] : [claim.id];
+  });
+  for (let index = 0; index < unsupportedIds.length; index += 100) {
+    const { error: updateError } = await admin.from("research_evidence_claims").update({
+      support_status: "unsupported",
+      eligible_for_scoring: false,
+      exclusion_reason: `Archived age text did not satisfy ${HISTORICAL_EVIDENCE_EXTRACTION_VERSION}.`,
+    }).eq("organization_id", input.organizationId).in("id", unsupportedIds.slice(index, index + 100));
+    if (updateError) throw updateError;
+  }
+  return { excludedUnsupportedAgeClaims: unsupportedIds.length };
+}
+reconcilePreparedAdultClaims.maxRetries = 2;
 
 async function fetchJson(url: string) {
   const response = await fetch(url, {
@@ -689,6 +761,10 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       organizationId: input.organizationId,
       recordIds: input.recordIds,
     });
+    const adultReconciliation = await reconcilePreparedAdultClaims({
+      organizationId: input.organizationId,
+      recordIds: input.recordIds,
+    });
     await updatePreparationRun({
       preparationRunId: input.preparationRunId,
       organizationId: input.organizationId,
@@ -786,6 +862,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       sourceApifyCostMicrousd: discovery.sourceApifyCostMicrousd,
       scoringTokensSpent: 0,
       excludedUnsupportedSignals: signalReconciliation.excludedUnsupportedSignals,
+      excludedUnsupportedAgeClaims: adultReconciliation.excludedUnsupportedAgeClaims,
       preparationMode: input.preparationMode,
       benchmarkSplit: input.benchmarkSplit,
       queryPlanVersion: input.queryPlanVersion,
