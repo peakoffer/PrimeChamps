@@ -2477,6 +2477,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(benchmarkPage, /recordIds: nextExcludedSignalRecoveryRecords/);
   assert.match(benchmarkPage, /Resume saved recovery/);
   assert.match(benchmarkPage, /processed_record_ids/);
+  assert.match(benchmarkPage, /!completedExcludedSignalRecordIdSet\.has\(recordId\)/);
   assert.match(benchmarkPage, /run\.record_ids\.every/);
   assert.match(benchmarkPage, /Archive cooling down/);
   assert.match(workflow, /readApifyRunDatasetWithUsage<SearchPage>\(input\.reuseProviderRunId, 1_000\)/);

@@ -466,8 +466,12 @@ export default function ResearchBenchmarkPage() {
   const interruptedExcludedRecordIds = useMemo(() => {
     if (!interruptedExcludedSignalRun) return [];
     const processed = new Set(interruptedExcludedSignalRun.checkpoint?.processed_record_ids || []);
-    return interruptedExcludedSignalRun.record_ids.filter((recordId) => !processed.has(recordId));
-  }, [interruptedExcludedSignalRun]);
+    // A newer completed recovery may have closed records left unfinished by
+    // this older failed run. Never resurrect those stale IDs in the resume CTA.
+    return interruptedExcludedSignalRun.record_ids.filter((recordId) =>
+      !processed.has(recordId) && !completedExcludedSignalRecordIdSet.has(recordId)
+    );
+  }, [completedExcludedSignalRecordIdSet, interruptedExcludedSignalRun]);
   const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0
     && interruptedExcludedSignalRun?.archive_fallback_available !== true;
   const excludedSignalRecoveryRecords = useMemo(() => records
