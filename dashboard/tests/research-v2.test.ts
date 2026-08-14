@@ -1991,6 +1991,17 @@ test("archived evidence extraction requires exact identity and sport and preserv
   assert.ok(prepared.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
   assert.ok(prepared.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
 
+  const liveAgeOnOlderProfile = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Catarina Guimaraes", sport: "Track & Field", evidence_cutoff_at: "2025-06-30T23:59:59Z" },
+    candidate: { ...candidate, title: "Team USA | Catarina Guimaraes", url: "https://www.teamusa.com/profiles/catarina-guimaraes" },
+    capture: { ...capture, capturedAt: "2025-06-17T20:19:27.000Z", originalUrl: "https://www.teamusa.com/profiles/catarina-guimaraes" },
+    html: '<html><head><title>Team USA | Catarina Guimaraes</title><script type="application/ld+json">{"datePublished":"2023-04-27"}</script></head><body><main>Catarina Guimaraes is a Team USA track and field athlete. Athlete Bio Height 5\'0" Age 21 Hometown Cranford, NJ.</main></body></html>',
+  });
+  const observedAge = liveAgeOnOlderProfile.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(observedAge?.structuredValue.precision, "stated_age");
+  assert.equal(observedAge?.effectiveAt, "2025-06-17T20:19:27.000Z");
+  assert.equal(observedAge?.structuredValue.age_as_of, "2025-06-17T20:19:27.000Z");
+
   const wrongPerson = extractPreparedArchivedEvidence({
     record,
     candidate,

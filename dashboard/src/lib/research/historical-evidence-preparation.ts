@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-multilingual-age-extraction-v9";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-observed-stated-age-extraction-v10";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-all-multilingual-profiles-v11";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -970,6 +970,13 @@ export function extractPreparedArchivedEvidence(input: {
     const ageExcerpt = (attributableAge?.evidence || officialCompactBirthDate?.evidence || "").slice(0, 1_000);
     const birthDate = officialCompactBirthDate?.birthDate
       || (attributableAge?.parsed.precision === "birth_date" ? extractBirthDate(ageExcerpt) : null);
+    // A displayed age is true only at the archived observation date. Profile
+    // pages commonly retain an old datePublished value while updating the age
+    // in place, so attaching a stated age to that publication date invents a
+    // contradiction with an otherwise consistent birth-date source.
+    const ageEffectiveAt = attributableAge?.parsed.precision === "stated_age"
+      ? capture.capturedAt
+      : effectiveAt;
     claims.push({
       claimType: "adult_eligibility",
       claimText: birthDate
@@ -985,7 +992,7 @@ export function extractPreparedArchivedEvidence(input: {
         age_as_of: capture.capturedAt,
       },
       sourceExcerpt: ageExcerpt,
-      effectiveAt,
+      effectiveAt: ageEffectiveAt,
       extractionConfidence: birthDate ? 99 : attributableAge?.parsed.precision === "stated_age" ? 94 : 90,
       material: true,
     });
