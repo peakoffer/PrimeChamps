@@ -288,6 +288,7 @@ async function persistOfficialHistoryFailure(input: {
   sourceId: string;
   candidate: Candidate;
   reason: string;
+  creditsRemaining?: number | null;
 }) {
   const admin = createAdminClient();
   const { error } = await admin.from("research_evidence_sources").update({
@@ -302,6 +303,9 @@ async function persistOfficialHistoryFailure(input: {
       maximum_credits_for_request: input.candidate.credits,
       attempt_state: "failed",
       failure_reason: input.reason.slice(0, 500),
+      ...(typeof input.creditsRemaining === "number"
+        ? { credits_remaining_after_request: input.creditsRemaining }
+        : {}),
       scoring_tokens_spent: 0,
       outreach_mutations_allowed: false,
     },
@@ -597,7 +601,12 @@ export async function POST(request: NextRequest) {
         });
         if (!snapshot) {
           const reason = "No exact-handle snapshot within 31 days before the cutoff";
-          await persistOfficialHistoryFailure({ sourceId: reservedSourceId, candidate, reason });
+          await persistOfficialHistoryFailure({
+            sourceId: reservedSourceId,
+            candidate,
+            reason,
+            creditsRemaining,
+          });
           failures.push({ recordId: candidate.id, athleteName: candidate.athleteName, reason });
           continue;
         }
@@ -667,7 +676,12 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Social Blade lookup failed";
-        await persistOfficialHistoryFailure({ sourceId: reservedSourceId, candidate, reason });
+        await persistOfficialHistoryFailure({
+          sourceId: reservedSourceId,
+          candidate,
+          reason,
+          creditsRemaining,
+        });
         failures.push({
           recordId: candidate.id,
           athleteName: candidate.athleteName,

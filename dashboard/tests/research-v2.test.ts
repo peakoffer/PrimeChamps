@@ -2508,6 +2508,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /body\.recordId !== candidates\[0\]\.id/);
   assert.match(socialBladeHistoryRoute, /The verified paid-history recovery is closed after sixteen checkpointed attempts/);
   assert.match(socialBladeHistoryRoute, /credits_remaining_after_request/);
+  assert.match(socialBladeHistoryRoute, /creditsRemaining/);
   assert.doesNotMatch(socialBladeHistoryRoute, /maxRecords\?: number/);
   assert.match(benchmarkPage, /recordId: candidate\.id/);
   assert.match(benchmarkPage, /credits remain/);
