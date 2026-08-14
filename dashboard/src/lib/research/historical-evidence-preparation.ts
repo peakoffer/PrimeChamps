@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-multilingual-age-extraction-v9";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-multilingual-combat-profiles-v10";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-all-multilingual-profiles-v11";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 

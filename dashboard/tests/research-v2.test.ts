@@ -2370,6 +2370,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /rateLimited: waybackRateLimited && !commonCrawl\.evidence/);
   assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
   assert.match(workflow, /Cutoff-safe external profiles referenced by/);
+  assert.doesNotMatch(workflow, /if \(candidates\.length\) break/);
   assert.match(workflow, /Common Crawl is an optional free fallback/);
   assert.match(workflow, /loadCommonCrawlCollections\.maxRetries = 0/);
   assert.match(workflow, /deferredCandidates\.push/);

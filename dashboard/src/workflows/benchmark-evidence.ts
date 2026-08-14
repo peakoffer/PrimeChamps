@@ -154,7 +154,6 @@ async function discoverWikimediaAgeCandidates(records: EvidencePreparationRecord
             }
           }
           grouped.set(record.id, [...(grouped.get(record.id) || []), ...candidates, ...referencedProfiles]);
-          if (candidates.length) break;
         }
       } catch {
         // Google discovery and the generic archives remain available when one
