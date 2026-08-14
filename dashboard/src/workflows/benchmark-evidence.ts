@@ -5,6 +5,7 @@ import {
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+  WIKIMEDIA_AGE_DISCOVERY_LANGUAGES,
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   buildHistoricalSignalRecoveryQueries,
@@ -16,9 +17,11 @@ import {
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
   selectWikimediaRevisionCapture,
+  selectWikimediaSearchCandidates,
   selectWaybackCapture,
   waybackCdxUrl,
   wikimediaRevisionApiUrl,
+  wikimediaSearchApiUrl,
   validatePreparedAgeEvidenceForSource,
   type CommonCrawlCapture,
   type EvidencePreparationRecord,
@@ -93,6 +96,47 @@ type StoredPreparedAdultClaim = {
     historical_as_of: string | null;
   }>;
 };
+
+async function discoverWikimediaAgeCandidates(records: EvidencePreparationRecord[]) {
+  const grouped = new Map(records.map((record) => [record.id, [] as HistoricalSearchCandidate[]]));
+  // Wikimedia rate-limits bursty anonymous API traffic. Keep this free lane
+  // deliberately sequential and lightly paced (40 requests / ~44s worst case
+  // for the hard ten-record workflow ceiling).
+  for (const record of records) {
+    for (const language of WIKIMEDIA_AGE_DISCOVERY_LANGUAGES) {
+      const url = wikimediaSearchApiUrl({ language, athleteName: record.athlete_name, sport: record.sport });
+      if (!url) continue;
+      try {
+        const request = () => fetch(url, {
+          headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+          signal: AbortSignal.timeout(15_000),
+          cache: "no-store",
+        });
+        let response = await request();
+        if (response.status === 429) {
+          const retryAfterSeconds = Math.min(5, Math.max(2, Number(response.headers.get("retry-after") || 2)));
+          await new Promise((resolve) => setTimeout(resolve, retryAfterSeconds * 1_000));
+          response = await request();
+        }
+        if (response.ok) {
+          const candidates = selectWikimediaSearchCandidates({
+            payload: await response.json() as unknown,
+            language,
+            athleteName: record.athlete_name,
+            sport: record.sport,
+          });
+          grouped.set(record.id, [...(grouped.get(record.id) || []), ...candidates]);
+          if (candidates.length) break;
+        }
+      } catch {
+        // Google discovery and the generic archives remain available when one
+        // language endpoint is unavailable.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+    }
+  }
+  return grouped;
+}
 
 function cleanText(value: unknown, maximum = 700) {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, maximum) : "";
@@ -250,11 +294,17 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     }
     grouped.set(record.id, previous);
   }
+  const wikimediaCandidates = input.preparationMode === "age_recovery"
+    ? await discoverWikimediaAgeCandidates(records)
+    : new Map<string, HistoricalSearchCandidate[]>();
   return {
     records,
     candidatesByRecord: Object.fromEntries(records.map((record) => [
       record.id,
-      dedupeHistoricalSearchCandidates(grouped.get(record.id) || [], {
+      dedupeHistoricalSearchCandidates([
+        ...(wikimediaCandidates.get(record.id) || []),
+        ...(grouped.get(record.id) || []),
+      ], {
         preferAuthoritativeAgeSources: input.preparationMode === "age_recovery",
         allowSocialProfiles: input.preparationMode === "signal_recovery",
         athleteName: record.athlete_name,

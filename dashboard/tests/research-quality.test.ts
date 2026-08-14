@@ -253,12 +253,20 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
   assert.equal(parseAgeEvidence("He first competed at age 15", now), null);
   assert.equal(parseAgeEvidence("He announced his retirement at age 28", now)?.age, 28);
   assert.equal(parseAgeEvidence("born 2005", now)?.age, 20);
+  assert.equal(parseAgeEvidence("Geburtsdatum: 15. August 1998", now)?.birthYear, 1998);
+  assert.equal(parseAgeEvidence("Geburtstag: 21. Januar 1996", now)?.birthYear, 1996);
+  assert.equal(parseAgeEvidence("fecha nacimiento: 24 de octubre de 1989", now)?.birthYear, 1989);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", "Kendall Kipp player profile. Date of birth: 12/12/2000."), true);
   assert.equal(ageEvidenceNamesAthlete("Kendall Kipp", `Kendall Kipp appears in a roster. ${"Other roster details ".repeat(20)} Age: 21.`), false);
   assert.equal(parseAgeEvidenceForAthlete(
     "Rebekah Allick",
     "Vicky Savard earned her spot on the Canadian National Team at age 28. Related players: Rebekah Allick, Middle Blocker."
   ), null);
+  assert.equal(parseAgeEvidenceForAthlete(
+    "Eddy Clerte",
+    "Eddy Clerté | Geburtsdatum: 15. August 1998 | BMX-Rennsport",
+    now
+  )?.parsed.birthYear, 1998);
   assert.equal(parseAgeEvidenceForAthlete(
     "Rebekah Allick",
     "Rebekah Allick | Born January 26, 2004 | middle blocker",

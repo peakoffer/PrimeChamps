@@ -6,9 +6,9 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-14-sport-handle-age-recovery-v3";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-14-multilingual-wikimedia-age-recovery-v4";
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-context-safe-age-extraction-v8";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-multilingual-age-extraction-v9";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-13-wayback-commoncrawl-wikimedia-v4";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -288,6 +288,73 @@ export type WikimediaRevisionCapture = {
   historicalUrl: string;
 };
 
+export const WIKIMEDIA_AGE_DISCOVERY_LANGUAGES = ["en", "es", "de", "fr"] as const;
+
+export function wikimediaSearchApiUrl(input: {
+  language: string;
+  athleteName: string;
+  sport: string;
+}) {
+  const language = input.language.toLowerCase().replace(/[^a-z-]/g, "");
+  if (!WIKIMEDIA_AGE_DISCOVERY_LANGUAGES.includes(language as typeof WIKIMEDIA_AGE_DISCOVERY_LANGUAGES[number])) {
+    return null;
+  }
+  const params = new URLSearchParams({
+    action: "query",
+    list: "search",
+    // Exact-title filtering below plus the archive extractor's sport gate are
+    // safer than adding an English sport phrase, which suppresses valid
+    // German/Spanish article matches.
+    srsearch: `"${input.athleteName}"`,
+    srlimit: "3",
+    formatversion: "2",
+    format: "json",
+  });
+  return `https://${language}.wikipedia.org/w/api.php?${params.toString()}`;
+}
+
+/**
+ * Converts bounded MediaWiki search results into archive candidates. Search is
+ * discovery only; the historical revision and the normal exact-name/sport/age
+ * gates still decide whether any claim is persisted.
+ */
+export function selectWikimediaSearchCandidates(input: {
+  payload: unknown;
+  language: string;
+  athleteName: string;
+  sport: string;
+}): HistoricalSearchCandidate[] {
+  const language = input.language.toLowerCase().replace(/[^a-z-]/g, "");
+  if (!WIKIMEDIA_AGE_DISCOVERY_LANGUAGES.includes(language as typeof WIKIMEDIA_AGE_DISCOVERY_LANGUAGES[number])
+    || !input.payload || typeof input.payload !== "object") return [];
+  const query = (input.payload as Record<string, unknown>).query;
+  const search = query && typeof query === "object" ? (query as Record<string, unknown>).search : null;
+  if (!Array.isArray(search)) return [];
+  return search.flatMap((raw, index) => {
+    if (!raw || typeof raw !== "object") return [];
+    const title = typeof (raw as Record<string, unknown>).title === "string"
+      ? String((raw as Record<string, unknown>).title).trim()
+      : "";
+    const snippet = typeof (raw as Record<string, unknown>).snippet === "string"
+      ? String((raw as Record<string, unknown>).snippet).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+      : "";
+    const normalizedTitle = normalizeEvidenceText(title);
+    const normalizedAthlete = normalizeEvidenceText(input.athleteName);
+    const exactTitle = normalizedTitle === normalizedAthlete
+      || (title.includes("(") && normalizedTitle.startsWith(`${normalizedAthlete} `));
+    if (!title || !exactTitle
+      || !benchmarkSourceNamesAthlete(input.athleteName, `${title} ${snippet}`)
+      || !benchmarkSourceSupportsSport(input.sport, `${title} ${snippet}`)) return [];
+    return [{
+      query: `wikimedia:${language}:"${input.athleteName}" ${input.sport}`,
+      title,
+      url: `https://${language}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+      snippet,
+      position: index + 1,
+    } satisfies HistoricalSearchCandidate];
+  }).slice(0, 2);
+}
+
 function wikipediaPageParts(value: string) {
   try {
     const url = new URL(canonicalHistoricalArchiveUrl(value));
@@ -353,10 +420,16 @@ export function selectWikimediaRevisionCapture(
 }
 
 export function normalizeWikipediaWikitext(value: string) {
-  return value.replace(
+  return value
+    .replace(
     /\{\{\s*(?:birth[ _-]*date(?:[ _-]*and[ _-]*age)?|dob)\s*\|(?:\s*df\s*=\s*(?:yes|y|1)\s*\|)?\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})[^}]*\}\}/gi,
     (_match, year: string, month: string, day: string) => `date of birth: ${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
-  );
+    )
+    // Spanish Wikipedia commonly uses {{Fecha|day|month|year|edad}}.
+    .replace(
+      /\{\{\s*fecha\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})\s*\|\s*(\d{4})[^}]*\}\}/gi,
+      (_match, day: string, month: string, year: string) => `date of birth: ${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
+    );
 }
 
 export function waybackCdxUrl(canonicalUrl: string, evidenceCutoffAt: string) {
@@ -604,20 +677,20 @@ function extractBirthDate(text: string) {
     const second = Number(numeric[2]);
     return normalizeNumericBirthDate(Number(numeric[3]), first > 12 ? second : first, first > 12 ? first : second);
   }
-  const localizedDayFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|date\s+de\s+naissance|n[eé](?:e)?(?:\s+le)?|fecha\s+de\s+nacimiento|nacid[oa]|geburtsdatum|geboren)\s*[:\-]?\s*(?:[A-Za-zÀ-ÿ]+\s+)?(\d{1,2})(?:st|nd|rd|th|er|e)?(?:\s+of)?\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})\b/i);
+  const localizedDayFirst = text.match(/\b(?:born|birth\s*date|birthdate|birthday|date\s+of\s+birth|dob|date\s+de\s+naissance|n[eé](?:e)?(?:\s+le)?|fecha(?:\s+de)?\s+nacimiento|nacid[oa]|geburtsdatum|geburtstag|geboren)\s*[:\-]?\s*(?:[A-Za-zÀ-ÿ]+\s+)?(\d{1,2})(?:(?:st|nd|rd|th|er|e)|\.)?(?:\s+(?:of|de))?\s+([A-Za-zÀ-ÿ]+)\s+(?:de\s+)?(\d{4})\b/i);
   if (localizedDayFirst) {
     const monthNames: Record<string, number> = {
-      jan: 1, january: 1, janvier: 1, januar: 1,
-      feb: 2, february: 2, fevrier: 2, februar: 2,
-      mar: 3, march: 3, mars: 3, marz: 3, maerz: 3,
-      apr: 4, april: 4, avril: 4, may: 5, mai: 5,
-      jun: 6, june: 6, juin: 6, juni: 6,
-      jul: 7, july: 7, juillet: 7, juli: 7,
-      aug: 8, august: 8, aout: 8,
-      sep: 9, sept: 9, september: 9, septembre: 9,
-      oct: 10, october: 10, octobre: 10, oktober: 10,
-      nov: 11, november: 11, novembre: 11,
-      dec: 12, december: 12, decembre: 12, dezember: 12,
+      jan: 1, january: 1, janvier: 1, januar: 1, enero: 1, janeiro: 1,
+      feb: 2, february: 2, fevrier: 2, februar: 2, febrero: 2, fevereiro: 2,
+      mar: 3, march: 3, mars: 3, marz: 3, maerz: 3, marzo: 3, marco: 3,
+      apr: 4, april: 4, avril: 4, abril: 4, may: 5, mai: 5, mayo: 5, maio: 5,
+      jun: 6, june: 6, juin: 6, juni: 6, junio: 6, junho: 6,
+      jul: 7, july: 7, juillet: 7, juli: 7, julio: 7, julho: 7,
+      aug: 8, august: 8, aout: 8, agosto: 8,
+      sep: 9, sept: 9, september: 9, septembre: 9, septiembre: 9, setiembre: 9, setembro: 9,
+      oct: 10, october: 10, octobre: 10, oktober: 10, octubre: 10, outubro: 10,
+      nov: 11, november: 11, novembre: 11, noviembre: 11, novembro: 11,
+      dec: 12, december: 12, decembre: 12, dezember: 12, diciembre: 12, dezembro: 12,
     };
     const monthToken = localizedDayFirst[2].normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     return normalizeNumericBirthDate(Number(localizedDayFirst[3]), monthNames[monthToken], Number(localizedDayFirst[1]));

@@ -6,21 +6,27 @@ export type ParsedAgeEvidence = {
 
 const MONTHS: Record<string, number> = {
   jan: 1, january: 1,
+  januar: 1, janvier: 1, enero: 1, janeiro: 1,
   feb: 2, february: 2,
+  februar: 2, fevrier: 2, février: 2, febrero: 2, fevereiro: 2,
   mar: 3, march: 3,
+  marz: 3, märz: 3, mars: 3, marzo: 3, marco: 3, março: 3,
   apr: 4, april: 4,
-  may: 5,
+  avril: 4, abril: 4,
+  may: 5, mai: 5, mayo: 5, maio: 5,
   jun: 6, june: 6,
+  juni: 6, juin: 6, junio: 6, junho: 6,
   jul: 7, july: 7,
+  juli: 7, juillet: 7, julio: 7, julho: 7,
   aug: 8, august: 8,
-  sep: 9, sept: 9, september: 9,
-  oct: 10, october: 10,
-  nov: 11, november: 11,
-  dec: 12, december: 12,
-  aout: 8, août: 8,
+  aout: 8, août: 8, agosto: 8,
+  sep: 9, sept: 9, september: 9, septembre: 9, septiembre: 9, setiembre: 9, setembro: 9,
+  oct: 10, october: 10, oktober: 10, octobre: 10, octubre: 10, outubro: 10,
+  nov: 11, november: 11, novembre: 11, noviembre: 11, novembro: 11,
+  dec: 12, december: 12, dezember: 12, decembre: 12, décembre: 12, diciembre: 12, dezembro: 12,
 };
 
-const BIRTH_FACT = "(?:born|birth\\s*date|birthdate|birthday|date\\s+of\\s+birth|dob|date\\s+de\\s+naissance|n[eé](?:e)?(?:\\s+le)?|fecha\\s+de\\s+nacimiento|nacid[oa]|geburtsdatum|geboren|data\\s+de\\s+nascimento|nascid[oa])";
+const BIRTH_FACT = "(?:born|birth\\s*date|birthdate|birthday|date\\s+of\\s+birth|dob|date\\s+de\\s+naissance|n[eé](?:e)?(?:\\s+le)?|fecha(?:\\s+de)?\\s+nacimiento|nacid[oa]|geburtsdatum|geburtstag|geboren|data\\s+de\\s+nascimento|nascid[oa])";
 
 function birthFactRegex(suffix: string, flags = "i") {
   return new RegExp(`\\b${BIRTH_FACT}(?=\\s|[:\\-])${suffix}`, flags);
@@ -65,7 +71,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
     }
   }
 
-  const dayFirst = text.match(birthFactRegex("\\s*[:\\-]?\\s*(?:[A-Za-zÀ-ÿ]+\\s+)?(\\d{1,2})(?:st|nd|rd|th|er|e)?(?:\\s+of)?\\s+([A-Za-zÀ-ÿ]+)\\s+(\\d{4})\\b"));
+  const dayFirst = text.match(birthFactRegex("\\s*[:\\-]?\\s*(?:[A-Za-zÀ-ÿ]+\\s+)?(\\d{1,2})(?:(?:st|nd|rd|th|er|e)|\\.)?(?:\\s+(?:of|de))?\\s+([A-Za-zÀ-ÿ]+)\\s+(?:de\\s+)?(\\d{4})\\b"));
   if (dayFirst) {
     const day = Number(dayFirst[1]);
     const month = MONTHS[dayFirst[2].normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()];
@@ -139,8 +145,13 @@ export function parseAgeEvidenceForAthlete(
 ) {
   // Replace one character at a time so indexes stay aligned with the original
   // source text used to extract the evidence slice.
-  const normalizedText = text.toLowerCase().replace(/[^a-z0-9]/g, " ");
-  const nameTokens = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  const indexAlignedAscii = (value: string) => value.toLowerCase().split("").map((character) => {
+    const manual = ({ "ł": "l", "ø": "o", "ð": "d", "þ": "t", "ß": "s" } as Record<string, string>)[character];
+    const folded = manual || character.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+    return folded.match(/[a-z0-9]/)?.[0] || " ";
+  }).join("");
+  const normalizedText = indexAlignedAscii(text);
+  const nameTokens = indexAlignedAscii(name).replace(/\s+/g, " ").trim()
     .split(" ").filter((token) => token.length > 1);
   if (nameTokens.length < 2) return null;
 

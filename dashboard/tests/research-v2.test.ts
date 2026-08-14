@@ -96,10 +96,12 @@ import {
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
   selectWikimediaRevisionCapture,
+  selectWikimediaSearchCandidates,
   selectWaybackCapture,
   validatePreparedAgeEvidenceForSource,
   waybackCdxUrl,
   wikimediaRevisionApiUrl,
+  wikimediaSearchApiUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
@@ -1741,6 +1743,10 @@ test("Wikimedia revision fallback retrieves the last cutoff-safe article revisio
   assert.match(capture?.historicalUrl || "", /oldid=1340650263/);
   assert.match(capture?.content || "", /date of birth: 1993-06-10/);
   assert.equal(normalizeWikipediaWikitext("{{dob|2000|1|2}}"), "date of birth: 2000-01-02");
+  assert.equal(
+    normalizeWikipediaWikitext("|fecha nacimiento = {{Fecha|24|10|1989|edad}}"),
+    "|fecha nacimiento = date of birth: 1989-10-24"
+  );
 
   const prepared = extractPreparedArchivedEvidence({
     record: {
@@ -1781,6 +1787,61 @@ test("Wikimedia revision fallback retrieves the last cutoff-safe article revisio
       slots: { main: { content } },
     }] }] },
   }, canonicalUrl, cutoff), null);
+});
+
+test("multilingual Wikimedia discovery stays bounded and exact-name attributable", () => {
+  assert.match(wikimediaSearchApiUrl({
+    language: "es",
+    athleteName: "Carlos Gimeno",
+    sport: "Cliff diving",
+  }) || "", /^https:\/\/es\.wikipedia\.org\/w\/api\.php\?/);
+  assert.equal(wikimediaSearchApiUrl({ language: "xx", athleteName: "Carlos Gimeno", sport: "Cliff diving" }), null);
+  const candidates = selectWikimediaSearchCandidates({
+    language: "es",
+    athleteName: "Carlos Gimeno",
+    sport: "Cliff diving",
+    payload: {
+      query: {
+        search: [
+          { title: "Carlos Gimeno", snippet: "Carlos Gimeno compite en saltos de gran altura." },
+          { title: "Carlos Gimeno Valero", snippet: "Tenista español." },
+          { title: "Salto de gran altura", snippet: "Competición internacional." },
+        ],
+      },
+    },
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].url, "https://es.wikipedia.org/wiki/Carlos_Gimeno");
+
+  const germanAge = extractPreparedArchivedEvidence({
+    record: {
+      id: "golden-eddy",
+      athlete_name: "Eddy Clerte",
+      sport: "BMX racing",
+      fit_label: "fit",
+      evidence_cutoff_at: "2026-07-07T12:00:00Z",
+    },
+    candidate: {
+      query: "wikimedia:de:Eddy Clerte",
+      title: "Eddy Clerté",
+      url: "https://de.wikipedia.org/wiki/Eddy_Clert%C3%A9",
+      snippet: "Eddy Clerté ist ein BMX-Rennfahrer.",
+    },
+    capture: {
+      timestamp: "20251126141407",
+      capturedAt: "2025-11-26T14:14:07Z",
+      originalUrl: "https://de.wikipedia.org/wiki/Eddy_Clert%C3%A9",
+      statusCode: "200",
+      digest: "eddy-revision",
+      mimeType: "text/x-wiki",
+      archivedUrl: "https://de.wikipedia.org/w/index.php?title=Eddy_Clert%C3%A9&oldid=1",
+    },
+    html: "Eddy Clerté ist ein französischer BMX-Rennfahrer. Geburtsdatum: 15. August 1998.",
+  });
+  assert.equal(
+    germanAge.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility")?.structuredValue.birth_date,
+    "1998-08-15"
+  );
 });
 
 test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
