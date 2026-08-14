@@ -2445,6 +2445,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   const ageSelector = route.slice(ageSelectorStart, ageSelectorEnd);
   assert.ok(ageSelectorStart >= 0 && ageSelectorEnd > ageSelectorStart);
   assert.doesNotMatch(ageSelector, /baselineCompleted/);
+  assert.match(ageSelector, /readiness\.identity\.passed/);
+  assert.match(ageSelector, /readiness\.creatorPotential\.passed/);
   assert.ok(
     ageSelector.indexOf("right.readiness.adult.independentSources")
       < ageSelector.indexOf("left.readiness.reasons.length"),

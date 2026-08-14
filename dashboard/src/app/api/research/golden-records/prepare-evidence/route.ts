@@ -113,7 +113,12 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
     const readiness = benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel: "fit", selection });
     return { record, readiness, safeClaims: selection.evidence.length };
   }).filter(({ readiness }) => !readiness.ready
+    // Age recovery is a last-mile tool. A dated age source cannot repair an
+    // unresolved identity or missing creator/audience packet, so do not spend
+    // discovery budget until those independently recoverable gates are done.
+    && readiness.identity.passed
     && readiness.momentum.passed
+    && readiness.creatorPotential.passed
     && !readiness.adult.passed
   ).sort((left, right) => Number(right.readiness.creatorPotential.passed) - Number(left.readiness.creatorPotential.passed)
     || Number(right.readiness.identity.passed) - Number(left.readiness.identity.passed)
