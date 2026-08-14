@@ -2187,11 +2187,20 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     instagram_handle: "jane.volley",
   });
   assert.equal(ageRecovery.length, 4);
+  assert.ok(ageRecovery[0].startsWith('"Jane Doe" ("date of birth"'));
+  assert.ok(!ageRecovery[0].includes('"Volleyball"'));
   assert.ok(ageRecovery.every((query) => /birth|born|age/i.test(query)));
   assert.ok(ageRecovery.every((query) => query.includes("before:2024-06-01")));
   assert.ok(ageRecovery.some((query) => query.includes("site:wikipedia.org")));
   assert.ok(ageRecovery.some((query) => query.includes("site:volleyballworld.com")));
   assert.ok(ageRecovery.some((query) => query.includes('"@jane.volley"')));
+  const combatAgeRecovery = buildHistoricalAgeRecoveryQueries({
+    athlete_name: "Crystal Fighter",
+    sport: "Combat Sports",
+    evidence_cutoff_at: "2024-06-01T12:00:00Z",
+    instagram_handle: null,
+  });
+  assert.ok(combatAgeRecovery.some((query) => query.includes("site:myfloridalicense.com")));
   const signalRecovery = buildHistoricalSignalRecoveryQueries({
     athlete_name: "Jane Doe",
     sport: "Volleyball",

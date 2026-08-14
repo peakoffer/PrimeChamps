@@ -6,7 +6,7 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-14-multilingual-wikimedia-age-recovery-v4";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-14-exact-name-authority-age-recovery-v5";
 export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-14-sport-handle-age-recovery-v3",
@@ -1041,7 +1041,7 @@ export function buildHistoricalEvidenceQueries(record: Pick<EvidencePreparationR
 function authoritativeAgeDomainsForSport(sport: string) {
   const normalized = normalizeEvidenceText(sport);
   if (/combat|mma|boxing|kickbox/.test(normalized)) {
-    return "(site:tapology.com OR site:sherdog.com OR site:ufc.com OR site:bkfc.com)";
+    return "(site:tapology.com OR site:sherdog.com OR site:ufc.com OR site:bkfc.com OR site:myfloridalicense.com)";
   }
   if (/cliff diving|high diving|diving/.test(normalized)) {
     return "(site:redbull.com OR site:worldaquatics.com OR site:olympics.com)";
@@ -1076,7 +1076,10 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
     ? `("@${handle}" OR "${handle}") (born OR "date of birth" OR birthdate OR age)`
     : `("player profile" OR "athlete bio") (birth OR age)`;
   return [
-    `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthdate OR birthday OR DOB) ${excludeSocial} before:${before}`,
+    // Keep one exact-name query free of sport synonyms. Official profile and
+    // commission pages often omit the sport name from the indexed snippet;
+    // athlete + sport matching is still mandatory at extraction time.
+    `"${record.athlete_name}" ("date of birth" OR birthdate OR birthday OR DOB) ${excludeSocial} before:${before}`,
     `"${record.athlete_name}" ${sportExpression} (born OR "date of birth" OR age) (site:wikipedia.org OR site:olympedia.org OR site:paralympic.org) before:${before}`,
     `"${record.athlete_name}" ${sportExpression} (born OR "date of birth" OR birthdate OR DOB) ${authoritativeAgeDomainsForSport(record.sport)} before:${before}`,
     `"${record.athlete_name}" ${sportExpression} ${handleOrProfile} ${excludeSocial} before:${before}`,
