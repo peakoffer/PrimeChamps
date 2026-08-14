@@ -363,9 +363,14 @@ export function selectWikimediaSearchCandidates(input: {
     const normalizedAthlete = normalizeEvidenceText(input.athleteName);
     const exactTitle = normalizedTitle === normalizedAthlete
       || (title.includes("(") && normalizedTitle.startsWith(`${normalizedAthlete} `));
+    // Search snippets are discovery metadata, not evidence. Exact-title
+    // attribution is sufficient to retrieve the cutoff-safe revision; the
+    // revision extractor still requires the athlete name and sport before it
+    // can persist any claim. Requiring the snippet to repeat the sport drops
+    // valid multilingual biographies whose snippet happens to show references
+    // or profile links instead of the article lead.
     if (!title || !exactTitle
-      || !benchmarkSourceNamesAthlete(input.athleteName, `${title} ${snippet}`)
-      || !benchmarkSourceSupportsSport(input.sport, `${title} ${snippet}`)) return [];
+      || !benchmarkSourceNamesAthlete(input.athleteName, `${title} ${snippet}`)) return [];
     return [{
       query: `wikimedia:${language}:"${input.athleteName}" ${input.sport}`,
       title,

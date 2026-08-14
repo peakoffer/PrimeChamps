@@ -1852,6 +1852,22 @@ test("multilingual Wikimedia discovery stays bounded and exact-name attributable
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].url, "https://es.wikipedia.org/wiki/Carlos_Gimeno");
 
+  const exactTitleWithReferenceSnippet = selectWikimediaSearchCandidates({
+    language: "es",
+    athleteName: "Gaston Reyno",
+    sport: "Bare-knuckle boxing",
+    payload: {
+      query: {
+        search: [{
+          title: "Gastón Reyno",
+          snippet: "Gastón Reyno en Instagram · Gastón Reyno en Sherdog · Gastón Reyno en Tapology",
+        }],
+      },
+    },
+  });
+  assert.equal(exactTitleWithReferenceSnippet.length, 1);
+  assert.equal(exactTitleWithReferenceSnippet[0].url, "https://es.wikipedia.org/wiki/Gast%C3%B3n_Reyno");
+
   const germanAge = extractPreparedArchivedEvidence({
     record: {
       id: "golden-eddy",
