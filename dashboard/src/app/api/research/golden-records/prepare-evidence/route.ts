@@ -6,6 +6,7 @@ import { selectActiveBenchmarkCohort } from "@/lib/research/v2";
 import {
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
+  HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS,
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
@@ -437,10 +438,15 @@ export async function POST(request: NextRequest) {
         : typeof summary?.providerRunId === "string" ? summary.providerRunId : undefined;
       const archiveProviderReplay = preparationMode === "age_recovery"
         && checkpoint?.archive_provider_version !== HISTORICAL_ARCHIVE_PROVIDER_VERSION;
+      const queryPlanMatches = checkpoint?.query_plan_version === queryPlanVersion
+        || (preparationMode === "age_recovery"
+          && HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS.includes(
+            checkpoint?.query_plan_version as typeof HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS[number]
+          ));
       return (run.status === "failed" || run.status === "cancelled"
           || checkpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION
           || archiveProviderReplay)
-        && checkpoint?.query_plan_version === queryPlanVersion
+        && queryPlanMatches
         && Array.isArray(run.record_ids)
         && recordIds.every((recordId) => run.record_ids.includes(recordId))
         && typeof providerRunId === "string"
