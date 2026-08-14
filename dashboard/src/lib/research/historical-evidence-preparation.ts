@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-multilingual-age-extraction-v9";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-wikimedia-profile-references-v6";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-direct-timegate-resume-v7";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -469,6 +469,45 @@ export function waybackCdxUrl(canonicalUrl: string, evidenceCutoffAt: string) {
     to,
   });
   return `https://web.archive.org/cdx/search/cdx?${params.toString()}`;
+}
+
+/**
+ * Requests the Wayback snapshot nearest the cutoff without using the CDX
+ * index. The redirected capture is still accepted only when it is the exact
+ * requested URL and its timestamp is no later than the benchmark cutoff.
+ * This is useful for cutoff-safe profile references when the public CDX index
+ * is temporarily rate limited.
+ */
+export function waybackTimegateUrl(canonicalUrl: string, evidenceCutoffAt: string) {
+  if (!isPublicHttpUrl(canonicalUrl)) throw new Error("Archive lookup requires a public HTTP URL");
+  const cutoff = new Date(evidenceCutoffAt);
+  if (!Number.isFinite(cutoff.getTime())) throw new Error("Archive lookup requires a valid evidence cutoff");
+  const timestamp = cutoff.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  return `https://web.archive.org/web/${timestamp}id_/${canonicalHistoricalArchiveUrl(canonicalUrl)}`;
+}
+
+export function selectWaybackRedirectCapture(
+  redirectedUrl: string,
+  canonicalUrl: string,
+  evidenceCutoffAt: string
+): WaybackCapture | null {
+  const match = redirectedUrl.match(/^https:\/\/web\.archive\.org\/web\/(\d{14})(?:[a-z]{2}_)?\/(https?:\/\/.+)$/i);
+  if (!match) return null;
+  const timestamp = match[1];
+  const capturedAt = parseWaybackTimestamp(timestamp);
+  const cutoff = Date.parse(evidenceCutoffAt);
+  const originalUrl = match[2];
+  if (!capturedAt || !Number.isFinite(cutoff) || Date.parse(capturedAt) > cutoff
+    || normalizedUrlForComparison(originalUrl) !== normalizedUrlForComparison(canonicalUrl)) return null;
+  return {
+    timestamp,
+    capturedAt,
+    originalUrl,
+    statusCode: "200",
+    digest: null,
+    mimeType: "text/html",
+    archivedUrl: redirectedUrl,
+  };
 }
 
 export function selectWaybackCapture(payload: unknown, canonicalUrl: string, evidenceCutoffAt: string): WaybackCapture | null {

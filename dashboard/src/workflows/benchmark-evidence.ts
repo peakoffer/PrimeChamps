@@ -18,9 +18,11 @@ import {
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
   selectWikimediaRevisionCapture,
+  selectWaybackRedirectCapture,
   selectWikimediaSearchCandidates,
   selectWaybackCapture,
   waybackCdxUrl,
+  waybackTimegateUrl,
   wikimediaRevisionApiUrl,
   wikimediaSearchApiUrl,
   validatePreparedAgeEvidenceForSource,
@@ -454,6 +456,31 @@ async function fetchArchiveHtml(url: string) {
   return (await response.text()).slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters * 3);
 }
 
+async function retrieveWaybackTimegateEvidenceCandidate(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+}) {
+  const response = await fetch(waybackTimegateUrl(input.candidate.url, input.record.evidence_cutoff_at), {
+    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(45_000),
+    cache: "no-store",
+    redirect: "follow",
+  });
+  if (response.status === 429) throw new RetryableError("Internet Archive rate limited the direct capture lookup", { retryAfter: "20s" });
+  if (response.status >= 500) throw new RetryableError(`Internet Archive direct capture lookup failed (${response.status})`, { retryAfter: "10s" });
+  if (!response.ok) return { evidence: null, rejectionReason: "no_wayback_timegate_capture_before_cutoff" };
+  const capture = selectWaybackRedirectCapture(response.url, input.candidate.url, input.record.evidence_cutoff_at);
+  if (!capture) return { evidence: null, rejectionReason: "wayback_timegate_capture_not_exact_or_after_cutoff" };
+  const contentType = response.headers.get("content-type") || "";
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (!/html|xhtml|text\//i.test(contentType) || contentLength > 2_000_000) {
+    return { evidence: null, rejectionReason: "wayback_timegate_capture_not_bounded_html" };
+  }
+  const html = (await response.text()).slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters * 3);
+  const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate: input.candidate, capture, html });
+  return { evidence: prepared.evidence, rejectionReason: prepared.rejectionReason };
+}
+
 async function loadCommonCrawlCollections() {
   "use step";
 
@@ -626,6 +653,25 @@ async function retrieveArchivedEvidenceCandidate(input: {
     // Continue to the generic archive providers when Wikimedia is unavailable.
   }
   let waybackRateLimited = false;
+  if (candidate.query.startsWith("Cutoff-safe external profiles referenced by ")) {
+    try {
+      const direct = await retrieveWaybackTimegateEvidenceCandidate({ record: input.record, candidate });
+      if (direct.evidence) {
+        return {
+          evidence: {
+            ...direct.evidence,
+            archiveProvider: "internet_archive_wayback" as const,
+            providerRequestId: direct.evidence.captureTimestamp,
+          },
+          rejectionReason: null,
+          rateLimited: false,
+          waybackRateLimited: false,
+        };
+      }
+    } catch (error) {
+      waybackRateLimited = error instanceof RetryableError;
+    }
+  }
   try {
     const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
     const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
@@ -648,7 +694,7 @@ async function retrieveArchivedEvidenceCandidate(input: {
       }
     }
   } catch (error) {
-    waybackRateLimited = error instanceof RetryableError;
+    waybackRateLimited = waybackRateLimited || error instanceof RetryableError;
   }
   try {
     const commonCrawl = await retrieveCommonCrawlEvidenceCandidate({
@@ -861,7 +907,8 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         },
       },
     });
-    const results = [];
+    const results: Awaited<ReturnType<typeof persistPreparedRecordEvidence>>[] = [];
+    const deferredCandidates: Array<{ recordId: string; url: string }> = [];
     for (const record of discovery.records) {
       const evidence: PreparedArchivedEvidence[] = [];
       const rejections: Array<{ url: string; reason: string }> = [];
@@ -879,10 +926,9 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           if (attempt < 1) await sleep("20s");
         }
         if (archiveResult?.rateLimited) {
-          throw new RetryableError(
-            "Historical archive providers stayed rate limited after one bounded retry; stop and replay the saved discovery run after cooldown",
-            { retryAfter: "10m" }
-          );
+          deferredCandidates.push({ recordId: record.id, url: candidate.url });
+          await sleep("5s");
+          continue;
         }
         if (archiveResult?.evidence) {
           evidence.push(archiveResult.evidence);
@@ -926,6 +972,9 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
         },
       });
     }
+    const unresolvedDeferredCandidates = deferredCandidates.filter((candidate) =>
+      !results.find((result) => result.recordId === candidate.recordId)?.ready
+    );
     const summary = {
       providerRunId: discovery.providerRunId,
       discoveryReused: discovery.discoveryReused,
@@ -939,8 +988,37 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       benchmarkSplit: input.benchmarkSplit,
       queryPlanVersion: input.queryPlanVersion,
       archiveProviderVersion: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
+      deferredArchiveCandidates: unresolvedDeferredCandidates,
       records: results,
     };
+    if (unresolvedDeferredCandidates.length) {
+      await updatePreparationRun({
+        preparationRunId: input.preparationRunId,
+        organizationId: input.organizationId,
+        patch: {
+          status: "failed",
+          records_processed: results.length,
+          records_ready: results.filter((result) => result.ready).length,
+          safe_source_count: results.reduce((sum, result) => sum + result.independentSources, 0),
+          safe_claim_count: results.reduce((sum, result) => sum + result.safeClaims, 0),
+          checkpoint: {
+            phase: "archive_cooldown",
+            extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
+            archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
+            query_plan_version: input.queryPlanVersion,
+            preparation_mode: input.preparationMode,
+            benchmark_split: input.benchmarkSplit,
+            provider_run_id: discovery.providerRunId,
+            processed_record_ids: results.map((result) => result.recordId),
+            deferred_archive_candidates: unresolvedDeferredCandidates,
+            scoring_tokens_spent: 0,
+          },
+          summary,
+          error_message: "Some archive candidates were deferred after bounded provider rate limits; replay will reuse paid discovery.",
+        },
+      });
+      return summary;
+    }
     await updatePreparationRun({
       preparationRunId: input.preparationRunId,
       organizationId: input.organizationId,

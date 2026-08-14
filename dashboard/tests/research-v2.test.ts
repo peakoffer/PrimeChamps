@@ -100,8 +100,10 @@ import {
   selectWikimediaRevisionCapture,
   selectWikimediaSearchCandidates,
   selectWaybackCapture,
+  selectWaybackRedirectCapture,
   validatePreparedAgeEvidenceForSource,
   waybackCdxUrl,
+  waybackTimegateUrl,
   wikimediaRevisionApiUrl,
   wikimediaSearchApiUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
@@ -1686,6 +1688,28 @@ test("Wayback selection uses the latest exact HTML capture no later than the evi
   assert.equal(cdxUrl.searchParams.get("matchType"), "exact");
   assert.equal(cdxUrl.searchParams.get("to"), "20240601123456");
   assert.equal(
+    waybackTimegateUrl(canonicalUrl, "2024-06-01T12:34:56Z"),
+    `https://web.archive.org/web/20240601123456id_/${canonicalUrl}`
+  );
+  assert.equal(
+    selectWaybackRedirectCapture(
+      `https://web.archive.org/web/20240501010101id_/${canonicalUrl}`,
+      canonicalUrl,
+      "2024-06-01T00:00:00Z"
+    )?.timestamp,
+    "20240501010101"
+  );
+  assert.equal(selectWaybackRedirectCapture(
+    `https://web.archive.org/web/20240701010101id_/${canonicalUrl}`,
+    canonicalUrl,
+    "2024-06-01T00:00:00Z"
+  ), null);
+  assert.equal(selectWaybackRedirectCapture(
+    "https://web.archive.org/web/20240501010101id_/https://sports.example/athletes/other",
+    canonicalUrl,
+    "2024-06-01T00:00:00Z"
+  ), null);
+  assert.equal(
     canonicalHistoricalArchiveUrl(`${canonicalUrl}?srsltid=tracking&utm_source=google#bio`),
     canonicalUrl
   );
@@ -2331,7 +2355,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
   assert.doesNotMatch(workflow, /skipWayback/);
   assert.match(workflow, /rateLimited: waybackRateLimited && !commonCrawl\.evidence/);
-  assert.match(workflow, /Historical archive providers stayed rate limited after one bounded retry/);
+  assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
+  assert.match(workflow, /Cutoff-safe external profiles referenced by/);
+  assert.match(workflow, /deferredCandidates\.push/);
+  assert.match(workflow, /phase: "archive_cooldown"/);
+  assert.match(workflow, /replay will reuse paid discovery/);
   assert.match(workflow, /readApifyRunDatasetWithUsage/);
   assert.match(workflow, /maxTotalChargeUsd: input\.maxApifyChargeUsd/);
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
