@@ -1235,6 +1235,18 @@ test("benchmark finalist gates require two independent identity and adult source
   });
   assert.deepEqual(benchmarkIdentityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
+  const contradictoryAge = {
+    ...selection.evidence.find((item) => item.claimId === "age-claim-b")!,
+    sourceId: "age-conflict",
+    claimId: "age-conflict",
+    sourceRef: "E98",
+    independenceGroup: "conflicting-bio.test",
+    structuredValue: { birth_date: "1997-01-02" },
+  };
+  assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, [...selection.evidence, contradictoryAge]), {
+    passed: false,
+    independentSources: 3,
+  });
   assert.equal(benchmarkCaseReadiness({ record: BENCHMARK_CASE, selection }).ready, true);
   const creatorReadySelection = {
     ...selection,

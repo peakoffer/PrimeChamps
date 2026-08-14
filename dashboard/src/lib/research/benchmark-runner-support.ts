@@ -385,14 +385,54 @@ function supportedAdultAge(evidence: LeakageSafeBenchmarkEvidence, cutoff: strin
   return birthYear ? new Date(cutoff).getUTCFullYear() - Number(birthYear) > 21 : false;
 }
 
+type AdultAgeFact = {
+  exactBirthDate: string | null;
+  possibleBirthYears: Set<number>;
+};
+
+function adultAgeFact(evidence: LeakageSafeBenchmarkEvidence): AdultAgeFact | null {
+  const value = evidence.structuredValue;
+  const rawBirthDate = typeof value.birth_date === "string" ? value.birth_date
+    : typeof value.date_of_birth === "string" ? value.date_of_birth
+      : null;
+  if (rawBirthDate) {
+    const parsed = new Date(rawBirthDate);
+    if (!Number.isFinite(parsed.getTime())) return null;
+    const exactBirthDate = parsed.toISOString().slice(0, 10);
+    return { exactBirthDate, possibleBirthYears: new Set([parsed.getUTCFullYear()]) };
+  }
+  if (typeof value.birth_year === "number" && Number.isInteger(value.birth_year)) {
+    return { exactBirthDate: null, possibleBirthYears: new Set([value.birth_year]) };
+  }
+  if (typeof value.age === "number" && Number.isInteger(value.age)) {
+    // The statement date is the age observation. `age_as_of` on older imports
+    // can be the archive retrieval date, which would manufacture a conflict.
+    const ageAsOf = evidence.effectiveAt || (typeof value.age_as_of === "string" ? value.age_as_of : null);
+    const observed = ageAsOf ? new Date(ageAsOf) : null;
+    if (!observed || !Number.isFinite(observed.getTime())) return null;
+    const year = observed.getUTCFullYear();
+    return { exactBirthDate: null, possibleBirthYears: new Set([year - value.age - 1, year - value.age]) };
+  }
+  return null;
+}
+
+function adultAgeFactsAgree(left: AdultAgeFact, right: AdultAgeFact) {
+  if (left.exactBirthDate && right.exactBirthDate) return left.exactBirthDate === right.exactBirthDate;
+  return [...left.possibleBirthYears].some((year) => right.possibleBirthYears.has(year));
+}
+
 export function benchmarkAdultEligibilityGate(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
   if (!record.evidence_cutoff_at) return { passed: false, independentSources: 0 };
-  const groups = new Set(evidence.filter((item) =>
+  const eligible = evidence.filter((item) =>
     /(age|birth|date_of_birth|dob|eligibility)/.test(item.claimType)
     && evidenceNamesAthlete(record.athlete_name, item)
     && supportedAdultAge(item, record.evidence_cutoff_at!)
-  ).map((item) => item.independenceGroup));
-  return { passed: groups.size >= 2, independentSources: groups.size };
+  );
+  const groups = new Set(eligible.map((item) => item.independenceGroup));
+  const facts = eligible.map(adultAgeFact).filter((fact): fact is AdultAgeFact => fact !== null);
+  const factsAgree = facts.length === eligible.length
+    && facts.every((left, index) => facts.slice(index + 1).every((right) => adultAgeFactsAgree(left, right)));
+  return { passed: groups.size >= 2 && factsAgree, independentSources: groups.size };
 }
 
 export function benchmarkCurrentMomentumGate(
