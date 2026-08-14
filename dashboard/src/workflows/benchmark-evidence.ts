@@ -582,7 +582,6 @@ async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
   commonCrawlCollections: unknown;
-  skipWayback?: boolean;
 }) {
   "use step";
 
@@ -601,31 +600,29 @@ async function retrieveArchivedEvidenceCandidate(input: {
     // Continue to the generic archive providers when Wikimedia is unavailable.
   }
   let waybackRateLimited = false;
-  if (!input.skipWayback) {
-    try {
-      const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
-      const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
-      if (capture) {
-        const html = await fetchArchiveHtml(capture.archivedUrl);
-        if (html) {
-          const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
-          if (prepared.evidence) {
-            return {
-              evidence: {
-                ...prepared.evidence,
-                archiveProvider: "internet_archive_wayback" as const,
-                providerRequestId: capture.timestamp,
-              },
-              rejectionReason: null,
-              rateLimited: false,
-              waybackRateLimited: false,
-            };
-          }
+  try {
+    const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
+    const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
+    if (capture) {
+      const html = await fetchArchiveHtml(capture.archivedUrl);
+      if (html) {
+        const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
+        if (prepared.evidence) {
+          return {
+            evidence: {
+              ...prepared.evidence,
+              archiveProvider: "internet_archive_wayback" as const,
+              providerRequestId: capture.timestamp,
+            },
+            rejectionReason: null,
+            rateLimited: false,
+            waybackRateLimited: false,
+          };
         }
       }
-    } catch (error) {
-      waybackRateLimited = error instanceof RetryableError;
     }
+  } catch (error) {
+    waybackRateLimited = error instanceof RetryableError;
   }
   try {
     const commonCrawl = await retrieveCommonCrawlEvidenceCandidate({
@@ -636,14 +633,16 @@ async function retrieveArchivedEvidenceCandidate(input: {
     return {
       evidence: commonCrawl.evidence,
       rejectionReason: commonCrawl.rejectionReason,
-      rateLimited: false,
+      // A Common Crawl miss is not proof that the source lacks a historical
+      // capture when Wayback itself was temporarily unavailable.
+      rateLimited: waybackRateLimited && !commonCrawl.evidence,
       waybackRateLimited,
     };
   } catch (error) {
     return {
       evidence: null,
       rejectionReason: error instanceof Error ? error.message.slice(0, 180) : "archive_lookup_failed",
-      rateLimited: false,
+      rateLimited: waybackRateLimited,
       waybackRateLimited,
     };
   }
@@ -837,7 +836,6 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       },
     });
     const results = [];
-    let skipWayback = false;
     for (const record of discovery.records) {
       const evidence: PreparedArchivedEvidence[] = [];
       const rejections: Array<{ url: string; reason: string }> = [];
@@ -850,9 +848,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             record,
             candidate,
             commonCrawlCollections,
-            skipWayback,
           });
-          if (archiveResult.waybackRateLimited) skipWayback = true;
           if (!archiveResult.rateLimited) break;
           if (attempt < 1) await sleep("20s");
         }
