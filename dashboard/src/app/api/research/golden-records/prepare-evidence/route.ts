@@ -20,10 +20,9 @@ import { prepareBenchmarkEvidenceWorkflow } from "@/workflows/benchmark-evidence
 import {
   benchmarkEvidenceFreezeReadiness,
   selectLeakageSafeBenchmarkEvidence,
-  type BenchmarkEvidenceClaimRow,
-  type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
 } from "@/lib/research/benchmark-runner-support";
+import { loadBenchmarkEvidenceRows } from "@/lib/research/benchmark-evidence-storage";
 
 export const maxDuration = 60;
 
@@ -93,22 +92,15 @@ async function unresolvedFitRecordsForAgeRecovery(input: {
     && !input.recoveryCompleted.has(record.id));
   if (!candidates.length) return [];
   const recordIds = candidates.map((record) => record.id);
-  const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
-    input.admin.from("research_evidence_sources").select(
-      "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
-    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
-    input.admin.from("research_evidence_claims").select(
-      "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
-    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
-  ]);
-  if (sourceError) throw sourceError;
-  if (claimError) throw claimError;
+  const { sources, claims } = await loadBenchmarkEvidenceRows({
+    admin: input.admin, organizationId: input.organizationId, recordIds,
+  });
   return candidates.map((record) => {
     const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
     const selection = selectLeakageSafeBenchmarkEvidence({
       record: benchmarkRecord,
-      sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
-      claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
+      sources: sources.filter((source) => source.golden_record_id === record.id),
+      claims: claims.filter((claim) => claim.golden_record_id === record.id),
     });
     const readiness = benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel: "fit", selection });
     return { record, readiness, safeClaims: selection.evidence.length };
@@ -142,22 +134,15 @@ async function unresolvedRecordsForBaseline(input: {
   // recovery. Looking only at not-yet-processed records can spend on a label
   // whose 16-case benchmark quota is already complete.
   const recordIds = input.eligible.map((record) => record.id);
-  const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
-    input.admin.from("research_evidence_sources").select(
-      "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"
-    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
-    input.admin.from("research_evidence_claims").select(
-      "id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason"
-    ).eq("organization_id", input.organizationId).in("golden_record_id", recordIds),
-  ]);
-  if (sourceError) throw sourceError;
-  if (claimError) throw claimError;
+  const { sources, claims } = await loadBenchmarkEvidenceRows({
+    admin: input.admin, organizationId: input.organizationId, recordIds,
+  });
   const entries = input.eligible.map((record) => {
     const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
     const selection = selectLeakageSafeBenchmarkEvidence({
       record: benchmarkRecord,
-      sources: ((sources || []) as BenchmarkEvidenceSourceRow[]).filter((source) => source.golden_record_id === record.id),
-      claims: ((claims || []) as BenchmarkEvidenceClaimRow[]).filter((claim) => claim.golden_record_id === record.id),
+      sources: sources.filter((source) => source.golden_record_id === record.id),
+      claims: claims.filter((claim) => claim.golden_record_id === record.id),
     });
     const fitLabel = record.fit_label as "fit" | "not_fit";
     return {

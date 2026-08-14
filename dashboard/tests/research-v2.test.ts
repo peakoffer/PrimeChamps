@@ -24,6 +24,14 @@ test("fresh evidence recovery stops spending on a label whose quota is full", ()
   ];
   assert.deepEqual(freshBenchmarkLabelDeficits(entries), { fit: 11, not_fit: 0 });
 });
+
+test("benchmark evidence storage batches records below the database row ceiling", () => {
+  const loader = readFileSync(new URL("../src/lib/research/benchmark-evidence-storage.ts", import.meta.url), "utf8");
+  assert.match(loader, /chunkRecordIds\(input\.recordIds\)/);
+  assert.match(loader, /size = 20/);
+  assert.match(loader, /\.limit\(1_000\)/);
+  assert.match(loader, /batches\.flatMap/);
+});
 import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
