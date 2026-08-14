@@ -23,6 +23,23 @@ export function historicalEvidenceQueryPlanVersion(mode: HistoricalEvidencePrepa
   return HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION;
 }
 
+export function historicalDiscoveryReplayCoverageMatches(input: {
+  mode: HistoricalEvidencePreparationMode;
+  requestedRecordIds: string[];
+  priorRecordIds: string[];
+}) {
+  if (!input.requestedRecordIds.length || !input.priorRecordIds.length) return false;
+  const prior = new Set(input.priorRecordIds);
+  const covered = input.requestedRecordIds.filter((recordId) => prior.has(recordId)).length;
+  if (covered === input.requestedRecordIds.length) return true;
+  // Multilingual Wikimedia discovery is independent of the paid Google run.
+  // Permit an age-only replay to add one newly eligible record when at least
+  // four records and 80% of the batch retain their saved paid discovery.
+  return input.mode === "age_recovery"
+    && covered >= 4
+    && covered / input.requestedRecordIds.length >= 0.8;
+}
+
 export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   maximumRecords: 10,
   queriesPerRecord: 4,

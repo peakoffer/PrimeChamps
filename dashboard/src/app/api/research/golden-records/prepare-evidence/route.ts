@@ -11,6 +11,7 @@ import {
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
+  historicalDiscoveryReplayCoverageMatches,
   historicalEvidenceQueryPlanVersion,
   normalizeEvidencePreparationBudget,
   type HistoricalEvidencePreparationMode,
@@ -448,7 +449,11 @@ export async function POST(request: NextRequest) {
           || archiveProviderReplay)
         && queryPlanMatches
         && Array.isArray(run.record_ids)
-        && recordIds.every((recordId) => run.record_ids.includes(recordId))
+        && historicalDiscoveryReplayCoverageMatches({
+          mode: preparationMode,
+          requestedRecordIds: recordIds,
+          priorRecordIds: run.record_ids,
+        })
         && typeof providerRunId === "string"
         && providerRunId.length > 0
         && typeof run.actual_apify_cost_microusd === "number";

@@ -87,6 +87,7 @@ import {
   extractCommonCrawlWarcBody,
   extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
+  historicalDiscoveryReplayCoverageMatches,
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
@@ -1844,6 +1845,25 @@ test("multilingual Wikimedia discovery stays bounded and exact-name attributable
   );
 });
 
+test("age recovery can add one free-only record while reusing paid discovery", () => {
+  const prior = ["a", "b", "c", "d"];
+  assert.equal(historicalDiscoveryReplayCoverageMatches({
+    mode: "age_recovery",
+    requestedRecordIds: [...prior, "e"],
+    priorRecordIds: prior,
+  }), true);
+  assert.equal(historicalDiscoveryReplayCoverageMatches({
+    mode: "baseline",
+    requestedRecordIds: [...prior, "e"],
+    priorRecordIds: prior,
+  }), false);
+  assert.equal(historicalDiscoveryReplayCoverageMatches({
+    mode: "age_recovery",
+    requestedRecordIds: [...prior, "e", "f"],
+    priorRecordIds: prior,
+  }), false);
+});
+
 test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
   const record = {
     id: "golden-jane",
@@ -2284,7 +2304,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /reuseProviderRunId/);
   assert.match(route, /run\.status === "failed"/);
   assert.match(route, /run\.status === "cancelled"/);
-  assert.match(route, /recordIds\.every\(\(recordId\) => run\.record_ids\.includes\(recordId\)\)/);
+  assert.match(route, /historicalDiscoveryReplayCoverageMatches\(\{/);
   assert.match(route, /reusableSummary\?\.providerRunId/);
   assert.match(route, /ARCHIVE_RATE_LIMIT_COOLDOWN_MS/);
   assert.match(route, /archive_fallback_available: true/);
