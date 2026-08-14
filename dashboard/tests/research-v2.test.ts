@@ -2470,6 +2470,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /benchmark_split: input\.benchmarkSplit/);
   assert.match(route, /No active locked, unrevealed benchmark cohort exists/);
   assert.match(route, /activeCohortVersion/);
+  assert.match(route, /requestedIds\.map\(\(recordId\) => eligibleById\.get\(recordId\)\)/);
   assert.match(route, /\.contains\("stratification_tags", \["dylan_outcome_ground_truth"\]\)/);
   assert.match(benchmarkPage, /Recover fresh positives/);
   assert.match(benchmarkPage, /benchmarkSplit: "excluded"/);

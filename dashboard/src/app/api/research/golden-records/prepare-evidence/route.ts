@@ -408,8 +408,14 @@ export async function POST(request: NextRequest) {
     const signalRecoveryRemaining = preparationMode === "signal_recovery"
       ? eligible.filter((record) => !signalRecoveryCompleted.has(record.id))
       : [];
+    const eligibleById = new Map(eligible.map((record) => [record.id, record]));
+    const explicitlySelected = requestedIds.map((recordId) => eligibleById.get(recordId))
+      .filter((record): record is GoldenPreparationCandidate => Boolean(record));
+    // Explicit IDs arrive in audited priority order from the benchmark UI.
+    // Supabase does not preserve `.in(...)` order, so reconstruct it here or a
+    // lower-value case can consume the archive window before a closable case.
     const selected = (requestedIds.length
-      ? eligible
+      ? explicitlySelected
       : preparationMode === "baseline"
         ? baselineRemaining
         : preparationMode === "age_recovery" ? ageRecoveryRemaining : signalRecoveryRemaining
