@@ -484,16 +484,22 @@ async function retrieveWaybackTimegateEvidenceCandidate(input: {
 async function loadCommonCrawlCollections() {
   "use step";
 
-  const response = await fetch("https://index.commoncrawl.org/collinfo.json", {
-    headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
-    signal: AbortSignal.timeout(30_000),
-    cache: "no-store",
-  });
-  if (!response.ok) return [];
-  const payload = await response.json() as unknown;
-  return Array.isArray(payload) ? payload : [];
+  try {
+    const response = await fetch("https://index.commoncrawl.org/collinfo.json", {
+      headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+      signal: AbortSignal.timeout(30_000),
+      cache: "no-store",
+    });
+    if (!response.ok) return [];
+    const payload = await response.json() as unknown;
+    return Array.isArray(payload) ? payload : [];
+  } catch {
+    // Common Crawl is an optional free fallback. A transient collection-index
+    // failure must not prevent Wikimedia or direct Wayback verification.
+    return [];
+  }
 }
-loadCommonCrawlCollections.maxRetries = 1;
+loadCommonCrawlCollections.maxRetries = 0;
 
 async function decompressCommonCrawlRecord(bytes: Uint8Array) {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
