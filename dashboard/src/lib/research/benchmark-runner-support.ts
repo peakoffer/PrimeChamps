@@ -817,7 +817,8 @@ export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
 export function buildBenchmarkResearcherPrompt(
   record: BenchmarkGoldenCase,
   evidence: LeakageSafeBenchmarkEvidence[],
-  deterministicPrecheck = benchmarkDeterministicGateSummary(record, evidence)
+  deterministicPrecheck = benchmarkDeterministicGateSummary(record, evidence),
+  recruitingThesisContext?: string
 ) {
   const dossier = evidence.map((item) => [
     `[${item.sourceRef}] ${item.title}`,
@@ -835,6 +836,11 @@ CANDIDATE
 Name: ${record.athlete_name}
 Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
+
+${recruitingThesisContext ? `FROZEN BUSINESS THESIS
+${recruitingThesisContext}
+This thesis defines current business priorities only. It is not evidence about this candidate, cannot satisfy an evidence gate, and must never be cited as a candidate fact.
+` : ""}
 
 DETERMINISTIC EVIDENCE PRECHECK
 ${JSON.stringify(deterministicPrecheck, null, 2)}

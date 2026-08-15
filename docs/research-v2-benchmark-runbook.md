@@ -41,7 +41,7 @@ A cohort cannot be frozen on labels alone. Every record must also contain at lea
 
 1. An owner or admin starts a development run with a case count and cost ceiling.
 2. The server resolves the newest priced, structured-output Anthropic Sonnet model in OpenRouter's live catalog and stores its exact ID, provider route, release timestamp, and price snapshot. If OpenRouter is unavailable, a configured direct Anthropic key is the failover route.
-3. The server freezes the selected case IDs in the run checkpoint. Labels are not stored in that checkpoint or sent to a model.
+3. The server freezes the selected case IDs plus the active approved weekly recruiting thesis in the run checkpoint. The thesis is sanitized, candidate-blind, content-hashed, and supplied unchanged to the Researcher and both Auditor stages. It defines current business priorities only: it is never candidate evidence and cannot satisfy identity, age, momentum, audience, creator, or commercial gates. Labels are not stored in that checkpoint or sent to a model.
 4. Each resume request processes one case under a five-minute execution lease:
    - Researcher assessment;
    - independent blind Auditor assessment with the proposed score hidden;
@@ -97,7 +97,7 @@ Repeat `resume` until `completed` is `true`. A failed run retains its checkpoint
 
 Do not set `RESEARCH_HELD_OUT_EVALUATION_ENABLED=true` until development results are stable and the intended prompt, rubric, evidence policy, model family, and score weighting are frozen.
 
-The server refuses to create a held-out run unless its baseline is a completed full-development-cohort run from the same frozen cohort and every release threshold already passes. A four-case smoke test may authorize a full development calibration, but it can never unlock held-out by itself. The held-out run must cover the entire locked split and is accepted only when every selected record is locked and unrevealed. One completed held-out run reveals and exhausts that cohort; it then becomes archive-only. Development scoring resolves exactly one current locked, unrevealed Dylan-ground-truth cohort, and fails closed if no active cohort or conflicting active cohorts exist. Another release test requires a new frozen cohort. Never tune against held-out records.
+The server refuses to create a held-out run unless its baseline is a completed full-development-cohort run from the same frozen cohort and every release threshold already passes. A four-case smoke test may authorize a full development calibration, but it can never unlock held-out by itself. The held-out run must reuse the development run's exact recruiting-thesis snapshot and hash. It also re-resolves the latest Sonnet before starting; if the exact model or provider route changed after development, held-out fails closed and development must be rerun against the new current model. The held-out run must cover the entire locked split and is accepted only when every selected record is locked and unrevealed. One completed held-out run reveals and exhausts that cohort; it then becomes archive-only. Development scoring resolves exactly one current locked, unrevealed Dylan-ground-truth cohort, and fails closed if no active cohort or conflicting active cohorts exist. Another release test requires a new frozen cohort. Never tune against held-out records.
 
 ## Production acceptance
 
@@ -125,6 +125,8 @@ Two disjoint benchmark releases are complete and revealed, leaving 32 developmen
 OnlyFans platform activity is not observed in any of the 100 cutoff-safe packets (0 active / 0 inactive / 100 not observed). Missing platform evidence therefore stays neutral. A future weekly internal-intelligence record can supply a dated active/inactive contradiction when it was genuinely known before scoring, but the benchmark must not infer it from the outcome.
 
 The fresh excluded pool is 12 positive / 24 negative and currently 0/36 evidence-ready. A new challenge release requires at least eight evidence-ready cases per label. The positive side is the binding constraint; do not start another scoring benchmark until it closes.
+
+Benchmark runner v27 now matches production's business-context contract: a development run snapshots the active approved weekly recruiting thesis, rejects candidate-specific guidance, and persists its exact SHA-256 content identity. Researcher and independent Auditor stages receive that same immutable context with an explicit warning that it is not evidence. Held-out can run only with the exact development snapshot and the same still-current latest-Sonnet route. Historical benchmark results above are unchanged; no revealed cohort was rerun or tuned.
 
 The latest nine-positive recovery run examined 43 grounded candidates, inserted 74 archived sources / 232 safe claims, spent $0.0885 on Apify plus about $0.2562 on latest-Sonnet search, and yielded 0/9 complete packets. Social Blade is configured and has 71 credits remaining, but its official service can return historical rows only from the date a profile first entered Social Blade tracking. Nineteen distinct official lookups are checkpointed; 13 matched, six failed. Never retry a failed handle. New failures persist exact returned-handle and date-range diagnostics without credentials or account secrets.
 

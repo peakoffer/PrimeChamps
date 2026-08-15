@@ -2085,10 +2085,16 @@ test("benchmark prompts are constructed from a safe whitelist and never expose l
     sources: BENCHMARK_SOURCES.filter((source) => source.id !== "future" && source.id !== "outcome"),
     claims: BENCHMARK_CLAIMS.filter((claim) => claim.id !== "future-claim" && claim.id !== "outcome-claim"),
   });
-  const prompt = buildBenchmarkResearcherPrompt(record, selection.evidence);
+  const thesis = `=== ACTIVE RECRUITING THESIS ===
+SPORT PRIORITIES:
+- Deprioritize mature combat-sports categories unless current evidence is exceptional.`;
+  const prompt = buildBenchmarkResearcherPrompt(record, selection.evidence, undefined, thesis);
   assert.equal(promptContainsBenchmarkLeakage(prompt, record), false);
   assert.ok(prompt.includes("Example Athlete"));
   assert.ok(prompt.includes("E1"));
+  assert.ok(prompt.includes("FROZEN BUSINESS THESIS"));
+  assert.ok(prompt.includes("Deprioritize mature combat-sports categories"));
+  assert.ok(prompt.includes("not evidence about this candidate"));
   assert.ok(!prompt.includes("SECRET OUTCOME"));
   assert.ok(!prompt.includes("gmail:private"));
 });
@@ -2243,12 +2249,19 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v26/);
+  assert.match(source, /research-v2-benchmark-runner-v27/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
   assert.match(source, /reasoning: \{ effort: attempt === 1 \? "medium" : "low", exclude: true \}/);
   assert.match(source, /call_limits: BENCHMARK_CALL_LIMITS/);
+  assert.match(source, /recruiting_profile_version_id: profileVersionId/);
+  assert.match(source, /recruiting_profile_hash: profileHash/);
+  assert.match(source, /recruiting_profile_snapshot: profileSnapshot/);
+  assert.match(source, /development baseline recruiting-thesis snapshot failed its content-hash check/);
+  assert.match(source, /latest Sonnet release or provider route changed after development/);
+  assert.match(source, /publish a candidate-blind thesis before benchmarking/);
+  assert.match(source, /This thesis defines current business priorities only/);
   assert.match(source, /maximumOutputTokens: run\.metrics\.call_limits\.blindOutputTokens/);
   assert.match(source, /0-100 numeric scale, never fractions from 0 to 1/);
   assert.match(source, /Do not require evidence that the athlete wants OnlyFans or adult content/);

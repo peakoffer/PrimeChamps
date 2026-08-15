@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
@@ -45,11 +47,16 @@ import {
   type LeakageSafeBenchmarkEvidence,
 } from "@/lib/research/benchmark-runner-support";
 import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/research/benchmark-model-provider";
+import {
+  DEFAULT_RECRUITING_PROFILE,
+  formatRecruitingProfileForPrompt,
+  type RecruitingProfile,
+} from "@/lib/research/intelligence";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v26";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v27";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -217,6 +224,11 @@ type RunCheckpoint = {
     blindOutputTokens: number;
     reviewOutputTokens: number;
   };
+  recruiting_profile_version_id: string;
+  recruiting_profile_version: number;
+  recruiting_profile_name: string;
+  recruiting_profile_hash: string;
+  recruiting_profile_snapshot: RecruitingProfile;
   development_case_target?: number;
   replay_source_run_id?: string | null;
   replay_source_cohort_version?: string | null;
@@ -265,6 +277,67 @@ function achievabilityLabelForScore(score: number): "high" | "medium" | "low" | 
 function integer(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+}
+
+function recruitingProfileSnapshot(value: unknown): RecruitingProfile {
+  const source = value && typeof value === "object" ? value as Partial<RecruitingProfile> : {};
+  const list = (key: keyof Pick<RecruitingProfile,
+    "target_profile" | "positive_signal" | "negative_signal" | "sport_priority"
+    | "follower_band" | "geography" | "process" | "other">) => {
+    const candidate = source[key];
+    return Array.isArray(candidate)
+      ? candidate.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [...DEFAULT_RECRUITING_PROFILE[key]];
+  };
+  const parameter = (key: keyof RecruitingProfile["parameters"]) => {
+    const candidate = Number(source.parameters?.[key]);
+    return Number.isFinite(candidate) && candidate >= 0
+      ? candidate
+      : DEFAULT_RECRUITING_PROFILE.parameters[key];
+  };
+  return {
+    objective: typeof source.objective === "string" && source.objective.trim()
+      ? source.objective.trim()
+      : DEFAULT_RECRUITING_PROFILE.objective,
+    summary: typeof source.summary === "string" && source.summary.trim()
+      ? source.summary.trim()
+      : DEFAULT_RECRUITING_PROFILE.summary,
+    target_profile: list("target_profile"),
+    positive_signal: list("positive_signal"),
+    negative_signal: list("negative_signal"),
+    sport_priority: list("sport_priority"),
+    follower_band: list("follower_band"),
+    geography: list("geography"),
+    process: list("process"),
+    other: list("other"),
+    parameters: {
+      target_age_min: parameter("target_age_min"),
+      target_age_max: parameter("target_age_max"),
+      maximum_priority_age: parameter("maximum_priority_age"),
+      follower_min: parameter("follower_min"),
+      follower_max: parameter("follower_max"),
+      approval_score: parameter("approval_score"),
+      priority_score: parameter("priority_score"),
+    },
+    generated_at: typeof source.generated_at === "string" && Number.isFinite(Date.parse(source.generated_at))
+      ? source.generated_at
+      : DEFAULT_RECRUITING_PROFILE.generated_at,
+  };
+}
+
+function recruitingProfileContentHash(profile: RecruitingProfile) {
+  return `sha256-${createHash("sha256").update(JSON.stringify(profile)).digest("hex")}`;
+}
+
+function assertProfileIsCandidateBlind(profileContext: string, records: BenchmarkGoldenCase[]) {
+  const normalized = profileContext.toLowerCase();
+  const named = records.find((record) => {
+    const athleteName = record.athlete_name.trim().toLowerCase();
+    return athleteName.length >= 3 && normalized.includes(athleteName);
+  });
+  if (named) {
+    throw new Error(`The active recruiting thesis contains candidate-specific guidance for ${named.athlete_name}; publish a candidate-blind thesis before benchmarking`);
+  }
 }
 
 function combinedUsage(...items: BenchmarkTokenUsage[]): BenchmarkTokenUsage {
@@ -470,8 +543,8 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 9,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v9",
+    version: 10,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v10",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
@@ -487,10 +560,11 @@ async function ensureBenchmarkArtifacts(input: {
       structured_output_policy: "strict_runtime_schema_validation_before_persistence",
       platform_willingness_required: false,
       onlyfans_platform_policy: "no_profile_neutral_active_profile_positive_inactive_existing_profile_blocks_finalist",
+      recruiting_thesis_policy: "immutable_candidate_blind_snapshot_shared_by_development_and_held_out",
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v9",
+    definition_hash: "research-v2-benchmark-rubric-v10",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -511,7 +585,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 16,
+      version: 17,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -536,15 +610,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence plus deterministic no-label gate summaries; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; no platform profile is neutral, an active exact profile is positive, and an explicitly inactive exact profile is a blocker; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-researcher-v16",
+      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence, deterministic no-label gate summaries, and an immutable candidate-blind recruiting-thesis snapshot that defines business priorities but cannot prove candidate facts; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; no platform profile is neutral, an active exact profile is positive, and an explicitly inactive exact profile is a blocker; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
+      content_hash: "research-v2-benchmark-researcher-v17",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
-      content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries before comparison with the Researcher assessment; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; no profile is neutral and an explicitly inactive exact OnlyFans profile blocks a finalist; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-auditor-v16",
+      content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries and the same immutable candidate-blind recruiting-thesis snapshot before comparison with the Researcher assessment; the thesis defines business priorities but cannot prove candidate facts; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; no profile is neutral and an explicitly inactive exact OnlyFans profile blocks a finalist; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
+      content_hash: "research-v2-benchmark-auditor-v17",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -705,6 +779,7 @@ export async function startBenchmarkRun(input: {
   }>;
   let replaySourceRunId: string | null = null;
   let replaySourceCohortVersion: string | null = null;
+  let heldOutBaselineCheckpoint: RunCheckpoint | null = null;
   if (input.split === "development" && typedRecords.length === 0) {
     const replay = await loadRevealedDevelopmentReplay(admin, input.organizationId, cohortVersion);
     typedRecords = replay.records;
@@ -735,6 +810,7 @@ export async function startBenchmarkRun(input: {
     if (baselineError) throw baselineError;
     if (!baseline) throw new Error("The held-out release baseline must be a completed development benchmark in this organization");
     const baselineCheckpoint = baseline.metrics as RunCheckpoint;
+    heldOutBaselineCheckpoint = baselineCheckpoint;
     if (baselineCheckpoint.cohort_version !== cohortVersion) {
       throw new Error("The development baseline and held-out records must belong to the same frozen cohort");
     }
@@ -799,8 +875,52 @@ export async function startBenchmarkRun(input: {
     throw new Error(`Benchmark evidence is not execution-ready (${readinessFailures.length}/${selected.length} selected cases): ${preview}`);
   }
 
+  let profileVersionId: string;
+  let profileVersion: number;
+  let profileName: string;
+  let profileSnapshot: RecruitingProfile;
+  if (heldOutBaselineCheckpoint) {
+    if (!heldOutBaselineCheckpoint.recruiting_profile_version_id
+      || !Number.isFinite(heldOutBaselineCheckpoint.recruiting_profile_version)
+      || !heldOutBaselineCheckpoint.recruiting_profile_name
+      || !heldOutBaselineCheckpoint.recruiting_profile_hash
+      || !heldOutBaselineCheckpoint.recruiting_profile_snapshot) {
+      throw new Error("The development baseline predates immutable recruiting-thesis snapshots; run a fresh full development benchmark before held-out");
+    }
+    profileVersionId = heldOutBaselineCheckpoint.recruiting_profile_version_id;
+    profileVersion = integer(heldOutBaselineCheckpoint.recruiting_profile_version);
+    profileName = heldOutBaselineCheckpoint.recruiting_profile_name;
+    profileSnapshot = recruitingProfileSnapshot(heldOutBaselineCheckpoint.recruiting_profile_snapshot);
+    if (recruitingProfileContentHash(profileSnapshot) !== heldOutBaselineCheckpoint.recruiting_profile_hash) {
+      throw new Error("The development baseline recruiting-thesis snapshot failed its content-hash check");
+    }
+  } else {
+    const { data: activeProfile, error: activeProfileError } = await admin.from("research_profile_versions")
+      .select("id,version,name,compiled_profile")
+      .eq("organization_id", input.organizationId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (activeProfileError) throw activeProfileError;
+    if (!activeProfile) {
+      throw new Error("No approved weekly recruiting thesis is active. Publish candidate-blind guidance before benchmarking");
+    }
+    profileVersionId = String(activeProfile.id);
+    profileVersion = integer(activeProfile.version);
+    profileName = typeof activeProfile.name === "string" && activeProfile.name.trim()
+      ? activeProfile.name.trim()
+      : `Recruiting thesis v${profileVersion}`;
+    profileSnapshot = recruitingProfileSnapshot(activeProfile.compiled_profile);
+  }
+  const profileHash = recruitingProfileContentHash(profileSnapshot);
+  const profileContext = formatRecruitingProfileForPrompt(profileSnapshot);
+  assertProfileIsCandidateBlind(profileContext, selected);
+
   const resolution = await resolveBenchmarkSonnet();
   const { model, provider, releaseCreatedAt, price: pricing } = resolution;
+  if (heldOutBaselineCheckpoint
+    && (heldOutBaselineCheckpoint.model !== model || heldOutBaselineCheckpoint.provider !== provider)) {
+    throw new Error("The latest Sonnet release or provider route changed after development; run a fresh full development benchmark before held-out");
+  }
   const artifacts = await ensureBenchmarkArtifacts({
     admin,
     organizationId: input.organizationId,
@@ -829,6 +949,11 @@ export async function startBenchmarkRun(input: {
       + BENCHMARK_CALL_LIMITS.reviewOutputTokens
     ) * 2,
     call_limits: BENCHMARK_CALL_LIMITS,
+    recruiting_profile_version_id: profileVersionId,
+    recruiting_profile_version: profileVersion,
+    recruiting_profile_name: profileName,
+    recruiting_profile_hash: profileHash,
+    recruiting_profile_snapshot: profileSnapshot,
     development_case_target: input.split === "development" ? typedRecords.length : undefined,
     replay_source_run_id: replaySourceRunId,
     replay_source_cohort_version: replaySourceCohortVersion,
@@ -863,7 +988,8 @@ export async function startBenchmarkRun(input: {
 function blindPrompt(
   record: BenchmarkGoldenCase,
   evidence: LeakageSafeBenchmarkEvidence[],
-  deterministicPrecheck: BenchmarkDeterministicGateSummary
+  deterministicPrecheck: BenchmarkDeterministicGateSummary,
+  recruitingThesisContext: string
 ) {
   return `You are the independent blind Auditor in a historical athlete benchmark. You have not seen the Researcher's score or any benchmark label, outcome, outcome correspondence, or post-cutoff information.
 
@@ -874,6 +1000,10 @@ ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 Candidate: ${record.athlete_name}
 Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
+
+FROZEN BUSINESS THESIS
+${recruitingThesisContext}
+This thesis defines current business priorities only. It is not evidence about this candidate, cannot satisfy an evidence gate, and must never be cited as a candidate fact.
 
 Deterministic evidence precheck (computed only from the frozen dossier; no label or outcome):
 ${JSON.stringify(deterministicPrecheck, null, 2)}
@@ -891,7 +1021,8 @@ function reviewPrompt(
   researcher: ResearcherAssessment,
   blind: BlindAssessment,
   evidence: LeakageSafeBenchmarkEvidence[],
-  deterministicPrecheck: BenchmarkDeterministicGateSummary
+  deterministicPrecheck: BenchmarkDeterministicGateSummary,
+  recruitingThesisContext: string
 ) {
   return `You are completing stage two of a blind benchmark audit. The independent assessment below was completed before the Researcher proposal was disclosed. Compare them now without using any historical outcome or golden label.
 
@@ -900,6 +1031,10 @@ ${JSON.stringify(blind)}
 
 RESEARCHER PROPOSAL
 ${JSON.stringify(researcher)}
+
+FROZEN BUSINESS THESIS
+${recruitingThesisContext}
+This thesis defines current business priorities only. It is not candidate evidence and cannot support or repair a material candidate claim.
 
 FROZEN PRE-DECISION EVIDENCE
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
@@ -1040,6 +1175,7 @@ async function processBenchmarkCase(input: {
   const onlyFansPlatformGate = benchmarkOnlyFansPlatformActivityGate(selection.evidence);
   const deterministicPrecheck = benchmarkDeterministicGateSummary(record, selection.evidence);
   const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
+  const recruitingThesisContext = formatRecruitingProfileForPrompt(run.metrics.recruiting_profile_snapshot);
   const evidenceHash = stableEvidenceSetHash(modelEvidence.map((item) => ({
     url: item.url,
     claim: item.claim,
@@ -1062,7 +1198,7 @@ async function processBenchmarkCase(input: {
     };
   } else {
     const researcherCall = await callStructuredSonnet<ResearcherModelAssessment>({
-      prompt: buildBenchmarkResearcherPrompt(record, modelEvidence, deterministicPrecheck),
+      prompt: buildBenchmarkResearcherPrompt(record, modelEvidence, deterministicPrecheck, recruitingThesisContext),
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -1098,7 +1234,14 @@ async function processBenchmarkCase(input: {
       prompt_version_id: artifacts.researcherPromptVersionId,
       model_version_id: artifacts.researcherModelVersionId,
       evidence_set_hash: evidenceHash,
-      assessment: { benchmark_run_id: run.id, researcher, identity_gate: identityGate, adult_gate: adultGate },
+      assessment: {
+        benchmark_run_id: run.id,
+        recruiting_profile_version_id: run.metrics.recruiting_profile_version_id,
+        recruiting_profile_hash: run.metrics.recruiting_profile_hash,
+        researcher,
+        identity_gate: identityGate,
+        adult_gate: adultGate,
+      },
       unsourced_claim_count: citationQuality.unsupportedClaimCount,
       critical_gap_count: (researcher.critical_gaps || []).length,
       is_final: false,
@@ -1142,7 +1285,7 @@ async function processBenchmarkCase(input: {
   let blindUsage = checkpointAssessment.blind_usage as ModelUsage | undefined;
   if (!blind || !blindUsage) {
     const blindCall = await callStructuredSonnet<BlindAssessment>({
-      prompt: blindPrompt(record, modelEvidence, deterministicPrecheck),
+      prompt: blindPrompt(record, modelEvidence, deterministicPrecheck, recruitingThesisContext),
       schema: BLIND_AUDITOR_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -1162,7 +1305,7 @@ async function processBenchmarkCase(input: {
   let reviewUsage = checkpointAssessment.review_usage as ModelUsage | undefined;
   if (!review || !reviewUsage) {
     const reviewCall = await callStructuredSonnet<ReviewAssessment>({
-      prompt: reviewPrompt(researcher, blind, modelEvidence, deterministicPrecheck),
+      prompt: reviewPrompt(researcher, blind, modelEvidence, deterministicPrecheck, recruitingThesisContext),
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -1416,7 +1559,11 @@ export async function resumeBenchmarkRun(input: { organizationId: string; runId:
     || !run.metrics.call_limits
     || !Number.isFinite(run.metrics.call_limits.researcherOutputTokens)
     || !Number.isFinite(run.metrics.call_limits.blindOutputTokens)
-    || !Number.isFinite(run.metrics.call_limits.reviewOutputTokens)) {
+    || !Number.isFinite(run.metrics.call_limits.reviewOutputTokens)
+    || !run.metrics.recruiting_profile_version_id
+    || !run.metrics.recruiting_profile_hash
+    || !run.metrics.recruiting_profile_snapshot
+    || recruitingProfileContentHash(recruitingProfileSnapshot(run.metrics.recruiting_profile_snapshot)) !== run.metrics.recruiting_profile_hash) {
     const compatibilityError = "This benchmark run does not have a compatible replay checkpoint; start a fresh development smoke test";
     await admin.from("research_benchmark_runs").update({
       status: "failed",
