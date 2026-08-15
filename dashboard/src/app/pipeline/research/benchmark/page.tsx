@@ -1187,15 +1187,20 @@ export default function ResearchBenchmarkPage() {
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               {!socialBladePlan.configured
-                ? !socialBladePlan.credentialStatus.clientIdVariablePresent
-                  ? "Social Blade client ID variable missing"
-                  : !socialBladePlan.credentialStatus.clientIdHasValue
-                    ? "Social Blade client ID value empty"
-                    : !socialBladePlan.credentialStatus.tokenVariablePresent
-                      ? "Social Blade token variable missing"
-                      : !socialBladePlan.credentialStatus.tokenHasValue
-                        ? "Social Blade token value empty"
-                        : "Social Blade not connected"
+                  ? [
+                      !socialBladePlan.credentialStatus.clientIdVariablePresent
+                        ? "client ID variable missing"
+                        : !socialBladePlan.credentialStatus.clientIdHasValue
+                          ? "client ID value empty"
+                          : null,
+                      !socialBladePlan.credentialStatus.tokenVariablePresent
+                        ? "token variable missing"
+                        : !socialBladePlan.credentialStatus.tokenHasValue
+                          ? "token value empty"
+                          : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "Social Blade not connected"
                 : socialBladePlan.officialPilotExhausted
                   ? "Paid history recovery complete"
                 : socialBladePlan.pilotRecords.length === 0
