@@ -642,6 +642,17 @@ test("enrichment checkpoint forks discard prior scoring and audit artifacts", ()
   assert.match(source, /\.map\(resetEnrichedCandidateForRescoring\)/);
 });
 
+test("scoring checkpoint forks preserve researcher scores and discard only audit artifacts", () => {
+  const source = readFileSync(new URL("../src/lib/research/evaluation-runs.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../src/app/api/internal/research-evaluations/route.ts", import.meta.url), "utf8");
+  assert.match(source, /resetScoredCandidateForReaudit/);
+  assert.match(source, /score_stage", "researcher"/);
+  assert.match(source, /phase: "saving_candidates"/);
+  assert.match(source, /resumedFrom: "auditing"/);
+  assert.match(source, /!key\.startsWith\("audit_"\)/);
+  assert.match(route, /body\.action === "fork_from_scoring"/);
+});
+
 test("paid enrichment gives fresh discovery priority without discarding memory", () => {
   const selected = selectBalancedResearchCandidates([
     ...Array.from({ length: 8 }, (_, index) => ({ id: `memory-${index}`, discovery_lane: "memory" as const })),

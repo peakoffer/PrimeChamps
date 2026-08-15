@@ -37,6 +37,13 @@ const DOWNSTREAM_RESEARCH_ARTIFACT_KEYS = new Set([
   "audit_id",
 ]);
 
+const AUDIT_RESEARCH_ARTIFACT_KEYS = new Set([
+  "audit_id",
+  "audit_findings",
+  "audit_summary",
+  "audit_verdict",
+]);
+
 function resetEnrichedCandidateForRescoring(candidate: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(candidate).filter(([key]) =>
     !DOWNSTREAM_RESEARCH_ARTIFACT_KEYS.has(key)
@@ -45,6 +52,61 @@ function resetEnrichedCandidateForRescoring(candidate: Record<string, unknown>) 
       && !key.startsWith("researcher_")
       && !key.startsWith("audit_")
   ));
+}
+
+function resetScoredCandidateForReaudit(
+  candidate: Record<string, unknown>,
+  score: {
+    id: string;
+    fit_score: number | string;
+    achievability_score: number | string;
+    research_confidence_score: number | string;
+    priority_score: number | string;
+    assessment: unknown;
+    input_tokens: number | string | null;
+    output_tokens: number | string | null;
+    cache_creation_input_tokens: number | string | null;
+    cache_read_input_tokens: number | string | null;
+    latency_ms: number | string | null;
+  }
+) {
+  const assessment = score.assessment && typeof score.assessment === "object"
+    ? score.assessment as Record<string, unknown>
+    : {};
+  const cleaned = Object.fromEntries(Object.entries(candidate).filter(([key]) =>
+    !AUDIT_RESEARCH_ARTIFACT_KEYS.has(key) && !key.startsWith("audit_")
+  ));
+  const numeric = (value: number | string | null, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const proposedPriority = numeric(
+    typeof assessment.researcher_proposed_priority === "number"
+      || typeof assessment.researcher_proposed_priority === "string"
+      ? assessment.researcher_proposed_priority
+      : candidate.researcher_proposed_score as number | string | null,
+    numeric(score.priority_score)
+  );
+  return {
+    ...cleaned,
+    score: numeric(score.priority_score),
+    onlyfans_fit_score: numeric(score.fit_score),
+    commercial_achievability_score: numeric(score.achievability_score),
+    research_confidence_score: numeric(score.research_confidence_score),
+    researcher_proposed_score: proposedPriority,
+    research_score_id: score.id,
+    score_breakdown: assessment.score_breakdown || candidate.score_breakdown || {},
+    reasoning: assessment.reasoning || candidate.reasoning || "",
+    concerns: assessment.concerns || candidate.concerns || [],
+    creator_signals: assessment.creator_signals || candidate.creator_signals || [],
+    momentum_evidence: assessment.momentum_evidence || candidate.momentum_evidence || [],
+    creator_evidence: assessment.creator_evidence || candidate.creator_evidence || [],
+    researcher_input_tokens: numeric(score.input_tokens),
+    researcher_output_tokens: numeric(score.output_tokens),
+    researcher_cache_creation_input_tokens: numeric(score.cache_creation_input_tokens),
+    researcher_cache_read_input_tokens: numeric(score.cache_read_input_tokens),
+    researcher_latency_ms: numeric(score.latency_ms),
+  };
 }
 
 export async function launchResearchEvaluations(input: {
@@ -204,6 +266,118 @@ export async function resumeResearchEvaluation(runId: string) {
       completed_at: new Date().toISOString(),
       heartbeat_at: new Date().toISOString(),
     }).eq("id", run.id).eq("organization_id", run.organization_id);
+    throw error;
+  }
+}
+
+export async function forkResearchEvaluationFromScoring(sourceRunId: string) {
+  const admin = createAdminClient();
+  const { data: source, error: sourceError } = await admin.from("research_logs")
+    .select("id,organization_id,requested_by_user_id,profile_version_id,research_depth,prompt_version,config_used,context_summary,raw_results,stats")
+    .eq("id", sourceRunId)
+    .eq("is_evaluation", true)
+    .maybeSingle();
+  if (sourceError) throw sourceError;
+  if (!source) throw new Error("Source evaluation run was not found");
+  if (!source.requested_by_user_id) throw new Error("Source evaluation has no requesting user");
+
+  const config = source.config_used as ResearchConfig | null;
+  const rawResults = Array.isArray(source.raw_results) ? source.raw_results : [];
+  if (!config || typeof config.sportFocus !== "string" || !config.sportFocus.trim()) {
+    throw new Error("Source evaluation has no valid saved configuration");
+  }
+  const { data: candidateRows, error: candidateRowsError } = await admin
+    .from("research_candidates")
+    .select("id,raw_candidate")
+    .eq("research_log_id", source.id)
+    .eq("identity_status", "verified")
+    .order("discovered_rank", { ascending: true });
+  if (candidateRowsError) throw candidateRowsError;
+  const candidateIds = (candidateRows || []).map((candidate) => candidate.id);
+  const { data: scoreRows, error: scoreRowsError } = candidateIds.length > 0
+    ? await admin
+        .from("research_scores")
+        .select("id,research_candidate_id,fit_score,achievability_score,research_confidence_score,priority_score,assessment,input_tokens,output_tokens,cache_creation_input_tokens,cache_read_input_tokens,latency_ms")
+        .eq("research_log_id", source.id)
+        .eq("score_stage", "researcher")
+        .in("research_candidate_id", candidateIds)
+    : { data: [], error: null };
+  if (scoreRowsError) throw scoreRowsError;
+  const scoreByCandidateId = new Map((scoreRows || []).map((score) => [score.research_candidate_id, score]));
+  const checkpointDetails = (candidateRows || []).flatMap((candidate) => {
+    const rawCandidate = candidate.raw_candidate && typeof candidate.raw_candidate === "object"
+      ? candidate.raw_candidate as Record<string, unknown>
+      : null;
+    const score = scoreByCandidateId.get(candidate.id);
+    return rawCandidate && score ? [resetScoredCandidateForReaudit(rawCandidate, score)] : [];
+  });
+  if (rawResults.length === 0 || checkpointDetails.length === 0) {
+    throw new Error("Source evaluation has no durable scoring checkpoint to fork");
+  }
+
+  const resumedConfig: ResearchConfig = { ...config, evaluationMode: true };
+  const sourceContext = source.context_summary && typeof source.context_summary === "object"
+    ? source.context_summary as Record<string, unknown>
+    : {};
+  const sourceStats = source.stats && typeof source.stats === "object"
+    ? source.stats as Record<string, unknown>
+    : {};
+  const { data: forked, error: insertError } = await admin.from("research_logs").insert({
+    organization_id: source.organization_id,
+    requested_by_user_id: source.requested_by_user_id,
+    profile_version_id: source.profile_version_id,
+    research_depth: source.research_depth || "extended",
+    status: "queued",
+    phase: "saving_candidates",
+    heartbeat_at: new Date().toISOString(),
+    config_used: resumedConfig,
+    is_evaluation: true,
+    prompt_version: source.prompt_version || RESEARCH_PROMPT_VERSION,
+    context_summary: {
+      ...sourceContext,
+      evaluation_fork_source_run_id: source.id,
+      evaluation_fork_reason: "Re-audit the same researcher scores without repeating discovery, enrichment, or scoring",
+    },
+    raw_results: rawResults,
+    scoring_details: checkpointDetails,
+    final_results: [],
+    stats: {
+      ...sourceStats,
+      enriched: checkpointDetails.length,
+      scored: checkpointDetails.length,
+      audited: 0,
+      returned: 0,
+      added: 0,
+      phase: "saving_candidates",
+    },
+  }).select("id").single();
+  if (insertError || !forked) throw insertError || new Error("Could not create evaluation audit fork");
+
+  try {
+    const workflow = await start(runResearchWorkflow, [{
+      researchLogId: forked.id,
+      organizationId: source.organization_id,
+      requestedByUserId: source.requested_by_user_id,
+      config: resumedConfig,
+    }]);
+    const { error: linkError } = await admin.from("research_logs").update({ workflow_run_id: workflow.runId })
+      .eq("id", forked.id).eq("organization_id", source.organization_id);
+    if (linkError) throw linkError;
+    return {
+      sourceRunId: source.id,
+      runId: forked.id,
+      workflowRunId: workflow.runId,
+      resumedFrom: "auditing",
+      scored: checkpointDetails.length,
+    };
+  } catch (error) {
+    await admin.from("research_logs").update({
+      status: "error",
+      phase: "error",
+      error_message: error instanceof Error ? error.message : "Could not start evaluation audit fork",
+      completed_at: new Date().toISOString(),
+      heartbeat_at: new Date().toISOString(),
+    }).eq("id", forked.id).eq("organization_id", source.organization_id);
     throw error;
   }
 }

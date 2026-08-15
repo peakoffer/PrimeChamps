@@ -4,6 +4,7 @@ import { runApifyActor, runApifyGoogleSearchQueries, type ApifyInstagramProfile 
 import {
   forkResearchEvaluationFromDiscovery,
   forkResearchEvaluationFromEnrichment,
+  forkResearchEvaluationFromScoring,
   launchResearchEvaluations,
   normalizeEvaluationSports,
   resumeResearchEvaluation,
@@ -65,6 +66,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Provide a valid source evaluation run ID" }, { status: 400 });
       }
       const result = await forkResearchEvaluationFromEnrichment(runId);
+      return NextResponse.json({ ok: true, ...result }, { status: 202 });
+    }
+    if (body.action === "fork_from_scoring") {
+      const runId = typeof body.runId === "string" ? body.runId.trim() : "";
+      if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(runId)) {
+        return NextResponse.json({ error: "Provide a valid source evaluation run ID" }, { status: 400 });
+      }
+      const result = await forkResearchEvaluationFromScoring(runId);
       return NextResponse.json({ ok: true, ...result }, { status: 202 });
     }
     if (body.action === "fork_from_discovery") {
