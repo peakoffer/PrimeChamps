@@ -249,7 +249,7 @@ async function discoverGroundedDeepSources(
   const lanes = preparationMode === "age_recovery"
     ? [{
       name: "adult_eligibility",
-      objective: "Find exact date-of-birth or explicit-age evidence. Prioritize official federations, regulators, event rosters, athlete profiles, and reputable dated sports interviews or coverage. Return multiple independent domains when possible.",
+      objective: "Find exact date-of-birth or explicit-age evidence. Prioritize official federations, regulators, event rosters, athlete profiles, and reputable dated sports interviews or coverage. Search multilingual age and birth terms (including age, born, date of birth, anni, età, años, edad, ans, âge, Jahre, Geburtstag, nascimento, idade). Prefer profile/interview pages that state age or birth date; exclude bout/event pages that do not. Return multiple independent domains when possible.",
     }] as const
     : [{
       name: "eligibility_momentum",
@@ -363,7 +363,17 @@ async function discoverGroundedDeepSources(
       .map((source) => [typeof source.url === "string" ? source.url : "", source] as const)
       .filter(([url]) => Boolean(url))).values());
     const proposed = [{ athlete_name: record.athlete_name, source_urls: sources.map((source) => source.url) }];
-    const grounded = groundedHistoricalSignalDiscoveryCandidates({ records: [record], proposed, consultedSources: sources });
+    const grounded = groundedHistoricalSignalDiscoveryCandidates({
+      records: [record],
+      proposed,
+      consultedSources: sources,
+      // Citation annotations can be title-only (for example an interview name)
+      // even when the underlying page proves the sport. Age recovery may keep
+      // that exact-name URL for the downstream archive extractor, which still
+      // requires matching sport and explicit cutoff-safe age text. Signal
+      // recovery retains the stricter metadata-level sport filter.
+      requireSportInDiscoveryMetadata: preparationMode !== "age_recovery",
+    });
     return [record.id, grounded[record.id] || []];
   }));
   const uniqueSources = new Set(calls.flatMap((call) => call.sources)

@@ -95,7 +95,8 @@ const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
   Motorsports: [
     "motorsport", "racing driver", "motorcycle racing", "motorcycle racer", "motorbike racing",
     "road racer", "superbike", "motogp", "moto gp", "worldwcr", "motociclismo",
-    "mundial femenino de velocidad", "carreras de motos",
+    "mundial femenino de velocidad", "carreras de motos", "formula woman", "formula x",
+    "automobilismo", "pilota automobilistica",
   ],
   "Racquet Sports": ["racquet sports", "tennis", "padel", "pickleball", "badminton", "squash"],
   "Supercross / Motocross": ["supercross", "motocross"],

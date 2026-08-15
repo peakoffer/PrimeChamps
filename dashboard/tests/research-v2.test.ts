@@ -3574,6 +3574,29 @@ test("grounded deep signal discovery accepts only consulted exact-athlete sport 
   assert.deepEqual(candidates.tessa?.map((candidate) => candidate.url), [riderPost, citedProfile]);
 });
 
+test("grounded age discovery can defer thin citation sport proof to the strict archive extractor", () => {
+  const interview = "https://example.org/interviews/sara-fruncillo";
+  const strict = groundedHistoricalSignalDiscoveryCandidates({
+    records: [{
+      id: "sara", athlete_name: "Sara Fruncillo", sport: "Motorsports",
+      evidence_cutoff_at: "2025-12-10T12:00:00.000Z",
+    }],
+    proposed: [{ athlete_name: "Sara Fruncillo", source_urls: [interview] }],
+    consultedSources: [{ url: interview, title: "Intervista a Sara Fruncillo" }],
+  });
+  assert.deepEqual(strict.sara, []);
+  const ageRecovery = groundedHistoricalSignalDiscoveryCandidates({
+    records: [{
+      id: "sara", athlete_name: "Sara Fruncillo", sport: "Motorsports",
+      evidence_cutoff_at: "2025-12-10T12:00:00.000Z",
+    }],
+    proposed: [{ athlete_name: "Sara Fruncillo", source_urls: [interview] }],
+    consultedSources: [{ url: interview, title: "Intervista a Sara Fruncillo" }],
+    requireSportInDiscoveryMetadata: false,
+  });
+  assert.deepEqual(ageRecovery.sara?.map((candidate) => candidate.url), [interview]);
+});
+
 test("generated material signals require explicit athlete-relevant language", () => {
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "Skip to main content Instagram YouTube"), false);
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);
@@ -3716,6 +3739,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /Age recovery gets one narrow search; signal recovery gets two/);
   assert.match(workflow, /name: "adult_eligibility"/);
   assert.match(workflow, /input\.preparationMode === "age_recovery"/);
+  assert.match(workflow, /requireSportInDiscoveryMetadata: preparationMode !== "age_recovery"/);
   assert.match(workflow, /max_uses: 1/);
   assert.match(workflow, /max_tool_calls: 1/);
   assert.match(workflow, /reasoning: \{ effort: "low", exclude: true \}/);

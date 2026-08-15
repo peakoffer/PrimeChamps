@@ -6,9 +6,10 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-grounded-deep-age-recovery-v7";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-thin-citation-age-recovery-v8";
 export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
+  "2026-08-15-grounded-deep-age-recovery-v7",
   "2026-08-14-exact-title-multilingual-age-recovery-v6",
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
@@ -2020,6 +2021,7 @@ export function groundedHistoricalSignalDiscoveryCandidates(input: {
   records: Array<Pick<EvidencePreparationRecord, "id" | "athlete_name" | "sport" | "evidence_cutoff_at">>;
   proposed: Array<{ athlete_name?: unknown; source_urls?: unknown }>;
   consultedSources: Array<{ url?: unknown; title?: unknown; content?: unknown }>;
+  requireSportInDiscoveryMetadata?: boolean;
 }) {
   const recordByName = new Map(input.records.map((record) => [normalizeEvidenceText(record.athlete_name), record]));
   const consultedByUrl = new Map(input.consultedSources.flatMap((source) => {
@@ -2046,7 +2048,8 @@ export function groundedHistoricalSignalDiscoveryCandidates(input: {
       if (!domain || HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS.has(domain)
         || domain === "youtube.com" || domain === "linkedin.com" || domain === "threads.net"
         || !benchmarkSourceNamesAthlete(record.athlete_name, evidenceText)
-        || !benchmarkSourceSupportsSport(record.sport, evidenceText)) continue;
+        || (input.requireSportInDiscoveryMetadata !== false
+          && !benchmarkSourceSupportsSport(record.sport, evidenceText))) continue;
       candidates.push({
         query: `Grounded deep signal discovery for "${record.athlete_name}" before ${record.evidence_cutoff_at.slice(0, 10)}`,
         title: grounded.title || `${record.athlete_name} ${record.sport} profile`,
