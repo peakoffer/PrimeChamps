@@ -490,7 +490,7 @@ export default function ResearchBenchmarkPage() {
       return !processed.has(recordId)
         && !completedExcludedSignalRecordIdSet.has(recordId)
         && !newerCompletedSignalRecordIdSet.has(recordId)
-        && record?.evidence_blockers.includes("fit record lacks both audience and creator-behavior evidence");
+        && Boolean(record?.evidence_blockers.length);
     });
   }, [completedExcludedSignalRecordIdSet, interruptedExcludedSignalRun, newerCompletedSignalRecordIdSet, records]);
   const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0
@@ -498,7 +498,7 @@ export default function ResearchBenchmarkPage() {
   const excludedSignalRecoveryRecords = useMemo(() => records
     .filter((record) => record.benchmark_split === "excluded"
       && record.fit_label === "fit"
-      && record.evidence_blockers.includes("fit record lacks both audience and creator-behavior evidence")
+      && record.evidence_blockers.length > 0
       && !completedExcludedSignalRecordIdSet.has(record.id))
     .sort((left, right) => left.evidence_blockers.length - right.evidence_blockers.length
       || right.safe_evidence_source_count - left.safe_evidence_source_count
@@ -885,7 +885,7 @@ export default function ResearchBenchmarkPage() {
   const recoverExcludedSignals = async () => {
     if (!nextExcludedSignalRecoveryRecords.length) return;
     setWorking(true);
-    setMessage("Starting a capped creator and commercial signal recovery run for the closest fresh positive cases…");
+    setMessage("Starting a capped evidence-gate recovery run for the closest fresh positive cases…");
     try {
       const response = await fetch("/api/research/golden-records/prepare-evidence", {
         method: "POST",

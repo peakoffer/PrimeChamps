@@ -458,7 +458,7 @@ export async function POST(request: NextRequest) {
           ? preparationMode === "age_recovery"
             ? "Every blocked fit record has completed the current age-recovery plan; no provider call was started."
             : preparationMode === "signal_recovery"
-              ? `Every ${signalRecoverySplit === "held_out" ? "locked held-out" : signalRecoverySplit === "excluded" ? "fresh excluded" : "development"} record has completed the current creator-signal recovery plan; no provider call was started.`
+              ? `Every ${signalRecoverySplit === "held_out" ? "locked held-out" : signalRecoverySplit === "excluded" ? "fresh excluded" : "development"} record has completed the current evidence-gate recovery plan; no provider call was started.`
               : "Every eligible record has completed the current evidence-extraction version; no provider call was started."
           : "No authoritative ground-truth records are eligible for evidence preparation yet; no provider call was started.",
         eligible: eligible.length,

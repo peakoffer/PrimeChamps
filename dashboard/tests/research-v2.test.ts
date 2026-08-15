@@ -2771,6 +2771,8 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   assert.ok(signalRecovery.some((query) => /content creator|followers|vlogs/.test(query)));
   assert.ok(signalRecovery.some((query) => /socialblade|hypeauditor|favikon|socialauditor/.test(query)));
   assert.ok(signalRecovery.some((query) => /abonnés|seguidores/.test(query)));
+  assert.ok(signalRecovery.some((query) => /date of birth|birthdate|birthday/.test(query)));
+  assert.ok(signalRecovery.some((query) => /result|ranking|championship|podium/.test(query)));
   assert.ok(signalRecovery.every((query) => !/onlyfans/i.test(query)), "development signal recovery must not search for the labeled outcome");
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
@@ -2811,12 +2813,13 @@ test("historical signal recovery uses a known cutoff-safe Instagram handle witho
   });
   assert.equal(queries.length, 4);
   assert.ok(queries.every((query) => query.startsWith('"Example Athlete"')));
-  assert.match(queries[0], /"@example\.athlete"/);
-  assert.match(queries[0], /site:socialblade\.com/);
-  assert.match(queries[0], /site:socialauditor\.io/);
-  assert.match(queries[1], /"Example Athlete"/);
-  assert.match(queries[1], /abonnés/);
-  assert.match(queries[2], /followers/);
+  assert.match(queries[0], /date of birth/);
+  assert.match(queries[1], /result OR results OR ranking/);
+  assert.match(queries[2], /abonnés/);
+  assert.match(queries[3], /"@example\.athlete"/);
+  assert.match(queries[3], /site:socialblade\.com/);
+  assert.match(queries[3], /site:socialauditor\.io/);
+  assert.match(queries[3], /followers/);
   assert.match(queries[3], /content creator/);
 });
 
@@ -2827,7 +2830,7 @@ test("historical signal recovery searches multilingual sport aliases instead of 
     evidence_cutoff_at: "2026-07-07T12:00:00.000Z",
     instagram_handle: "@tessathyssen",
   });
-  assert.match(surfing[2], /surf OR surfing OR surfer OR surfeur OR surfeuse OR surfista/);
+  assert.match(surfing[1], /surf OR surfing OR surfer OR surfeur OR surfeuse OR surfista/);
   assert.doesNotMatch(surfing[3], /"Surfing"/);
   assert.match(surfing[3], /posté OR poster OR publier OR photos/);
   assert.match(surfing[3], /-site:instagram\.com/);

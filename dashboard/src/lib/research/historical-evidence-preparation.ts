@@ -12,7 +12,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-explicit-audience-grounded-search-v13";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-gate-aware-positive-recovery-v14";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-wayback-availability-fallback-v16";
 
@@ -1702,10 +1702,10 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
   // archive-friendly interviews, profiles, and trade coverage.
   const excludePlatforms = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:youtube.com -site:linkedin.com -site:threads.net -site:x.com -site:twitter.com";
   return [
-    `"${record.athlete_name}" ${handleExpression} (followers OR subscribers OR engagement) ${audienceDomains} before:${before}`,
+    `"${record.athlete_name}" ("date of birth" OR birthdate OR birthday OR DOB OR born OR age) ${excludePlatforms} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} (result OR results OR ranking OR championship OR tournament OR season OR podium OR qualified OR signed) ${excludePlatforms} before:${before}`,
     `"${record.athlete_name}" (followers OR abonnés OR seguidores OR seguidoras OR subscribers OR influencer) ${excludePlatforms} before:${before}`,
-    `"${record.athlete_name}" ${sportExpression} (followers OR abonnés OR seguidores OR subscribers OR audience OR influencer OR vlogs) ${excludePlatforms} before:${before}`,
-    `"${record.athlete_name}" ${sportExpression} ("content creator" OR vlog OR vlogs OR YouTube OR podcast OR interview OR posting OR posts OR videos OR posté OR poster OR publier OR photos OR "réseaux sociaux" OR publicaciones OR publicar OR fotos OR publicação OR publicações) ${excludePlatforms} before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} (${handleExpression} OR ${audienceDomains} OR followers OR abonnés OR seguidores OR subscribers OR audience OR influencer OR "content creator" OR vlog OR vlogs OR podcast OR posting OR posts OR videos OR posté OR poster OR publier OR photos OR "réseaux sociaux" OR publicaciones OR publicar OR fotos OR publicação OR publicações) ${excludePlatforms} before:${before}`,
   ];
 }
 
