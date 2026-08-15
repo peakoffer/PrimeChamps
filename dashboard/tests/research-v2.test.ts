@@ -2981,7 +2981,7 @@ test("two-lane signal recovery reuses paid discovery but refreshes grounded cand
   ]);
   const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
   assert.match(route, /HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS\.includes/);
-  assert.match(route, /reusableCheckpoint\?\.query_plan_version === queryPlanVersion/);
+  assert.match(route, /checkpoint\?\.query_plan_version !== queryPlanVersion/);
 });
 
 test("archive recovery prefers cutoff-safe direct and Common Crawl evidence before Wayback", () => {
@@ -3769,6 +3769,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /if \(archiveResult\.waybackRateLimited\) waybackCircuitOpen = true/);
   assert.match(workflow, /candidate\.storedCapture && !input\.waybackCircuitOpen/);
   assert.match(route, /items\.slice\(0, EVIDENCE_PREPARATION_LIMITS\.archiveUrlsPerRecord\)/);
+  assert.match(route, /bestReplayableDeepDiscovery/);
+  assert.match(route, /sort\(\(left, right\) => right\.count - left\.count\)/);
   assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
   assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
   assert.match(workflow, /Cutoff-safe external profiles referenced by/);

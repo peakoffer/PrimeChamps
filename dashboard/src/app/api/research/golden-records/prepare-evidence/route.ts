@@ -52,6 +52,7 @@ type EvidencePreparationRunRow = {
   status: string;
   record_ids: unknown;
   checkpoint: unknown;
+  summary?: unknown;
   error_message?: string | null;
   created_at?: string;
 };
@@ -107,6 +108,35 @@ function replayableDeepDiscoveryCandidates(value: unknown, recordIds: string[]) 
       })];
   }));
   return Object.values(candidates).some((items) => items.length > 0) ? candidates : undefined;
+}
+
+function bestReplayableDeepDiscovery(
+  runs: EvidencePreparationRunRow[],
+  recordIds: string[],
+  queryPlanVersion: string,
+  mode: HistoricalEvidencePreparationMode,
+) {
+  return runs.flatMap((run) => {
+    const checkpoint = run.checkpoint as Record<string, unknown> | null | undefined;
+    const summary = run.summary as Record<string, unknown> | null | undefined;
+    if (checkpoint?.query_plan_version !== queryPlanVersion
+      || !Array.isArray(run.record_ids)
+      || !historicalDiscoveryReplayCoverageMatches({
+        mode,
+        requestedRecordIds: recordIds,
+        priorRecordIds: run.record_ids.filter((id): id is string => typeof id === "string"),
+      })) return [];
+    const candidates = replayableDeepDiscoveryCandidates(
+      checkpoint.deep_discovery_candidates || summary?.deepDiscoveryCandidatesByRecord,
+      recordIds,
+    );
+    if (!candidates) return [];
+    const count = Object.values(candidates).reduce((sum, items) => sum + items.length, 0);
+    const model = typeof checkpoint.deep_discovery_model === "string"
+      ? checkpoint.deep_discovery_model
+      : typeof summary?.deepDiscoveryModel === "string" ? summary.deepDiscoveryModel : null;
+    return [{ candidates, model, count }];
+  }).sort((left, right) => right.count - left.count)[0];
 }
 
 async function unresolvedFitRecordsForAgeRecovery(input: {
@@ -519,15 +549,14 @@ export async function POST(request: NextRequest) {
     const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
       ? reusableCheckpoint.provider_run_id
       : typeof reusableSummary?.providerRunId === "string" ? reusableSummary.providerRunId : undefined;
-    const reuseDeepDiscoveryCandidates = reusableCheckpoint?.query_plan_version === queryPlanVersion
-      ? replayableDeepDiscoveryCandidates(
-        reusableCheckpoint?.deep_discovery_candidates || reusableSummary?.deepDiscoveryCandidatesByRecord,
-        recordIds,
-      )
-      : undefined;
-    const reuseDeepDiscoveryModel = typeof reusableCheckpoint?.deep_discovery_model === "string"
-      ? reusableCheckpoint.deep_discovery_model
-      : typeof reusableSummary?.deepDiscoveryModel === "string" ? reusableSummary.deepDiscoveryModel : null;
+    // Retries must recover the richest saved packet, not merely the newest
+    // packet: an older retry implementation truncated each athlete to four
+    // grounded sources and could otherwise permanently discard positions 5-8.
+    const reusableDeepDiscovery = bestReplayableDeepDiscovery(
+      runRows, recordIds, queryPlanVersion, preparationMode
+    );
+    const reuseDeepDiscoveryCandidates = reusableDeepDiscovery?.candidates;
+    const reuseDeepDiscoveryModel = reusableDeepDiscovery?.model || null;
     const { data: preparationRun, error: insertError } = await admin.from("research_evidence_preparation_runs").insert({
       organization_id: user.organizationId,
       requested_by_user_id: user.id,
