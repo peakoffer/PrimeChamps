@@ -43,6 +43,7 @@ import {
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
   normalizeResearchV2BlindCriticalGaps,
+  removeNeutralShortWindowGrowthConcerns,
   researchV2CommercialAccessSnapshot,
   researchV2CreatorActivitySnapshot,
   researchV2PreAuditEvidenceComplete,
@@ -661,6 +662,22 @@ test("research artifact activation archives the prior rubric version before acti
   );
   assert.match(artifactSetup, /\.neq\("version", 5\)/);
   assert.doesNotMatch(artifactSetup, /\.neq\("version", 4\)/);
+});
+
+test("a sub-30-day follower snapshot cannot survive as a negative finalist concern", () => {
+  assert.deepEqual(removeNeutralShortWindowGrowthConcerns({
+    concerns: [
+      "Audience growth is essentially flat over 4 days, suggesting no current viral growth trend.",
+      "No exact OnlyFans profile was found; absence is neutral.",
+    ],
+    daysBetweenSnapshots: 4,
+    hasQualifiedAudienceTrend: false,
+  }), ["No exact OnlyFans profile was found; absence is neutral."]);
+  assert.deepEqual(removeNeutralShortWindowGrowthConcerns({
+    concerns: ["Follower growth declined over the measured period."],
+    daysBetweenSnapshots: 45,
+    hasQualifiedAudienceTrend: true,
+  }), ["Follower growth declined over the measured period."]);
 });
 
 test("paid enrichment gives fresh discovery priority without discarding memory", () => {

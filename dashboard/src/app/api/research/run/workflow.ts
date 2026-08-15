@@ -52,6 +52,7 @@ import {
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
   normalizeResearchV2BlindCriticalGaps,
+  removeNeutralShortWindowGrowthConcerns,
   researchV2CommercialAccessSnapshot,
   researchV2CreatorActivitySnapshot,
   researchV2PreAuditEvidenceComplete,
@@ -4376,6 +4377,11 @@ CALIBRATION REMINDER:
   }
   return {
     ...athlete,
+    concerns: removeNeutralShortWindowGrowthConcerns({
+      concerns: athlete.concerns,
+      daysBetweenSnapshots: athlete.momentum_metrics?.days_between_snapshots,
+      hasQualifiedAudienceTrend: Boolean(socialBladeAudience.trend),
+    }),
     score: correctedWithObjectiveGuardrails.priority,
     onlyfans_fit_score: corrected.onlyfansFit,
     commercial_achievability_score: corrected.commercialAchievability,

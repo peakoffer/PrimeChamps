@@ -192,6 +192,23 @@ export function calibrateResearchV2QualifiedBand(input: {
   };
 }
 
+export function removeNeutralShortWindowGrowthConcerns(input: {
+  concerns: string[] | undefined;
+  daysBetweenSnapshots: number | undefined;
+  hasQualifiedAudienceTrend: boolean;
+}) {
+  const concerns = input.concerns || [];
+  if (input.hasQualifiedAudienceTrend || !input.daysBetweenSnapshots || input.daysBetweenSnapshots >= 30) {
+    return concerns;
+  }
+  return concerns.filter((concern) => {
+    const normalized = concern.toLowerCase();
+    const referencesAudienceGrowth = /follower|audience|growth|viral/.test(normalized);
+    const treatsItAsNegative = /flat|declin|negative|down|stagn|no current|no growth|lack of growth/.test(normalized);
+    return !(referencesAudienceGrowth && treatsItAsNegative);
+  });
+}
+
 export function holdResearchV2PriorityForIndependentAudit(priority: number) {
   const normalized = bounded(priority);
   return normalized > 80 ? 79 : normalized;
