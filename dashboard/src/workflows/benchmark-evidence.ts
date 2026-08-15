@@ -1491,7 +1491,6 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
     });
     const results: Awaited<ReturnType<typeof persistPreparedRecordEvidence>>[] = [];
     const deferredCandidates: Array<{ recordId: string; url: string }> = [];
-    let waybackCircuitOpen = false;
     for (const record of discovery.records) {
       const evidence: PreparedArchivedEvidence[] = [];
       const rejections: Array<{ url: string; reason: string }> = [];
@@ -1502,9 +1501,11 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           record,
           candidate,
           commonCrawlCollections,
-          waybackCircuitOpen,
+          // A rate limit for one URL must not suppress immutable evidence for
+          // every later URL. Each candidate gets one bounded, zero-retry
+          // archive attempt and the outer loop remains capped and paced.
+          waybackCircuitOpen: false,
         });
-        if (archiveResult.waybackRateLimited) waybackCircuitOpen = true;
         if (archiveResult?.rateLimited) {
           deferredCandidates.push({ recordId: record.id, url: candidate.url });
           continue;

@@ -3006,7 +3006,7 @@ test("archive recovery prefers cutoff-safe direct and Common Crawl evidence befo
   assert.match(workflow, /extractPreparedDatedArticleEvidence/);
   assert.match(workflow, /isPublicHttpUrl\(url\.toString\(\)\)/);
   assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
-  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /www-normalized-common-crawl-v20/);
+  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /per-candidate-archive-v21/);
   assert.equal(isPublicHttpUrl("https://example.com/athlete"), true);
   assert.equal(isPublicHttpUrl("http://169.254.169.254/latest/meta-data"), false);
   assert.equal(isPublicHttpUrl("http://192.168.1.12/private"), false);
@@ -3778,8 +3778,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /retrieveArchivedEvidenceCandidate\.maxRetries = 0/);
   assert.doesNotMatch(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
   assert.doesNotMatch(workflow, /skipWayback/);
-  assert.match(workflow, /let waybackCircuitOpen = false/);
-  assert.match(workflow, /if \(archiveResult\.waybackRateLimited\) waybackCircuitOpen = true/);
+  assert.doesNotMatch(workflow, /let waybackCircuitOpen = false/);
+  assert.doesNotMatch(workflow, /archiveResult\.waybackRateLimited\) waybackCircuitOpen = true/);
   assert.match(workflow, /candidate\.storedCapture && !input\.waybackCircuitOpen/);
   assert.match(route, /items\.slice\(0, EVIDENCE_PREPARATION_LIMITS\.archiveUrlsPerRecord\)/);
   assert.match(route, /bestReplayableDeepDiscovery/);
