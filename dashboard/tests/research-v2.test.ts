@@ -2742,6 +2742,15 @@ test("Common Crawl fallback selects bounded pre-cutoff captures and extracts the
     { id: "CC-MAIN-2024-26", from: "2024-06-20T00:00:00Z", to: "2024-07-03T23:59:59Z" },
   ], "2024-06-01T00:00:00Z", 2);
   assert.deepEqual(collections, ["CC-MAIN-2024-22", "CC-MAIN-2024-18"]);
+  assert.deepEqual(selectCommonCrawlCollections([
+    { id: "CC-MAIN-2025-51", from: "2025-11-20T00:00:00Z", to: "2025-12-03T23:59:59Z" },
+    { id: "CC-MAIN-2025-47", from: "2025-10-20T00:00:00Z", to: "2025-11-02T23:59:59Z" },
+    { id: "CC-MAIN-2025-38", from: "2025-09-04T00:00:00Z", to: "2025-09-17T23:59:59Z" },
+    { id: "CC-MAIN-2025-30", from: "2025-06-20T00:00:00Z", to: "2025-07-03T23:59:59Z" },
+    { id: "CC-MAIN-2024-51", from: "2024-11-20T00:00:00Z", to: "2024-12-03T23:59:59Z" },
+  ], "2025-12-10T00:00:00Z", 3), [
+    "CC-MAIN-2025-51", "CC-MAIN-2025-38", "CC-MAIN-2024-51",
+  ]);
 
   const capture = selectCommonCrawlCapture([
     { timestamp: "20240501010101", url: canonicalUrl, status: "200", mime: "text/html", filename: "crawl-data/old.warc.gz", offset: "10", length: "100", digest: "OLD" },
@@ -2993,7 +3002,7 @@ test("archive recovery prefers cutoff-safe direct and Common Crawl evidence befo
   assert.match(workflow, /extractPreparedDatedArticleEvidence/);
   assert.match(workflow, /isPublicHttpUrl\(url\.toString\(\)\)/);
   assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
-  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /direct-common-crawl-first-v17/);
+  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /spaced-common-crawl-v18/);
   assert.equal(isPublicHttpUrl("https://example.com/athlete"), true);
   assert.equal(isPublicHttpUrl("http://169.254.169.254/latest/meta-data"), false);
   assert.equal(isPublicHttpUrl("http://192.168.1.12/private"), false);

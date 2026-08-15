@@ -21,7 +21,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-formula-racing-label-v24";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-direct-common-crawl-first-v17";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-spaced-common-crawl-v18";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -344,7 +344,7 @@ export function selectCommonCrawlCollections(
   if (!Array.isArray(payload)) return [];
   const cutoff = Date.parse(evidenceCutoffAt);
   if (!Number.isFinite(cutoff)) return [];
-  return payload.flatMap((raw) => {
+  const eligible = payload.flatMap((raw) => {
     if (!raw || typeof raw !== "object") return [];
     const collection = raw as CommonCrawlCollection;
     const id = typeof collection.id === "string" ? collection.id.trim() : "";
@@ -352,9 +352,23 @@ export function selectCommonCrawlCollections(
     const to = parseCollectionTimestamp(collection.to);
     if (!/^CC-MAIN-\d{4}-\d{2}$/.test(id) || from === null || from > cutoff) return [];
     return [{ id, from, to: to ?? from }];
-  }).sort((left, right) => right.from - left.from || right.to - left.to)
-    .slice(0, Math.max(1, Math.min(3, Math.floor(maximum))))
-    .map((collection) => collection.id);
+  }).sort((left, right) => right.from - left.from || right.to - left.to);
+  const limit = Math.max(1, Math.min(3, Math.floor(maximum)));
+  if (limit <= 2 || eligible.length <= limit) return eligible.slice(0, limit).map((collection) => collection.id);
+  const selected = [eligible[0]];
+  // Niche pages are not recrawled every month. Sample a roughly quarterly
+  // and annual collection rather than spending all three bounded lookups on
+  // adjacent crawl windows that likely contain the same URLs.
+  for (const ageMs of [75, 300].slice(0, limit - 1).map((days) => days * 24 * 60 * 60 * 1_000)) {
+    const candidate = eligible.find((collection) => !selected.includes(collection)
+      && collection.from <= eligible[0].from - ageMs);
+    if (candidate) selected.push(candidate);
+  }
+  for (const collection of eligible) {
+    if (selected.length >= limit) break;
+    if (!selected.includes(collection)) selected.push(collection);
+  }
+  return selected.map((collection) => collection.id);
 }
 
 export function commonCrawlIndexUrl(collectionId: string, canonicalUrl: string) {

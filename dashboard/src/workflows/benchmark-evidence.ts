@@ -881,7 +881,7 @@ async function retrieveCommonCrawlEvidenceCandidate(input: {
   const collectionIds = selectCommonCrawlCollections(
     input.collections,
     input.record.evidence_cutoff_at,
-    2
+    3
   );
   for (const collectionId of collectionIds) {
     const response = await fetch(commonCrawlIndexUrl(collectionId, input.candidate.url), {
