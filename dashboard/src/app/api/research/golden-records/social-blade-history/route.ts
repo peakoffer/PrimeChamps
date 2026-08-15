@@ -264,6 +264,61 @@ async function fetchSocialBladeHistory(candidate: Candidate) {
   return { payload, sourceUrl: url.toString() };
 }
 
+async function checkSocialBladeConnection(organizationId: string) {
+  const credentials = socialBladeCredentials();
+  if (!credentials) {
+    const status = socialBladeCredentialStatus();
+    throw new Error(status.validationError || "Social Blade credentials are not configured");
+  }
+  const admin = createAdminClient();
+  const { data: cachedSource, error } = await admin.from("research_evidence_sources")
+    .select("canonical_url,retrieved_at,metadata")
+    .eq("organization_id", organizationId)
+    .eq("provider", "social_blade_instagram_history")
+    .eq("retrieval_status", "retrieved")
+    .eq("eligible_before_cutoff", true)
+    .gte("retrieved_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000).toISOString())
+    .order("retrieved_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!cachedSource?.canonical_url) {
+    throw new Error("No recently paid Social Blade profile is available for a zero-credit connection check");
+  }
+  const url = new URL(cachedSource.canonical_url);
+  if (url.origin !== "https://matrix.sbapis.com" || url.pathname !== "/b/instagram/statistics") {
+    throw new Error("The cached Social Blade connection-check target is invalid");
+  }
+  const response = await fetch(url, {
+    headers: { clientid: credentials.clientId, token: credentials.token },
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  const payload = await response.json() as SocialBladeInstagramResponse;
+  if (!response.ok || payload.status?.success !== true) {
+    throw new Error(payload.status?.error || `Social Blade connection check failed (${response.status})`);
+  }
+  const metadata = cachedSource.metadata && typeof cachedSource.metadata === "object"
+    ? cachedSource.metadata as Record<string, unknown>
+    : {};
+  const creditsBefore = typeof metadata.credits_remaining_after_request === "number"
+    ? metadata.credits_remaining_after_request
+    : null;
+  const creditsAfter = typeof payload.info?.credits?.available === "number"
+    ? payload.info.credits.available
+    : null;
+  return {
+    authenticated: true,
+    cachedProfileReused: true,
+    chargedCredits: creditsBefore !== null && creditsAfter !== null
+      ? Math.max(0, creditsBefore - creditsAfter)
+      : null,
+    creditsRemaining: creditsAfter,
+    scoringTokensSpent: 0,
+    outreachMutationsAllowed: false,
+  };
+}
+
 function officialAttemptRequestId(candidate: Candidate) {
   return `${candidate.handle}:${candidate.tier}:${candidate.cutoff.slice(0, 10)}:${OFFICIAL_HISTORY_PLAN_VERSION}:attempt`;
 }
@@ -344,9 +399,12 @@ async function persistOfficialHistoryFailure(input: {
   if (error) throw error;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
+    if (request.nextUrl.searchParams.get("validate") === "connection") {
+      return NextResponse.json({ ok: true, ...(await checkSocialBladeConnection(user.organizationId)) });
+    }
     const [candidates, apifyPublicAttemptCount, officialHistoryStats] = await Promise.all([
       buildCandidatePlan(user.organizationId),
       countApifyPublicHistoryAttempts(user.organizationId),

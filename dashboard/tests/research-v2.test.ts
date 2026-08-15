@@ -3691,6 +3691,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_RECOVERY_ATTEMPTS = 24/);
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_SNAPSHOT_AGE_DAYS = 90/);
   assert.match(socialBladeHistoryRoute, /OFFICIAL_HISTORY_PLAN_VERSION = "max90-v2"/);
+  assert.match(socialBladeHistoryRoute, /validate"\) === "connection"/);
+  assert.match(socialBladeHistoryRoute, /No recently paid Social Blade profile is available for a zero-credit connection check/);
+  assert.match(socialBladeHistoryRoute, /outreachMutationsAllowed: false/);
   assert.match(socialBladeHistoryRoute, /officialValidationPassed/);
   assert.match(socialBladeHistoryRoute, /officialHistoryStats\.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS/);
   assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);
