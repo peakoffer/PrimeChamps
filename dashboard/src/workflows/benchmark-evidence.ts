@@ -1049,31 +1049,49 @@ async function retrieveDirectDatedArticleEvidenceCandidate(input: {
   if (!isPublicHttpUrl(url.toString())) {
     return { evidence: null, rejectionReason: "dated_article_url_is_not_public_http" };
   }
-  const response = await fetch(url.toString(), {
-    headers: {
+  const headerVariants: Array<Record<string, string>> = [
+    {
       Accept: "text/html,application/xhtml+xml",
       "User-Agent": "PrimeChampsResearch/1.0 evidence-audit",
     },
-    redirect: "follow",
-    signal: AbortSignal.timeout(30_000),
-    cache: "no-store",
-  });
-  if (!response.ok || !/html|xhtml/i.test(response.headers.get("content-type") || "")) {
-    return { evidence: null, rejectionReason: "dated_article_lookup_failed" };
+    {
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 PrimeChampsEvidenceAudit/1.0",
+    },
+  ];
+  let lastReason = "dated_article_lookup_failed";
+  for (const headers of headerVariants) {
+    const response = await fetch(url.toString(), {
+      headers,
+      redirect: "follow",
+      signal: AbortSignal.timeout(30_000),
+      cache: "no-store",
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !/html|xhtml/i.test(contentType)) {
+      lastReason = `dated_article_lookup_failed_${response.status}_${contentType.split(";")[0] || "unknown"}`;
+      continue;
+    }
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > 2_000_000) {
+      lastReason = "dated_article_response_too_large";
+      continue;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!bytes.length || bytes.length > 2_000_000) {
+      lastReason = "dated_article_response_too_large";
+      continue;
+    }
+    const extracted = extractPreparedDatedArticleEvidence({
+      record: input.record,
+      candidate: input.candidate,
+      html: new TextDecoder().decode(bytes).slice(0, 1_000_000),
+    });
+    if (extracted.evidence) return extracted;
+    lastReason = extracted.rejectionReason || "dated_article_extraction_failed";
   }
-  const contentLength = Number(response.headers.get("content-length") || 0);
-  if (contentLength > 2_000_000) {
-    return { evidence: null, rejectionReason: "dated_article_response_too_large" };
-  }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.length || bytes.length > 2_000_000) {
-    return { evidence: null, rejectionReason: "dated_article_response_too_large" };
-  }
-  return extractPreparedDatedArticleEvidence({
-    record: input.record,
-    candidate: input.candidate,
-    html: new TextDecoder().decode(bytes).slice(0, 1_000_000),
-  });
+  return { evidence: null, rejectionReason: lastReason };
 }
 
 async function retrieveArchivedEvidenceCandidate(input: {
@@ -1086,6 +1104,7 @@ async function retrieveArchivedEvidenceCandidate(input: {
 
   const { candidate } = input;
   let storedReplayRateLimited = false;
+  let directDatedArticleRejection = "dated_article_not_checked";
   if (candidate.storedCapture && !input.waybackCircuitOpen) {
     try {
       const prepared = await extractWaybackPreparedEvidence({
@@ -1132,6 +1151,7 @@ async function retrieveArchivedEvidenceCandidate(input: {
   }
   try {
     const datedArticle = await retrieveDirectDatedArticleEvidenceCandidate({ record: input.record, candidate });
+    directDatedArticleRejection = datedArticle.rejectionReason || "dated_article_no_evidence";
     if (datedArticle.evidence) {
       return {
         evidence: datedArticle.evidence,
@@ -1140,7 +1160,10 @@ async function retrieveArchivedEvidenceCandidate(input: {
         waybackRateLimited: false,
       };
     }
-  } catch {
+  } catch (error) {
+    directDatedArticleRejection = error instanceof Error
+      ? `dated_article_exception_${error.name}`
+      : "dated_article_exception_unknown";
     // A current page is admissible only through the strict dated-article
     // extractor; otherwise continue to immutable archive providers.
   }
@@ -1248,7 +1271,7 @@ async function retrieveArchivedEvidenceCandidate(input: {
     evidence: null,
     rejectionReason: waybackRateLimited
       ? "wayback_rate_limited_after_direct_and_common_crawl_miss"
-      : "no_cutoff_safe_direct_common_crawl_or_wayback_evidence",
+      : `no_cutoff_safe_direct_common_crawl_or_wayback_evidence:${directDatedArticleRejection}`,
     rateLimited: waybackRateLimited,
     waybackRateLimited,
   };

@@ -3763,6 +3763,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /name: "adult_eligibility"/);
   assert.match(workflow, /input\.preparationMode === "age_recovery"/);
   assert.match(workflow, /requireSportInDiscoveryMetadata: preparationMode !== "age_recovery"/);
+  assert.match(workflow, /PrimeChampsEvidenceAudit\/1\.0/);
+  assert.match(workflow, /directDatedArticleRejection/);
   assert.match(workflow, /max_uses: 1/);
   assert.match(workflow, /max_tool_calls: 1/);
   assert.match(workflow, /reasoning: \{ effort: "low", exclude: true \}/);
