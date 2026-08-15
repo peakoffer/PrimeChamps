@@ -124,9 +124,11 @@ import {
   extractPreparedArchivedEvidence,
   extractPreparedDatedArticleEvidence,
   groundedHistoricalSignalDiscoveryCandidates,
+  HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS,
   historicalDiscoveryReplayCoverageMatches,
+  isPublicHttpUrl,
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
   parseWaybackTimestamp,
@@ -2892,6 +2894,22 @@ test("two-lane signal recovery reuses paid discovery but refreshes grounded cand
   assert.match(route, /reusableCheckpoint\?\.query_plan_version === queryPlanVersion/);
 });
 
+test("archive recovery prefers cutoff-safe direct and Common Crawl evidence before Wayback", () => {
+  const workflow = readFileSync(new URL("../src/workflows/benchmark-evidence.ts", import.meta.url), "utf8");
+  const direct = workflow.indexOf("const datedArticle = await retrieveDirectDatedArticleEvidenceCandidate");
+  const commonCrawl = workflow.indexOf("const commonCrawl = await retrieveCommonCrawlEvidenceCandidate", direct);
+  const wayback = workflow.indexOf("let waybackRateLimited", commonCrawl);
+  assert.ok(direct > 0 && commonCrawl > direct && wayback > commonCrawl);
+  assert.match(workflow, /extractPreparedDatedArticleEvidence/);
+  assert.match(workflow, /isPublicHttpUrl\(url\.toString\(\)\)/);
+  assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
+  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /direct-common-crawl-first-v17/);
+  assert.equal(isPublicHttpUrl("https://example.com/athlete"), true);
+  assert.equal(isPublicHttpUrl("http://169.254.169.254/latest/meta-data"), false);
+  assert.equal(isPublicHttpUrl("http://192.168.1.12/private"), false);
+  assert.equal(isPublicHttpUrl("http://[::1]/private"), false);
+});
+
 test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
   const record = {
     id: "golden-jane",
@@ -3598,7 +3616,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /let waybackCircuitOpen = false/);
   assert.match(workflow, /if \(archiveResult\.waybackRateLimited\) waybackCircuitOpen = true/);
   assert.match(workflow, /candidate\.storedCapture && !input\.waybackCircuitOpen/);
-  assert.match(workflow, /rateLimited: waybackRateLimited && !commonCrawl\.evidence/);
+  assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
   assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
   assert.match(workflow, /Cutoff-safe external profiles referenced by/);
   assert.doesNotMatch(workflow, /if \(candidates\.length\) break/);

@@ -278,7 +278,11 @@ export async function GET() {
       HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
       HISTORICAL_ARCHIVE_PROVIDER_VERSION
     );
-    const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
+    const signalRecoveryCompleted = completedRecordIds(
+      runRows,
+      HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
+      HISTORICAL_ARCHIVE_PROVIDER_VERSION
+    );
     const baselineRemaining = await unresolvedRecordsForBaseline({
       admin, organizationId: user.organizationId, eligible, baselineCompleted,
     });
@@ -427,7 +431,11 @@ export async function POST(request: NextRequest) {
       HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
       HISTORICAL_ARCHIVE_PROVIDER_VERSION
     );
-    const signalRecoveryCompleted = completedRecordIds(runRows, HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION);
+    const signalRecoveryCompleted = completedRecordIds(
+      runRows,
+      HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
+      HISTORICAL_ARCHIVE_PROVIDER_VERSION
+    );
     const baselineRemaining = await unresolvedRecordsForBaseline({
       admin, organizationId: user.organizationId, eligible, baselineCompleted,
     });
@@ -477,7 +485,7 @@ export async function POST(request: NextRequest) {
       const providerRunId = typeof checkpoint?.provider_run_id === "string"
         ? checkpoint.provider_run_id
         : typeof summary?.providerRunId === "string" ? summary.providerRunId : undefined;
-      const archiveProviderReplay = preparationMode === "age_recovery"
+      const archiveProviderReplay = (preparationMode === "age_recovery" || preparationMode === "signal_recovery")
         && checkpoint?.archive_provider_version !== HISTORICAL_ARCHIVE_PROVIDER_VERSION;
       const queryPlanMatches = checkpoint?.query_plan_version === queryPlanVersion
         || (preparationMode === "age_recovery"

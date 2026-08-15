@@ -18,8 +18,10 @@ import {
   extractOfficialCommissionAdultEvidence,
   extractOfficialDatedProfileEvidence,
   extractPreparedArchivedEvidence,
+  extractPreparedDatedArticleEvidence,
   extractPreparedArchivedPdfEvidence,
   groundedHistoricalSignalDiscoveryCandidates,
+  isPublicHttpUrl,
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
@@ -1018,6 +1020,44 @@ async function retrieveOfficialDatedProfileEvidenceCandidate(input: {
   return { evidence, rejectionReason: null };
 }
 
+async function retrieveDirectDatedArticleEvidenceCandidate(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+}) {
+  let url: URL;
+  try { url = new URL(input.candidate.url); } catch {
+    return { evidence: null, rejectionReason: "dated_article_url_is_not_public_http" };
+  }
+  if (!isPublicHttpUrl(url.toString())) {
+    return { evidence: null, rejectionReason: "dated_article_url_is_not_public_http" };
+  }
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "PrimeChampsResearch/1.0 evidence-audit",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+    cache: "no-store",
+  });
+  if (!response.ok || !/html|xhtml/i.test(response.headers.get("content-type") || "")) {
+    return { evidence: null, rejectionReason: "dated_article_lookup_failed" };
+  }
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (contentLength > 2_000_000) {
+    return { evidence: null, rejectionReason: "dated_article_response_too_large" };
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 2_000_000) {
+    return { evidence: null, rejectionReason: "dated_article_response_too_large" };
+  }
+  return extractPreparedDatedArticleEvidence({
+    record: input.record,
+    candidate: input.candidate,
+    html: new TextDecoder().decode(bytes).slice(0, 1_000_000),
+  });
+}
+
 async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
@@ -1073,6 +1113,20 @@ async function retrieveArchivedEvidenceCandidate(input: {
     // Continue to immutable archive providers if the official site is unavailable.
   }
   try {
+    const datedArticle = await retrieveDirectDatedArticleEvidenceCandidate({ record: input.record, candidate });
+    if (datedArticle.evidence) {
+      return {
+        evidence: datedArticle.evidence,
+        rejectionReason: null,
+        rateLimited: false,
+        waybackRateLimited: false,
+      };
+    }
+  } catch {
+    // A current page is admissible only through the strict dated-article
+    // extractor; otherwise continue to immutable archive providers.
+  }
+  try {
     const wikimedia = await retrieveWikimediaRevisionEvidenceCandidate({ record: input.record, candidate });
     if (wikimedia.evidence) {
       return {
@@ -1084,6 +1138,24 @@ async function retrieveArchivedEvidenceCandidate(input: {
     }
   } catch {
     // Continue to the generic archive providers when Wikimedia is unavailable.
+  }
+  try {
+    const commonCrawl = await retrieveCommonCrawlEvidenceCandidate({
+      record: input.record,
+      candidate,
+      collections: input.commonCrawlCollections,
+    });
+    if (commonCrawl.evidence) {
+      return {
+        evidence: commonCrawl.evidence,
+        rejectionReason: null,
+        rateLimited: false,
+        waybackRateLimited: false,
+      };
+    }
+  } catch {
+    // Wayback remains the final immutable fallback when Common Crawl is
+    // unavailable or has no qualifying pre-cutoff capture.
   }
   let waybackRateLimited = input.waybackCircuitOpen || storedReplayRateLimited;
   if (!input.waybackCircuitOpen) {
@@ -1154,28 +1226,14 @@ async function retrieveArchivedEvidenceCandidate(input: {
       waybackRateLimited = waybackRateLimited || error instanceof RetryableError;
     }
   }
-  try {
-    const commonCrawl = await retrieveCommonCrawlEvidenceCandidate({
-      record: input.record,
-      candidate,
-      collections: input.commonCrawlCollections,
-    });
-    return {
-      evidence: commonCrawl.evidence,
-      rejectionReason: commonCrawl.rejectionReason,
-      // A Common Crawl miss is not proof that the source lacks a historical
-      // capture when Wayback itself was temporarily unavailable.
-      rateLimited: waybackRateLimited && !commonCrawl.evidence,
-      waybackRateLimited,
-    };
-  } catch (error) {
-    return {
-      evidence: null,
-      rejectionReason: error instanceof Error ? error.message.slice(0, 180) : "archive_lookup_failed",
-      rateLimited: waybackRateLimited,
-      waybackRateLimited,
-    };
-  }
+  return {
+    evidence: null,
+    rejectionReason: waybackRateLimited
+      ? "wayback_rate_limited_after_direct_and_common_crawl_miss"
+      : "no_cutoff_safe_direct_common_crawl_or_wayback_evidence",
+    rateLimited: waybackRateLimited,
+    waybackRateLimited,
+  };
 }
 retrieveArchivedEvidenceCandidate.maxRetries = 0;
 

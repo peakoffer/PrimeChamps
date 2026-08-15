@@ -18,7 +18,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-boxing-section-age-attribution-v19";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-wayback-availability-fallback-v16";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-direct-common-crawl-first-v17";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -291,9 +291,17 @@ function normalizedUrlForComparison(value: string) {
 export function isPublicHttpUrl(value: string) {
   try {
     const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
     return (url.protocol === "https:" || url.protocol === "http:")
-      && !["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(url.hostname.toLowerCase())
-      && !url.hostname.toLowerCase().endsWith(".local");
+      && !["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(hostname)
+      && !hostname.endsWith(".localhost")
+      && !hostname.endsWith(".local")
+      && !/^10\./.test(hostname)
+      && !/^192\.168\./.test(hostname)
+      && !/^172\.(?:1[6-9]|2\d|3[01])\./.test(hostname)
+      && !/^169\.254\./.test(hostname)
+      && !/^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(hostname)
+      && !hostname.includes(":");
   } catch {
     return false;
   }
