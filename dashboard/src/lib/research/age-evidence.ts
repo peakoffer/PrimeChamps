@@ -105,7 +105,7 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
   // "aged 15" frequently describes when an athlete started a sport, not their
   // age at publication. Only accept an explicit age field or current-age phrase.
   const stated = text.match(
-    /\bage\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)|\b(?:cumpl(?:e|[ií]a|i[oó]|ir[aá])|tiene)\s+(\d{1,2})\s+a[nñ]os\b|\b(?:[aâ]g[eé]e?\s+de|a)\s+(\d{1,2})\s+ans\b|^\s*,\s*(\d{1,2})\s+ans\b|\b(\d{1,2})\s+jahre\s+alt\b|\b(?:tem|completou)\s+(\d{1,2})\s+anos\b|\bha\s+(\d{1,2})\s+anni\b/i
+    /\bage\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)|\b(?:cumpl(?:e|[ií]a|i[oó]|ir[aá])|tiene)\s+(\d{1,2})\s+a[nñ]os\b|\b(?:[aâ]g[eé]e?\s+de|a)\s+(\d{1,2})\s+ans\b|^\s*,\s*(\d{1,2})\s+ans\b|\b(\d{1,2})\s+jahre\s+alt\b|\b(?:tem|completou)\s+(\d{1,2})\s+anos\b|\bha\s+(\d{1,2})\s+anni\b|,\s*(\d{1,2})\s+anni\b/i
   );
   const statedAge = Number(stated?.slice(1).find(Boolean));
   const statedContext = stated?.index === undefined

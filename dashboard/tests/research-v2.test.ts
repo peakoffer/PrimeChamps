@@ -134,6 +134,7 @@ import {
   isPublicHttpUrl,
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
+  parsePreparedAgeEvidenceForAthlete,
   parseWaybackTimestamp,
   preparedEvidenceSignalExcerptForAthlete,
   preparedMomentumEffectiveAt,
@@ -3300,6 +3301,17 @@ test("direct dated articles admit only tightly timestamped, attributable pre-cut
   });
   assert.equal(saraServerShell.rejectionReason, null);
   assert.ok(saraServerShell.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
+  const italianAppositiveAge = parsePreparedAgeEvidenceForAthlete(
+    "Sara Fruncillo",
+    "La conferenza stampa avrà come protagonista Sara Fruncillo, 26 anni, già concorrente della Formula X.",
+    new Date("2024-07-10T12:00:00Z"),
+  );
+  assert.equal(italianAppositiveAge?.parsed.age, 26);
+  assert.equal(parsePreparedAgeEvidenceForAthlete(
+    "Sara Fruncillo",
+    "Sara Fruncillo gareggia in Formula X. La collega Maria Rossi, 26 anni, sarà presente.",
+    new Date("2024-07-10T12:00:00Z"),
+  ), null);
 });
 
 test("archived Instagram handles require athlete attribution and reject publisher footer accounts", () => {

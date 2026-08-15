@@ -20,7 +20,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-formula-racing-label-v24";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-italian-appositive-age-v25";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-per-candidate-archive-v21";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -1371,7 +1371,7 @@ function statedAgeSharesAthleteClause(name: string, evidence: string) {
   const surname = indexAlignedFold(name.trim().split(/\s+/).at(-1) || "");
   if (!surname) return false;
   const lower = indexAlignedFold(evidence);
-  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)|\b(?:cumpl(?:e|[ií]a|i[oó]|ir[aá])|tiene)\s+\d{1,2}\s+a[nñ]os\b|\b(?:[aâ]g[eé]e?\s+de|a)\s+\d{1,2}\s+ans\b|,\s*\d{1,2}\s+ans\b|\b\d{1,2}\s+jahre\s+alt\b|\b(?:tem|completou)\s+\d{1,2}\s+anos\b|\bha\s+\d{1,2}\s+anni\b|,\s*(?:un(?:a)?\s+)?(?:joven|deportista|surfista|atleta)?\s*de\s+(?:\(\s*entonces\s*\)\s*)?\d{1,2}\s+a[nñ]os\b|(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*\d{1,2}\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i.exec(evidence);
+  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)|\b(?:cumpl(?:e|[ií]a|i[oó]|ir[aá])|tiene)\s+\d{1,2}\s+a[nñ]os\b|\b(?:[aâ]g[eé]e?\s+de|a)\s+\d{1,2}\s+ans\b|,\s*\d{1,2}\s+ans\b|\b\d{1,2}\s+jahre\s+alt\b|\b(?:tem|completou)\s+\d{1,2}\s+anos\b|\bha\s+\d{1,2}\s+anni\b|,\s*\d{1,2}\s+anni\b|,\s*(?:un(?:a)?\s+)?(?:joven|deportista|surfista|atleta)?\s*de\s+(?:\(\s*entonces\s*\)\s*)?\d{1,2}\s+a[nñ]os\b|(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*\d{1,2}\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i.exec(evidence);
   if (!ageMatch || ageMatch.index === undefined) return false;
   const beforeAge = lower.slice(0, ageMatch.index);
   const surnameIndex = beforeAge.lastIndexOf(surname);
