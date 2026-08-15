@@ -32,7 +32,7 @@ const athleteName = argument("athlete");
 const canonicalUrl = argument("url");
 const requiredClaim = argument("required-claim") || "adult_eligibility";
 if (!new Set([
-  "adult_eligibility", "athlete_profile", "athletic_momentum", "audience_signal",
+  "sport_identity", "adult_eligibility", "athlete_profile", "athletic_momentum", "audience_signal",
   "creator_behavior_signal", "commercial_achievability_signal",
 ]).has(requiredClaim)) {
   throw new Error("--required-claim is not a supported evidence claim");
