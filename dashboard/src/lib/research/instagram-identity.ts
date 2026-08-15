@@ -373,12 +373,14 @@ export function evaluateCorroboratedInstagramIdentity(input: {
     || /\b(?:fan\s?page|fan account|updates account|supporters)\b/i.test(profileText);
   const independentHandleSource = input.searchCandidate.reasons.includes("named source publishes Instagram handle")
     || input.searchCandidate.reasons.includes("named athlete source corroborates profile ownership");
+  const exactNativeSearchResult = input.searchCandidate.reasons.includes("live Instagram user search returned this profile")
+    && input.searchCandidate.searchConfidence >= 60;
   const externallyCorroboratedHandle = independentHandleSource
     && (exactProfileName || exactNameHandle)
     && !organizationalOrFanRisk;
   const verifiedPlatformIdentity = input.profile.verified === true
     && exactProfileName
-    && profileHasSportSignal
+    && (profileHasSportSignal || exactNativeSearchResult)
     && input.externalSportIdentityVerified
     && !organizationalOrFanRisk;
   const passed = externallyCorroboratedHandle || verifiedPlatformIdentity;
@@ -389,6 +391,7 @@ export function evaluateCorroboratedInstagramIdentity(input: {
       exactNameHandle ? "live Instagram handle exactly matches the athlete name" : null,
       profileHasSportSignal ? "live Instagram profile contains a sport or athlete signal" : null,
       independentHandleSource ? "independent athlete source publishes the Instagram handle" : null,
+      exactNativeSearchResult ? "exact-name live Instagram search resolved the profile" : null,
       verifiedPlatformIdentity ? "verified Instagram identity agrees with external athlete/sport evidence" : null,
       organizationalOrFanRisk ? "profile has organization or fan-account risk" : null,
       !passed ? "identity lacks two independent exact-person signals" : null,

@@ -21,6 +21,7 @@ import {
   sanitizeInstagramSearchTerm,
   scoreInstagramProfileIdentity,
 } from "../src/lib/research/instagram-identity.ts";
+import { buildAthleteAgeSearchQueries } from "../src/lib/research/age-evidence.ts";
 import { auditResearchResults } from "../src/lib/research/run-audit.ts";
 import {
   ageEvidenceNamesAthlete,
@@ -607,6 +608,22 @@ test("Instagram finalist identity requires two independent exact-person signals"
   });
   assert.equal(verifiedPlatformIdentity.passed, true);
 
+  const verifiedExactNativeIdentityWithoutSportBio = evaluateCorroboratedInstagramIdentity({
+    athleteName: "Devon Newberry",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "devnewberry",
+      url: "https://www.instagram.com/devnewberry/",
+      title: "Devon Newberry",
+      snippet: "Devon Newberry",
+      searchConfidence: 60,
+      reasons: ["live Instagram user search returned this profile"],
+    },
+    profile: { fullName: "Devon Newberry", bio: "Personal brand and lifestyle", verified: true },
+    externalSportIdentityVerified: true,
+  });
+  assert.equal(verifiedExactNativeIdentityWithoutSportBio.passed, true);
+
   const unverifiedSameName = evaluateCorroboratedInstagramIdentity({
     athleteName: "Mimi Colyer",
     sport: "volleyball",
@@ -653,6 +670,18 @@ test("Instagram finalist identity requires two independent exact-person signals"
     externalSportIdentityVerified: true,
   });
   assert.equal(fanAccount.passed, false);
+});
+
+test("age discovery searches both broad and authoritative multilingual evidence", () => {
+  const queries = buildAthleteAgeSearchQueries({
+    athleteName: "Stella Nervini",
+    sport: "volleyball",
+    authoritativeDomains: ["volleyballworld.com", "federvolley.it", "legavolleyfemminile.it"],
+  });
+  assert.equal(queries.length, 2);
+  assert.match(queries[0], /"date of birth"/);
+  assert.match(queries[1], /"nata il"/);
+  assert.match(queries[1], /site:federvolley\.it/);
 });
 
 test("Instagram-native search isolates batched queries and still requires athlete corroboration", () => {

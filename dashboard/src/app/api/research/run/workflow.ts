@@ -38,6 +38,7 @@ import {
 } from "@/lib/research/candidate-selection";
 import { auditResearchResults, RESEARCH_PRIORITY_THRESHOLD } from "@/lib/research/run-audit";
 import {
+  buildAthleteAgeSearchQueries,
   selectVerifiedAthleteAge,
   type AthleteAgeSearchResult,
   type VerifiedAthleteAge,
@@ -3090,12 +3091,13 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
 
   try {
     log(`Resolving source-linked ages for ${athletes.length} athletes with one batched Apify Google run`);
-    const search = await runApifyGoogleSearchQueries(
-      athletes.map((athlete) =>
-        `"${athlete.name}" ${athlete.sport} athlete ("date of birth" OR born OR birthday OR age)`
-      ),
-      5
-    );
+    const search = await runApifyGoogleSearchQueries(athletes.flatMap((athlete) =>
+      buildAthleteAgeSearchQueries({
+        athleteName: athlete.name,
+        sport: athlete.sport,
+        authoritativeDomains: trustedAgeDomainsForSport(athlete.sport),
+      })
+    ), 10);
     const results = search.results.map((result) => ({
       title: result.title,
       snippet: result.snippet,
@@ -3121,7 +3123,7 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
       });
     }
     log(`Apify Google resolved ${byCandidateKey.size}/${athletes.length} source-verified ages`, {
-      queries: athletes.length,
+      queries: athletes.length * 2,
       results: search.results.length,
     });
   } catch (error) {

@@ -214,6 +214,25 @@ export type AthleteAgeSearchResult = {
   link?: string;
 };
 
+export function buildAthleteAgeSearchQueries(input: {
+  athleteName: string;
+  sport: string;
+  authoritativeDomains: string[];
+}) {
+  const athleteName = input.athleteName.trim();
+  const sport = input.sport.trim();
+  const siteFilter = Array.from(new Set(input.authoritativeDomains
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean)))
+    .slice(0, 6)
+    .map((domain) => `site:${domain}`)
+    .join(" OR ");
+  return [
+    `"${athleteName}" ${sport} ("date of birth" OR "birth date" OR birthdate OR born OR birthday)`,
+    `"${athleteName}" ("date of birth" OR "birth date" OR born OR birthday OR "nato il" OR "nata il" OR geburtsdatum)${siteFilter ? ` (${siteFilter})` : ""}`,
+  ];
+}
+
 export type VerifiedAthleteAge = ParsedAgeEvidence & {
   isMinor: boolean;
   source: string;
