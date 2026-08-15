@@ -136,6 +136,8 @@ Age-recovery query plan v7 added exactly one latest-Sonnet grounded search per a
 
 Query plan v9 spent 12,079 latest-Sonnet tokens / $0.061231 on one final Daryn/Sara grounded search, with zero new Apify, scoring, or outreach activity, and retained 11 candidate pages including Orticalab. The final recovery pass then fixed replay preservation, richest-checkpoint selection, bounded historical Common Crawl sampling, `www` lookup normalization, and per-source archive throttling without buying more discovery. Extraction v25 accepts only an attributable Italian appositive age such as `Sara Fruncillo, 26 anni`; regression coverage rejects the same phrase when it names another person. Production run `01b2b797-f963-4bab-a398-6c0d401f2262` reused the 11 saved candidates and spent $0 on new Apify, model, or scoring calls. It stored two independent cutoff-safe adult claims for Sara from `sky.it` and an archived `orticalab.it` capture, so her two-source 21+ gate now passes. The run processed 2/2 and retained 78 safe claims. It is recorded as failed only because two unrelated archive candidates hit bounded provider deferrals. Sara still needs historical audience plus creator-behavior evidence, while Daryn still needs a second independent 21+ source. Do not rerun this checkpoint unchanged.
 
+The dated-evidence intake at commit `00c482f` is the next recovery lane. Download the prefilled worksheet from the Golden benchmark, complete only rows backed by an exact pre-cutoff email or attachment, and import it through the adjacent control. The server accepts only untouched authoritative records and requires the exact source date, email subject, document reference, verbatim athlete-attributable excerpt, cutoff confirmation, and identity confidence. It fails closed on duplicate rows, outcome/fit/deal language, post-cutoff dates, locked or previously scored cases, and unattributable excerpts. Medium/low-confidence claims remain non-scoring. Internal age statements are stored only as discovery hints; the two-independent-public-source adult gate is unchanged. An import never starts a model or writes to scoring, outreach, notifications, or the live pipeline. Reload the page after each small import and audit readiness gain before adding more rows.
+
 Dylan's 100-case ledger remains the sole commercial ground truth: 44 positive and 56 negative. The current bounded audit loads 1,072 evidence sources and 2,155 claims, retains 1,657 cutoff-safe model claims, and finds 44 evidence-ready packets (17 positive / 27 negative) with 100/100 point-in-time compliance.
 
 Two disjoint benchmark releases are complete and revealed, leaving 32 development, 32 held-out, and 36 excluded records. The newest held-out release `c990033d-38b0-4139-9d27-cd2dbd23bf38` passed identity, 21+, source, unsupported-claim, point-in-time, and audit-accuracy gates, but above-80 precision was 7/8 = 87.5%. The one miss was Murat Kazgan; his later negative outcome depended on inactive OnlyFans use that was absent from the pre-decision evidence packet. All revealed records are archive-only. Never tune against Murat or rerun either revealed held-out set.
@@ -150,10 +152,11 @@ The latest nine-positive recovery run examined 43 grounded candidates, inserted 
 
 The next valid sequence is:
 
-1. Recover at least eight excluded positives using genuinely pre-decision evidence not already exhausted—prefer dated internal weekly-intelligence artifacts or source documents that explicitly state historical audience/activity.
-2. Recover eight excluded negatives only after the positive quota is plausible; do not spend merely because negatives are easier.
-3. Freeze a new 8+8 challenge cohort once, precommit any sport/achievability calibration before scoring, run full development, and unlock held-out only if development passes every release gate.
-4. Run held-out once. If precision above 80 is below 90%, archive the cohort and do not tune against it.
+1. Download the dated-evidence worksheet and fill only exact, pre-cutoff rows supported by Dylan's emails or attachments. Do not restate outcomes or fill missing values from memory.
+2. Import a small batch, reload, and verify which positive packets actually became ready. Do not rerun exhausted Social Blade/public-search handles.
+3. Reach at least eight fresh evidence-ready positives; the eight-negative side is already ready.
+4. Freeze a new 8+8 challenge cohort once, precommit any sport/achievability calibration before scoring, run full development, and unlock held-out only if development passes every release gate.
+5. Run held-out once. If precision above 80 is below 90%, archive the cohort and do not tune against it.
 
 ## Recovery chronology (2026-08-13; retained for provenance)
 
