@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-gate-aware-positive-recovery-v14";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-athlete-feature-and-identity-fold-v18";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-wayback-availability-fallback-v16";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -47,6 +47,8 @@ export const EVIDENCE_PREPARATION_LIMITS = Object.freeze({
   searchResultsPerQuery: 8,
   archiveUrlsPerRecord: 8,
   archiveBodyCharacters: 120_000,
+  archivePdfBytes: 5_000_000,
+  archivePdfPages: 80,
   defaultMaxApifyChargeUsd: 0.75,
   minimumMaxApifyChargeUsd: 0.5,
   maximumMaxApifyChargeUsd: 1,
@@ -136,7 +138,7 @@ export type OfficialDatedProfileEvidence = OfficialCommissionAdultEvidence & {
 };
 
 export type PreparedEvidenceClaim = {
-  claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athlete_profile" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
+  claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athlete_profile" | "athletic_momentum" | "audience_signal" | "creator_behavior_signal" | "commercial_achievability_signal";
   claimText: string;
   structuredValue: Record<string, unknown>;
   sourceExcerpt: string;
@@ -696,6 +698,10 @@ export function selectWaybackCapture(payload: unknown, canonicalUrl: string, evi
   const cutoff = Date.parse(evidenceCutoffAt);
   if (!Number.isFinite(cutoff)) return null;
   const requested = normalizedUrlForComparison(canonicalUrl);
+  const requestedIsPdf = (() => {
+    try { return new URL(canonicalHistoricalArchiveUrl(canonicalUrl)).pathname.toLowerCase().endsWith(".pdf"); }
+    catch { return false; }
+  })();
   const captures = payload.slice(1).flatMap((raw) => {
     if (!Array.isArray(raw)) return [];
     const timestamp = String(raw[indexes.timestamp] || "");
@@ -705,7 +711,9 @@ export function selectWaybackCapture(payload: unknown, canonicalUrl: string, evi
     const mimeType = indexes.mimetype >= 0 ? String(raw[indexes.mimetype] || "") : "";
     if (!capturedAt || Date.parse(capturedAt) > cutoff || statusCode !== "200") return [];
     if (requested !== normalizedUrlForComparison(originalUrl)) return [];
-    if (mimeType && !/html|xhtml/i.test(mimeType)) return [];
+    if (requestedIsPdf) {
+      if (!/pdf/i.test(mimeType)) return [];
+    } else if (mimeType && !/html|xhtml/i.test(mimeType)) return [];
     return [{
       timestamp,
       capturedAt,
@@ -738,7 +746,11 @@ function decodeHtmlEntities(value: string) {
 }
 
 function normalizeEvidenceText(value: string) {
-  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  return value.toLowerCase()
+    .replace(/[łøðþß]/g, (character) => ({
+      ł: "l", ø: "o", ð: "d", þ: "t", ß: "s",
+    } as Record<string, string>)[character] || character)
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ").trim();
 }
 
@@ -1122,19 +1134,40 @@ export function extractPublishedAt(html: string, evidenceCutoffAt: string) {
     ["meta.article:published_time", /<meta\b[^>]*(?:property|name)=["']article:published_time["'][^>]*content=["']([^"']+)["'][^>]*>/i],
     ["meta.datePublished", /<meta\b[^>]*(?:property|name|itemprop)=["'](?:datePublished|date_published|pubdate)["'][^>]*content=["']([^"']+)["'][^>]*>/i],
     ["time.datetime", /<time\b[^>]*datetime=["']([^"']+)["'][^>]*>/i],
+    ["semantic.itemDateCreated", /<div\b[^>]*class=["'][^"']*\bitemDateCreated\b[^"']*["'][^>]*>([\s\S]{0,500}?)<\/div>/i],
   ];
   for (const [method, pattern] of patterns) {
     const value = html.match(pattern)?.[1];
-    const publishedAt = value ? validHistoricalDate(decodeHtmlEntities(value), cutoff) : null;
+    const normalizedValue = value && method.startsWith("semantic.")
+      ? archivedHtmlToText(value)
+      : decodeHtmlEntities(value || "");
+    const publishedAt = normalizedValue
+      ? validHistoricalDate(method.startsWith("semantic.") ? `${normalizedValue} UTC` : normalizedValue, cutoff)
+      : null;
     if (publishedAt) return { publishedAt, method };
   }
   return { publishedAt: null, method: null };
 }
 
-function extractTitle(html: string, fallback: string) {
+function extractTitle(html: string, fallback: string, athleteName: string) {
   const title = decodeHtmlEntities(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
     .replace(/\s+/g, " ").trim();
-  return (title || fallback || "Archived public source").slice(0, 300);
+  const normalizedName = normalizeEvidenceText(athleteName);
+  const namesAthlete = (value: string) => normalizedName
+    && ` ${normalizeEvidenceText(value)} `.includes(` ${normalizedName} `);
+  const openGraphTitle = decodeHtmlEntities(
+    html.match(/<meta\b[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i)?.[1]
+      || html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["'][^>]*>/i)?.[1]
+      || ""
+  ).replace(/\s+/g, " ").trim();
+  const athleteHeading = Array.from(html.matchAll(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi))
+    .map((match) => archivedHtmlToText(match[1]).replace(/\s+/g, " ").trim())
+    .find((heading) => namesAthlete(heading)) || "";
+  // Publisher shells often expose only a generic <title> (for example,
+  // "WorldSBK") while the canonical article headline lives in og:title or
+  // an athlete-naming heading. Never promote a generic or unrelated heading.
+  return (namesAthlete(openGraphTitle) ? openGraphTitle
+    : athleteHeading || title || fallback || "Archived public source").slice(0, 300);
 }
 
 function evidenceExcerpt(name: string, text: string) {
@@ -1382,12 +1415,49 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
   const signalPattern = PREPARED_EVIDENCE_SIGNAL_PATTERNS[input.claimType];
   const normalizedName = normalizeEvidenceText(input.athleteName);
   if (!signalPattern || !normalizedName) return null;
+  if (input.claimType === "athletic_momentum") {
+    // Official competition PDFs often present a current seeding statement
+    // followed by a dense entry table. Preserve the bounded statement through
+    // the exact athlete row so active competition is attributable even when
+    // PDF line breaks separate the header from every rider name.
+    const indexAlignedFold = (value: string) => value.toLowerCase().split("").map((character) => {
+      const manual = ({ "ł": "l", "ø": "o", "ð": "d", "þ": "t", "ß": "s" } as Record<string, string>)[character];
+      return manual || character.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").slice(0, 1);
+    }).join("");
+    const foldedSource = indexAlignedFold(input.sourceExcerpt);
+    const foldedName = indexAlignedFold(input.athleteName);
+    const athleteIndex = foldedSource.indexOf(foldedName);
+    if (athleteIndex >= 0) {
+      const windowStart = Math.max(0, athleteIndex - 3_000);
+      const beforeAthlete = foldedSource.slice(windowStart, athleteIndex);
+      const seeding = Array.from(beforeAthlete.matchAll(/\b(?:current\s+)?seeding\s+list\b/g)).at(-1);
+      if (seeding?.index !== undefined) {
+        const start = windowStart + seeding.index;
+        const headerEnd = input.sourceExcerpt.indexOf("\n", start);
+        const athleteLineStart = input.sourceExcerpt.lastIndexOf("\n", athleteIndex) + 1;
+        const athleteLineEnd = input.sourceExcerpt.indexOf("\n", athleteIndex);
+        const header = input.sourceExcerpt.slice(start, headerEnd >= 0 ? headerEnd : start + 240).trim();
+        const athleteLine = input.sourceExcerpt.slice(
+          athleteLineStart,
+          athleteLineEnd >= 0 ? athleteLineEnd : athleteIndex + foldedName.length + 80,
+        ).trim();
+        if (header && athleteLine) return `${header}\n${athleteLine}`.slice(0, 700);
+      }
+    }
+  }
   const segments = input.sourceExcerpt
     .split(/\n|(?<=[.!?])\s+/)
     .map((segment) => segment.replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  const titleNamesAthlete = segments.length > 1
+  const titleNamesAthlete = segments.length > 0
     && ` ${normalizeEvidenceText(segments[0])} `.includes(` ${normalizedName} `);
+  const athleteFeatureTitle = input.claimType === "creator_behavior_signal"
+    && titleNamesAthlete
+    && /\b(?:interview|entretien|entrevista|podcast|her story|meet)\b/i.test(segments[0]);
+  // The benchmark calibration explicitly treats a named interview, podcast,
+  // or personality-led "HER STORY / meet" profile as creator behavior. The
+  // exact athlete must be in the source title, which prevents a related-story
+  // navigation link on someone else's article from becoming evidence.
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     if (!signalPattern.test(segment)) continue;
@@ -1417,7 +1487,7 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
       return `${segments[0]} ${segment}`.slice(0, 1_000);
     }
   }
-  return null;
+  return athleteFeatureTitle ? segments[0].slice(0, 1_000) : null;
 }
 
 export function preparedMomentumEffectiveAt(sourceExcerpt: string, fallbackEffectiveAt: string) {
@@ -1447,7 +1517,7 @@ export function extractPreparedArchivedEvidence(input: {
     return { evidence: null, rejectionReason: "archive_capture_after_cutoff" };
   }
   const text = archivedHtmlToText(input.html);
-  const title = extractTitle(input.html, candidate.title);
+  const title = extractTitle(input.html, candidate.title, record.athlete_name);
   const attributable = `${title}\n${text}`;
   const normalizedName = normalizeEvidenceText(record.athlete_name);
   const normalizedAttributable = normalizeEvidenceText(attributable);
@@ -1499,14 +1569,14 @@ export function extractPreparedArchivedEvidence(input: {
     // pages commonly retain an old datePublished value while updating the age
     // in place, so attaching a stated age to that publication date invents a
     // contradiction with an otherwise consistent birth-date source.
-    const newsSchema = /["']@type["']\s*:\s*["']NewsArticle["']/i.test(input.html);
+    const articleSchema = /["']@type["']\s*:\s*["'](?:News)?Article["']/i.test(input.html);
     const articleBodyInSchema = /["']articleBody["']\s*:/i.test(input.html);
     const modifiedValue = input.html.match(/["']dateModified["']\s*:\s*["']([^"']+)["']/i)?.[1];
     const modifiedAt = modifiedValue ? Date.parse(decodeHtmlEntities(modifiedValue)) : Number.NaN;
     const publishedTimestamp = publication.publishedAt ? Date.parse(publication.publishedAt) : Number.NaN;
     const newsWasNotLaterRewritten = Number.isFinite(modifiedAt) && Number.isFinite(publishedTimestamp)
       && modifiedAt >= publishedTimestamp && modifiedAt - publishedTimestamp <= 7 * 24 * 60 * 60 * 1_000;
-    const immutableDatedNewsArticle = Boolean(publication.publishedAt && newsSchema
+    const immutableDatedNewsArticle = Boolean(publication.publishedAt && articleSchema
       && (articleBodyInSchema || newsWasNotLaterRewritten));
     const ageEffectiveAt = attributableAge?.parsed.precision === "stated_age" && !immutableDatedNewsArticle
       ? capture.capturedAt
@@ -1575,6 +1645,15 @@ export function extractPreparedArchivedEvidence(input: {
       sourceExcerpt: audienceExcerpt, effectiveAt, extractionConfidence: 88, material: true,
     });
   }
+  const creatorExcerpt = preparedEvidenceSignalExcerptForAthlete({
+    athleteName: record.athlete_name, claimType: "creator_behavior_signal", sourceExcerpt: signalExcerpt,
+  });
+  if (creatorExcerpt) {
+    claims.push({
+      claimType: "creator_behavior_signal", claimText: creatorExcerpt.slice(0, 600), structuredValue: { signal: "athlete_centered_public_content" },
+      sourceExcerpt: creatorExcerpt, effectiveAt, extractionConfidence: 90, material: true,
+    });
+  }
   const commercialExcerpt = preparedEvidenceSignalExcerptForAthlete({
     athleteName: record.athlete_name, claimType: "commercial_achievability_signal", sourceExcerpt: signalExcerpt,
   });
@@ -1601,6 +1680,43 @@ export function extractPreparedArchivedEvidence(input: {
     },
     rejectionReason: null,
   };
+}
+
+/**
+ * Extracts bounded text from an immutable PDF capture, then routes that text
+ * through the same exact-name, sport, age, and material-signal gates as HTML.
+ * The bundled serverless PDF.js build avoids native binaries in Vercel.
+ */
+export async function extractPreparedArchivedPdfEvidence(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+  capture: WaybackCapture;
+  bytes: Uint8Array;
+}): Promise<{ evidence: PreparedArchivedEvidence | null; rejectionReason: string | null }> {
+  if (!input.bytes.length || input.bytes.length > EVIDENCE_PREPARATION_LIMITS.archivePdfBytes) {
+    return { evidence: null, rejectionReason: "archived_pdf_exceeds_byte_limit" };
+  }
+  try {
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const pdf = await getDocumentProxy(input.bytes, { maxImageSize: 16_777_216 });
+    if (!pdf.numPages || pdf.numPages > EVIDENCE_PREPARATION_LIMITS.archivePdfPages) {
+      return { evidence: null, rejectionReason: "archived_pdf_exceeds_page_limit" };
+    }
+    const extracted = await extractText(pdf, { mergePages: true });
+    const text = String(extracted.text || "").slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters);
+    if (text.trim().length < 80) return { evidence: null, rejectionReason: "archived_pdf_has_insufficient_text" };
+    const escape = (value: string) => value
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    return extractPreparedArchivedEvidence({
+      record: input.record,
+      candidate: input.candidate,
+      capture: input.capture,
+      html: `<html><head><title>${escape(input.candidate.title || "Archived PDF")}</title></head><body><main>${escape(text).replace(/\n/g, "<br>")}</main></body></html>`,
+    });
+  } catch {
+    return { evidence: null, rejectionReason: "archived_pdf_text_extraction_failed" };
+  }
 }
 
 function historicalSportSearchExpression(sport: string) {

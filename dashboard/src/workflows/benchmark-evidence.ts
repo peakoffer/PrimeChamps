@@ -17,6 +17,7 @@ import {
   extractCommonCrawlWarcBody,
   extractOfficialDatedProfileEvidence,
   extractPreparedArchivedEvidence,
+  extractPreparedArchivedPdfEvidence,
   groundedHistoricalSignalDiscoveryCandidates,
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
@@ -682,6 +683,49 @@ async function fetchArchiveHtml(url: string) {
   return (await response.text()).slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters * 3);
 }
 
+async function fetchArchivePdf(url: string) {
+  const response = await fetch(url, {
+    headers: { Accept: "application/pdf", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(45_000),
+    cache: "no-store",
+  });
+  if (response.status === 429) throw new RetryableError("Internet Archive rate limited the archived PDF", { retryAfter: "20s" });
+  if (response.status >= 500) throw new RetryableError(`Internet Archive archived PDF failed (${response.status})`, { retryAfter: "10s" });
+  if (!response.ok) return null;
+  const contentType = response.headers.get("content-type") || "";
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (!/pdf|octet-stream/i.test(contentType)
+    || contentLength > EVIDENCE_PREPARATION_LIMITS.archivePdfBytes) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return bytes.length > 0 && bytes.length <= EVIDENCE_PREPARATION_LIMITS.archivePdfBytes ? bytes : null;
+}
+
+function archiveCandidateIsPdf(candidate: HistoricalSearchCandidate, mimeType?: string | null) {
+  if (/pdf/i.test(mimeType || "")) return true;
+  try {
+    return new URL(candidate.url).pathname.toLowerCase().endsWith(".pdf");
+  } catch {
+    return false;
+  }
+}
+
+async function extractWaybackPreparedEvidence(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+  capture: Parameters<typeof extractPreparedArchivedEvidence>[0]["capture"];
+}) {
+  if (archiveCandidateIsPdf(input.candidate, input.capture.mimeType)) {
+    const bytes = await fetchArchivePdf(input.capture.archivedUrl);
+    return bytes
+      ? extractPreparedArchivedPdfEvidence({ ...input, bytes })
+      : { evidence: null, rejectionReason: "wayback_capture_not_bounded_pdf" };
+  }
+  const html = await fetchArchiveHtml(input.capture.archivedUrl);
+  return html
+    ? extractPreparedArchivedEvidence({ ...input, html })
+    : { evidence: null, rejectionReason: "wayback_capture_not_bounded_html" };
+}
+
 async function retrieveWaybackTimegateEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
@@ -951,34 +995,30 @@ async function retrieveArchivedEvidenceCandidate(input: {
   let storedReplayRateLimited = false;
   if (candidate.storedCapture && !input.waybackCircuitOpen) {
     try {
-      const html = await fetchArchiveHtml(candidate.storedCapture.archivedUrl);
-      if (html) {
-        const prepared = extractPreparedArchivedEvidence({
-          record: input.record,
-          candidate,
-          capture: {
-            timestamp: candidate.storedCapture.timestamp,
-            capturedAt: candidate.storedCapture.capturedAt,
-            originalUrl: candidate.url,
-            statusCode: "200",
-            digest: candidate.storedCapture.contentHash,
-            mimeType: "text/html",
-            archivedUrl: candidate.storedCapture.archivedUrl,
+      const prepared = await extractWaybackPreparedEvidence({
+        record: input.record,
+        candidate,
+        capture: {
+          timestamp: candidate.storedCapture.timestamp,
+          capturedAt: candidate.storedCapture.capturedAt,
+          originalUrl: candidate.url,
+          statusCode: "200",
+          digest: candidate.storedCapture.contentHash,
+          mimeType: archiveCandidateIsPdf(candidate) ? "application/pdf" : "text/html",
+          archivedUrl: candidate.storedCapture.archivedUrl,
+        },
+      });
+      if (prepared.evidence) {
+        return {
+          evidence: {
+            ...prepared.evidence,
+            archiveProvider: "internet_archive_wayback" as const,
+            providerRequestId: candidate.storedCapture.timestamp,
           },
-          html,
-        });
-        if (prepared.evidence) {
-          return {
-            evidence: {
-              ...prepared.evidence,
-              archiveProvider: "internet_archive_wayback" as const,
-              providerRequestId: candidate.storedCapture.timestamp,
-            },
-            rejectionReason: null,
-            rateLimited: false,
-            waybackRateLimited: false,
-          };
-        }
+          rejectionReason: null,
+          rateLimited: false,
+          waybackRateLimited: false,
+        };
       }
     } catch (error) {
       storedReplayRateLimited = error instanceof RetryableError;
@@ -1018,22 +1058,19 @@ async function retrieveArchivedEvidenceCandidate(input: {
         candidate.url,
         input.record.evidence_cutoff_at,
       );
-      if (available) {
-        const html = await fetchArchiveHtml(available.archivedUrl);
-        if (html) {
-          const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture: available, html });
-          if (prepared.evidence) {
-            return {
-              evidence: {
-                ...prepared.evidence,
-                archiveProvider: "internet_archive_wayback" as const,
-                providerRequestId: `available-${available.timestamp}`,
-              },
-              rejectionReason: null,
-              rateLimited: false,
-              waybackRateLimited: false,
-            };
-          }
+      if (available && !archiveCandidateIsPdf(candidate)) {
+        const prepared = await extractWaybackPreparedEvidence({ record: input.record, candidate, capture: available });
+        if (prepared.evidence) {
+          return {
+            evidence: {
+              ...prepared.evidence,
+              archiveProvider: "internet_archive_wayback" as const,
+              providerRequestId: `available-${available.timestamp}`,
+            },
+            rejectionReason: null,
+            rateLimited: false,
+            waybackRateLimited: false,
+          };
         }
       }
     } catch (error) {
@@ -1064,21 +1101,18 @@ async function retrieveArchivedEvidenceCandidate(input: {
       const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
       const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
       if (capture) {
-        const html = await fetchArchiveHtml(capture.archivedUrl);
-        if (html) {
-          const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
-          if (prepared.evidence) {
-            return {
-              evidence: {
-                ...prepared.evidence,
-                archiveProvider: "internet_archive_wayback" as const,
-                providerRequestId: capture.timestamp,
-              },
-              rejectionReason: null,
-              rateLimited: false,
-              waybackRateLimited: false,
-            };
-          }
+        const prepared = await extractWaybackPreparedEvidence({ record: input.record, candidate, capture });
+        if (prepared.evidence) {
+          return {
+            evidence: {
+              ...prepared.evidence,
+              archiveProvider: "internet_archive_wayback" as const,
+              providerRequestId: capture.timestamp,
+            },
+            rejectionReason: null,
+            rateLimited: false,
+            waybackRateLimited: false,
+          };
         }
       }
     } catch (error) {

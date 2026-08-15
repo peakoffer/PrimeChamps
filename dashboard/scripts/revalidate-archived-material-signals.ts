@@ -6,7 +6,9 @@ dotenv.config({ path: ".env.local" });
 
 const APPLY = process.argv.includes("--apply");
 const ARCHIVE_PROVIDERS = new Set(["internet_archive_wayback", "common_crawl", "wikimedia_revision"]);
-const MATERIAL_SIGNAL_TYPES = ["athletic_momentum", "audience_signal", "commercial_achievability_signal"];
+const MATERIAL_SIGNAL_TYPES = [
+  "athletic_momentum", "audience_signal", "creator_behavior_signal", "commercial_achievability_signal",
+];
 const EXCLUSION_REASON = "archive_signal_not_explicitly_attributed_to_named_athlete";
 
 type GoldenRecord = { id: string; athlete_name: string; benchmark_split: string; fit_label: string };

@@ -6,6 +6,7 @@ import {
   commonCrawlIndexUrl,
   extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
+  extractPreparedArchivedPdfEvidence,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
   selectWikimediaRevisionCapture,
@@ -171,7 +172,8 @@ async function retrieveWikimediaRevisionEvidence() {
   };
 }
 
-let recovered: { item: PreparedArchivedEvidence; html: string } | null = await retrieveWikimediaRevisionEvidence();
+let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveWikimediaRevisionEvidence()
+  .then((value) => value ? { item: value.item, content: value.html } : null);
 if (!recovered) {
   const cdxResponse = await fetch(waybackCdxUrl(canonicalUrl, record.evidence_cutoff_at), {
     headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
@@ -182,20 +184,31 @@ if (!recovered) {
     : null;
   if (capture) {
     const archiveResponse = await fetch(capture.archivedUrl, {
-      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+      headers: { Accept: "text/html,application/xhtml+xml,application/pdf", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
       signal: AbortSignal.timeout(45_000),
     }).catch(() => null);
     if (archiveResponse?.ok) {
-      const html = (await archiveResponse.text()).slice(0, 360_000);
-      const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
-      if (hasRequiredClaim(prepared.evidence)) recovered = { item: prepared.evidence!, html };
+      const isPdf = /pdf/i.test(capture.mimeType || "")
+        || new URL(canonicalUrl).pathname.toLowerCase().endsWith(".pdf");
+      if (isPdf) {
+        const bytes = new Uint8Array(await archiveResponse.arrayBuffer());
+        const prepared = await extractPreparedArchivedPdfEvidence({ record, candidate, capture, bytes });
+        if (hasRequiredClaim(prepared.evidence)) recovered = { item: prepared.evidence!, content: bytes };
+      } else {
+        const html = (await archiveResponse.text()).slice(0, 360_000);
+        const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
+        if (hasRequiredClaim(prepared.evidence)) recovered = { item: prepared.evidence!, content: html };
+      }
     }
   }
 }
-if (!recovered) recovered = await retrieveCommonCrawlEvidence();
+if (!recovered) {
+  const commonCrawl = await retrieveCommonCrawlEvidence();
+  if (commonCrawl) recovered = { item: commonCrawl.item, content: commonCrawl.html };
+}
 if (!recovered) throw new Error(`No cutoff-safe Wikimedia, Wayback, or Common Crawl capture contained the required ${requiredClaim} evidence`);
 
-const { item, html } = recovered;
+const { item, content } = recovered;
 const verifiedAt = new Date().toISOString();
 const { data: source, error: sourceError } = await admin.from("research_evidence_sources").upsert({
   organization_id: record.organization_id,
@@ -211,7 +224,7 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   published_at: item.publishedAt,
   retrieved_at: verifiedAt,
   historical_as_of: item.historicalAsOf,
-  content_hash: item.contentHash || createHash("sha256").update(html).digest("hex"),
+  content_hash: item.contentHash || createHash("sha256").update(content).digest("hex"),
   retrieval_status: "retrieved",
   eligible_before_cutoff: true,
   exclusion_reason: null,

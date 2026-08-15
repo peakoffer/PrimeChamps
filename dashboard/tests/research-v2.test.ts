@@ -109,6 +109,7 @@ import {
   extractOfficialCompetitionEntryAdultEvidence,
   extractOfficialCommissionAdultEvidence,
   extractOfficialDatedProfileEvidence,
+  extractPublishedAt,
   extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
@@ -140,6 +141,16 @@ test("historical motorcycle racing accepts road-racing and WorldWCR evidence", (
     "Motorcycle racing",
     "Tayla Relph is an Australian road racing athlete competing in WorldWCR."
   ), true);
+});
+
+test("benchmark identity matching folds non-decomposing Latin letters", () => {
+  assert.equal(
+    benchmarkSourceNamesAthlete(
+      "Maks Płuciennik",
+      "Maks Pluciennik is a 25-year-old BMX Street rider from Poland.",
+    ),
+    true,
+  );
 });
 
 test("historical motorcycle racing accepts explicit Spanish motorcycle evidence", () => {
@@ -2071,6 +2082,12 @@ test("Wayback selection uses the latest exact HTML capture no later than the evi
   assert.equal(capture?.archivedUrl, `https://web.archive.org/web/20240501010101id_/${canonicalUrl}`);
   assert.equal(parseWaybackTimestamp("20240230010101"), null);
   assert.equal(selectWaybackCapture([["timestamp", "original", "statuscode"]], canonicalUrl, "2024-06-01T00:00:00Z"), null);
+  const pdfUrl = "https://sports.example/seeding/current-list.pdf";
+  assert.equal(selectWaybackCapture([
+    ["timestamp", "original", "statuscode", "digest", "mimetype"],
+    ["20240501010101", pdfUrl, "200", "PDF", "application/pdf"],
+    ["20240502010101", pdfUrl, "200", "HTML", "text/html"],
+  ], pdfUrl, "2024-06-01T00:00:00Z")?.digest, "PDF");
   const cdxUrl = new URL(waybackCdxUrl(canonicalUrl, "2024-06-01T12:34:56Z"));
   assert.equal(cdxUrl.hostname, "web.archive.org");
   assert.equal(cdxUrl.searchParams.get("matchType"), "exact");
@@ -2125,6 +2142,16 @@ test("Wayback selection uses the latest exact HTML capture no later than the evi
     canonicalHistoricalArchiveUrl(`${canonicalUrl}?srsltid=tracking&utm_source=google#bio`),
     canonicalUrl
   );
+});
+
+test("archived CMS date-created fields preserve the article date instead of the later capture date", () => {
+  assert.deepEqual(extractPublishedAt(
+    '<div class="itemDateCreated yj-date"><span class="fa fa-clock-o"></span> Nov 26, 2018 </div>',
+    "2026-06-16T12:00:00Z",
+  ), {
+    publishedAt: "2018-11-26T00:00:00.000Z",
+    method: "semantic.itemDateCreated",
+  });
 });
 
 test("stored cutoff-safe evidence is replayed exactly once after an extraction upgrade", () => {
@@ -2460,6 +2487,15 @@ test("archived evidence extraction requires exact identity and sport and preserv
   assert.equal(observedAge?.effectiveAt, "2025-06-17T20:19:27.000Z");
   assert.equal(observedAge?.structuredValue.age_as_of, "2025-06-17T20:19:27.000Z");
 
+  const immutableArticleAge = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Maks Płuciennik", sport: "BMX", evidence_cutoff_at: "2026-06-16T12:00:00Z" },
+    candidate: { ...candidate, title: "FAT FAVOURITES with Maks Płuciennik", url: "https://fatbmx.example/maks-pluciennik" },
+    capture: { ...capture, capturedAt: "2023-02-09T02:12:07.000Z", originalUrl: "https://fatbmx.example/maks-pluciennik" },
+    html: '<html><head><title>FAT FAVOURITES with Maks Płuciennik</title><script type="application/ld+json">{"@type":"Article","datePublished":"2018-11-26T14:53:17Z","dateModified":"2018-11-26T14:53:17Z","articleBody":"Name: Maks Płuciennik Age: 19 BMX rider."}</script></head><body><main>Maks Płuciennik is a BMX rider. Name: Maks Płuciennik Age: 19.</main></body></html>',
+  });
+  const immutableAge = immutableArticleAge.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(immutableAge?.effectiveAt, "2018-11-26T14:53:17.000Z");
+
   const wrongPerson = extractPreparedArchivedEvidence({
     record,
     candidate,
@@ -2523,6 +2559,28 @@ test("archived evidence extraction requires exact identity and sport and preserv
     html: `<html><title>Tessa Thyssen : entretien</title><body><main><p>Tessa Thyssen est une surfeuse professionnelle.</p>${"<p>Navigation magazine.</p>".repeat(80)}<p>J&rsquo;explique mon projet et ils suivent mes 12 800 abonnés.</p></main></body></html>`,
   });
   assert.ok(lateLocalizedAudience.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const athleteFeatureUnderGenericPublisherTitle = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Astrid Madrigal", sport: "Motorsports" },
+    candidate: { ...candidate, title: "WorldSBK", url: "https://worldsbk.example/astrid-madrigal" },
+    capture: { ...capture, originalUrl: "https://worldsbk.example/astrid-madrigal" },
+    html: '<html><head><title>WorldSBK</title></head><body><main><h1>HER STORY: meet Astrid Madrigal – “I’ve helped many girls fulfil their dream”</h1><p>Astrid Madrigal is a WorldWCR motorcycle racing rider.</p></main></body></html>',
+  });
+  assert.match(athleteFeatureUnderGenericPublisherTitle.evidence?.title || "", /HER STORY: meet Astrid Madrigal/);
+  assert.ok(athleteFeatureUnderGenericPublisherTitle.evidence?.claims.some(
+    (claim) => claim.claimType === "creator_behavior_signal",
+  ));
+
+  const athleteFeatureUnderOpenGraphTitle = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Astrid Madrigal", sport: "Motorsports" },
+    candidate: { ...candidate, title: "WorldSBK", url: "https://worldsbk.example/astrid-madrigal" },
+    capture: { ...capture, originalUrl: "https://worldsbk.example/astrid-madrigal" },
+    html: '<html><head><title>WorldSBK</title><meta property="og:title" content="HER STORY: meet Astrid Madrigal – athlete interview"></head><body><main><h1>News</h1><h2>HER STORY: meet Astrid Madrigal – athlete interview</h2><p>Astrid Madrigal is a WorldWCR motorcycle racing rider.</p></main></body></html>',
+  });
+  assert.match(athleteFeatureUnderOpenGraphTitle.evidence?.title || "", /HER STORY: meet Astrid Madrigal/);
+  assert.ok(athleteFeatureUnderOpenGraphTitle.evidence?.claims.some(
+    (claim) => claim.claimType === "creator_behavior_signal",
+  ));
 
   const officialCompactDob = extractPreparedArchivedEvidence({
     record: { ...record, athlete_name: "Nick Ponzio", sport: "Track & Field" },
@@ -2934,16 +2992,39 @@ test("generated material signals require explicit athlete-relevant language", ()
   assert.equal(preparedEvidenceSignalExcerptForAthlete({
     athleteName: "Tessa Thyssen",
     claimType: "creator_behavior_signal",
-    sourceExcerpt: "Tessa Thyssen : entretien. Sa coéquipière explique publier des vidéos chaque semaine.",
+    sourceExcerpt: "Tessa Thyssen : profile. Sa coéquipière explique publier des vidéos chaque semaine.",
   }), null, "a teammate's creator activity must not inherit the athlete title");
   assert.equal(preparedEvidenceSignalExcerptForAthlete({
     athleteName: "Tessa Thyssen",
     claimType: "audience_signal",
     sourceExcerpt: "Tessa Thyssen : entretien. Sa coéquipière explique avoir mes 120 000 abonnés.",
   }), null, "a non-first-person teammate sentence must not inherit the athlete title");
+  assert.match(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Astrid Madrigal",
+    claimType: "creator_behavior_signal",
+    sourceExcerpt: "HER STORY: meet Astrid Madrigal – I’ve helped many girls fulfil their dream. The WorldWCR rider discusses her journey.",
+  }) || "", /HER STORY: meet Astrid Madrigal/);
+  assert.match(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Astrid Madrigal",
+    claimType: "creator_behavior_signal",
+    sourceExcerpt: "HER STORY: meet Astrid Madrigal – I’ve helped many girls fulfil their dream",
+  }) || "", /HER STORY: meet Astrid Madrigal/);
+  assert.equal(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Astrid Madrigal",
+    claimType: "creator_behavior_signal",
+    sourceExcerpt: "WorldWCR race report. Related: HER STORY: meet Astrid Madrigal. The report is about another rider.",
+  }), null, "a related-story link on another article is not an athlete-centered feature");
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "Navigation Rankings Record Book"), false);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "She won the national championship."), true);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "The athlete is listed as a pro team rider."), true);
+  const seedingExcerpt = preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Paula Novotna",
+    claimType: "athletic_momentum",
+    sourceExcerpt: `current seeding list after GWA Tarifa 2024.\nSurf-Freestyle.\nMEN WOMEN\n${"1 Other Rider\n".repeat(40)}23 Paula Novotna\n24 Another Rider`,
+  });
+  assert.match(seedingExcerpt || "", /current seeding list after GWA Tarifa 2024/);
+  assert.match(seedingExcerpt || "", /23 Paula Novotna/);
+  assert.ok((seedingExcerpt || "").length < 700);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "Main navigation Management Contact"), false);
   assert.equal(preparedEvidenceSignalSupported("commercial_achievability_signal", "She signed with a management agency."), true);
   assert.equal(preparedEvidenceSignalExcerptForAthlete({

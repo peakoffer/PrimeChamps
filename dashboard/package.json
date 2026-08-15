@@ -35,6 +35,7 @@
     "recharts": "^2.15.0",
     "resend": "6.18.1",
     "tailwind-merge": "^2.6.0",
+    "unpdf": "^1.8.0",
     "workflow": "^4.8.0"
   },
   "devDependencies": {

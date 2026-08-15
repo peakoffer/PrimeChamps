@@ -102,7 +102,11 @@ const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
 };
 
 export function normalizeBenchmarkIdentity(value: unknown) {
-  return String(value || "").toLowerCase().normalize("NFKD")
+  return String(value || "").toLowerCase()
+    .replace(/[łøðþß]/g, (character) => ({
+      ł: "l", ø: "o", ð: "d", þ: "t", ß: "s",
+    } as Record<string, string>)[character] || character)
+    .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
