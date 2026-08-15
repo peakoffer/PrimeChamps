@@ -39,6 +39,7 @@ export const BENCHMARK_PRE_OUTREACH_CALIBRATION = `PRE-OUTREACH CALIBRATION
 - A finalist that clears every core gate should normally land above 80 priority: identity and 21+ are independently corroborated; current athletic relevance is source-backed; a meaningful personal audience and creator behavior are present; and the career tier is realistically accessible.
 - Finalist anchor: when those core dimensions are all present, use fit 86-91, commercial achievability 76-84, and research confidence 82-90. Do not apply this anchor when any core dimension is missing or contradictory.
 - Fit 80-85 is a promising reserve, not automatically a finalist, when the evidence is positive but one core dimension is thin, stale, or only indirectly supported.
+- When a required adult-eligibility or audience gate fails, use fit 45-58, commercial achievability 35-44, and confidence 42-58. Strong athletic momentum, a proposed posting cadence, or known economics cannot by themselves replace those missing pre-outreach gates.
 - Performance, training, behind-the-scenes, interview, podcast, and personality-led social content all count as creator behavior; lifestyle content is not required.
 - A roughly 50,000-500,000 personal audience is a strong accessibility band, not a hard minimum. A smaller or qualitative athlete-specific audience signal can still be meaningful for an emerging or niche-sport athlete when creator behavior and realistic career-tier accessibility are present. One platform is sufficient; missing cross-platform data is optional, not critical.
 - Treat the deterministic precheck as the authoritative reading of whether the frozen dossier contains each core signal. Do not turn a passed audience or creator gate into a failure solely because the audience is below 50,000, qualitative, or lacks cross-platform corroboration. Strength can affect the score within the anchor range, but it is not a missing gate.
@@ -617,6 +618,39 @@ export function canonicalBenchmarkMaterialClaims(
   return claims;
 }
 
+function structuredOutputText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map((part) => {
+    if (typeof part === "string") return part;
+    if (!part || typeof part !== "object") return "";
+    const record = part as Record<string, unknown>;
+    return typeof record.text === "string" ? record.text
+      : typeof record.content === "string" ? record.content
+        : "";
+  }).join("\n");
+}
+
+/** Accepts strict JSON plus the two harmless wrappers providers occasionally add. */
+export function parseBenchmarkStructuredJson<T>(value: unknown): T {
+  const text = structuredOutputText(value).replace(/^\uFEFF/, "").trim();
+  if (!text) throw new Error("empty structured output");
+  const candidates = [text];
+  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+  if (fenced) candidates.push(fenced.trim());
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(text.slice(firstBrace, lastBrace + 1));
+  for (const candidate of Array.from(new Set(candidates))) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // Try the next bounded wrapper; never invent or semantically repair data.
+    }
+  }
+  throw new Error("invalid structured JSON");
+}
+
 export function benchmarkCaseReadiness(input: {
   record: BenchmarkGoldenCase;
   selection: BenchmarkEvidenceSelection;
@@ -692,8 +726,11 @@ export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
   };
 }
 
-export function buildBenchmarkResearcherPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
-  const gates = benchmarkDeterministicGateSummary(record, evidence);
+export function buildBenchmarkResearcherPrompt(
+  record: BenchmarkGoldenCase,
+  evidence: LeakageSafeBenchmarkEvidence[],
+  deterministicPrecheck = benchmarkDeterministicGateSummary(record, evidence)
+) {
   const dossier = evidence.map((item) => [
     `[${item.sourceRef}] ${item.title}`,
     `URL: ${item.url}`,
@@ -712,7 +749,7 @@ Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
 
 DETERMINISTIC EVIDENCE PRECHECK
-${JSON.stringify(gates, null, 2)}
+${JSON.stringify(deterministicPrecheck, null, 2)}
 This precheck is computed from the same frozen dossier, contains no label or outcome, and is independently audited. Treat each passed core evidence gate as present. A score may still be lowered for a real contradiction or inaccessible career economics, but not by relabeling a passed gate as missing.
 
 SCORING

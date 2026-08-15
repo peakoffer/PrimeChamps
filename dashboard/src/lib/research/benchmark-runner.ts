@@ -31,10 +31,12 @@ import {
   estimateBenchmarkCostMicrousd,
   evaluateBenchmarkMaterialClaimCitations,
   normalizeOpenRouterBenchmarkUsage,
+  parseBenchmarkStructuredJson,
   projectedBenchmarkCallCostMicrousd,
   selectLeakageSafeBenchmarkEvidence,
   type BenchmarkEvidenceClaimRow,
   type BenchmarkEvidenceSourceRow,
+  type BenchmarkDeterministicGateSummary,
   type BenchmarkGoldenCase,
   type BenchmarkPriceSnapshot,
   type BenchmarkTokenUsage,
@@ -45,7 +47,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v23";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v24";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -397,7 +399,7 @@ async function callStructuredSonnet<T>(input: {
     const payload = await response.json() as {
       content?: Array<{ type?: string; text?: string }>;
       stop_reason?: string;
-      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+      choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }>;
       usage?: {
         input_tokens?: number;
         output_tokens?: number;
@@ -420,14 +422,14 @@ async function callStructuredSonnet<T>(input: {
     accumulatedUsage = combinedUsage(accumulatedUsage, usage);
     accumulatedCostMicrousd += costMicrousd;
     accumulatedLatencyMs += Date.now() - startedAt;
-    const text = openRouter
+    const rawStructuredOutput = openRouter
       ? payload.choices?.[0]?.message?.content || ""
       : (payload.content || []).filter((block) => block.type === "text").map((block) => block.text || "").join("\n");
     const truncated = openRouter ? payload.choices?.[0]?.finish_reason === "length" : payload.stop_reason === "max_tokens";
-    if (text && !truncated) {
+    if (rawStructuredOutput && !truncated) {
       try {
         return {
-          value: JSON.parse(text) as T,
+          value: parseBenchmarkStructuredJson<T>(rawStructuredOutput),
           usage: {
             ...accumulatedUsage,
             latencyMs: accumulatedLatencyMs,
@@ -457,8 +459,8 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 6,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v6",
+    version: 7,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v7",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
@@ -468,12 +470,13 @@ async function ensureBenchmarkArtifacts(input: {
       ],
       audit_score_policy: "minimum_of_researcher_blind_auditor_and_review_with_deterministic_evidence_precheck",
       audience_policy: "contextual_emerging_athlete_signal_not_a_50000_follower_floor",
+      failed_core_gate_score_bands: { fit: "45-58", commercial_achievability: "35-44", research_confidence: "42-58" },
       material_claim_policy: "model_selects_refs_application_emits_immutable_claims_and_quotes",
       platform_willingness_required: false,
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v6",
+    definition_hash: "research-v2-benchmark-rubric-v7",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -494,7 +497,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 13,
+      version: 14,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -520,14 +523,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence plus deterministic no-label gate summaries; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-researcher-v13",
+      content_hash: "research-v2-benchmark-researcher-v14",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries before comparison with the Researcher assessment; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-auditor-v13",
+      content_hash: "research-v2-benchmark-auditor-v14",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -774,8 +777,11 @@ export async function startBenchmarkRun(input: {
   return { run, selectedCases: selected.length, readinessFailures: 0 };
 }
 
-function blindPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
-  const gates = benchmarkDeterministicGateSummary(record, evidence);
+function blindPrompt(
+  record: BenchmarkGoldenCase,
+  evidence: LeakageSafeBenchmarkEvidence[],
+  deterministicPrecheck: BenchmarkDeterministicGateSummary
+) {
   return `You are the independent blind Auditor in a historical athlete benchmark. You have not seen the Researcher's score or any benchmark label, outcome, outcome correspondence, or post-cutoff information.
 
 Independently determine whether the supplied frozen pre-decision evidence establishes the exact athlete identity, corroborated 21+ eligibility, current athletic momentum at the cutoff, creator/audience opportunity, and realistic pre-outreach commercial accessibility. The dossier can include public sources and authenticated internal market intelligence that was known before the decision; do not reject a dossier record merely because it is internal. Missing evidence is a gap, not permission to infer. Do not infer adult-content willingness from appearance, identity, or sport. Do not require evidence that the athlete wants OnlyFans or adult content; its absence is neutral and must not be listed as a critical gap. Judge achievability from pre-outreach proxies such as career tier, audience, creator behavior, partnerships, representation or business access, geography, and likely economics. Missing representation is not an automatic blocker when other accessibility proxies are strong.
@@ -787,7 +793,7 @@ Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
 
 Deterministic evidence precheck (computed only from the frozen dossier; no label or outcome):
-${JSON.stringify(gates, null, 2)}
+${JSON.stringify(deterministicPrecheck, null, 2)}
 Treat each passed core evidence gate as present. Do not override a passed audience or creator gate solely because the signal is qualitative, below 50,000, or lacks cross-platform corroboration.
 
 Evidence:
@@ -801,9 +807,8 @@ function reviewPrompt(
   researcher: ResearcherAssessment,
   blind: BlindAssessment,
   evidence: LeakageSafeBenchmarkEvidence[],
-  record: BenchmarkGoldenCase
+  deterministicPrecheck: BenchmarkDeterministicGateSummary
 ) {
-  const gates = benchmarkDeterministicGateSummary(record, evidence);
   return `You are completing stage two of a blind benchmark audit. The independent assessment below was completed before the Researcher proposal was disclosed. Compare them now without using any historical outcome or golden label.
 
 INDEPENDENT BLIND ASSESSMENT
@@ -816,7 +821,7 @@ FROZEN PRE-DECISION EVIDENCE
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
 DETERMINISTIC EVIDENCE PRECHECK (NO LABEL OR OUTCOME)
-${JSON.stringify(gates, null, 2)}
+${JSON.stringify(deterministicPrecheck, null, 2)}
 
 Pass only when every material score and claim is supported by the frozen evidence. Material claims are immutable source records selected by E-number; do not call a canonical source claim unsupported merely because you would word it differently or because its authenticated pre-decision source is internal. List every actual unsupported Researcher conclusion in unsupported_material_claims. Correct a usable proposal when evidence supports lower scores. Never raise a Researcher or blind-auditor dimension. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from creator, audience, momentum, and accessibility evidence. Missing representation alone is not automatically critical. Treat every passed deterministic core gate as present; do not override it solely because an audience signal is qualitative, below 50,000, or lacks cross-platform corroboration.
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
@@ -935,6 +940,7 @@ async function processBenchmarkCase(input: {
   const adultGate = benchmarkAdultEligibilityGate(record, selection.evidence);
   const momentumGate = benchmarkCurrentMomentumGate(record, selection.evidence);
   const creatorPotentialGate = benchmarkCreatorPotentialGate(record, selection.evidence);
+  const deterministicPrecheck = benchmarkDeterministicGateSummary(record, selection.evidence);
   const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
   const evidenceHash = stableEvidenceSetHash(modelEvidence.map((item) => ({
     url: item.url,
@@ -958,7 +964,7 @@ async function processBenchmarkCase(input: {
     };
   } else {
     const researcherCall = await callStructuredSonnet<ResearcherModelAssessment>({
-      prompt: buildBenchmarkResearcherPrompt(record, modelEvidence),
+      prompt: buildBenchmarkResearcherPrompt(record, modelEvidence, deterministicPrecheck),
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -1038,7 +1044,7 @@ async function processBenchmarkCase(input: {
   let blindUsage = checkpointAssessment.blind_usage as ModelUsage | undefined;
   if (!blind || !blindUsage) {
     const blindCall = await callStructuredSonnet<BlindAssessment>({
-      prompt: blindPrompt(record, modelEvidence),
+      prompt: blindPrompt(record, modelEvidence, deterministicPrecheck),
       schema: BLIND_AUDITOR_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
@@ -1058,7 +1064,7 @@ async function processBenchmarkCase(input: {
   let reviewUsage = checkpointAssessment.review_usage as ModelUsage | undefined;
   if (!review || !reviewUsage) {
     const reviewCall = await callStructuredSonnet<ReviewAssessment>({
-      prompt: reviewPrompt(researcher, blind, modelEvidence, record),
+      prompt: reviewPrompt(researcher, blind, modelEvidence, deterministicPrecheck),
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,

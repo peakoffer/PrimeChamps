@@ -76,6 +76,7 @@ import {
   compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
   evaluateBenchmarkMaterialClaimCitations,
+  parseBenchmarkStructuredJson,
   normalizeOpenRouterBenchmarkUsage,
   promptContainsBenchmarkLeakage,
   projectedBenchmarkCallCostMicrousd,
@@ -1650,6 +1651,15 @@ test("models select evidence refs while application code emits immutable materia
   assert.equal(evaluateBenchmarkMaterialClaimCitations(canonicalBenchmarkMaterialClaims(["E1", "E99"], evidence), evidence).unsupportedClaimCount > 0, true);
 });
 
+test("benchmark structured output parser accepts strict JSON and harmless provider wrappers only", () => {
+  assert.deepEqual(parseBenchmarkStructuredJson<{ ok: boolean }>(' {"ok":true} '), { ok: true });
+  assert.deepEqual(parseBenchmarkStructuredJson<{ ok: boolean }>('```json\n{"ok":true}\n```'), { ok: true });
+  assert.deepEqual(parseBenchmarkStructuredJson<{ ok: boolean }>([
+    { type: "text", text: '{"ok":true}' },
+  ]), { ok: true });
+  assert.throws(() => parseBenchmarkStructuredJson("not json"), /invalid structured JSON/);
+});
+
 test("benchmark finalist gates require two independent identity and adult sources", () => {
   const selection = selectLeakageSafeBenchmarkEvidence({
     record: BENCHMARK_CASE,
@@ -1989,7 +1999,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v23/);
+  assert.match(source, /research-v2-benchmark-runner-v24/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
