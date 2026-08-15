@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-localized-age-and-audience-extraction-v13";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-stored-source-extraction-replay-v14";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -68,6 +68,17 @@ export type HistoricalSearchCandidate = {
   snippet: string;
   displayedDate?: string;
   position?: number;
+};
+
+export type StoredPreparedEvidenceSource = {
+  canonical_url: string | null;
+  eligible_before_cutoff: boolean | null;
+  golden_record_id: string;
+  historical_as_of: string | null;
+  metadata: Record<string, unknown> | null;
+  provider: string;
+  retrieval_status: string;
+  title: string | null;
 };
 
 export type WaybackCapture = {
@@ -158,6 +169,55 @@ export function canonicalHistoricalArchiveUrl(value: string) {
   } catch {
     return "";
   }
+}
+
+const REPLAYABLE_PREPARED_EVIDENCE_PROVIDERS = new Set([
+  "internet_archive_wayback",
+  "common_crawl",
+  "wikimedia_revision",
+  "official_dated_profile",
+]);
+
+/**
+ * Replays already verified cutoff-safe URLs when the extraction contract has
+ * advanced. This is deliberately a free archive replay, not a new discovery
+ * call: stored URLs are only eligible when the old source was successfully
+ * retrieved before the record cutoff and has not yet been stamped with the
+ * current extraction version.
+ */
+export function buildStoredPreparedEvidenceReplayCandidates(input: {
+  record: EvidencePreparationRecord;
+  sources: StoredPreparedEvidenceSource[];
+  extractionVersion?: string;
+}) {
+  const cutoff = Date.parse(input.record.evidence_cutoff_at);
+  if (!Number.isFinite(cutoff)) return [] as HistoricalSearchCandidate[];
+  const extractionVersion = input.extractionVersion || HISTORICAL_EVIDENCE_EXTRACTION_VERSION;
+  return dedupeHistoricalSearchCandidates(input.sources.flatMap((source): HistoricalSearchCandidate[] => {
+    const historicalAsOf = Date.parse(source.historical_as_of || "");
+    const sourceExtractionVersion = typeof source.metadata?.extraction_version === "string"
+      ? source.metadata.extraction_version
+      : null;
+    const canonicalUrl = canonicalHistoricalArchiveUrl(source.canonical_url || "");
+    if (source.golden_record_id !== input.record.id
+      || source.retrieval_status !== "retrieved"
+      || source.eligible_before_cutoff !== true
+      || !REPLAYABLE_PREPARED_EVIDENCE_PROVIDERS.has(source.provider)
+      || !Number.isFinite(historicalAsOf)
+      || historicalAsOf > cutoff
+      || sourceExtractionVersion === extractionVersion
+      || !canonicalUrl) return [];
+    return [{
+      query: `Cutoff-safe external profiles referenced by stored evidence for "${input.record.athlete_name}"`,
+      title: source.title || `${input.record.athlete_name} archived public profile`,
+      url: canonicalUrl,
+      snippet: `Previously verified cutoff-safe source; replayed under ${extractionVersion}.`,
+    }];
+  }), {
+    athleteName: input.record.athlete_name,
+    sport: input.record.sport,
+    instagramHandle: input.record.instagram_handle,
+  });
 }
 
 export function buildOfficialDatedProfileCandidates(record: EvidencePreparationRecord): HistoricalSearchCandidate[] {

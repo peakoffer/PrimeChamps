@@ -98,6 +98,7 @@ import {
 import { convertOnlyFansHistoricalWorkbookExtraction } from "../src/lib/research/historical-workbook-converter.ts";
 import {
   buildOfficialDatedProfileCandidates,
+  buildStoredPreparedEvidenceReplayCandidates,
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   buildHistoricalSignalRecoveryQueries,
@@ -2072,6 +2073,44 @@ test("Wayback selection uses the latest exact HTML capture no later than the evi
     canonicalHistoricalArchiveUrl(`${canonicalUrl}?srsltid=tracking&utm_source=google#bio`),
     canonicalUrl
   );
+});
+
+test("stored cutoff-safe evidence is replayed exactly once after an extraction upgrade", () => {
+  const record = {
+    id: "record-1",
+    athlete_name: "Estelle Poret",
+    sport: "Aquabike",
+    fit_label: "fit" as const,
+    evidence_cutoff_at: "2026-05-28T12:00:00Z",
+    instagram_handle: null,
+  };
+  const common = {
+    canonical_url: "https://www.lyonfemmes.com/article/estelle-poret?utm_source=google",
+    eligible_before_cutoff: true,
+    golden_record_id: record.id,
+    historical_as_of: "2024-01-01T00:00:00Z",
+    provider: "internet_archive_wayback",
+    retrieval_status: "retrieved",
+    title: "Estelle Poret, championne lyonnaise de jet-ski",
+  };
+  const replay = buildStoredPreparedEvidenceReplayCandidates({
+    record,
+    extractionVersion: "extract-v2",
+    sources: [
+      { ...common, metadata: { extraction_version: "extract-v1" } },
+      { ...common, canonical_url: "https://current.example/estelle", historical_as_of: "2026-05-29T00:00:00Z", metadata: null },
+      { ...common, canonical_url: "https://socialblade.com/instagram/user/estelle", provider: "social_blade_instagram_history", metadata: null },
+    ],
+  });
+  assert.equal(replay.length, 1);
+  assert.equal(replay[0]?.url, "https://www.lyonfemmes.com/article/estelle-poret");
+  assert.match(replay[0]?.query || "", /stored evidence/);
+  const alreadyCurrent = buildStoredPreparedEvidenceReplayCandidates({
+    record,
+    extractionVersion: "extract-v2",
+    sources: [{ ...common, metadata: { extraction_version: "extract-v2" } }],
+  });
+  assert.equal(alreadyCurrent.length, 0);
 });
 
 test("Common Crawl fallback selects bounded pre-cutoff captures and extracts the WARC response body", () => {

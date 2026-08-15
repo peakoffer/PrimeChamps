@@ -7,6 +7,7 @@ import {
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   WIKIMEDIA_AGE_DISCOVERY_LANGUAGES,
   buildOfficialDatedProfileCandidates,
+  buildStoredPreparedEvidenceReplayCandidates,
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   buildHistoricalSignalRecoveryQueries,
@@ -33,6 +34,7 @@ import {
   type HistoricalSearchCandidate,
   type HistoricalEvidencePreparationMode,
   type PreparedArchivedEvidence,
+  type StoredPreparedEvidenceSource,
 } from "@/lib/research/historical-evidence-preparation";
 import {
   benchmarkEvidenceFreezeReadiness,
@@ -243,6 +245,14 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     .eq("eligible_for_scoring", true)
     .order("effective_at", { ascending: false });
   if (profileClaimError) throw profileClaimError;
+  const { data: storedPreparedSources, error: storedPreparedSourceError } = await admin.from("research_evidence_sources")
+    .select("golden_record_id,canonical_url,title,provider,historical_as_of,retrieval_status,eligible_before_cutoff,metadata")
+    .eq("organization_id", input.organizationId)
+    .in("golden_record_id", input.recordIds)
+    .in("provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile"])
+    .eq("retrieval_status", "retrieved")
+    .eq("eligible_before_cutoff", true);
+  if (storedPreparedSourceError) throw storedPreparedSourceError;
   const instagramHandleByRecord = new Map<string, string>();
   const cutoffByRecord = new Map((data || []).map((record) => [String(record.id), Date.parse(String(record.evidence_cutoff_at))]));
   for (const claim of profileClaims || []) {
@@ -331,6 +341,10 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     candidatesByRecord: Object.fromEntries(records.map((record) => [
       record.id,
       dedupeHistoricalSearchCandidates([
+        ...buildStoredPreparedEvidenceReplayCandidates({
+          record,
+          sources: (storedPreparedSources || []) as StoredPreparedEvidenceSource[],
+        }),
         ...buildOfficialDatedProfileCandidates(record),
         ...(wikimediaCandidates.get(record.id) || []),
         ...(grouped.get(record.id) || []),
@@ -880,6 +894,8 @@ async function persistPreparedRecordEvidence(input: {
           ? "exact_name_plus_sport_in_cutoff_safe_official_structured_profile"
           : "exact_name_plus_sport_in_archived_page",
         archive_provider: item.archiveProvider || "internet_archive_wayback",
+        archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
+        extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
         scoring_tokens_spent: 0,
       },
     }, { onConflict: "organization_id,golden_record_id,canonical_url,historical_as_of" }).select("id").single();
