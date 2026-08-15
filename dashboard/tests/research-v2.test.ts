@@ -2465,6 +2465,14 @@ test("archived evidence extraction requires exact identity and sport and preserv
   assert.ok(pronounSignals.evidence?.claims.some((claim) => claim.claimType === "athletic_momentum"));
   assert.ok(pronounSignals.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
 
+  const lateLocalizedAudience = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Tessa Thyssen", sport: "Surfing", evidence_cutoff_at: "2026-07-07T12:00:00Z" },
+    candidate: { ...candidate, title: "Tessa Thyssen : entretien", url: "https://surf.example/tessa-thyssen" },
+    capture: { ...capture, capturedAt: "2026-02-11T03:48:13.000Z", originalUrl: "https://surf.example/tessa-thyssen" },
+    html: `<html><title>Tessa Thyssen : entretien</title><body><main><p>Tessa Thyssen est une surfeuse professionnelle.</p>${"<p>Navigation magazine.</p>".repeat(80)}<p>J&rsquo;explique mon projet et ils suivent mes 12 800 abonnés.</p></main></body></html>`,
+  });
+  assert.ok(lateLocalizedAudience.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
   const officialCompactDob = extractPreparedArchivedEvidence({
     record: { ...record, athlete_name: "Nick Ponzio", sport: "Track & Field" },
     candidate: { ...candidate, title: "World Athletics shot put list", url: "https://worldathletics.org/records/shot-put" },
@@ -2776,7 +2784,10 @@ test("historical signal recovery uses a known cutoff-safe Instagram handle witho
   assert.equal(queries.length, 4);
   assert.match(queries[0], /"@example\.athlete"/);
   assert.match(queries[0], /site:socialblade\.com/);
-  assert.match(queries[1], /"@example\.athlete"/);
+  assert.match(queries[0], /abonnés/);
+  assert.doesNotMatch(queries[0], /"Example Athlete"/);
+  assert.match(queries[1], /"Example Athlete"/);
+  assert.match(queries[1], /abonnés/);
   assert.match(queries[2], /sponsor/);
   assert.match(queries[3], /content creator/);
 });
@@ -2784,11 +2795,22 @@ test("historical signal recovery uses a known cutoff-safe Instagram handle witho
 test("generated material signals require explicit athlete-relevant language", () => {
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "Skip to main content Instagram YouTube"), false);
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);
+  assert.equal(preparedEvidenceSignalSupported("audience_signal", "La surfeuse compte 12 800 abonnés."), true);
   assert.match(preparedEvidenceSignalExcerptForAthlete({
     athleteName: "Paula Novotna",
     claimType: "audience_signal",
     sourceExcerpt: "Paula Novotna shared the production with her profile, which gathers around 150,000 fans worldwide.",
   }) || "", /150,000 fans/);
+  assert.match(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Tessa Thyssen",
+    claimType: "audience_signal",
+    sourceExcerpt: "Tessa Thyssen : entretien. Je valorise mes partenaires et ils suivent mes 7 000 abonnés.",
+  }) || "", /Tessa Thyssen.*7 000 abonnés/);
+  assert.equal(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Tessa Thyssen",
+    claimType: "audience_signal",
+    sourceExcerpt: "Tessa Thyssen : entretien. Sa coéquipière explique avoir mes 120 000 abonnés.",
+  }), null, "a non-first-person teammate sentence must not inherit the athlete title");
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "Navigation Rankings Record Book"), false);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "She won the national championship."), true);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "The athlete is listed as a pro team rider."), true);

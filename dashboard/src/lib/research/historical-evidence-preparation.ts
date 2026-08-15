@@ -12,8 +12,8 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-exact-stored-capture-replay-v15";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-multilingual-audience-signal-recovery-v6";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-audience-attribution-v16";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -680,6 +680,7 @@ export function selectWaybackCapture(payload: unknown, canonicalUrl: string, evi
 function decodeHtmlEntities(value: string) {
   const named: Record<string, string> = {
     amp: "&", apos: "'", quot: '"', lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—",
+    rsquo: "’", lsquo: "‘", laquo: "«", raquo: "»",
   };
   return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
     if (entity.startsWith("#x")) {
@@ -1321,7 +1322,7 @@ export function validatePreparedAgeEvidenceForSource(input: {
 
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
   athletic_momentum: /(?:^|[^\p{L}\p{N}])(?:ranked|ranking|champion(?:ne)?|finalist(?:e)?|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|classement|class[ée]e?|termin[ée]e?|m[ée]daill[ée]e?|victoire|vainqueur|gagn[ée]e?|qualifi[ée]e?|campe[óo]n|campeona|campe[ãa]|finalista|medallista|medalhista|gan[óo]|venceu|vit[óo]ria|clasific[óo]|classifica[çc][ãa]o|qualificou|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)(?=$|[^\p{L}\p{N}])/iu,
-  audience_signal: /\b(?:followers|subscribers?|fans|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
+  audience_signal: /\b(?:followers?|subscribers?|fans|abonn[ée]s?|seguidores?|seguidoras?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
   creator_behavior_signal: /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i,
   commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
 };
@@ -1343,6 +1344,8 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
     .split(/\n|(?<=[.!?])\s+/)
     .map((segment) => segment.replace(/\s+/g, " ").trim())
     .filter(Boolean);
+  const titleNamesAthlete = segments.length > 1
+    && ` ${normalizeEvidenceText(segments[0])} `.includes(` ${normalizedName} `);
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     if (!signalPattern.test(segment)) continue;
@@ -1357,6 +1360,17 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
     const directlyRefersBack = /^(?:she|he|they|the athlete|the player|the fighter|the rider|the surfer|the driver|the runner)\b/i.test(segment);
     if (directlyRefersBack && ` ${normalizedPrevious} `.includes(` ${normalizedName} `)) {
       return `${previous} ${segment}`.slice(0, 1_000);
+    }
+
+    // Interview and profile headlines often name the athlete once, followed by
+    // a first-person quote such as "mes 7 000 abonnés". Treat that as
+    // attributable only on an exact athlete-titled page and only when the
+    // signal sentence itself is explicitly first person. This does not allow a
+    // teammate's audience or generic page navigation to inherit the title.
+    const firstPersonAudience = input.claimType === "audience_signal"
+      && /(?:\b(?:i|me)\b.{0,260}\bmy\s+[\d.,\sKkMm]{0,16}(?:followers?|subscribers?|fans)\b|(?:\bje\b|\bj['’]|\bm['’]|\bmoi\b).{0,260}\bmes\s+[\d.,\sKkMm]{0,16}abonn[ée]s?\b|(?:\byo\b|\bme\b).{0,260}\bmis\s+[\d.,\sKkMm]{0,16}seguidor(?:es|as)?\b|(?:\beu\b|\bme\b).{0,260}\bminh(?:os|as)\s+[\d.,\sKkMm]{0,16}seguidor(?:es|as)?\b)/i.test(segment);
+    if (titleNamesAthlete && firstPersonAudience) {
+      return `${segments[0]} ${segment}`.slice(0, 1_000);
     }
   }
   return null;
@@ -1494,7 +1508,11 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     });
   }
-  const signalExcerpt = `${title}\n${excerpt}`.slice(0, 1_200);
+  // Identity evidence stays compact around the first exact-name occurrence,
+  // but audience and creator facts often appear later in an interview after
+  // navigation and biography text. Scan the bounded page body and keep only
+  // the exact attributable sentence returned by the strict signal extractor.
+  const signalExcerpt = `${title}\n${text}`.slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters);
   const momentumExcerpt = preparedEvidenceSignalExcerptForAthlete({
     athleteName: record.athlete_name, claimType: "athletic_momentum", sourceExcerpt: signalExcerpt,
   });
@@ -1622,8 +1640,8 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
     ? record.instagram_handle.trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "")
     : "";
   const profileQueries = handle ? [
-    `"${record.athlete_name}" "@${handle}" (followers OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
-    `"${record.athlete_name}" "@${handle}" (Instagram OR profile OR posts OR creator OR followers) before:${before}`,
+    `("@${handle}" OR "${handle}") (followers OR abonnés OR seguidores OR subscribers OR engagement) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
+    `"${record.athlete_name}" (followers OR abonnés OR seguidores OR subscribers OR "social media following" OR influencer) before:${before}`,
   ] : [
     `"${record.athlete_name}" "${record.sport}" (Instagram OR "Instagram handle" OR "post shared by") (profile OR followers OR "social media") before:${before}`,
     `"${record.athlete_name}" "${record.sport}" ("Instagram followers" OR "TikTok followers" OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
