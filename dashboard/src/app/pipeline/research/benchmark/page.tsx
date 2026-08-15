@@ -493,14 +493,21 @@ export default function ResearchBenchmarkPage() {
     && latestDevelopmentRun.calculated_metrics.unsupportedClaimRate === 0
     && latestDevelopmentRun.calculated_metrics.pointInTimeComplianceRate === 1
   );
-  const developmentSmokeNeedsPrecisionDenominator = Boolean(
+  const developmentSmokeSafeForFullCalibration = Boolean(
     latestDevelopmentRun?.status === "completed"
     && latestDevelopmentRun.result_count >= 4
     && latestDevelopmentRun.calculated_metrics
-    && latestDevelopmentRun.calculated_metrics.finalistsAbove80 === 0
     && latestDevelopmentRun.calculated_metrics.sourceVerificationRate === 1
     && latestDevelopmentRun.calculated_metrics.unsupportedClaimRate === 0
     && latestDevelopmentRun.calculated_metrics.pointInTimeComplianceRate === 1
+    && (latestDevelopmentRun.calculated_metrics.finalistsAbove80 === 0
+      || (latestDevelopmentRun.calculated_metrics.precisionAbove80 !== null
+        && latestDevelopmentRun.calculated_metrics.precisionAbove80 >= 0.9
+        && latestDevelopmentRun.calculated_metrics.finalistIdentityAccuracy === 1
+        && latestDevelopmentRun.calculated_metrics.finalistEligibilityVerificationRate === 1
+        && latestDevelopmentRun.calculated_metrics.finalistZeroUnsupportedClaimRate === 1
+        && latestDevelopmentRun.calculated_metrics.finalistAuditPassRate !== null
+        && latestDevelopmentRun.calculated_metrics.finalistAuditPassRate >= 0.9))
   );
   const completedExcludedSignalRecordIdSet = useMemo(
     () => new Set(completedExcludedSignalRecordIds),
@@ -1345,13 +1352,15 @@ export default function ResearchBenchmarkPage() {
                   <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
                     Start four-case smoke test
                   </button>
-                  {(developmentSmokePassed || developmentSmokeNeedsPrecisionDenominator)
+                  {(developmentSmokePassed || developmentSmokeSafeForFullCalibration)
                     && latestDevelopmentRun
                     && latestDevelopmentRun.result_count < benchmarkReadiness.development.total
                     && (
                     <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(benchmarkReadiness.development.total, 1_500_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
-                      {developmentSmokeNeedsPrecisionDenominator
+                      {latestDevelopmentRun.calculated_metrics?.finalistsAbove80 === 0
                         ? `Expand to establish precision (${benchmarkReadiness.development.total})`
+                        : latestDevelopmentRun.release_readiness.ready !== true
+                          ? `Expand to verify audit accuracy (${benchmarkReadiness.development.total})`
                         : `Start full development calibration (${benchmarkReadiness.development.total})`}
                     </button>
                   )}
