@@ -58,11 +58,13 @@ function socialBladeCredentials() {
 }
 
 function socialBladeCredentialStatus() {
+  const clientId = process.env.SOCIAL_BLADE_CLIENT_ID;
+  const token = process.env.SOCIAL_BLADE_TOKEN;
   return {
-    clientIdVariablePresent: Object.hasOwn(process.env, "SOCIAL_BLADE_CLIENT_ID"),
-    clientIdHasValue: Boolean(process.env.SOCIAL_BLADE_CLIENT_ID?.trim()),
-    tokenVariablePresent: Object.hasOwn(process.env, "SOCIAL_BLADE_TOKEN"),
-    tokenHasValue: Boolean(process.env.SOCIAL_BLADE_TOKEN?.trim()),
+    clientIdVariablePresent: typeof clientId === "string",
+    clientIdHasValue: Boolean(clientId?.trim()),
+    tokenVariablePresent: typeof token === "string",
+    tokenHasValue: Boolean(token?.trim()),
   };
 }
 
