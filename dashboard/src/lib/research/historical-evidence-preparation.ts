@@ -14,7 +14,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-jsonld-localized-age-extraction-v11";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-all-multilingual-profiles-v11";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-dated-profiles-v12";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -110,6 +110,11 @@ export type OfficialCommissionAdultEvidence = {
 
 export type OfficialCompetitionEntryAdultEvidence = OfficialCommissionAdultEvidence;
 
+export type OfficialDatedProfileEvidence = OfficialCommissionAdultEvidence & {
+  profileId: string;
+  status: string;
+};
+
 export type PreparedEvidenceClaim = {
   claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athlete_profile" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
   claimText: string;
@@ -133,7 +138,7 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
-  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision";
+  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile";
   providerRequestId?: string;
 };
 
@@ -153,6 +158,20 @@ export function canonicalHistoricalArchiveUrl(value: string) {
   } catch {
     return "";
   }
+}
+
+export function buildOfficialDatedProfileCandidates(record: EvidencePreparationRecord): HistoricalSearchCandidate[] {
+  if (!benchmarkSourceSupportsSport(record.sport, "International Skating Union speed skating athlete profile")) return [];
+  const slug = record.athlete_name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) return [];
+  return [{
+    query: "Deterministic official federation profile",
+    title: `${record.athlete_name} - International Skating Union`,
+    url: `https://isu-skating.com/speed-skating/skaters/${slug}/`,
+    snippet: `Official International Skating Union speed skating profile for ${record.athlete_name}.`,
+    position: 0,
+  }];
 }
 
 function normalizedUrlForComparison(value: string) {
@@ -779,6 +798,68 @@ export function extractOfficialCompetitionEntryAdultEvidence(input: {
     excerpt: winner.excerpt,
     publishedAt: publishedAt.toISOString(),
   } : null;
+}
+
+/**
+ * Accept a birth date from an official federation profile only when the page's
+ * own structured athlete row carries a creation and update timestamp that both
+ * predate the benchmark cutoff. This is intentionally narrower than treating a
+ * mutable current profile as historical evidence.
+ */
+export function extractOfficialDatedProfileEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceText: string;
+  evidenceCutoffAt: string;
+}): OfficialDatedProfileEvidence | null {
+  let url: URL;
+  try { url = new URL(input.sourceUrl); } catch { return null; }
+  if (url.hostname.toLowerCase() !== "isu-skating.com"
+    || !/^\/speed-skating\/skaters\/[^/]+\/?$/i.test(url.pathname)) return null;
+
+  const cutoff = new Date(input.evidenceCutoffAt);
+  if (!Number.isFinite(cutoff.getTime())) return null;
+  const decoded = input.sourceText
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\"/g, '"');
+  const nameMatches = Array.from(decoded.matchAll(/"full_name"\s*:\s*"([^"]{2,160})"/g))
+    .filter((match) => normalizeEvidenceText(match[1]) === normalizeEvidenceText(input.athleteName));
+  if (nameMatches.length !== 1 || nameMatches[0].index === undefined) return null;
+
+  const anchor = nameMatches[0].index;
+  const start = Math.max(0, decoded.lastIndexOf('{"skaters_id"', anchor));
+  const window = decoded.slice(start, Math.min(decoded.length, anchor + 8_000));
+  const field = (name: string) => window.match(new RegExp(`"${name}"\\s*:\\s*"([^"]+)"`))?.[1]?.trim() || "";
+  const profileId = window.match(/"skaters_id"\s*:\s*(\d+)/)?.[1] || "";
+  const birthDateText = field("date_of_birth");
+  const status = field("status");
+  const createdAt = new Date(field("created_at"));
+  const updatedAt = new Date(field("updated_at"));
+  const discipline = window.match(/"discipline"\s*:\s*\{\s*"title"\s*:\s*"([^"]+)"/)?.[1]?.trim() || "";
+  if (!profileId || !birthDateText || !status || !discipline
+    || !Number.isFinite(createdAt.getTime()) || !Number.isFinite(updatedAt.getTime())
+    || createdAt > updatedAt || updatedAt > cutoff
+    || !benchmarkSourceSupportsSport(input.sport, discipline)) return null;
+
+  const birthDate = extractBirthDate(`Date of birth: ${birthDateText}`);
+  const ageAtCutoff = birthDate ? ageOnDate(birthDate, input.evidenceCutoffAt) : null;
+  if (!birthDate || ageAtCutoff === null || ageAtCutoff < 21 || ageAtCutoff > 80) return null;
+  const excerpt = [
+    input.athleteName,
+    `Sport: ${discipline}`,
+    `Date of birth: ${birthDateText}`,
+    `Profile status: ${status}`,
+    `Official profile record ${profileId} created ${createdAt.toISOString()} and updated ${updatedAt.toISOString()}.`,
+  ].join("\n");
+  return {
+    birthDate,
+    domain: "isu-skating.com",
+    excerpt,
+    publishedAt: updatedAt.toISOString(),
+    profileId,
+    status,
+  };
 }
 
 const RESERVED_INSTAGRAM_PATHS = new Set([

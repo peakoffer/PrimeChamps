@@ -6,6 +6,7 @@ import {
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   WIKIMEDIA_AGE_DISCOVERY_LANGUAGES,
+  buildOfficialDatedProfileCandidates,
   buildHistoricalAgeRecoveryQueries,
   buildHistoricalEvidenceQueries,
   buildHistoricalSignalRecoveryQueries,
@@ -13,6 +14,7 @@ import {
   dedupeHistoricalSearchCandidates,
   extractWikimediaExternalProfileCandidates,
   extractCommonCrawlWarcBody,
+  extractOfficialDatedProfileEvidence,
   extractPreparedArchivedEvidence,
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
@@ -329,6 +331,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     candidatesByRecord: Object.fromEntries(records.map((record) => [
       record.id,
       dedupeHistoricalSearchCandidates([
+        ...buildOfficialDatedProfileCandidates(record),
         ...(wikimediaCandidates.get(record.id) || []),
         ...(grouped.get(record.id) || []),
       ], {
@@ -361,7 +364,7 @@ async function reconcilePreparedSignalClaims(input: {
     .in("golden_record_id", input.recordIds)
     .in("claim_type", ["athletic_momentum", "audience_signal", "commercial_achievability_signal"])
     .eq("eligible_for_scoring", true)
-    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision"]);
+    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile"]);
   if (error) throw error;
   const unsupportedIds = ((data || []) as unknown as StoredPreparedSignalClaim[])
     .filter((claim) => !preparedEvidenceSignalSupported(claim.claim_type, claim.source_excerpt || ""))
@@ -394,7 +397,7 @@ async function reconcilePreparedAdultClaims(input: {
       .in("golden_record_id", input.recordIds)
       .eq("claim_type", "adult_eligibility")
       .eq("eligible_for_scoring", true)
-      .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision"]),
+      .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile"]),
   ]);
   if (recordError) throw recordError;
   if (claimError) throw claimError;
@@ -636,6 +639,82 @@ async function retrieveWikimediaRevisionEvidenceCandidate(input: {
   };
 }
 
+async function retrieveOfficialDatedProfileEvidenceCandidate(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+}) {
+  let url: URL;
+  try { url = new URL(input.candidate.url); } catch {
+    return { evidence: null, rejectionReason: "not_an_official_dated_profile" };
+  }
+  if (url.hostname.toLowerCase() !== "isu-skating.com"
+    || !/^\/speed-skating\/skaters\/[^/]+\/?$/i.test(url.pathname)) {
+    return { evidence: null, rejectionReason: "not_an_official_dated_profile" };
+  }
+  const response = await fetch(url.toString(), {
+    headers: { Accept: "text/html", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(30_000),
+    cache: "no-store",
+  });
+  if (!response.ok) return { evidence: null, rejectionReason: "official_dated_profile_lookup_failed" };
+  const sourceText = await response.text();
+  const extracted = extractOfficialDatedProfileEvidence({
+    athleteName: input.record.athlete_name,
+    sport: input.record.sport,
+    sourceUrl: url.toString(),
+    sourceText,
+    evidenceCutoffAt: input.record.evidence_cutoff_at,
+  });
+  if (!extracted) return { evidence: null, rejectionReason: "official_profile_not_cutoff_safe" };
+  const captureTimestamp = extracted.publishedAt.replace(/[-:.TZ]/g, "").slice(0, 14);
+  const canonicalUrl = url.toString();
+  const evidence: PreparedArchivedEvidence = {
+    canonicalUrl,
+    archivedUrl: canonicalUrl,
+    domain: extracted.domain,
+    title: `${input.record.athlete_name} - International Skating Union`,
+    publishedAt: extracted.publishedAt,
+    historicalAsOf: extracted.publishedAt,
+    contentHash: null,
+    captureTimestamp,
+    publicationDateMethod: "official_structured_profile_updated_at",
+    searchQuery: input.candidate.query,
+    searchSnippet: input.candidate.snippet,
+    archiveProvider: "official_dated_profile",
+    providerRequestId: `isu-skater-${extracted.profileId}-${captureTimestamp}`,
+    claims: [
+      {
+        claimType: "sport_identity",
+        claimText: `${input.record.athlete_name} is identified as a ${input.record.sport} athlete by the International Skating Union.`,
+        structuredValue: { athlete_name: input.record.athlete_name, sport: input.record.sport, profile_id: extracted.profileId },
+        sourceExcerpt: extracted.excerpt,
+        effectiveAt: extracted.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      },
+      {
+        claimType: "adult_eligibility",
+        claimText: `${input.record.athlete_name} has an official public birth date of ${extracted.birthDate}.`,
+        structuredValue: { birth_date: extracted.birthDate, profile_id: extracted.profileId },
+        sourceExcerpt: extracted.excerpt,
+        effectiveAt: extracted.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      },
+      {
+        claimType: "candidate_evidence",
+        claimText: extracted.excerpt.slice(0, 600),
+        structuredValue: { evidence_kind: "official_dated_federation_profile", profile_id: extracted.profileId },
+        sourceExcerpt: extracted.excerpt,
+        effectiveAt: extracted.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      },
+    ],
+  };
+  return { evidence, rejectionReason: null };
+}
+
 async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
@@ -644,6 +723,19 @@ async function retrieveArchivedEvidenceCandidate(input: {
   "use step";
 
   const { candidate } = input;
+  try {
+    const official = await retrieveOfficialDatedProfileEvidenceCandidate({ record: input.record, candidate });
+    if (official.evidence) {
+      return {
+        evidence: official.evidence,
+        rejectionReason: null,
+        rateLimited: false,
+        waybackRateLimited: false,
+      };
+    }
+  } catch {
+    // Continue to immutable archive providers if the official site is unavailable.
+  }
   try {
     const wikimedia = await retrieveWikimediaRevisionEvidenceCandidate({ record: input.record, candidate });
     if (wikimedia.evidence) {
@@ -767,7 +859,7 @@ async function persistPreparedRecordEvidence(input: {
       domain: item.domain,
       title: item.title,
       publisher: item.domain,
-      source_type: "archive",
+      source_type: item.archiveProvider === "official_dated_profile" ? "official_roster" : "archive",
       provider: item.archiveProvider || "internet_archive_wayback",
       provider_request_id: item.providerRequestId || item.captureTimestamp,
       published_at: item.publishedAt,
@@ -784,7 +876,9 @@ async function persistPreparedRecordEvidence(input: {
         publication_date_method: item.publicationDateMethod,
         discovery_query: item.searchQuery,
         discovery_snippet: item.searchSnippet,
-        verification: "exact_name_plus_sport_in_archived_page",
+        verification: item.archiveProvider === "official_dated_profile"
+          ? "exact_name_plus_sport_in_cutoff_safe_official_structured_profile"
+          : "exact_name_plus_sport_in_archived_page",
         archive_provider: item.archiveProvider || "internet_archive_wayback",
         scoring_tokens_spent: 0,
       },
