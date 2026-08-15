@@ -1183,14 +1183,18 @@ export default function ResearchBenchmarkPage() {
             <button
               disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured || socialBladePlan.officialPilotExhausted || socialBladePlan.pilotRecords.length === 0}
               onClick={() => void runSocialBladePilot()}
-              title={!socialBladePlan.configured
+              title={loading
+                ? "Checking the server-side Social Blade connection"
+                : !socialBladePlan.configured
                 ? "Add the two server-side Social Blade credentials first"
                 : socialBladePlan.officialPilotExhausted
                   ? "The checkpointed recovery allowance is complete; audit readiness before spending more"
                   : undefined}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
-              {!socialBladePlan.configured
+              {loading
+                ? "Checking Social Blade…"
+                : !socialBladePlan.configured
                   ? [
                       !socialBladePlan.credentialStatus.clientIdVariablePresent
                         ? "client ID variable missing"
