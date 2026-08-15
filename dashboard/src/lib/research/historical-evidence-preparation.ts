@@ -160,7 +160,7 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
-  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile";
+  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article";
   providerRequestId?: string;
 };
 
@@ -1149,6 +1149,140 @@ export function extractPublishedAt(html: string, evidenceCutoffAt: string) {
   return { publishedAt: null, method: null };
 }
 
+function comparablePublicArticleUrl(value: string) {
+  const canonical = canonicalHistoricalArchiveUrl(value);
+  if (!canonical) return "";
+  try {
+    const url = new URL(canonical);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === "localhost" || hostname.endsWith(".localhost")
+      || hostname === "0.0.0.0" || hostname === "127.0.0.1" || hostname === "::1"
+      || /^10\./.test(hostname) || /^192\.168\./.test(hostname)
+      || /^172\.(?:1[6-9]|2\d|3[01])\./.test(hostname)) return "";
+    url.hostname = hostname;
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function htmlAttribute(tag: string, name: string) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return decodeHtmlEntities(
+    tag.match(new RegExp(`\\b${escapedName}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1] || "",
+  ).trim();
+}
+
+function directArticleCanonicalUrl(html: string) {
+  for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
+    const rel = htmlAttribute(match[0], "rel").toLowerCase().split(/\s+/);
+    if (rel.includes("canonical")) return htmlAttribute(match[0], "href");
+  }
+  return "";
+}
+
+function jsonLdObjects(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(jsonLdObjects);
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  return [record, ...Object.values(record).flatMap(jsonLdObjects)];
+}
+
+function directArticleJsonLd(html: string) {
+  const objects: Record<string, unknown>[] = [];
+  for (const match of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      objects.push(...jsonLdObjects(JSON.parse(match[1].trim())));
+    } catch {
+      // A page may contain several JSON-LD blocks; one malformed unrelated
+      // block must not hide a later, valid NewsArticle block.
+    }
+  }
+  return objects.filter((item) => {
+    const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
+    return types.some((type) => /^(?:News)?Article$/i.test(String(type || "")));
+  });
+}
+
+function directArticleStructuredUrls(article: Record<string, unknown>) {
+  const values = [article.url, article.mainEntityOfPage];
+  return values.flatMap((value): string[] => {
+    if (typeof value === "string") return [value];
+    if (!value || typeof value !== "object") return [];
+    const record = value as Record<string, unknown>;
+    return [record["@id"], record.url].filter((item): item is string => typeof item === "string");
+  });
+}
+
+/**
+ * Admits a current editorial page only when its own structured metadata makes
+ * the historical observation cutoff-safe. This is intentionally stricter
+ * than ordinary web evidence: exact canonical URL, NewsArticle JSON-LD, both
+ * dates before the benchmark cutoff, and no rewrite more than seven days
+ * after publication. Exact athlete, sport, and claim attribution are still
+ * enforced by the shared archived-evidence extractor.
+ */
+export function extractPreparedDatedArticleEvidence(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+  html: string;
+}): { evidence: PreparedArchivedEvidence | null; rejectionReason: string | null } {
+  const requestedUrl = comparablePublicArticleUrl(input.candidate.url);
+  if (!requestedUrl) return { evidence: null, rejectionReason: "dated_article_url_is_not_public_http" };
+  const canonicalUrl = comparablePublicArticleUrl(directArticleCanonicalUrl(input.html));
+  if (!canonicalUrl) return { evidence: null, rejectionReason: "dated_article_missing_canonical_url" };
+  if (canonicalUrl !== requestedUrl) {
+    return { evidence: null, rejectionReason: "dated_article_canonical_url_mismatch" };
+  }
+  const cutoff = Date.parse(input.record.evidence_cutoff_at);
+  if (!Number.isFinite(cutoff)) return { evidence: null, rejectionReason: "dated_article_invalid_cutoff" };
+  const maximumRewriteWindowMs = 7 * 24 * 60 * 60 * 1_000;
+  const article = directArticleJsonLd(input.html).find((item) => {
+    const published = Date.parse(typeof item.datePublished === "string" ? item.datePublished : "");
+    const modified = Date.parse(typeof item.dateModified === "string" ? item.dateModified : "");
+    if (!Number.isFinite(published) || !Number.isFinite(modified)
+      || published < Date.UTC(1990, 0, 1) || modified < published
+      || modified > cutoff || modified - published > maximumRewriteWindowMs) return false;
+    const structuredUrls = directArticleStructuredUrls(item).map(comparablePublicArticleUrl).filter(Boolean);
+    return structuredUrls.length === 0 || structuredUrls.includes(canonicalUrl);
+  });
+  if (!article) {
+    return { evidence: null, rejectionReason: "dated_article_missing_cutoff_safe_newsarticle_dates" };
+  }
+  const publishedAt = new Date(Date.parse(String(article.datePublished))).toISOString();
+  const modifiedAt = new Date(Date.parse(String(article.dateModified))).toISOString();
+  const timestamp = modifiedAt.replace(/[-:T.Z]/g, "").slice(0, 14);
+  const prepared = extractPreparedArchivedEvidence({
+    record: input.record,
+    candidate: { ...input.candidate, url: canonicalUrl },
+    capture: {
+      timestamp,
+      capturedAt: modifiedAt,
+      originalUrl: canonicalUrl,
+      statusCode: "200",
+      digest: null,
+      mimeType: "text/html",
+      archivedUrl: canonicalUrl,
+    },
+    html: input.html,
+  });
+  if (!prepared.evidence) return prepared;
+  if (prepared.evidence.publishedAt !== publishedAt
+    || prepared.evidence.publicationDateMethod !== "jsonld.datePublished") {
+    return { evidence: null, rejectionReason: "dated_article_publication_metadata_is_ambiguous" };
+  }
+  return {
+    evidence: {
+      ...prepared.evidence,
+      archiveProvider: "direct_dated_article",
+      providerRequestId: timestamp,
+    },
+    rejectionReason: null,
+  };
+}
+
 function extractTitle(html: string, fallback: string, athleteName: string) {
   const title = decodeHtmlEntities(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
     .replace(/\s+/g, " ").trim();
@@ -1451,6 +1585,8 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
     .filter(Boolean);
   const titleNamesAthlete = segments.length > 0
     && ` ${normalizeEvidenceText(segments[0])} `.includes(` ${normalizedName} `);
+  const normalizedSurname = normalizedName.split(/\s+/).at(-1) || "";
+  const escapedSurname = normalizedSurname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const athleteFeatureTitle = input.claimType === "creator_behavior_signal"
     && titleNamesAthlete
     && /\b(?:interview|entretien|entrevista|podcast|her story|meet)\b/i.test(segments[0]);
@@ -1472,6 +1608,22 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
     const directlyRefersBack = /^(?:she|he|they|the athlete|the player|the fighter|the rider|the surfer|the driver|the runner)\b/i.test(segment);
     if (directlyRefersBack && ` ${normalizedPrevious} `.includes(` ${normalizedName} `)) {
       return `${previous} ${segment}`.slice(0, 1_000);
+    }
+
+    // Editorial fight cards and event previews commonly introduce the exact
+    // full name in a matchup sentence, then use the athlete's surname in the
+    // following short bio. Permit that continuation only when the signal
+    // sentence starts with the exact surname and the full name appears within
+    // the prior three bounded sentences. Returning both sentences preserves
+    // the identity anchor in the frozen quote and prevents a teammate's or
+    // neighboring card participant's audience from being inherited.
+    const surnameRefersBack = normalizedSurname.length >= 4
+      && new RegExp(`^${escapedSurname}\\b`).test(normalizedSegment);
+    const recentIdentityAnchor = segments.slice(Math.max(0, index - 3), index).reverse().find((candidate) =>
+      ` ${normalizeEvidenceText(candidate)} `.includes(` ${normalizedName} `)
+    );
+    if (surnameRefersBack && recentIdentityAnchor) {
+      return `${recentIdentityAnchor} ${segment}`.slice(0, 1_000);
     }
 
     // Interview and profile headlines often name the athlete once, followed by

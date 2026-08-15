@@ -6,6 +6,7 @@ import {
   commonCrawlIndexUrl,
   extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
+  extractPreparedDatedArticleEvidence,
   extractPreparedArchivedPdfEvidence,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
@@ -13,6 +14,8 @@ import {
   selectWaybackCapture,
   wikimediaRevisionApiUrl,
   waybackCdxUrl,
+  HISTORICAL_ARCHIVE_PROVIDER_VERSION,
+  HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   type HistoricalSearchCandidate,
   type PreparedArchivedEvidence,
 } from "../src/lib/research/historical-evidence-preparation.ts";
@@ -28,8 +31,11 @@ function argument(name: string) {
 const athleteName = argument("athlete");
 const canonicalUrl = argument("url");
 const requiredClaim = argument("required-claim") || "adult_eligibility";
-if (!new Set(["adult_eligibility", "athlete_profile", "athletic_momentum"]).has(requiredClaim)) {
-  throw new Error("--required-claim must be adult_eligibility, athlete_profile, or athletic_momentum");
+if (!new Set([
+  "adult_eligibility", "athlete_profile", "athletic_momentum", "audience_signal",
+  "creator_behavior_signal", "commercial_achievability_signal",
+]).has(requiredClaim)) {
+  throw new Error("--required-claim is not a supported evidence claim");
 }
 if (!athleteName || !canonicalUrl) {
   throw new Error("Usage requires --athlete=\"Athlete Name\" and --url=https://public-source.example/profile");
@@ -63,6 +69,31 @@ const candidate: HistoricalSearchCandidate = {
 
 function hasRequiredClaim(evidence: PreparedArchivedEvidence | null) {
   return Boolean(evidence?.claims.some((claim) => claim.claimType === requiredClaim));
+}
+
+async function retrieveDirectDatedArticleEvidence() {
+  const response = await fetch(canonicalUrl, {
+    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!response?.ok || !/html|xhtml/i.test(response.headers.get("content-type") || "")) return null;
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (contentLength > 2_000_000) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 2_000_000) return null;
+  const html = new TextDecoder().decode(bytes).slice(0, 1_000_000);
+  const prepared = extractPreparedDatedArticleEvidence({ record, candidate, html });
+  if (!hasRequiredClaim(prepared.evidence)) return null;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  return {
+    item: {
+      ...prepared.evidence!,
+      contentHash,
+      providerRequestId: `sha256:${contentHash}`,
+    },
+    html,
+  };
 }
 
 async function retrieveCommonCrawlEvidence() {
@@ -172,7 +203,9 @@ async function retrieveWikimediaRevisionEvidence() {
   };
 }
 
-let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveWikimediaRevisionEvidence()
+let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveDirectDatedArticleEvidence()
+  .then((value) => value ? { item: value.item, content: value.html } : null);
+if (!recovered) recovered = await retrieveWikimediaRevisionEvidence()
   .then((value) => value ? { item: value.item, content: value.html } : null);
 if (!recovered) {
   const cdxResponse = await fetch(waybackCdxUrl(canonicalUrl, record.evidence_cutoff_at), {
@@ -206,7 +239,7 @@ if (!recovered) {
   const commonCrawl = await retrieveCommonCrawlEvidence();
   if (commonCrawl) recovered = { item: commonCrawl.item, content: commonCrawl.html };
 }
-if (!recovered) throw new Error(`No cutoff-safe Wikimedia, Wayback, or Common Crawl capture contained the required ${requiredClaim} evidence`);
+if (!recovered) throw new Error(`No cutoff-safe dated article, Wikimedia, Wayback, or Common Crawl source contained the required ${requiredClaim} evidence`);
 
 const { item, content } = recovered;
 const verifiedAt = new Date().toISOString();
@@ -218,7 +251,7 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   domain: item.domain,
   title: item.title,
   publisher: item.domain,
-  source_type: "archive",
+  source_type: item.archiveProvider === "direct_dated_article" ? "news" : "archive",
   provider: item.archiveProvider || "internet_archive_wayback",
   provider_request_id: item.providerRequestId || item.captureTimestamp,
   published_at: item.publishedAt,
@@ -230,10 +263,15 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   exclusion_reason: null,
   cost_microusd: 0,
   metadata: {
-    preparation_method: "operator_supplied_authoritative_archive_source",
+    preparation_method: item.archiveProvider === "direct_dated_article"
+      ? "operator_supplied_cutoff_safe_dated_article"
+      : "operator_supplied_authoritative_archive_source",
     capture_timestamp: item.captureTimestamp,
     verification: `shared_exact_name_sport_${requiredClaim}_and_cutoff_extractor`,
     evaluation_only: true,
+    archive_provider: item.archiveProvider || "internet_archive_wayback",
+    archive_provider_version: HISTORICAL_ARCHIVE_PROVIDER_VERSION,
+    extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
     scoring_tokens_spent: 0,
   },
 }, { onConflict: "organization_id,golden_record_id,canonical_url,historical_as_of" }).select("id").single();

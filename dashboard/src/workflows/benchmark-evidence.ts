@@ -589,7 +589,7 @@ async function reconcilePreparedSignalClaims(input: {
     .in("golden_record_id", input.recordIds)
     .in("claim_type", ["athletic_momentum", "audience_signal", "commercial_achievability_signal"])
     .eq("eligible_for_scoring", true)
-    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile"]);
+    .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile", "direct_dated_article"]);
   if (error) throw error;
   const unsupportedIds = ((data || []) as unknown as StoredPreparedSignalClaim[])
     .filter((claim) => !preparedEvidenceSignalSupported(claim.claim_type, claim.source_excerpt || ""))
@@ -622,7 +622,7 @@ async function reconcilePreparedAdultClaims(input: {
       .in("golden_record_id", input.recordIds)
       .eq("claim_type", "adult_eligibility")
       .eq("eligible_for_scoring", true)
-      .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile"]),
+      .in("research_evidence_sources.provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile", "direct_dated_article"]),
   ]);
   if (recordError) throw recordError;
   if (claimError) throw claimError;

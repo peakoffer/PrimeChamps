@@ -121,6 +121,7 @@ import {
   extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
+  extractPreparedDatedArticleEvidence,
   groundedHistoricalSignalDiscoveryCandidates,
   historicalDiscoveryReplayCoverageMatches,
   normalizeWikipediaWikitext,
@@ -2972,6 +2973,68 @@ test("archived evidence extraction requires exact identity and sport and preserv
   });
   assert.equal(siblingAgeMention.rejectionReason, null);
   assert.ok(!siblingAgeMention.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
+});
+
+test("direct dated articles admit only tightly timestamped, attributable pre-cutoff evidence", () => {
+  const record = {
+    id: "golden-daryn",
+    athlete_name: "Daryn Harris",
+    sport: "Boxing",
+    fit_label: "fit" as const,
+    evidence_cutoff_at: "2026-05-11T23:59:59Z",
+  };
+  const url = "https://sports.example/daryn-harris-undercard";
+  const candidate = {
+    query: '"Daryn Harris" boxing Instagram followers',
+    title: "Daryn Harris undercard",
+    url,
+    snippet: "Daryn Harris is a boxer and kickboxer.",
+  };
+  const article = (overrides: { modified?: string; body?: string; includeModified?: boolean } = {}) => {
+    const modified = overrides.modified || "2025-08-30T00:29:02Z";
+    const body = overrides.body || "Further down the card is Carla Jade vs. Daryn Harris. Jade is the champion. Harris is a boxer and kickboxer with over 76.7K followers on Instagram.";
+    const metadata = {
+      "@context": "https://schema.org",
+      "@type": "NewsArticle",
+      url,
+      headline: "Daryn Harris undercard",
+      datePublished: "2025-08-29T21:35:35Z",
+      ...(overrides.includeModified === false ? {} : { dateModified: modified }),
+    };
+    return `<html><head><link href="${url}" rel="canonical"><script type="application/ld+json">${JSON.stringify(metadata)}</script></head><body><main><h3>Daryn Harris boxing profile</h3><p>${body}</p></main></body></html>`;
+  };
+
+  const accepted = extractPreparedDatedArticleEvidence({ record, candidate, html: article() });
+  assert.equal(accepted.rejectionReason, null);
+  assert.equal(accepted.evidence?.archiveProvider, "direct_dated_article");
+  assert.equal(accepted.evidence?.historicalAsOf, "2025-08-30T00:29:02.000Z");
+  assert.ok(accepted.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const missingModified = extractPreparedDatedArticleEvidence({
+    record, candidate, html: article({ includeModified: false }),
+  });
+  assert.equal(missingModified.evidence, null);
+  assert.equal(missingModified.rejectionReason, "dated_article_missing_cutoff_safe_newsarticle_dates");
+
+  const afterCutoff = extractPreparedDatedArticleEvidence({
+    record, candidate, html: article({ modified: "2026-05-12T00:00:00Z" }),
+  });
+  assert.equal(afterCutoff.evidence, null);
+  assert.equal(afterCutoff.rejectionReason, "dated_article_missing_cutoff_safe_newsarticle_dates");
+
+  const lateRewrite = extractPreparedDatedArticleEvidence({
+    record, candidate, html: article({ modified: "2025-09-10T00:00:00Z" }),
+  });
+  assert.equal(lateRewrite.evidence, null);
+  assert.equal(lateRewrite.rejectionReason, "dated_article_missing_cutoff_safe_newsarticle_dates");
+
+  const wrongPersonAudience = extractPreparedDatedArticleEvidence({
+    record,
+    candidate,
+    html: article({ body: "Daryn Harris is a boxer and kickboxer. Carla Jade has over 76.7K followers on Instagram." }),
+  });
+  assert.equal(wrongPersonAudience.rejectionReason, null);
+  assert.ok(!wrongPersonAudience.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
 });
 
 test("archived Instagram handles require athlete attribution and reject publisher footer accounts", () => {
