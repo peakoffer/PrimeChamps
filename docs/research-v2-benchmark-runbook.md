@@ -124,13 +124,23 @@ Production commit `678b90d` deploys benchmark runner v29 with the application-ow
 
 This is a passing development baseline, not a held-out production proof. It replays records from an already revealed historical cohort. Do not run the visible one-time held-out control against that archive. A legitimate release still requires a fresh, locked, unrevealed 8-positive/8-negative cohort; the current fresh evidence blocker is the positive side.
 
+### Authoritative live recovery checkpoint
+
+The production benchmark UI currently exposes 28 fresh, labeled, never-scored records: nine positive and 19 negative. Eight negatives are evidence-ready and zero positives are evidence-ready, so the fresh 8+8 challenge cannot be frozen yet. These live counts supersede the older recovery counts retained below as chronology.
+
+The rotated Social Blade credentials were authenticated in production on 2026-08-15. The health check reused a cached exact-handle profile, charged zero credits, and reported 71 credits remaining. The current positive blocker is evidence coverage, not Social Blade authentication. Nineteen distinct official profiles have been attempted, 13 returned a matched historical source, and exhausted/failed handles must not be retried merely to spend credits.
+
+The closest positive records are Tayla Relph and Catarina Guimaraes (historical audience only), Daryn Harris (a second independent 21+ source), and Sara Fruncillo (a second independent 21+ source plus historical audience). The remaining five positives have wider age, momentum, audience, or creator gaps. A bounded age-recovery replay for Daryn and Sara reused the paid Apify discovery checkpoint for zero new Apify spend but closed neither packet because the prior workflow had no grounded deep age-discovery lane and archive providers rate-limited some candidates.
+
+Age-recovery query plan v7 adds exactly one latest-Sonnet grounded search per athlete for direct, citation-bearing adult-eligibility sources. It remains discovery-only: every candidate URL must still pass exact athlete/sport matching, immutable pre-cutoff dating, explicit claim extraction, and independent-source corroboration before it can affect readiness. It performs no scoring, outreach, notification, or live-pipeline write. Signal recovery retains its separate two-lane search ceiling.
+
 Dylan's 100-case ledger remains the sole commercial ground truth: 44 positive and 56 negative. The current bounded audit loads 1,072 evidence sources and 2,155 claims, retains 1,657 cutoff-safe model claims, and finds 44 evidence-ready packets (17 positive / 27 negative) with 100/100 point-in-time compliance.
 
 Two disjoint benchmark releases are complete and revealed, leaving 32 development, 32 held-out, and 36 excluded records. The newest held-out release `c990033d-38b0-4139-9d27-cd2dbd23bf38` passed identity, 21+, source, unsupported-claim, point-in-time, and audit-accuracy gates, but above-80 precision was 7/8 = 87.5%. The one miss was Murat Kazgan; his later negative outcome depended on inactive OnlyFans use that was absent from the pre-decision evidence packet. All revealed records are archive-only. Never tune against Murat or rerun either revealed held-out set.
 
 OnlyFans platform activity is not observed in any of the 100 cutoff-safe packets (0 active / 0 inactive / 100 not observed). Missing platform evidence therefore stays neutral. A future weekly internal-intelligence record can supply a dated active/inactive contradiction when it was genuinely known before scoring, but the benchmark must not infer it from the outcome.
 
-The fresh excluded pool is 12 positive / 24 negative and currently 0/36 evidence-ready. A new challenge release requires at least eight evidence-ready cases per label. The positive side is the binding constraint; do not start another scoring benchmark until it closes.
+The older 12-positive / 24-negative excluded-pool count below predates later assignments and evidence audits. Use the authoritative 28-record live recovery checkpoint above for current execution. A new challenge release still requires at least eight evidence-ready cases per label. The positive side is the binding constraint; do not start another scoring benchmark until it closes.
 
 Benchmark runner v27 now matches production's business-context contract: a development run snapshots the active approved weekly recruiting thesis, rejects candidate-specific guidance, and persists its exact SHA-256 content identity. Researcher and independent Auditor stages receive that same immutable context with an explicit warning that it is not evidence. Held-out can run only with the exact development snapshot and the same still-current latest-Sonnet route. Historical benchmark results above are unchanged; no revealed cohort was rerun or tuned.
 

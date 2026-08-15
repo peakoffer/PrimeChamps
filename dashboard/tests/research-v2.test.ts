@@ -3713,7 +3713,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /Promise\.all\(records\.flatMap/);
   assert.match(workflow, /eligibility_momentum/);
   assert.match(workflow, /audience_creator/);
-  assert.match(workflow, /at most two tool calls and ten cited URLs per/);
+  assert.match(workflow, /Age recovery gets one narrow search; signal recovery gets two/);
+  assert.match(workflow, /name: "adult_eligibility"/);
+  assert.match(workflow, /input\.preparationMode === "age_recovery"/);
   assert.match(workflow, /max_uses: 1/);
   assert.match(workflow, /max_tool_calls: 1/);
   assert.match(workflow, /reasoning: \{ effort: "low", exclude: true \}/);

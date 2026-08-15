@@ -209,7 +209,10 @@ function normalizeName(value: string) {
     .replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-async function discoverGroundedDeepSignalSources(records: EvidencePreparationRecord[]) {
+async function discoverGroundedDeepSources(
+  records: EvidencePreparationRecord[],
+  preparationMode: "age_recovery" | "signal_recovery"
+) {
   const empty = {
     candidatesByRecord: Object.fromEntries(records.map((record) => [record.id, [] as HistoricalSearchCandidate[]])),
     model: null as string | null,
@@ -243,20 +246,22 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
   }
 
   const model = selectedModel.model;
-  const lanes = [
-    {
+  const lanes = preparationMode === "age_recovery"
+    ? [{
+      name: "adult_eligibility",
+      objective: "Find exact date-of-birth or explicit-age evidence. Prioritize official federations, regulators, event rosters, athlete profiles, and reputable dated sports interviews or coverage. Return multiple independent domains when possible.",
+    }] as const
+    : [{
       name: "eligibility_momentum",
       objective: "Find exact date-of-birth or explicit-age evidence and dated athletic results, rankings, qualifications, signings, starts, podiums, or competition momentum. Prioritize official federations, regulators, event results, teams, athlete profiles, and reputable dated sports coverage.",
-    },
-    {
+    }, {
       name: "audience_creator",
       objective: "Find a numeric follower, subscriber, fan, reach, view, or social-audience measurement and repeated creator activity such as posts, videos, vlogs, podcasts, photos, interviews, newsletters, or social publishing. Prioritize archived sponsorship decks, media kits, athlete marketplaces, analytics directories, sponsor profiles, personal sites, Linktree-style profiles, and reputable creator or trade coverage.",
-    },
-  ] as const;
-  // Two narrow searches consistently outperform one overloaded query while
-  // preserving a hard ceiling: at most two tool calls and ten cited URLs per
-  // athlete. Search results remain discovery metadata only; every accepted
-  // claim must still pass the immutable pre-cutoff archive validator.
+    }] as const;
+  // Age recovery gets one narrow search; signal recovery gets two. Both lanes
+  // stay bounded to one tool call and five cited URLs per athlete. Search
+  // results remain discovery metadata only; every accepted claim must still
+  // pass the immutable pre-cutoff archive validator.
   const calls = await Promise.all(records.flatMap((record) => lanes.map(async (lane) => {
     const prompt = `Use the web-search tool exactly once. Find up to five direct, archive-friendly public webpages for this exact athlete and this evidence lane only:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\nEvidence lane: ${lane.name}\nObjective: ${lane.objective}\n\nThe underlying fact and source page must have existed on or before the cutoff. Include multilingual sources and exact-handle pages when helpful. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, matching sport, and explicit source text supporting a claim.`;
     try {
@@ -531,7 +536,10 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
   const reusableDeepDiscoveryCandidates = input.reuseDeepDiscoveryCandidates;
   const reusableDeepDiscoveryCount = Object.values(reusableDeepDiscoveryCandidates || {})
     .reduce((sum, candidates) => sum + candidates.length, 0);
-  const deepDiscovery = input.preparationMode === "signal_recovery" && reusableDeepDiscoveryCount > 0
+  const groundedDeepDiscoveryMode = input.preparationMode === "age_recovery"
+    ? "age_recovery"
+    : input.preparationMode === "signal_recovery" ? "signal_recovery" : null;
+  const deepDiscovery = groundedDeepDiscoveryMode && reusableDeepDiscoveryCount > 0
     ? {
       candidatesByRecord: reusableDeepDiscoveryCandidates!,
       model: input.reuseDeepDiscoveryModel || "saved_grounded_discovery_checkpoint",
@@ -543,8 +551,8 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       error: null,
       reused: true,
     }
-    : input.preparationMode === "signal_recovery"
-      ? { ...(await discoverGroundedDeepSignalSources(records)), reused: false }
+    : groundedDeepDiscoveryMode
+      ? { ...(await discoverGroundedDeepSources(records, groundedDeepDiscoveryMode)), reused: false }
       : {
       candidatesByRecord: Object.fromEntries(records.map((record) => [record.id, [] as HistoricalSearchCandidate[]])),
       model: null,

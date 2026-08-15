@@ -3,7 +3,7 @@
 **Checkpoint date:** 2026-08-15
 **Repository:** `/Users/zacharyvanheyningen/Projects/primechamps`  
 **GitHub:** `peakoffer/PrimeChamps`  
-**Local branch:** `codex/research-engine-quality-loop`  
+**Local branch:** `main`
 **Production branch:** `main`  
 **Production:** <https://crm.prime-champs.com>  
 **Supabase project:** `rmxuwyxpoazsuqvdadlo`  
@@ -24,6 +24,10 @@ This block supersedes older counts later in this document. The older sections re
 - **2026-08-15 verified baseline:** production commit `678b90d` runs benchmark runner v29. Development replay `3cd5a04c-85ce-4f08-9a2c-dda0f61d440b` completed all 16 revealed archive cases with latest Sonnet (`anthropic/claude-sonnet-5`) for $1.043. It returned five finalists with 100% precision, 93.75% audit-decision accuracy, 100% auditor catch, 100% finalist identity/21+/audit pass, 100% source and point-in-time compliance, and zero unsupported claims. Strong-fit recall was 62.5%.
 - v29 fixes two measured failures without using labels or outcomes in prompts: a corroborated birth-date-derived age now triggers the maximum-priority-age ceiling, and `allCoreEvidenceGatesPassed` now selects a mandatory qualified-fit/high band instead of allowing subjective “reasonable reserve” drift. Murat Kazgan is still descriptively overfit, but his corroborated age deterministically caps priority at 69 and the audit pipeline records the false-finalist miss as caught.
 - This is development proof on revealed archive data only. The goal remains incomplete until a fresh 8+8 cohort is locked and run once. Do not reuse or reveal an old held-out archive. The immediate data blocker remains fresh positive cutoff-safe evidence.
+- **Authoritative live recovery state:** the production UI exposes 28 fresh labeled records that have never been scored: nine positive and 19 negative. Evidence readiness is `0 positive / 8 negative`. These counts supersede older pool/readiness counts later in this handoff, which are retained only as chronology.
+- The rotated Social Blade credentials were validated in production on 2026-08-15 using a cached exact-handle profile: authentication passed, zero credits were charged, and 71 credits remain. Nineteen distinct official profiles have been attempted and 13 returned matched historical sources. The blocker is now historical evidence coverage, not credential validity; do not retry exhausted handles.
+- The nearest positive gaps are: Tayla Relph and Catarina Guimaraes need historical audience; Daryn Harris needs a second independent 21+ source; Sara Fruncillo needs a second independent 21+ source plus historical audience. Maisey Rose Courtney, Mattia Vita, Callum Stedman, and Harry McCahill have wider age/momentum/audience/creator gaps.
+- A bounded Daryn/Sara age replay reused the existing paid Apify checkpoint at zero new Apify cost, but the old workflow lacked grounded deep age discovery and archive providers rate-limited some candidates. Query plan v7 adds one latest-Sonnet grounded adult-eligibility search per athlete. Results remain discovery metadata until exact identity, matching sport, immutable pre-cutoff dating, explicit source text, and independent corroboration pass deterministic validation. This route performs no scoring or live/outreach writes.
 
 - The authoritative 100-case audit currently finds 44 evidence-ready records: 17 positive and 27 negative. It loads 1,072 sources and 2,155 claims, of which 1,657 are cutoff-safe model evidence. Point-in-time compliance is 100/100.
 - Two disjoint 8+8 development / 8+8 held-out cohorts have been completed and revealed. Current assignments are 32 development, 32 held-out, and 36 excluded. Every held-out record is now archive-only and must never be tuned or reused as held-out.

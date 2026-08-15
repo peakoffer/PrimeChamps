@@ -6,9 +6,10 @@ import {
 } from "./benchmark-sport-validation.ts";
 
 export const HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION = "2026-08-12-editorial-age-v3";
-export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-14-exact-title-multilingual-age-recovery-v6";
+export const HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-grounded-deep-age-recovery-v7";
 export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
+  "2026-08-14-exact-title-multilingual-age-recovery-v6",
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
