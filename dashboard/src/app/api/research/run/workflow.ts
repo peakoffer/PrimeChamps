@@ -3772,6 +3772,7 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
   if (!ANTHROPIC_API_KEY) throw new Error("Anthropic audit model is not configured");
   for (let attempt = 1; attempt <= 2; attempt++) {
     const startedAt = Date.now();
+    const maxTokens = attempt === 1 ? 2_400 : 4_800;
     const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -3781,7 +3782,7 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
       },
       body: JSON.stringify({
         model,
-        max_tokens: 2_400,
+        max_tokens: maxTokens,
         output_config: { format: { type: "json_schema", schema } },
         messages: [{ role: "user", content: sanitizeUnicodeForJson(prompt) }],
       }),
@@ -3793,6 +3794,7 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
     const payload = await response.json() as {
       content?: Array<{ type?: string; text?: string }>;
       usage?: AnthropicUsage;
+      stop_reason?: string;
     };
     const content = (payload.content || []).filter((block) => block.type === "text").map((block) => block.text || "").join("\n");
     const match = content.match(/\{[\s\S]*\}/);
@@ -3807,7 +3809,7 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
         // Retry once with the same strict schema.
       }
     }
-    log(`    ${model} returned invalid audit JSON (attempt ${attempt}/2)`);
+    log(`    ${model} returned invalid audit JSON (attempt ${attempt}/2; stop=${payload.stop_reason || "unknown"}; outputChars=${content.length}; maxTokens=${maxTokens})`);
   }
   throw new Error(`${model} returned invalid audit JSON twice`);
 }
@@ -4600,6 +4602,7 @@ Respond with ONLY valid JSON:
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     const scoreRequestStartedAt = Date.now();
+    const maxTokens = attempt === 1 ? 1_800 : 3_600;
     const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -4609,7 +4612,7 @@ Respond with ONLY valid JSON:
       },
       body: JSON.stringify({
         model: scoringModel,
-        max_tokens: 1_800,
+        max_tokens: maxTokens,
         output_config: {
           format: {
             type: "json_schema",
@@ -4635,6 +4638,7 @@ Respond with ONLY valid JSON:
     const data = (await response.json()) as {
       content?: Array<{ type?: string; text?: string }>;
       usage?: AnthropicUsage;
+      stop_reason?: string;
     };
     const content = (data.content || [])
       .filter((block) => block.type === "text" && block.text)
@@ -4758,7 +4762,7 @@ Respond with ONLY valid JSON:
       }
     }
 
-    log(`    ${scoringModel} returned invalid scoring JSON for ${athlete.name} (attempt ${attempt}/2)`);
+    log(`    ${scoringModel} returned invalid scoring JSON for ${athlete.name} (attempt ${attempt}/2; stop=${data.stop_reason || "unknown"}; outputChars=${content.length}; maxTokens=${maxTokens})`);
   }
 
   throw new Error(`${scoringModel} returned invalid scoring JSON twice for ${athlete.name}`);

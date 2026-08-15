@@ -550,6 +550,15 @@ test("evaluation profiles default to a genuinely bounded smoke budget", () => {
   assert.ok(smoke.enrichmentPoolLimit < getResearchEvaluationBudget("development").enrichmentPoolLimit);
 });
 
+test("Anthropic structured-output retries expand truncated scoring and audit budgets", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /const maxTokens = attempt === 1 \? 2_400 : 4_800/);
+  assert.match(workflow, /const maxTokens = attempt === 1 \? 1_800 : 3_600/);
+  assert.match(workflow, /stop_reason\?: string/);
+  assert.match(workflow, /stop=\$\{payload\.stop_reason \|\| "unknown"\}/);
+  assert.match(workflow, /stop=\$\{data\.stop_reason \|\| "unknown"\}/);
+});
+
 test("paid enrichment gives fresh discovery priority without discarding memory", () => {
   const selected = selectBalancedResearchCandidates([
     ...Array.from({ length: 8 }, (_, index) => ({ id: `memory-${index}`, discovery_lane: "memory" as const })),
