@@ -2958,6 +2958,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
   assert.match(workflow, /scoringTokensSpent: 0/);
   assert.match(workflow, /openrouter:web_search/);
+  assert.match(workflow, /google\/gemini-3\.7-flash/);
   assert.match(workflow, /engine: "exa"/);
   assert.match(workflow, /mode: "deep"/);
   assert.match(workflow, /max_uses: Math\.min\(10, records\.length\)/);

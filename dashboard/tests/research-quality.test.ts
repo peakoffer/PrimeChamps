@@ -969,7 +969,7 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /findInstagramCandidatesWithOpenAI/);
   assert.match(workflowSource, /named source publishes Instagram handle/);
   assert.match(workflowSource, /OpenAI resolved.*attributable Instagram identities/);
-  assert.match(workflowSource, /google\/gemini-3\.6-flash/);
+  assert.match(workflowSource, /google\/gemini-3\.7-flash/);
   assert.match(workflowSource, /type: "openrouter:web_search"/);
   assert.match(workflowSource, /RESEARCH_IDENTITY_PROVIDER === "openrouter"/);
   assert.match(instagramProviderSource, /apify\/instagram-search-scraper/);

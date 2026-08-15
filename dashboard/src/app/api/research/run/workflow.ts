@@ -76,7 +76,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_RESEARCH_MODEL = process.env.OPENAI_RESEARCH_MODEL || "gpt-5.6";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_IDENTITY_MODEL = process.env.OPENROUTER_IDENTITY_MODEL || "google/gemini-3.6-flash";
+const OPENROUTER_IDENTITY_MODEL = process.env.OPENROUTER_IDENTITY_MODEL || "google/gemini-3.7-flash";
 const RESEARCH_IDENTITY_PROVIDER = process.env.RESEARCH_IDENTITY_PROVIDER === "openrouter"
   ? "openrouter"
   : process.env.RESEARCH_IDENTITY_PROVIDER === "openai"

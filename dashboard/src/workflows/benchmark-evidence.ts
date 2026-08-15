@@ -214,7 +214,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
   if (!apiKey || !records.length) return empty;
   const model = process.env.OPENROUTER_EVIDENCE_DISCOVERY_MODEL?.trim()
     || process.env.OPENROUTER_IDENTITY_MODEL?.trim()
-    || "google/gemini-3.6-flash";
+    || "google/gemini-3.7-flash";
   const cases = records.map((record) => ({
     athlete_name: record.athlete_name,
     sport: record.sport,
