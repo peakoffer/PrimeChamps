@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-gate-aware-positive-recovery-v14";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-athlete-feature-and-identity-fold-v18";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-boxing-section-age-attribution-v19";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-wayback-availability-fallback-v16";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -1345,6 +1345,10 @@ function statedAgeSharesAthleteClause(name: string, evidence: string) {
 }
 
 export function parsePreparedAgeEvidenceForAthlete(name: string, text: string, now = new Date()) {
+  const rejectsFollowingCategoryHeader = (result: ReturnType<typeof parseAgeEvidenceForAthlete>) => Boolean(
+    result?.parsed.precision === "birth_year"
+    && /\b(?:finals?|semifinals?|qualifiers?|category|class)\s+(?:male|female|men|women)\s*\(\s*(?:born|birth\s*year)\b/i.test(result.evidence)
+  );
   // A stated age must stay in the same clause as the athlete's own name. Exact
   // birth facts can tolerate normal profile chrome, but the wider window never
   // admits a loose age phrase that could belong to a teammate or sibling.
@@ -1353,9 +1357,11 @@ export function parsePreparedAgeEvidenceForAthlete(name: string, text: string, n
     && !statedAgeSharesAthleteClause(name, parsedNearbyAge.evidence)
     ? null
     : parsedNearbyAge;
-  if (nearbyAge) return nearbyAge;
+  if (nearbyAge && !rejectsFollowingCategoryHeader(nearbyAge)) return nearbyAge;
   const extendedAge = parseAgeEvidenceForAthlete(name, text, now, 220);
-  return extendedAge?.parsed.precision === "stated_age" ? null : extendedAge;
+  return extendedAge?.parsed.precision === "stated_age" || rejectsFollowingCategoryHeader(extendedAge)
+    ? null
+    : extendedAge;
 }
 
 function extractBirthDate(text: string) {
@@ -1512,7 +1518,9 @@ export function validatePreparedAgeEvidenceForSource(input: {
 
   if (wider?.parsed.precision === "stated_age") {
     const profileAgeField = /\b(?:place of birth|date of birth|height|status)\b[\s\S]{0,450}\bage\s*[:\-]?\s*\d{1,2}\b/i.test(wider.evidence);
-    const currentAgePhrase = /\b(?:at\s+)?(?:just\s+)?\d{1,2}\s+years?\s+old\b/i.test(wider.evidence);
+    const historicalAgePhrase = /\b(?:then|later)\s+at\s+(?:just\s+)?\d{1,2}\s+years?\s+old\b|\bwhen\s+(?:she|he|they|the\s+athlete)\s+(?:was|were)\s+(?:only\s+|just\s+)?\d{1,2}\s+years?\s+old\b/i.test(wider.evidence);
+    const currentAgePhrase = !historicalAgePhrase
+      && /\b(?:at\s+)?(?:just\s+)?\d{1,2}\s+years?\s+old\b/i.test(wider.evidence);
     if (profileAgeField || currentAgePhrase) {
       return { attributableAge: wider, officialCompactBirthDate: null };
     }

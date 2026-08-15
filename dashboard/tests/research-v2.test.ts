@@ -231,6 +231,42 @@ test("archived Spanish birthday reporting is attributable without treating child
   assert.equal(childhoodAge.attributableAge, null);
 });
 
+test("archived boxing tables do not attach the following category birth year to the prior athlete", () => {
+  const result = validatePreparedAgeEvidenceForSource({
+    athleteName: "Maisey Rose Courtney",
+    domain: "strefa.pl",
+    title: "England Talent Results 2018",
+    observedAt: new Date("2025-08-10T07:46:52.000Z"),
+    text: `2018-02-18
+54kg
+Chloe Morris
+Maisey-Rose
+Courtney
+2018-02-18
+57kg
+Elise Glynn
+Ellie Wilson
+Finals male (born 2001)
+2018-02-18`,
+  });
+  assert.equal(result.attributableAge, null);
+  assert.equal(result.officialCompactBirthDate, null);
+});
+
+test("archived athlete features do not promote a childhood milestone into adult eligibility", () => {
+  const result = validatePreparedAgeEvidenceForSource({
+    athleteName: "Tayla Relph",
+    domain: "abc.net.au",
+    title: "Australia's fastest female motorcycle road racer Tayla Relph",
+    observedAt: new Date("2025-07-24T20:51:14.000Z"),
+    text: `Twenty-four years ago, Tayla Relph's parents took their then toddler daughter to a Crusty Demons meet.
+Tayla Relph was barely three when she got her first motorbike.
+Then at 10 years old she began racing competitively.`,
+  });
+  assert.equal(result.attributableAge, null);
+  assert.equal(result.officialCompactBirthDate, null);
+});
+
 test("archived JSON-LD article bodies remain available for exact athlete evidence", () => {
   const prepared = extractPreparedArchivedEvidence({
     record: {
