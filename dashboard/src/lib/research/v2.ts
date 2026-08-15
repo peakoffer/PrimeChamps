@@ -52,13 +52,16 @@ export function hasOutcomeGroundTruth(record: Record<string, unknown>) {
 
 export function hasResolvedGoldenRecordSport(record: Record<string, unknown>) {
   const sport = typeof record.sport === "string" ? record.sport.trim().toLowerCase() : "";
-  const unresolvedTag = Array.isArray(record.stratification_tags)
-    && record.stratification_tags.some((tag) => tag === "needs_sport_enrichment"
-      || tag === "sport_enrichment_identity_conflict"
-      || tag === "sport_enrichment_public_search_exhausted");
+  // `needs_sport_enrichment` and `sport_enrichment_public_search_exhausted`
+  // describe an earlier lookup attempt, not the current field value. Once a
+  // non-placeholder sport is supplied and evidence supports it, those stale
+  // workflow tags must not hide the packet from the UI or cohort freeze. A
+  // hard identity conflict remains quarantined until explicitly resolved.
+  const identityConflict = Array.isArray(record.stratification_tags)
+    && record.stratification_tags.includes("sport_enrichment_identity_conflict");
   return Boolean(sport)
     && !["needs enrichment", "unknown", "unresolved"].includes(sport)
-    && !unresolvedTag;
+    && !identityConflict;
 }
 
 export type GoldenRecordInput = {

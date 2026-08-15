@@ -1156,6 +1156,22 @@ test("sport-unresolved Dylan records stay quarantined from split assignment", ()
   }), false);
 });
 
+test("a resolved sport is not hidden by a stale exhausted-enrichment tag", () => {
+  assert.equal(isGoldenRecordReadyForSplit({
+    benchmark_split: "excluded",
+    sport: "Speed skating",
+    fit_label: "fit",
+    achievability_label: "high",
+    point_in_time_reliability: "strong",
+    label_order_fit_before_outcome: false,
+    decision_at: "2026-02-11T12:00:00Z",
+    evidence_cutoff_at: "2026-02-11T12:00:00Z",
+    decisive_information_publicly_knowable: null,
+    labeled_at: "2026-08-11T12:00:00Z",
+    stratification_tags: ["dylan_outcome_ground_truth", "sport_enrichment_public_search_exhausted"],
+  }), true);
+});
+
 test("benchmark metrics reward precision rather than score volume", () => {
   const base = {
     predictedFit: "fit" as const,
