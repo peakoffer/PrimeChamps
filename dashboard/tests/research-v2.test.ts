@@ -340,6 +340,22 @@ test("official commission tables resolve DOB only from a dated exact-athlete reg
     ].join("\n"),
   });
   assert.equal(proDebutWithoutFederalId?.birthDate, "1999-11-24");
+  const proDebutSplitAfterAthlete = extractOfficialCommissionAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl: "https://www2.myfloridalicense.com/pro/sbc/documents/1-23-26-Brand_Risk_Promotions-Results_without_med.pdf",
+    publishedAt: "2026-01-23",
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+    sourceText: [
+      "MATCH RESULTS Event Date: 1/23/2026 Event Type: Boxing",
+      "FLORIDA ATHLETIC COMMISSION",
+      "Bout Corner Sport Participant Name Hometown DOB Weight",
+      "Blue Daryn Harris Miami, FL 11/24/1999",
+      "Pro",
+      "Debut 119.4 Win",
+    ].join("\n"),
+  });
+  assert.equal(proDebutSplitAfterAthlete?.birthDate, "1999-11-24");
   assert.equal(extractOfficialCommissionAdultEvidence({
     athleteName: "Crystal Pittman",
     sport: "Combat Sports",

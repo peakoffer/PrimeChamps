@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   commonCrawlIndexUrl,
   extractCommonCrawlWarcBody,
+  extractOfficialCommissionAdultEvidence,
   extractPreparedArchivedEvidence,
   extractPreparedDatedArticleEvidence,
   extractPreparedArchivedPdfEvidence,
@@ -93,6 +94,83 @@ async function retrieveDirectDatedArticleEvidence() {
       providerRequestId: `sha256:${contentHash}`,
     },
     html,
+  };
+}
+
+function officialCommissionPdfDateFromUrl(value: string) {
+  let pathname: string;
+  try { pathname = new URL(value).pathname; } catch { return null; }
+  const match = pathname.match(/(?:^|\/)(\d{1,2})[-_](\d{1,2})[-_](\d{2}|\d{4})(?:[-_]|$)/);
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const rawYear = Number(match[3]);
+  const year = match[3].length === 2 ? 2000 + rawYear : rawYear;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date.toISOString();
+}
+
+async function retrieveDirectOfficialCommissionPdfEvidence() {
+  if (!canonicalUrl.toLowerCase().endsWith(".pdf")) return null;
+  const publishedAt = officialCommissionPdfDateFromUrl(canonicalUrl);
+  if (!publishedAt || !record.evidence_cutoff_at
+    || Date.parse(publishedAt) > Date.parse(record.evidence_cutoff_at)) return null;
+  const response = await fetch(canonicalUrl, {
+    headers: { Accept: "application/pdf", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!response?.ok || !/pdf/i.test(response.headers.get("content-type") || "")) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 12_000_000) return null;
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(bytes, { maxImageSize: 16_777_216 });
+  if (!pdf.numPages || pdf.numPages > 80) return null;
+  const extracted = await extractText(pdf, { mergePages: true });
+  const sourceText = String(extracted.text || "").slice(0, 360_000);
+  const adult = extractOfficialCommissionAdultEvidence({
+    athleteName: record.athlete_name,
+    sport: record.sport,
+    sourceUrl: canonicalUrl,
+    sourceText,
+    publishedAt,
+    evidenceCutoffAt: record.evidence_cutoff_at,
+  });
+  if (!adult || requiredClaim !== "adult_eligibility") return null;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  const captureTimestamp = publishedAt.replace(/[-:T.Z]/g, "").slice(0, 14);
+  return {
+    item: {
+      canonicalUrl,
+      archivedUrl: canonicalUrl,
+      domain: adult.domain,
+      title: candidate.title,
+      publishedAt: adult.publishedAt,
+      historicalAsOf: adult.publishedAt,
+      contentHash,
+      captureTimestamp,
+      publicationDateMethod: "official_regulator_filename_and_participant_table",
+      searchQuery: candidate.query,
+      searchSnippet: candidate.snippet,
+      archiveProvider: "official_dated_profile" as const,
+      providerRequestId: `sha256:${contentHash}`,
+      claims: [{
+        claimType: "adult_eligibility" as const,
+        claimText: `${record.athlete_name} has a public birth date of ${adult.birthDate}.`,
+        structuredValue: {
+          birth_date: adult.birthDate,
+          birth_year: Number(adult.birthDate.slice(0, 4)),
+          precision: "birth_date",
+          age_as_of: adult.publishedAt,
+        },
+        sourceExcerpt: adult.excerpt,
+        effectiveAt: adult.publishedAt,
+        extractionConfidence: 99,
+        material: true,
+      }],
+    },
+    content: bytes,
   };
 }
 
@@ -203,7 +281,8 @@ async function retrieveWikimediaRevisionEvidence() {
   };
 }
 
-let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveDirectDatedArticleEvidence()
+let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveDirectOfficialCommissionPdfEvidence();
+if (!recovered) recovered = await retrieveDirectDatedArticleEvidence()
   .then((value) => value ? { item: value.item, content: value.html } : null);
 if (!recovered) recovered = await retrieveWikimediaRevisionEvidence()
   .then((value) => value ? { item: value.item, content: value.html } : null);

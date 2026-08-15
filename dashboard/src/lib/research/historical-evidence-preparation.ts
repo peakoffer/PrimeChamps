@@ -851,10 +851,14 @@ export function extractOfficialCommissionAdultEvidence(input: {
     const row = lines[index];
     if (!` ${normalizeEvidenceText(row)} `.includes(` ${normalizedAthlete} `)) continue;
     // Some commission PDFs wrap "Pro" onto the line immediately before the
-    // athlete row and leave "Debut" on the row itself. Keep that exception
-    // tightly bounded to the adjacent line instead of relaxing the row check.
+    // athlete row and leave "Debut" on the row itself. Others place both
+    // tokens on the two lines immediately after the athlete row. Keep both
+    // exceptions tightly bounded instead of relaxing the regulator-row check.
     const previousRow = lines[index - 1] || "";
-    const wrappedProDebut = /^\s*Pro\s*$/i.test(previousRow) && /\bDebut\b/i.test(row);
+    const nextRow = lines[index + 1] || "";
+    const followingRow = lines[index + 2] || "";
+    const wrappedProDebut = (/^\s*Pro\s*$/i.test(previousRow) && /\bDebut\b/i.test(row))
+      || (/^\s*Pro\s*$/i.test(nextRow) && /^\s*Debut\b/i.test(followingRow));
     if (!/\b[A-Z]{2}-?\d{5,}\b/.test(row) && !wrappedProDebut) continue;
     // Multi-page commission exports often print the table header only once,
     // then place several bouts beneath it. Keep the window bounded but wide
