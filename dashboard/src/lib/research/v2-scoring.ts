@@ -99,6 +99,7 @@ export function passesResearchV2FinalGate(input: ResearchV2Score & {
   currentAthleticMomentumVerified: boolean;
   meaningfulAudienceVerified: boolean;
   creatorPotentialVerified: boolean;
+  onlyFansPlatformActivityCompatible: boolean;
   commercialConstraintsComplete: boolean;
   materialClaimsVerified: boolean;
   auditorVerdict: "pass" | "corrected" | "fail";
@@ -113,6 +114,7 @@ export function passesResearchV2FinalGate(input: ResearchV2Score & {
     && input.currentAthleticMomentumVerified
     && input.meaningfulAudienceVerified
     && input.creatorPotentialVerified
+    && input.onlyFansPlatformActivityCompatible
     && input.commercialConstraintsComplete
     && input.materialClaimsVerified
     && input.auditorVerdict !== "fail"

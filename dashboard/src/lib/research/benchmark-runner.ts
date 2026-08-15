@@ -24,6 +24,7 @@ import {
   benchmarkCaseReadiness,
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
+  benchmarkOnlyFansPlatformActivityGate,
   BENCHMARK_PRE_OUTREACH_CALIBRATION,
   buildBenchmarkResearcherPrompt,
   canonicalBenchmarkMaterialClaims,
@@ -48,7 +49,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v25";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v26";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -466,14 +467,15 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 8,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v8",
+    version: 9,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v9",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
       above_80_gates: [
         "two_source_identity", "two_source_21_plus", "current_momentum", "audience",
-        "creator_behavior", "commercial_constraints", "exact_quote_material_claim_support", "blind_audit",
+        "creator_behavior", "no_inactive_onlyfans_profile", "commercial_constraints",
+        "exact_quote_material_claim_support", "blind_audit",
       ],
       audit_score_policy: "minimum_of_researcher_blind_auditor_and_review_with_deterministic_evidence_precheck",
       audience_policy: "contextual_emerging_athlete_signal_not_a_50000_follower_floor",
@@ -481,10 +483,11 @@ async function ensureBenchmarkArtifacts(input: {
       material_claim_policy: "model_selects_refs_application_emits_immutable_claims_and_quotes",
       structured_output_policy: "strict_runtime_schema_validation_before_persistence",
       platform_willingness_required: false,
+      onlyfans_platform_policy: "no_profile_neutral_active_profile_positive_inactive_existing_profile_blocks_finalist",
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v8",
+    definition_hash: "research-v2-benchmark-rubric-v9",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -505,7 +508,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 15,
+      version: 16,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -530,15 +533,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence plus deterministic no-label gate summaries; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-researcher-v15",
+      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence plus deterministic no-label gate summaries; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; no platform profile is neutral, an active exact profile is positive, and an explicitly inactive exact profile is a blocker; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
+      content_hash: "research-v2-benchmark-researcher-v16",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
-      content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries before comparison with the Researcher assessment; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-auditor-v15",
+      content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries before comparison with the Researcher assessment; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; no profile is neutral and an explicitly inactive exact OnlyFans profile blocks a finalist; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
+      content_hash: "research-v2-benchmark-auditor-v16",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -968,6 +971,7 @@ async function processBenchmarkCase(input: {
   const adultGate = benchmarkAdultEligibilityGate(record, selection.evidence);
   const momentumGate = benchmarkCurrentMomentumGate(record, selection.evidence);
   const creatorPotentialGate = benchmarkCreatorPotentialGate(record, selection.evidence);
+  const onlyFansPlatformGate = benchmarkOnlyFansPlatformActivityGate(selection.evidence);
   const deterministicPrecheck = benchmarkDeterministicGateSummary(record, selection.evidence);
   const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
   const evidenceHash = stableEvidenceSetHash(modelEvidence.map((item) => ({
@@ -1147,6 +1151,7 @@ async function processBenchmarkCase(input: {
       ? ["Two-source 21+ eligibility was not verified consistently by the researcher and auditor."] : []),
     ...(proposedFinalist && !momentumGate.passed ? ["No source-backed athletic momentum was verified within 24 months of the evidence cutoff."] : []),
     ...(proposedFinalist && !creatorPotentialGate.passed ? ["Both audience and creator-behavior evidence are required for a finalist."] : []),
+    ...(proposedFinalist && !onlyFansPlatformGate.passed ? ["An exact existing OnlyFans profile is inactive or closed at the evidence cutoff."] : []),
     ...(proposedFinalist && !blind.commercial_constraints_complete ? ["Commercial achievability constraints are incomplete."] : []),
   ];
   const forcedFailure = !identityGate.passed || !researcher.identity_confirmed || !blind.identity_passed
@@ -1179,6 +1184,7 @@ async function processBenchmarkCase(input: {
     currentAthleticMomentumVerified: momentumGate.passed,
     meaningfulAudienceVerified: creatorPotentialGate.audienceEvidenceCount > 0,
     creatorPotentialVerified: creatorPotentialGate.creatorEvidenceCount > 0,
+    onlyFansPlatformActivityCompatible: onlyFansPlatformGate.passed,
     commercialConstraintsComplete: blind.commercial_constraints_complete,
     materialClaimsVerified: citationQuality.sourceVerificationRate === 1
       && blind.source_verification_passed
@@ -1260,6 +1266,7 @@ async function processBenchmarkCase(input: {
     ...(!adultGate.passed ? [{ failure_type: "unverified_eligibility", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "Corroborated 21+ eligibility was not established before the cutoff.", proposed_fix: "Add two independent dated birth or age sources from before the cutoff before treating this case as a finalist." }] : []),
     ...(!momentumGate.passed ? [{ failure_type: "stale_information", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "No source-backed athletic momentum was verified within 24 months of the cutoff.", proposed_fix: "Add a dated result, ranking, signing, roster promotion, or comparable current source before treating this case as a finalist." }] : []),
     ...(!creatorPotentialGate.passed ? [{ failure_type: "missing_source", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "The evidence does not establish both audience and creator behavior.", proposed_fix: "Add a dated audience snapshot and creator-behavior source before treating this case as a finalist." }] : []),
+    ...(!onlyFansPlatformGate.passed ? [{ failure_type: "criteria_drift", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "An exact existing OnlyFans profile is inactive or closed at the evidence cutoff.", proposed_fix: "Require fresher exact-profile evidence proving reactivation before reconsidering this candidate." }] : []),
     ...(!blind.commercial_constraints_complete ? [{ failure_type: "achievability_error", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "Commercial achievability constraints are incomplete.", proposed_fix: "Resolve career-tier accessibility and likely economics before treating this case as a finalist." }] : []),
   ];
   if (findings.length) {
@@ -1290,6 +1297,7 @@ async function processBenchmarkCase(input: {
     || researcherAchievabilityLabel !== record.achievability_label
     || (researcherScoring.priority > 80 && (
       !identityGate.passed || !adultGate.passed || !momentumGate.passed || !creatorPotentialGate.passed
+      || !onlyFansPlatformGate.passed
       || !blind.commercial_constraints_complete || citationQuality.unsupportedClaimCount > 0
     ));
   const finalPredictionCorrect = correctedFitLabel === record.fit_label

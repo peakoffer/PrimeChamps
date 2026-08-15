@@ -61,6 +61,7 @@ export type PreparedHistoricalEvidenceDetail = {
     | "audience_signal"
     | "social_engagement_signal"
     | "creator_behavior_signal"
+    | "onlyfans_platform_activity_signal"
     | "athletic_momentum"
     | "adult_eligibility_hint"
     | "commercial_achievability_signal";
@@ -153,6 +154,7 @@ const DETAIL_CATEGORY_CONFIGURATION = {
   "Average Likes or Average Engagement at Decision": { claimType: "social_engagement_signal", material: true, platform: "instagram" },
   "Creator Activity at Decision": { claimType: "creator_behavior_signal", material: true },
   "Posting Frequency at Decision": { claimType: "creator_behavior_signal", material: true },
+  "OnlyFans Platform Activity at Decision": { claimType: "onlyfans_platform_activity_signal", material: true },
   "Athletic Momentum at Decision": { claimType: "athletic_momentum", material: true },
   "Momentum Date or Season": { claimType: "athletic_momentum", material: true },
   "Date of Birth": { claimType: "adult_eligibility_hint", material: false },

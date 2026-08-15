@@ -36,7 +36,7 @@ export type BenchmarkGoldenCase = {
 };
 
 export const BENCHMARK_PRE_OUTREACH_CALIBRATION = `PRE-OUTREACH CALIBRATION
-- A finalist that clears every core gate should normally land above 80 priority: identity and 21+ are independently corroborated; current athletic relevance is source-backed; a meaningful personal audience and creator behavior are present; and the career tier is realistically accessible.
+- A finalist that clears every core gate should normally land above 80 priority: identity and 21+ are independently corroborated; current athletic relevance is source-backed; a meaningful personal audience and creator behavior are present; the career tier is realistically accessible; and there is no exact, cutoff-dated evidence that an existing OnlyFans profile is inactive or closed.
 - Finalist anchor: when those core dimensions are all present, use fit 86-91, commercial achievability 76-84, and research confidence 82-90. Do not apply this anchor when any core dimension is missing or contradictory.
 - Fit 80-85 is a promising reserve, not automatically a finalist, when the evidence is positive but one core dimension is thin, stale, or only indirectly supported.
 - When a required adult-eligibility or audience gate fails, use fit 45-58, commercial achievability 35-44, and confidence 42-58. Strong athletic momentum, a proposed posting cadence, or known economics cannot by themselves replace those missing pre-outreach gates.
@@ -44,9 +44,10 @@ export const BENCHMARK_PRE_OUTREACH_CALIBRATION = `PRE-OUTREACH CALIBRATION
 - A roughly 50,000-500,000 personal audience is a strong accessibility band, not a hard minimum. A smaller or qualitative athlete-specific audience signal can still be meaningful for an emerging or niche-sport athlete when creator behavior and realistic career-tier accessibility are present. One platform is sufficient; missing cross-platform data is optional, not critical.
 - Treat the deterministic precheck as the authoritative reading of whether the frozen dossier contains each core signal. Do not turn a passed audience or creator gate into a failure solely because the audience is below 50,000, qualitative, or lacks cross-platform corroboration. Strength can affect the score within the anchor range, but it is not a missing gate.
 - Commercial achievability 70-85 is supported for a non-iconic or realistically accessible career tier with a meaningful audience and creator/brand behavior. Representation, a business contact path, or prior platform activity strengthens the score but is not required.
+- No exact OnlyFans profile is neutral in a pre-outreach evaluation. An exact active profile is positive platform evidence. An exact existing profile that is inactive, closed to subscribers, abandoned, or explicitly awaiting reactivation is a material contradiction: fit must stay below 60 and the candidate cannot be a finalist until fresher evidence proves reactivation.
 - Research confidence 80-90 is supported when identity and 21+ are independently corroborated, material claims cite valid pre-decision evidence, the cutoff is respected, and the core momentum/audience/creator dimensions are present. Missing optional amplifiers must not cap confidence below 80.
 - Fit below 60 is appropriate when public evidence lacks both a meaningful personal audience and creator/brand behavior even if the athlete is competitively successful.
-- Critical gaps are limited to unresolved identity, insufficient 21+ corroboration, no source-backed current athletic relevance, no meaningful audience/creator evidence, material contradiction, invalid citations, or post-cutoff evidence. Do not list representation, cross-platform reach, platform-specific history, adult-content willingness, lifestyle content, market receptivity, or exact economics as critical when the core proxies are present.`;
+- Critical gaps are limited to unresolved identity, insufficient 21+ corroboration, no source-backed current athletic relevance, no meaningful audience/creator evidence, an explicitly inactive existing OnlyFans profile, material contradiction, invalid citations, or post-cutoff evidence. Do not list representation, cross-platform reach, the mere absence of platform-specific history, adult-content willingness, lifestyle content, market receptivity, or exact economics as critical when the core proxies are present.`;
 
 export type BenchmarkEvidenceSourceRow = {
   id: string;
@@ -127,6 +128,7 @@ const MODEL_EVIDENCE_CAPS: Record<string, number> = {
   audience_signal: 2,
   social_engagement_signal: 2,
   creator_behavior_signal: 2,
+  onlyfans_platform_activity_signal: 2,
   commercial_achievability_signal: 2,
   candidate_evidence: 2,
 };
@@ -542,12 +544,46 @@ export function benchmarkCreatorPotentialGate(record: BenchmarkGoldenCase, evide
   };
 }
 
+export function benchmarkOnlyFansPlatformActivityGate(evidence: LeakageSafeBenchmarkEvidence[]) {
+  const signals = evidence.filter((item) => {
+    const text = `${item.title}\n${item.claim}\n${item.excerpt}`;
+    return item.claimType === "onlyfans_platform_activity_signal"
+      || (item.claimType === "candidate_evidence" && /\bonly\s*fans\b/i.test(text));
+  }).sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt));
+  const classified: Array<{
+    item: LeakageSafeBenchmarkEvidence;
+    status: "active" | "inactive";
+  }> = [];
+  for (const item of signals) {
+    const text = `${item.title}\n${item.claim}\n${item.excerpt}`;
+    const inactive = /\b(?:only\s*fans)\b[\s\S]{0,160}\b(?:inactive|not\s+active|dormant|closed|disabled|abandoned|no\s+longer\s+(?:posting|active)|cannot\s+(?:subscribe|add\s+subscribers?))\b/i.test(text)
+      || /\b(?:inactive|not\s+active|dormant|closed|disabled|abandoned|no\s+longer\s+(?:posting|active))\b[\s\S]{0,160}\b(?:only\s*fans)\b/i.test(text);
+    const active = /\b(?:only\s*fans)\b[\s\S]{0,160}\b(?:active|reactivat(?:ed|ion)|renewed\s+(?:posting|activity)|currently\s+posting|open\s+to\s+subscribers?|\d[\d,]*\+?\s+(?:fans|subscribers?))\b/i.test(text)
+      || /\b(?:active|reactivat(?:ed|ion)|renewed\s+(?:posting|activity)|currently\s+posting)\b[\s\S]{0,160}\b(?:only\s*fans)\b/i.test(text);
+    if (inactive) classified.push({ item, status: "inactive" });
+    else if (active) classified.push({ item, status: "active" });
+  }
+  const latest = classified[0];
+  return {
+    passed: latest?.status !== "inactive",
+    status: latest?.status || "not_observed" as "active" | "inactive" | "not_observed",
+    evidenceCount: classified.length,
+    freshestAt: latest?.item.effectiveAt || null,
+  };
+}
+
 export type BenchmarkDeterministicGateSummary = {
   identity: { passed: boolean; independentSources: number };
   adultEligibility: { passed: boolean; independentSources: number };
   currentMomentum: { passed: boolean; evidenceCount: number; freshestAt: string | null };
   audience: { passed: boolean; evidenceCount: number };
   creatorBehavior: { passed: boolean; evidenceCount: number };
+  onlyFansPlatformActivity: {
+    passed: boolean;
+    status: "active" | "inactive" | "not_observed";
+    evidenceCount: number;
+    freshestAt: string | null;
+  };
   allCoreEvidenceGatesPassed: boolean;
 };
 
@@ -559,6 +595,7 @@ export function benchmarkDeterministicGateSummary(
   const adult = benchmarkAdultEligibilityGate(record, evidence);
   const momentum = benchmarkCurrentMomentumGate(record, evidence);
   const creator = benchmarkCreatorPotentialGate(record, evidence);
+  const platformActivity = benchmarkOnlyFansPlatformActivityGate(evidence);
   const summary = {
     identity: { passed: identity.passed, independentSources: identity.independentSources },
     adultEligibility: { passed: adult.passed, independentSources: adult.independentSources },
@@ -569,13 +606,15 @@ export function benchmarkDeterministicGateSummary(
     },
     audience: { passed: creator.audienceEvidenceCount > 0, evidenceCount: creator.audienceEvidenceCount },
     creatorBehavior: { passed: creator.creatorEvidenceCount > 0, evidenceCount: creator.creatorEvidenceCount },
+    onlyFansPlatformActivity: platformActivity,
     allCoreEvidenceGatesPassed: false,
   };
   summary.allCoreEvidenceGatesPassed = summary.identity.passed
     && summary.adultEligibility.passed
     && summary.currentMomentum.passed
     && summary.audience.passed
-    && summary.creatorBehavior.passed;
+    && summary.creatorBehavior.passed
+    && summary.onlyFansPlatformActivity.passed;
   return summary;
 }
 
@@ -723,6 +762,7 @@ export function benchmarkEvidenceFreezeReadiness(input: {
   const adult = benchmarkAdultEligibilityGate(input.record, input.selection.evidence);
   const momentum = benchmarkCurrentMomentumGate(input.record, input.selection.evidence);
   const creatorPotential = benchmarkCreatorPotentialGate(input.record, input.selection.evidence);
+  const platformActivity = benchmarkOnlyFansPlatformActivityGate(input.selection.evidence);
   const domains = new Set(input.selection.evidence.map((item) => item.independenceGroup));
   const reasons: string[] = [];
   if (!input.selection.pointInTimeCompliant) reasons.push("point-in-time evidence is unsafe");
@@ -732,7 +772,8 @@ export function benchmarkEvidenceFreezeReadiness(input: {
   if (input.fitLabel === "fit" && !adult.passed) reasons.push("fit record lacks two-source 21+ corroboration");
   if (input.fitLabel === "fit" && !momentum.passed) reasons.push("fit record lacks source-backed current athletic momentum");
   if (input.fitLabel === "fit" && !creatorPotential.passed) reasons.push("fit record lacks both audience and creator-behavior evidence");
-  return { ready: reasons.length === 0, reasons, identity, adult, momentum, creatorPotential, independentSources: domains.size };
+  if (input.fitLabel === "fit" && !platformActivity.passed) reasons.push("fit record has an explicit inactive OnlyFans profile at the cutoff");
+  return { ready: reasons.length === 0, reasons, identity, adult, momentum, creatorPotential, platformActivity, independentSources: domains.size };
 }
 
 export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
@@ -801,8 +842,9 @@ SCORING
 - Research confidence measures identity, corroborated 21+ eligibility, evidence freshness, source independence, and completeness.
 - A candidate cannot be recommended above 80 with unresolved identity, missing two-source 21+ corroboration, unsupported material claims, or critical commercial gaps.
 - Do not require public evidence that the athlete wants OnlyFans or adult content. That is not normally knowable before outreach; its absence is neutral and must not be listed as a critical gap.
+- Treat no exact OnlyFans profile as neutral. If the dossier proves that an exact existing profile is active, count that as positive platform evidence. If it proves the profile is inactive, closed, abandoned, or awaiting reactivation, treat that as a critical contradiction and keep fit below 60.
 - Missing representation or a public business contact lowers achievability only when the rest of the public proxy evidence is insufficient; it is not an automatic blocker.
-- A strong pre-outreach fit may be supported by verified-adult status, current athletic momentum, a meaningful personal audience, creator-led content, and realistic career-tier accessibility without any platform-specific signal.
+- A strong pre-outreach fit may be supported by verified-adult status, current athletic momentum, a meaningful personal audience, creator-led content, and realistic career-tier accessibility without any platform-specific signal, provided there is no explicit inactive-profile contradiction.
 - Return four to six distinct E-numbers in material_evidence_refs. Select the strongest frozen records that directly support identity, adult eligibility, momentum, audience/creator opportunity, and accessibility. Application code will create exact material claims and quotes from those immutable records; never invent an E-number.
 - Put only failed core gates in critical_gaps. Put optional missing amplifiers and unanswered non-blocking questions in limitations. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
 - Keep reasoning under 120 words and return no more than six material evidence references, five critical gaps, and five limitations.

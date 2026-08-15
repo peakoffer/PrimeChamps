@@ -4,6 +4,7 @@ import {
   runApifyGoogleSearch,
   runApifyGoogleSearchQueries,
   type ApifyInstagramProfile,
+  type ApifyOnlyFansReverseLookup,
 } from "@/lib/apify";
 import { resolveAnthropicScoringModel } from "@/lib/ai/anthropic-models";
 import {
@@ -69,6 +70,10 @@ import {
   type ResearchDepth,
 } from "@/lib/research/intelligence";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
+import {
+  selectOnlyFansPlatformSignal,
+  type OnlyFansPlatformSignal,
+} from "@/lib/research/onlyfans-platform-signal";
 
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
@@ -86,6 +91,8 @@ const APIFY_GOOGLE_IDENTITY_FALLBACK = process.env.RESEARCH_APIFY_GOOGLE_IDENTIT
 const APIFY_GOOGLE_DOSSIER_FALLBACK = process.env.RESEARCH_APIFY_GOOGLE_DOSSIER_FALLBACK === "true";
 const APIFY_GOOGLE_AGE_LOOKUP = process.env.RESEARCH_APIFY_GOOGLE_AGE_LOOKUP !== "false";
 const APIFY_INSTAGRAM_SEARCH_ACTOR = process.env.APIFY_INSTAGRAM_SEARCH_ACTOR || "apify/instagram-search-scraper";
+const APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR = process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR
+  || "sentry/onlyfans-reverse-lookup";
 
 const supabase = createAdminClient({ disableRealtime: true });
 const PROVIDER_TIMEOUT_MS = 45_000;
@@ -149,7 +156,7 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
 } as const;
 
 const RESEARCH_V2_RUBRIC_DEFINITION = {
-  version: "v2.2",
+  version: "v2.3",
   dimensions: {
     onlyfans_fit: "Public-evidence opportunity quality, independent of price or access",
     commercial_achievability: "Access, representation, likely economics, geography, and realistic close probability",
@@ -167,14 +174,16 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
     source_backed_momentum_required: true,
     meaningful_audience_required: true,
     source_backed_creator_potential_required: true,
+    onlyfans_platform_check_required: true,
+    inactive_existing_onlyfans_profile_blocks_finalist: true,
     complete_commercial_constraints_required: true,
     independent_audit_required: true,
     critical_gaps_allowed: 0,
   },
 } as const;
 
-const RESEARCHER_PROMPT_RECORD = "Research V2.2 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity and two independent agreeing sources proving 21+ eligibility.";
-const AUDITOR_PROMPT_RECORD = "Research V2.2 blind auditor: independently verify corroborated exact-person Instagram identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
+const RESEARCHER_PROMPT_RECORD = "Research V2.3 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity, two independent agreeing sources proving 21+ eligibility, and a completed exact-match OnlyFans platform check with no inactive-profile contradiction.";
+const AUDITOR_PROMPT_RECORD = "Research V2.3 blind auditor: independently verify corroborated exact-person Instagram identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, exact-match OnlyFans platform activity compatibility, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
 
 const RESEARCH_AUDIT_BLIND_SCHEMA = {
   type: "object",
@@ -505,6 +514,15 @@ interface EnrichedAthlete extends DiscoveredAthlete {
     days_between_snapshots?: number;
     status: "baseline" | "measured";
   };
+  onlyfans_platform_status?: OnlyFansPlatformSignal["status"];
+  onlyfans_platform_check_completed?: boolean;
+  onlyfans_profile_exact_match?: boolean;
+  onlyfans_profile_username?: string | null;
+  onlyfans_profile_url?: string | null;
+  onlyfans_profile_last_seen?: string | null;
+  onlyfans_profile_posts_count?: number | null;
+  onlyfans_subscriptions_open?: boolean | null;
+  onlyfans_platform_reason?: string;
 }
 
 function verifyDiscoveredAthlete(athlete: DiscoveredAthlete): DiscoveredAthlete {
@@ -649,15 +667,15 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     .eq("organization_id", input.organizationId)
     .eq("rubric_key", "onlyfans_fit_achievability_confidence")
     .eq("status", "active")
-    .neq("version", 3);
+    .neq("version", 4);
   if (rubricArchiveError) throw rubricArchiveError;
   const { data: rubric, error: rubricError } = await supabase.from("research_rubric_versions").upsert({
     organization_id: input.organizationId,
     rubric_key: "onlyfans_fit_achievability_confidence",
-    version: 3,
-    name: "OnlyFans fit, achievability, confidence, and priority v2.2",
+    version: 4,
+    name: "OnlyFans fit, achievability, confidence, and priority v2.3",
     definition: RESEARCH_V2_RUBRIC_DEFINITION,
-    definition_hash: "research-v2.2-rubric-corroborated-identity-and-21-plus-v3",
+    definition_hash: "research-v2.3-rubric-onlyfans-platform-activity-gate-v4",
     status: "active",
     activated_at: new Date().toISOString(),
   }, { onConflict: "organization_id,rubric_key,version" }).select("id").single();
@@ -670,13 +688,13 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
       .eq("prompt_key", promptKey)
       .eq("role", role)
       .eq("status", "active")
-      .neq("version", 3);
+      .neq("version", 4);
     if (promptArchiveError) throw promptArchiveError;
     const { data, error } = await supabase.from("research_prompt_versions").upsert({
       organization_id: input.organizationId,
       prompt_key: promptKey,
       role,
-      version: 3,
+      version: 4,
       content,
       content_hash: contentHash,
       output_schema: role === "auditor"
@@ -689,8 +707,8 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     return data.id as string;
   };
   const [researcherPromptVersionId, auditorPromptVersionId] = await Promise.all([
-    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.2-researcher-corroborated-identity-and-21-plus-v3"),
-    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.2-blind-auditor-corroborated-identity-and-21-plus-v3"),
+    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.3-researcher-onlyfans-platform-activity-gate-v4"),
+    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.3-blind-auditor-onlyfans-platform-activity-gate-v4"),
   ]);
 
   const ensureModel = async (capability: "judgment" | "audit") => {
@@ -1391,7 +1409,7 @@ Requirements:
 - Prefer ${thesisParams.follower_min.toLocaleString()}-${thesisParams.follower_max.toLocaleString()} Instagram followers, a strong personal brand, regular fitness/lifestyle content, direct fan engagement, and realistic accessibility
 - Deprioritize retired athletes, late-career veterans, mega-celebrities, and multi-cycle icons unless the brief explicitly requests them
 - Do not infer willingness to create adult content from appearance, clothing, body type, gender expression, or sexuality; use only professional, audience, creator, and business evidence
-- AVOID: athletes already on OnlyFans, minors, inactive accounts, team-only pages, and identities without authoritative sport evidence
+- AVOID: minors, inactive social accounts, team-only pages, and identities without authoritative sport evidence. Do not exclude an athlete merely for having an OnlyFans profile; an exact active profile is positive evidence, while an exact inactive or closed profile is a blocker.
 
 For each athlete, provide:
 - Full name
@@ -3371,6 +3389,69 @@ async function lookupAthleteAge(
   }
 }
 
+function unavailableOnlyFansPlatformSignal(reason: string): OnlyFansPlatformSignal {
+  return {
+    status: "unknown",
+    checkCompleted: false,
+    exactMatch: false,
+    matchedBy: null,
+    username: null,
+    url: null,
+    lastSeen: null,
+    postsCount: null,
+    subscriptionsOpen: null,
+    reason,
+  };
+}
+
+async function lookupOnlyFansPlatformSignals(athletes: EnrichedAthlete[]) {
+  const byCandidate = new Map<string, OnlyFansPlatformSignal>();
+  if (!athletes.length) return byCandidate;
+  if (!APIFY_API_KEY) {
+    for (const athlete of athletes) {
+      byCandidate.set(
+        researchCandidateKey(athlete.name, athlete.sport),
+        unavailableOnlyFansPlatformSignal("The OnlyFans platform check could not run because Apify is unavailable.")
+      );
+    }
+    return byCandidate;
+  }
+  const seeds = Array.from(new Set(athletes.flatMap((athlete) => [
+    athlete.instagram_handle ? `https://www.instagram.com/${athlete.instagram_handle.replace(/^@/, "")}/` : "",
+    athlete.name,
+  ]).filter(Boolean)));
+  try {
+    const results = await runApifyActor<ApifyOnlyFansReverseLookup>(
+      APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR,
+      { seeds },
+      {
+        datasetLimit: Math.max(seeds.length, athletes.length * 2),
+        timeoutMs: 120_000,
+        maxTotalChargeUsd: 0.5,
+      }
+    );
+    const checkedAt = new Date().toISOString();
+    for (const athlete of athletes) {
+      byCandidate.set(researchCandidateKey(athlete.name, athlete.sport), selectOnlyFansPlatformSignal({
+        athleteName: athlete.name,
+        instagramHandle: athlete.instagram_handle,
+        results,
+        checkedAt,
+      }));
+    }
+  } catch (error) {
+    const reason = `The OnlyFans platform check failed safely: ${describeError(error)}`;
+    log(reason);
+    for (const athlete of athletes) {
+      byCandidate.set(
+        researchCandidateKey(athlete.name, athlete.sport),
+        unavailableOnlyFansPlatformSignal(reason)
+      );
+    }
+  }
+  return byCandidate;
+}
+
 async function persistPartialScoringCheckpoint(
   input: ResearchWorkflowInput,
   candidates: ScoredAthlete[],
@@ -3447,6 +3528,7 @@ async function scoreAthletes(
       break;
     }
     const batch = pendingAthletes.slice(index, index + scoringBatchSize);
+    const onlyFansPlatformByCandidate = await lookupOnlyFansPlatformSignals(batch);
     const apifyAgeByCandidate = await lookupAthleteAgesWithApify(batch);
     const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(
       batch.filter((athlete) =>
@@ -3483,6 +3565,21 @@ async function scoreAthletes(
       const athleteForScoring: EnrichedAthlete = {
         ...athlete,
         evidence: mergedEvidence,
+        ...(() => {
+          const signal = onlyFansPlatformByCandidate.get(candidateKey)
+            || unavailableOnlyFansPlatformSignal("The OnlyFans platform check did not return a result for this candidate.");
+          return {
+            onlyfans_platform_status: signal.status,
+            onlyfans_platform_check_completed: signal.checkCompleted,
+            onlyfans_profile_exact_match: signal.exactMatch,
+            onlyfans_profile_username: signal.username,
+            onlyfans_profile_url: signal.url,
+            onlyfans_profile_last_seen: signal.lastSeen,
+            onlyfans_profile_posts_count: signal.postsCount,
+            onlyfans_subscriptions_open: signal.subscriptionsOpen,
+            onlyfans_platform_reason: signal.reason,
+          };
+        })(),
         ...(ageInfo.age !== null ? {
           age: ageInfo.age,
           age_verified: ageInfo.isMinor === true || ageInfo.corroborated,
@@ -3749,6 +3846,9 @@ function deterministicResearchV2FinalistEvidence(athlete: ScoredAthlete, followe
       followerMinimum,
     }),
     creatorPotential: hasSourceBackedResearchV2Signal(athlete.creator_evidence, sources),
+    onlyFansPlatformCheckCompleted: athlete.onlyfans_platform_check_completed === true,
+    onlyFansPlatformCompatible: athlete.onlyfans_platform_check_completed === true
+      && !(athlete.onlyfans_profile_exact_match === true && athlete.onlyfans_platform_status === "inactive"),
   };
 }
 
@@ -3833,7 +3933,7 @@ async function auditPriorityCandidate(
 
 You have NOT been shown the Researcher's score. Independently determine whether the public evidence supports this person as a current, source-verified adult athlete and whether the research is complete enough to judge OnlyFans fit and commercial achievability.
 
-Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Independently require a specific current athletic-momentum source, a meaningful verified audience, and a concrete source-backed creator/content behavior signal. Sponsorship alone is not creator behavior. Do not infer adult-content willingness from appearance or identity.
+Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Independently require a specific current athletic-momentum source, a meaningful verified audience, a concrete source-backed creator/content behavior signal, and a completed exact-match OnlyFans platform check. No exact profile is neutral. An exact active profile is positive evidence; an exact inactive, closed, or dormant profile is a critical contradiction. Sponsorship alone is not creator behavior. Do not infer adult-content willingness from appearance or identity.
 
 CANDIDATE (NO PROPOSED SCORE):
 - Name: ${athlete.name}
@@ -3847,6 +3947,7 @@ CANDIDATE (NO PROPOSED SCORE):
 - Followers / engagement / latest activity: ${athlete.follower_count || 0} / ${athlete.engagement_rate ?? "unknown"}% / ${athlete.last_posted_at || "unknown"}
 - Instagram profile / bio: ${athlete.instagram_url || "missing"} / ${(athlete.bio || "not available").slice(0, 500)}
 - Recent Instagram posts: ${(athlete.latest_posts || []).slice(0, 6).map((post) => `${post.timestamp || "unknown date"} (${post.url || "missing URL"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "none"}
+- Exact OnlyFans platform check: completed ${athlete.onlyfans_platform_check_completed === true ? "yes" : "no"}; status ${athlete.onlyfans_platform_status || "unknown"}; exact match ${athlete.onlyfans_profile_exact_match === true ? "yes" : "no"}; profile ${athlete.onlyfans_profile_url || athlete.onlyfans_profile_username || "none"}; last seen ${athlete.onlyfans_profile_last_seen || "unknown"}; posts ${athlete.onlyfans_profile_posts_count ?? "unknown"}; subscriptions ${athlete.onlyfans_subscriptions_open === null || athlete.onlyfans_subscriptions_open === undefined ? "unknown" : athlete.onlyfans_subscriptions_open ? "open" : "closed"}; ${athlete.onlyfans_platform_reason || "no provider explanation"}
 - Research evidence: ${(athlete.evidence || []).slice(0, 12).map((item) => `${(item.title || "Source").slice(0, 200)} (${item.url || "missing URL"}): ${(item.sourceExcerpt || item.claim).slice(0, 700)}`).join(" | ") || "none"}
 - Independently retrieved audit evidence: ${independentResults.slice(0, 10).map((item) => `${item.title.slice(0, 200)} (${item.url}): ${item.snippet.slice(0, 500)}`).join(" | ") || "none retrieved"}
 - Random claim re-fetch: ${claimSample.sampled} sampled; ${claimSample.unsupported} failed; ${claimSample.failures.join(" | ") || "no failures"}
@@ -3906,6 +4007,10 @@ Return pass only if the proposed dimensions are justified and there is no critic
     !deterministicEvidence.currentMomentum ? "No source-backed current athletic-momentum citation matched the frozen dossier" : null,
     !deterministicEvidence.meaningfulAudience ? "Verified audience did not meet the active minimum or exceptional-engagement rule" : null,
     !deterministicEvidence.creatorPotential ? "No source-backed creator/content behavior citation matched the frozen dossier" : null,
+    !deterministicEvidence.onlyFansPlatformCheckCompleted ? "Exact-match OnlyFans platform check did not complete" : null,
+    deterministicEvidence.onlyFansPlatformCheckCompleted && !deterministicEvidence.onlyFansPlatformCompatible
+      ? "An exact existing OnlyFans profile is inactive, closed, or dormant"
+      : null,
     !blind.current_momentum_passed ? "Independent auditor did not verify current athletic momentum" : null,
     !blind.audience_evidence_passed ? "Independent auditor did not verify meaningful audience evidence" : null,
     !blind.creator_evidence_passed ? "Independent auditor did not verify creator potential" : null,
@@ -3930,6 +4035,8 @@ Return pass only if the proposed dimensions are justified and there is no critic
     || !deterministicEvidence.currentMomentum
     || !deterministicEvidence.meaningfulAudience
     || !deterministicEvidence.creatorPotential
+    || !deterministicEvidence.onlyFansPlatformCheckCompleted
+    || !deterministicEvidence.onlyFansPlatformCompatible
     || claimSample.unsupported > 0
     || criticalGaps.length > 0;
   const verdict = forcedFailure ? "fail" : review.verdict;
@@ -4001,6 +4108,7 @@ Return pass only if the proposed dimensions are justified and there is no critic
     currentAthleticMomentumVerified: deterministicEvidence.currentMomentum && blind.current_momentum_passed,
     meaningfulAudienceVerified: deterministicEvidence.meaningfulAudience && blind.audience_evidence_passed,
     creatorPotentialVerified: deterministicEvidence.creatorPotential && blind.creator_evidence_passed,
+    onlyFansPlatformActivityCompatible: deterministicEvidence.onlyFansPlatformCompatible,
     commercialConstraintsComplete: blind.commercial_constraints_complete,
     materialClaimsVerified: blind.source_verification_passed && claimSample.unsupported === 0 && (blind.unsupported_claims?.length || 0) === 0,
     auditorVerdict: verdict,
@@ -4370,12 +4478,16 @@ ATHLETE PROFILE:
 - Recent post evidence: ${athlete.latest_posts?.slice(0, 4).map((post) => `${post.timestamp || "unknown date"} (${post.url || "URL unavailable"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "not available"}
 - Bio: ${athlete.bio || "No bio"}
 - Verified: ${athlete.verified ? "Yes" : "No"}
+- Exact OnlyFans platform check: ${athlete.onlyfans_platform_check_completed === true
+    ? `${athlete.onlyfans_platform_status || "unknown"}${athlete.onlyfans_profile_exact_match ? ` exact profile ${athlete.onlyfans_profile_url || athlete.onlyfans_profile_username || "matched"}` : " (no exact profile found; neutral)"}; last seen ${athlete.onlyfans_profile_last_seen || "unknown"}; posts ${athlete.onlyfans_profile_posts_count ?? "unknown"}; subscriptions ${athlete.onlyfans_subscriptions_open === null || athlete.onlyfans_subscriptions_open === undefined ? "unknown" : athlete.onlyfans_subscriptions_open ? "open" : "closed"}`
+    : `not completed; ${athlete.onlyfans_platform_reason || "provider result unavailable"}`}
 
 HARD GATES (not weighted points):
 - The person and Instagram identity must resolve to the same real professional athlete
 - Professional status must have a direct or reputable current source
 - Age must be corroborated by two independent agreeing public sources as 21 or older before a finalist can score above 80
 - The account must be public and active
+- The exact-match OnlyFans platform check must complete before a finalist can qualify. No exact profile is neutral. An exact active profile is positive platform evidence. An exact inactive, closed, abandoned, or dormant profile is a critical contradiction and cannot qualify until fresher evidence proves reactivation.
 - A failed gate must be described in concerns and cannot be recommended for Approval
 - An 80+ proposal must include at least one momentum_evidence citation and one creator_evidence citation copied from the supplied dossier. Each source_url must be an exact URL shown above and each source_excerpt must be text actually present at that URL. Return an empty evidence array when the dossier does not support the claim.
 
@@ -4440,6 +4552,7 @@ CALIBRATION:
 - A score of 80 means evidence-backed and ready for human review, not perfect or guaranteed to convert
 - A baseline follower snapshot is not itself a penalty when dated competition momentum, current engagement, and creator/business evidence are already strong
 - Never move a candidate into the 80+ band to fill a quota; missing age, identity, activity, sport evidence, creator evidence, or strong objective fit must remain below 80
+- Never move a candidate into the 80+ band when the OnlyFans platform check did not complete or found an exact inactive/closed profile
 
 Respond with ONLY valid JSON:
 {
@@ -4552,11 +4665,16 @@ Respond with ONLY valid JSON:
           const objectiveFit = ["strong", "possible", "weak"].includes(String(parsed.objective_fit))
             ? parsed.objective_fit as "strong" | "possible" | "weak"
             : "weak";
+          const platformCheckIncomplete = athlete.onlyfans_platform_check_completed !== true;
+          const inactiveOnlyFansProfile = athlete.onlyfans_profile_exact_match === true
+            && athlete.onlyfans_platform_status === "inactive";
+          const platformFitCeiling = inactiveOnlyFansProfile ? 59 : platformCheckIncomplete ? 79 : 100;
+          const platformAchievabilityCeiling = inactiveOnlyFansProfile ? 44 : platformCheckIncomplete ? 69 : 100;
           const v2Score = buildResearchV2Score({
-            onlyfansFit: parsed.onlyfans_fit_score,
-            commercialAchievability: parsed.commercial_achievability_score,
+            onlyfansFit: Math.min(parsed.onlyfans_fit_score, platformFitCeiling),
+            commercialAchievability: Math.min(parsed.commercial_achievability_score, platformAchievabilityCeiling),
             researchConfidence: parsed.research_confidence_score,
-            hasCriticalGap: false,
+            hasCriticalGap: platformCheckIncomplete || inactiveOnlyFansProfile,
             unsupportedMaterialClaims: 0,
           });
           const usage = normalizedAnthropicUsage(data.usage);
@@ -4580,9 +4698,16 @@ Respond with ONLY valid JSON:
             researcher_latency_ms: Date.now() - scoreRequestStartedAt,
             score_breakdown: dimensions,
             reasoning: parsed.reasoning,
-            concerns: Array.isArray(parsed.concerns)
-              ? parsed.concerns.filter((concern): concern is string => typeof concern === "string")
-              : [],
+            concerns: [
+              ...(Array.isArray(parsed.concerns)
+                ? parsed.concerns.filter((concern): concern is string => typeof concern === "string")
+                : []),
+              ...(inactiveOnlyFansProfile
+                ? ["Exact existing OnlyFans profile is inactive or closed; reactivation is required before reconsideration"]
+                : platformCheckIncomplete
+                  ? ["Exact-match OnlyFans platform check did not complete; blocked from finalist status"]
+                  : []),
+            ],
             is_minor: parsed.is_minor === true,
             career_stage: careerStage,
             objective_fit: objectiveFit,
@@ -5245,6 +5370,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         currentAthleticMomentumVerified: athlete.audit_current_momentum_verified === true,
         meaningfulAudienceVerified: athlete.audit_meaningful_audience_verified === true,
         creatorPotentialVerified: athlete.audit_creator_potential_verified === true,
+        onlyFansPlatformActivityCompatible: athlete.onlyfans_platform_check_completed === true
+          && !(athlete.onlyfans_profile_exact_match === true && athlete.onlyfans_platform_status === "inactive"),
         commercialConstraintsComplete: athlete.audit_commercial_constraints_complete === true,
         materialClaimsVerified: athlete.audit_material_claims_verified === true,
         auditorVerdict: athlete.audit_verdict || "fail",

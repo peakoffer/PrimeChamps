@@ -70,6 +70,7 @@ import {
   benchmarkCreatorPotentialGate,
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
+  benchmarkOnlyFansPlatformActivityGate,
   buildBenchmarkResearcherPrompt,
   benchmarkDeterministicGateSummary,
   canonicalBenchmarkMaterialClaims,
@@ -89,6 +90,7 @@ import {
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
 } from "../src/lib/research/benchmark-runner-support.ts";
+import { selectOnlyFansPlatformSignal } from "../src/lib/research/onlyfans-platform-signal.ts";
 import {
   prepareHistoricalEvidenceDetails,
   prepareHistoricalSocialSnapshot,
@@ -894,6 +896,23 @@ test("historical detail evidence rejects leakage and keeps age as a non-scoring 
   assert.equal(detail[0].claimType, "adult_eligibility_hint");
   assert.equal(detail[0].eligibleForScoring, false);
   assert.match(detail[0].exclusionReason || "", /two independent public sources/);
+  const platformActivity = prepareHistoricalEvidenceDetails({
+    athleteName: "Example Athlete",
+    decisionDate: "2026-05-03",
+    details: [{
+      claimCategory: "OnlyFans Platform Activity at Decision",
+      extractedValue: "Profile inactive and closed to new subscribers",
+      sourceDate: "2026-04-20",
+      sourceEmailSubject: "Example proposal",
+      sourceDocumentReference: "example.pdf",
+      supportingExcerpt: "Example Athlete's exact OnlyFans profile was inactive and closed to new subscribers.",
+      beforeDecisionCutoff: "Yes",
+      identityMatchConfidence: "High",
+    }],
+  });
+  assert.equal(platformActivity[0].claimType, "onlyfans_platform_activity_signal");
+  assert.equal(platformActivity[0].eligibleForScoring, true);
+  assert.equal(platformActivity[0].material, true);
   const leaked = prepareHistoricalEvidenceDetails({
     athleteName: "Example Athlete",
     decisionDate: "2026-05-03",
@@ -1358,6 +1377,7 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     currentAthleticMomentumVerified: true,
     meaningfulAudienceVerified: true,
     creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
     commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "pass",
@@ -1370,6 +1390,7 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     currentAthleticMomentumVerified: true,
     meaningfulAudienceVerified: true,
     creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
     commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "fail",
@@ -1382,6 +1403,7 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     currentAthleticMomentumVerified: false,
     meaningfulAudienceVerified: true,
     creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
     commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "pass",
@@ -1402,6 +1424,7 @@ test("V2 final gate fails closed on audience, creator, and commercial evidence",
     currentAthleticMomentumVerified: true,
     meaningfulAudienceVerified: true,
     creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
     commercialConstraintsComplete: true,
     materialClaimsVerified: true,
     auditorVerdict: "pass" as const,
@@ -1409,7 +1432,107 @@ test("V2 final gate fails closed on audience, creator, and commercial evidence",
   };
   assert.equal(passesResearchV2FinalGate({ ...complete, meaningfulAudienceVerified: false }), false);
   assert.equal(passesResearchV2FinalGate({ ...complete, creatorPotentialVerified: false }), false);
+  assert.equal(passesResearchV2FinalGate({ ...complete, onlyFansPlatformActivityCompatible: false }), false);
   assert.equal(passesResearchV2FinalGate({ ...complete, commercialConstraintsComplete: false }), false);
+});
+
+test("OnlyFans platform signal accepts exact active profiles and blocks exact inactive profiles", () => {
+  const active = selectOnlyFansPlatformSignal({
+    athleteName: "Alex Example",
+    instagramHandle: "alexexample",
+    checkedAt: "2026-08-15T00:00:00.000Z",
+    results: [{
+      displayInput: "https://www.instagram.com/alexexample/",
+      matchConfidence: "exact",
+      ofFound: true,
+      ofUsername: "alexexample",
+      ofName: "Alex Example",
+      ofIsActive: true,
+      ofCanAddSubscriber: true,
+      ofPostsCount: 24,
+      ofLastSeen: "2026-08-10T00:00:00.000Z",
+    }],
+  });
+  assert.equal(active.checkCompleted, true);
+  assert.equal(active.exactMatch, true);
+  assert.equal(active.status, "active");
+
+  const inactive = selectOnlyFansPlatformSignal({
+    athleteName: "Alex Example",
+    instagramHandle: "alexexample",
+    results: [{
+      displayInput: "Alex Example",
+      matchConfidence: "exact",
+      ofFound: true,
+      ofUsername: "alexexample",
+      ofName: "Alex Example",
+      ofIsActive: false,
+      ofCanAddSubscriber: false,
+    }],
+  });
+  assert.equal(inactive.exactMatch, true);
+  assert.equal(inactive.status, "inactive");
+});
+
+test("OnlyFans platform signal treats no corroborated exact profile as neutral", () => {
+  const signal = selectOnlyFansPlatformSignal({
+    athleteName: "Alex Example",
+    instagramHandle: "alexexample",
+    results: [{
+      displayInput: "Different Person",
+      matchConfidence: "high",
+      ofFound: true,
+      ofUsername: "someoneelse",
+      ofName: "Different Person",
+      ofIsActive: false,
+    }],
+  });
+  assert.equal(signal.checkCompleted, true);
+  assert.equal(signal.exactMatch, false);
+  assert.equal(signal.status, "not_found");
+
+  const crossCandidate = selectOnlyFansPlatformSignal({
+    athleteName: "Alex Example",
+    instagramHandle: "alexexample",
+    results: [{
+      displayInput: "Other Alex Example",
+      matchConfidence: "exact",
+      ofFound: true,
+      ofUsername: "notalexexample",
+      ofName: "Alex Example",
+      ofIsActive: false,
+    }],
+  });
+  assert.equal(crossCandidate.exactMatch, false);
+  assert.equal(crossCandidate.status, "not_found");
+});
+
+test("benchmark platform gate uses the newest explicit activity state and treats absence as neutral", () => {
+  const evidence = (status: "active" | "inactive", effectiveAt: string) => ({
+    sourceId: `${status}-${effectiveAt}`,
+    claimId: `${status}-${effectiveAt}`,
+    sourceRef: "E1",
+    url: "https://example.com/profile",
+    domain: "example.com",
+    title: "OnlyFans profile status",
+    claimType: "onlyfans_platform_activity_signal",
+    claim: status === "active"
+      ? "Alex Example's OnlyFans profile is active and open to subscribers."
+      : "Alex Example's OnlyFans profile is inactive and closed to subscribers.",
+    excerpt: status,
+    effectiveAt,
+    independenceGroup: "example.com",
+    material: true,
+    structuredValue: {},
+  });
+  assert.equal(benchmarkOnlyFansPlatformActivityGate([]).passed, true);
+  assert.equal(benchmarkOnlyFansPlatformActivityGate([
+    evidence("inactive", "2026-01-01T00:00:00.000Z"),
+  ]).passed, false);
+  assert.equal(benchmarkOnlyFansPlatformActivityGate([
+    evidence("inactive", "2026-01-01T00:00:00.000Z"),
+    evidence("active", "2026-02-01T00:00:00.000Z"),
+  ]).status, "active");
 });
 
 test("blind and review scores are hard ceilings and can never inflate the researcher", () => {
@@ -1475,8 +1598,11 @@ test("live research evaluation exits before athlete writes and suppresses notifi
   assert.match(workflow, /athlete\.age_corroborated === true/);
   assert.match(workflow, /athlete\.identity_corroborated === true/);
   assert.match(workflow, /evaluateCorroboratedInstagramIdentity/);
-  assert.match(workflow, /research-v2\.2-rubric-corroborated-identity-and-21-plus-v3/);
+  assert.match(workflow, /research-v2\.3-rubric-onlyfans-platform-activity-gate-v4/);
   assert.match(workflow, /two independent agreeing public sources/);
+  assert.match(workflow, /lookupOnlyFansPlatformSignals/);
+  assert.match(workflow, /OnlyFans platform check did not complete/);
+  assert.ok(!workflow.includes("AVOID: athletes already on OnlyFans"));
 });
 
 test("evidence set hashes are order-independent but content-sensitive", () => {
@@ -2050,7 +2176,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v25/);
+  assert.match(source, /research-v2-benchmark-runner-v26/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
