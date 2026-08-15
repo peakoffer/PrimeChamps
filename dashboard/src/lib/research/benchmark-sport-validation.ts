@@ -67,6 +67,7 @@ const SPORT_TERMS: Partial<Record<BenchmarkSport, string[]>> = {
 // both "Football" and "Soccer" for the same athlete.
 const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
   "American Football": ["american football", "nfl", "ncaa football", "gridiron"],
+  Aquabike: ["aquabike", "jet ski", "jetski", "personal watercraft"],
   "Beach Volleyball": ["beach volleyball", "beachvolleyball", "volley-ball de plage"],
   "Bare-Knuckle Boxing": [
     "bare knuckle", "bare-knuckle", "bkfc", "boxing", "boxer", "fighter",

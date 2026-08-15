@@ -1998,6 +1998,7 @@ test("benchmark sport enrichment rejects a spelling-only near match", () => {
 test("historical evidence accepts Dylan's broad sport labels without weakening canonical classification", () => {
   const examples: Array<[string, string]> = [
     ["American Football", "Josh Butler played NCAA football before entering the NFL."],
+    ["Aquabike", "Estelle Poret is a French jet ski world champion."],
     ["Beach Volleyball", "Olivia Macdonald is a beach volleyball athlete."],
     ["Bare-knuckle boxing", "Gastón Reyno es un peleador profesional de artes marciales mixtas."],
     ["Cliff Diving", "Carlos Gimeno competes on the Red Bull Cliff Diving World Series."],
