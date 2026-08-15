@@ -2765,6 +2765,10 @@ test("Common Crawl fallback selects bounded pre-cutoff captures and extracts the
   assert.equal(indexUrl.hostname, "index.commoncrawl.org");
   assert.equal(indexUrl.searchParams.get("url"), canonicalUrl);
   assert.deepEqual(indexUrl.searchParams.getAll("filter"), ["status:200", "mime:text/html"]);
+  const wwwIndexUrl = new URL(commonCrawlIndexUrl(
+    "CC-MAIN-2024-22", "https://www.example.com/athlete"
+  ));
+  assert.equal(wwwIndexUrl.searchParams.get("url"), "https://example.com/athlete");
 
   const warc = [
     "WARC/1.0",
@@ -3002,7 +3006,7 @@ test("archive recovery prefers cutoff-safe direct and Common Crawl evidence befo
   assert.match(workflow, /extractPreparedDatedArticleEvidence/);
   assert.match(workflow, /isPublicHttpUrl\(url\.toString\(\)\)/);
   assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
-  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /parallel-spaced-common-crawl-v19/);
+  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /www-normalized-common-crawl-v20/);
   assert.equal(isPublicHttpUrl("https://example.com/athlete"), true);
   assert.equal(isPublicHttpUrl("http://169.254.169.254/latest/meta-data"), false);
   assert.equal(isPublicHttpUrl("http://192.168.1.12/private"), false);

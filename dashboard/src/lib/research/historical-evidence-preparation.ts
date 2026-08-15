@@ -21,7 +21,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-formula-racing-label-v24";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-parallel-spaced-common-crawl-v19";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-www-normalized-common-crawl-v20";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -374,8 +374,13 @@ export function selectCommonCrawlCollections(
 export function commonCrawlIndexUrl(collectionId: string, canonicalUrl: string) {
   if (!/^CC-MAIN-\d{4}-\d{2}$/.test(collectionId)) throw new Error("Common Crawl collection ID is invalid");
   if (!isPublicHttpUrl(canonicalUrl)) throw new Error("Common Crawl lookup requires a public HTTP URL");
+  const lookupUrl = new URL(canonicalHistoricalArchiveUrl(canonicalUrl));
+  // Common Crawl canonicalizes URL keys without a leading www even when the
+  // captured response's original URL includes it. The returned row is still
+  // checked against the exact normalized path before any evidence is trusted.
+  lookupUrl.hostname = lookupUrl.hostname.replace(/^www\./i, "");
   const params = new URLSearchParams({
-    url: canonicalHistoricalArchiveUrl(canonicalUrl),
+    url: lookupUrl.toString(),
     output: "json",
     limit: "10",
   });
