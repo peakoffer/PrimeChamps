@@ -463,6 +463,15 @@ export default function ResearchBenchmarkPage() {
     && (run.checkpoint?.benchmark_split === "excluded"
       || run.record_ids.every((recordId) => records.find((record) => record.id === recordId)?.benchmark_split === "excluded"))
     && Boolean(run.checkpoint?.provider_run_id));
+  const newerCompletedSignalRecordIdSet = useMemo(() => {
+    if (!interruptedExcludedSignalRun) return new Set<string>();
+    const interruptedAt = Date.parse(interruptedExcludedSignalRun.created_at);
+    return new Set(evidencePreparationRuns
+      .filter((run) => run.status === "completed"
+        && run.checkpoint?.preparation_mode === "signal_recovery"
+        && Date.parse(run.created_at) > interruptedAt)
+      .flatMap((run) => run.checkpoint?.processed_record_ids || run.record_ids));
+  }, [evidencePreparationRuns, interruptedExcludedSignalRun]);
   const interruptedExcludedRecordIds = useMemo(() => {
     if (!interruptedExcludedSignalRun) return [];
     const processed = new Set(interruptedExcludedSignalRun.checkpoint?.processed_record_ids || []);
@@ -472,9 +481,10 @@ export default function ResearchBenchmarkPage() {
       const record = records.find((candidate) => candidate.id === recordId);
       return !processed.has(recordId)
         && !completedExcludedSignalRecordIdSet.has(recordId)
+        && !newerCompletedSignalRecordIdSet.has(recordId)
         && record?.evidence_blockers.includes("fit record lacks both audience and creator-behavior evidence");
     });
-  }, [completedExcludedSignalRecordIdSet, interruptedExcludedSignalRun, records]);
+  }, [completedExcludedSignalRecordIdSet, interruptedExcludedSignalRun, newerCompletedSignalRecordIdSet, records]);
   const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0
     && interruptedExcludedSignalRun?.archive_fallback_available !== true;
   const excludedSignalRecoveryRecords = useMemo(() => records

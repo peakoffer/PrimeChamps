@@ -2803,6 +2803,8 @@ test("historical signal recovery searches multilingual sport aliases instead of 
   assert.match(surfing[2], /surf OR surfing OR surfer OR surfeur OR surfeuse OR surfista/);
   assert.doesNotMatch(surfing[3], /"Surfing"/);
   assert.match(surfing[3], /posté OR poster OR publier OR photos/);
+  assert.match(surfing[3], /-site:instagram\.com/);
+  assert.match(surfing[3], /-site:youtube\.com/);
   const athletics = buildHistoricalSignalRecoveryQueries({
     athlete_name: "Catarina Guimaraes",
     sport: "Track & Field",
@@ -3001,6 +3003,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(benchmarkPage, /Resume saved recovery/);
   assert.match(benchmarkPage, /processed_record_ids/);
   assert.match(benchmarkPage, /!completedExcludedSignalRecordIdSet\.has\(recordId\)/);
+  assert.match(benchmarkPage, /newerCompletedSignalRecordIdSet/);
   assert.match(benchmarkPage, /run\.record_ids\.every/);
   assert.match(benchmarkPage, /Archive cooling down/);
   assert.match(workflow, /readApifyRunDatasetWithUsage<SearchPage>\(input\.reuseProviderRunId, 1_000\)/);
