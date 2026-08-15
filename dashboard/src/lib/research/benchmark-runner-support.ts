@@ -491,8 +491,10 @@ function ageAtUtcDate(birthDate: string, atDate: string) {
 }
 
 /**
- * Returns an exact age only when two independent cutoff-safe sources agree on
- * the full birth date. Approximate ages remain useful for the 21+ gate but can
+ * Returns an exact age only when one cutoff-safe source supplies the full birth
+ * date and a second independent source corroborates that date. The second
+ * source may repeat the date or expose an age explicitly derived from a birth
+ * date. Ordinary approximate/stated ages remain useful for the 21+ gate but can
  * never trigger a deterministic business-priority ceiling.
  */
 export function benchmarkCorroboratedAgeAtCutoff(
@@ -500,17 +502,44 @@ export function benchmarkCorroboratedAgeAtCutoff(
   evidence: LeakageSafeBenchmarkEvidence[]
 ) {
   if (!record.evidence_cutoff_at) return null;
-  const exactFacts = evidence
+  const ageFacts = evidence
     .filter((item) => /(age|birth|date_of_birth|dob|eligibility)/.test(item.claimType)
       && evidenceNamesAthlete(record.athlete_name, item)
       && supportedAdultAge(item, record.evidence_cutoff_at!))
-    .map((item) => ({ fact: adultAgeFact(item), group: item.independenceGroup }))
-    .filter((item): item is { fact: AdultAgeFact & { exactBirthDate: string }; group: string } =>
-      Boolean(item.fact?.exactBirthDate));
-  const dates = new Set(exactFacts.map((item) => item.fact.exactBirthDate));
-  const groups = new Set(exactFacts.map((item) => item.group));
-  if (dates.size !== 1 || groups.size < 2) return null;
-  return ageAtUtcDate([...dates][0], record.evidence_cutoff_at);
+    .map((item) => ({
+      fact: adultAgeFact(item),
+      group: item.independenceGroup,
+      birthDatePrecision: item.structuredValue.precision === "birth_date",
+      statedAge: typeof item.structuredValue.age === "number" ? item.structuredValue.age : null,
+      ageAsOf: item.effectiveAt
+        || (typeof item.structuredValue.age_as_of === "string" ? item.structuredValue.age_as_of : null),
+    }))
+    .filter((item): item is {
+      fact: AdultAgeFact;
+      group: string;
+      birthDatePrecision: boolean;
+      statedAge: number | null;
+      ageAsOf: string | null;
+    } => item.fact !== null);
+  const exactDates = new Set(ageFacts
+    .map((item) => item.fact.exactBirthDate)
+    .filter((value): value is string => Boolean(value)));
+  if (exactDates.size !== 1) return null;
+  const exactBirthDate = [...exactDates][0];
+  const exactFact: AdultAgeFact = {
+    exactBirthDate,
+    possibleBirthYears: new Set([new Date(`${exactBirthDate}T00:00:00.000Z`).getUTCFullYear()]),
+  };
+  const corroboratingGroups = new Set(ageFacts
+    .filter((item) => item.fact.exactBirthDate === exactBirthDate
+      || (item.birthDatePrecision
+        && item.statedAge !== null
+        && item.ageAsOf !== null
+        && ageAtUtcDate(exactBirthDate, item.ageAsOf) === item.statedAge
+        && adultAgeFactsAgree(exactFact, item.fact)))
+    .map((item) => item.group));
+  if (corroboratingGroups.size < 2) return null;
+  return ageAtUtcDate(exactBirthDate, record.evidence_cutoff_at);
 }
 
 export function benchmarkCurrentMomentumGate(

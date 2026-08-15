@@ -2032,6 +2032,38 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.deepEqual(benchmarkIdentityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.equal(benchmarkCorroboratedAgeAtCutoff(BENCHMARK_CASE, selection.evidence), 27);
+  const birthDateDerivedAge = {
+    ...selection.evidence.find((item) => item.claimId === "age-claim-b")!,
+    structuredValue: {
+      age: 27,
+      age_as_of: "2025-06-01T00:00:00.000Z",
+      precision: "birth_date",
+    },
+  };
+  assert.equal(
+    benchmarkCorroboratedAgeAtCutoff(BENCHMARK_CASE, [
+      selection.evidence.find((item) => item.claimId === "age-claim-a")!,
+      birthDateDerivedAge,
+    ]),
+    27,
+    "an independent age explicitly derived from a birth date corroborates the exact date"
+  );
+  assert.equal(
+    benchmarkCorroboratedAgeAtCutoff(BENCHMARK_CASE, [
+      selection.evidence.find((item) => item.claimId === "age-claim-a")!,
+      { ...birthDateDerivedAge, structuredValue: { age: 27 } },
+    ]),
+    null,
+    "an ordinary stated age cannot trigger the deterministic age ceiling"
+  );
+  assert.equal(
+    benchmarkCorroboratedAgeAtCutoff(BENCHMARK_CASE, [
+      selection.evidence.find((item) => item.claimId === "age-claim-a")!,
+      { ...birthDateDerivedAge, structuredValue: { ...birthDateDerivedAge.structuredValue, age: 26 } },
+    ]),
+    null,
+    "a birth-date-derived age must agree with the exact date at the observation time"
+  );
   const contradictoryAge = {
     ...selection.evidence.find((item) => item.claimId === "age-claim-b")!,
     sourceId: "age-conflict",
