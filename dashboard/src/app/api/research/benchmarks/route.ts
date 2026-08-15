@@ -111,7 +111,13 @@ export async function GET() {
     const benchmarkRuns = (runs || []).map((run) => {
       const cases = casesByRun.get(run.id) || [];
       const calculatedMetrics = cases.length && (run.benchmark_split === "development" || run.status === "completed")
-        ? calculateBenchmarkMetrics(cases)
+        ? calculateBenchmarkMetrics(cases, 80, {
+            totalCostMicrousd: asNumber(run.total_cost_microusd),
+            inputTokens: asNumber(run.input_tokens),
+            outputTokens: asNumber(run.output_tokens),
+            cacheCreationInputTokens: asNumber(run.cache_creation_input_tokens),
+            cacheReadInputTokens: asNumber(run.cache_read_input_tokens),
+          })
         : null;
       const runCohortVersion = typeof run.metrics === "object" && run.metrics
         && "cohort_version" in run.metrics && typeof run.metrics.cohort_version === "string"

@@ -687,7 +687,13 @@ export async function startBenchmarkRun(input: {
     const baselineCases = baselineRows
       .map((row) => metricsCase(row as Record<string, unknown>))
       .filter((item): item is BenchmarkCaseResult => Boolean(item));
-    const baselineMetrics = calculateBenchmarkMetrics(baselineCases) as BenchmarkMetrics;
+    const baselineMetrics = calculateBenchmarkMetrics(baselineCases, 80, {
+      totalCostMicrousd: integer(baseline.total_cost_microusd),
+      inputTokens: integer(baseline.input_tokens),
+      outputTokens: integer(baseline.output_tokens),
+      cacheCreationInputTokens: integer(baseline.cache_creation_input_tokens),
+      cacheReadInputTokens: integer(baseline.cache_read_input_tokens),
+    }) as BenchmarkMetrics;
     const releaseReadiness = evaluateBenchmarkReleaseReadiness(baselineMetrics, {
       minimumCases: Math.max(2, developmentCohortSize || 0),
     });
@@ -900,7 +906,19 @@ function metricsCase(row: Record<string, unknown>): BenchmarkCaseResult | null {
 async function finalizeRun(admin: AdminClient, run: RunRow) {
   const rows = await benchmarkCaseResultRows(admin, run.id);
   const cases = rows.map((row) => metricsCase(row as Record<string, unknown>)).filter((item): item is BenchmarkCaseResult => Boolean(item));
-  const metrics = calculateBenchmarkMetrics(cases);
+  const { data: accounting, error: accountingError } = await admin.from("research_benchmark_runs")
+    .select("total_cost_microusd,input_tokens,output_tokens,cache_creation_input_tokens,cache_read_input_tokens")
+    .eq("id", run.id)
+    .eq("organization_id", run.organization_id)
+    .single();
+  if (accountingError) throw accountingError;
+  const metrics = calculateBenchmarkMetrics(cases, 80, {
+    totalCostMicrousd: integer(accounting.total_cost_microusd),
+    inputTokens: integer(accounting.input_tokens),
+    outputTokens: integer(accounting.output_tokens),
+    cacheCreationInputTokens: integer(accounting.cache_creation_input_tokens),
+    cacheReadInputTokens: integer(accounting.cache_read_input_tokens),
+  });
   const completedAt = new Date().toISOString();
   const checkpoint = {
     ...run.metrics,

@@ -456,7 +456,24 @@ function rate(numerator: number, denominator: number) {
   return denominator > 0 ? numerator / denominator : null;
 }
 
-export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priorityThreshold = 80) {
+export type BenchmarkAccountingTotals = {
+  totalCostMicrousd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+};
+
+function accountingTotal(resultTotal: number, override: unknown) {
+  const value = Number(override);
+  return Number.isFinite(value) ? Math.max(resultTotal, Math.round(value)) : resultTotal;
+}
+
+export function calculateBenchmarkMetrics(
+  results: BenchmarkCaseResult[],
+  priorityThreshold = 80,
+  accounting?: BenchmarkAccountingTotals
+) {
   const predictedPriority = results.filter((result) => result.priorityScore > priorityThreshold);
   const truePriority = results.filter((result) => result.actualFit === "fit" && result.actualAchievability !== "low");
   const truePositivePriority = predictedPriority.filter((result) =>
@@ -471,7 +488,21 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
   );
   const actualNegative = results.filter((result) => result.actualFit !== "fit" || result.actualAchievability === "low");
   const researcherFailures = results.filter((result) => result.researcherFailure);
-  const totalCostMicrousd = results.reduce((total, result) => total + result.costMicrousd, 0);
+  const resultCostMicrousd = results.reduce((total, result) => total + result.costMicrousd, 0);
+  const resultInputTokens = results.reduce((total, result) => total + (result.inputTokens || 0), 0);
+  const resultOutputTokens = results.reduce((total, result) => total + (result.outputTokens || 0), 0);
+  const resultCacheCreationInputTokens = results.reduce(
+    (total, result) => total + (result.cacheCreationInputTokens || 0),
+    0
+  );
+  const resultCacheReadInputTokens = results.reduce(
+    (total, result) => total + (result.cacheReadInputTokens || 0),
+    0
+  );
+  // Run-level accounting includes provider calls that were rejected before a
+  // result row could be persisted (for example malformed structured output).
+  // Never let an override reduce the usage visible in completed result rows.
+  const totalCostMicrousd = accountingTotal(resultCostMicrousd, accounting?.totalCostMicrousd);
   return {
     cases: results.length,
     finalistsAbove80: predictedPriority.length,
@@ -536,10 +567,13 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
     costPerValidatedCandidateMicrousd: rate(totalCostMicrousd, truePositivePriority.length),
     averageLatencyMs: rate(results.reduce((total, result) => total + result.latencyMs, 0), results.length),
     tokenUsage: {
-      input: results.reduce((total, result) => total + (result.inputTokens || 0), 0),
-      output: results.reduce((total, result) => total + (result.outputTokens || 0), 0),
-      cacheCreationInput: results.reduce((total, result) => total + (result.cacheCreationInputTokens || 0), 0),
-      cacheReadInput: results.reduce((total, result) => total + (result.cacheReadInputTokens || 0), 0),
+      input: accountingTotal(resultInputTokens, accounting?.inputTokens),
+      output: accountingTotal(resultOutputTokens, accounting?.outputTokens),
+      cacheCreationInput: accountingTotal(
+        resultCacheCreationInputTokens,
+        accounting?.cacheCreationInputTokens
+      ),
+      cacheReadInput: accountingTotal(resultCacheReadInputTokens, accounting?.cacheReadInputTokens),
     },
     priorityCounts: {
       predicted: predictedPriority.length,

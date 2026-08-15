@@ -1243,6 +1243,44 @@ test("benchmark metrics reward precision rather than score volume", () => {
   });
 });
 
+test("benchmark metrics include rejected provider attempts in run accounting", () => {
+  const metrics = calculateBenchmarkMetrics([{
+    actualFit: "fit",
+    actualAchievability: "high",
+    predictedFit: "fit",
+    predictedAchievability: "high",
+    priorityScore: 90,
+    identityCorrect: true,
+    eligibilityVerified: true,
+    sourceVerificationRate: 1,
+    unsupportedClaimRate: 0,
+    pointInTimeCompliant: true,
+    auditVerdict: "pass",
+    auditorCaughtResearcherFailure: false,
+    researcherFailure: false,
+    costMicrousd: 100_000,
+    latencyMs: 2_000,
+    inputTokens: 1_000,
+    outputTokens: 200,
+  }], 80, {
+    totalCostMicrousd: 125_000,
+    inputTokens: 1_400,
+    outputTokens: 275,
+    cacheCreationInputTokens: 50,
+    cacheReadInputTokens: 75,
+  });
+
+  assert.equal(metrics.totalCostMicrousd, 125_000);
+  assert.equal(metrics.averageCostMicrousd, 125_000);
+  assert.equal(metrics.costPerValidatedCandidateMicrousd, 125_000);
+  assert.deepEqual(metrics.tokenUsage, {
+    input: 1_400,
+    output: 275,
+    cacheCreationInput: 50,
+    cacheReadInput: 75,
+  });
+});
+
 test("held-out release readiness requires every measured production gate", () => {
   const positive = {
     actualFit: "fit" as const,
