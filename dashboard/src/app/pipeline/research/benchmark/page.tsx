@@ -1268,7 +1268,9 @@ export default function ResearchBenchmarkPage() {
               <p className="mt-1 text-xs leading-5 text-zinc-500">
                 {benchmarkReadiness.development.cohortVersion
                   ? benchmarkReadiness.development.replaySourceRunId
-                    ? `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative revealed cases are available for development replay. The new ${benchmarkReadiness.heldOut.total}-case challenge set remains locked and unseen.`
+                    ? benchmarkReadiness.heldOut.total > 0
+                      ? `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative revealed cases are available for development replay. The new ${benchmarkReadiness.heldOut.total}-case challenge set remains locked and unseen.`
+                      : `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative revealed historical cases are available for development replay while the fresh challenge set is assembled.`
                     : `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative development cases are active. The ${benchmarkReadiness.heldOut.total}-case held-out set remains locked.`
                   : "No active benchmark cohort. Prepare at least eight leakage-safe evidence packets per label for a fresh challenge release."}
               </p>

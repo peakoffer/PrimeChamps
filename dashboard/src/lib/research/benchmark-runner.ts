@@ -682,7 +682,7 @@ async function loadEvidence(admin: AdminClient, organizationId: string, recordId
   };
 }
 
-async function loadRevealedDevelopmentReplay(admin: AdminClient, organizationId: string, activeCohortVersion: string) {
+async function loadRevealedDevelopmentReplay(admin: AdminClient, organizationId: string, activeCohortVersion: string | null) {
   const { data: completedRuns, error: completedRunError } = await admin
     .from("research_benchmark_runs")
     .select("id,metrics,created_at")
@@ -702,7 +702,9 @@ async function loadRevealedDevelopmentReplay(admin: AdminClient, organizationId:
     const caseIds = Array.isArray(checkpoint.case_ids)
       ? checkpoint.case_ids.filter((id): id is string => typeof id === "string")
       : [];
-    if (!sourceCohortVersion || sourceCohortVersion === activeCohortVersion || caseIds.length < 16) continue;
+    if (!sourceCohortVersion
+      || (activeCohortVersion && sourceCohortVersion === activeCohortVersion)
+      || caseIds.length < 16) continue;
     const { data: sourceRecords, error: sourceRecordsError } = await admin
       .from("research_golden_records")
       .select(BENCHMARK_GOLDEN_RECORD_SELECT)
@@ -761,30 +763,41 @@ export async function startBenchmarkRun(input: {
   if (activeCohort.conflict) {
     throw new Error(`Multiple active benchmark cohorts exist (${activeCohort.activeVersions.join(", ")}); scoring is disabled until the cohort conflict is resolved`);
   }
-  if (!activeCohort.cohortVersion) {
+  if (!activeCohort.cohortVersion && input.split === "held_out") {
     throw new Error("No active locked, unrevealed benchmark cohort exists. Freeze a fresh evidence-ready cohort before scoring");
   }
-  const cohortVersion = activeCohort.cohortVersion;
-  const { data: records, error: recordsError } = await admin.from("research_golden_records")
-    .select(BENCHMARK_GOLDEN_RECORD_SELECT)
-    .eq("organization_id", input.organizationId)
-    .eq("benchmark_split", input.split)
-    .eq("benchmark_cohort_version", cohortVersion)
-    .contains("stratification_tags", ["dylan_outcome_ground_truth"])
-    .order("id", { ascending: true });
-  if (recordsError) throw recordsError;
-  let typedRecords = (records || []) as Array<BenchmarkGoldenCase & {
+  let cohortVersion = activeCohort.cohortVersion || "";
+  let typedRecords: Array<BenchmarkGoldenCase & {
     fit_label: "fit" | "not_fit";
     achievability_label: "high" | "medium" | "low";
-  }>;
+  }> = [];
+  if (activeCohort.cohortVersion) {
+    const { data: records, error: recordsError } = await admin.from("research_golden_records")
+      .select(BENCHMARK_GOLDEN_RECORD_SELECT)
+      .eq("organization_id", input.organizationId)
+      .eq("benchmark_split", input.split)
+      .eq("benchmark_cohort_version", cohortVersion)
+      .contains("stratification_tags", ["dylan_outcome_ground_truth"])
+      .order("id", { ascending: true });
+    if (recordsError) throw recordsError;
+    typedRecords = (records || []) as typeof typedRecords;
+  }
   let replaySourceRunId: string | null = null;
   let replaySourceCohortVersion: string | null = null;
   let heldOutBaselineCheckpoint: RunCheckpoint | null = null;
   if (input.split === "development" && typedRecords.length === 0) {
-    const replay = await loadRevealedDevelopmentReplay(admin, input.organizationId, cohortVersion);
+    const replay = await loadRevealedDevelopmentReplay(
+      admin,
+      input.organizationId,
+      activeCohort.cohortVersion
+    );
     typedRecords = replay.records;
     replaySourceRunId = replay.sourceRunId;
     replaySourceCohortVersion = replay.sourceCohortVersion;
+    // A revealed archive is development data only. When no fresh challenge is
+    // active, tie the run to the replayed cohort for reproducibility without
+    // implying that a new held-out release has been frozen.
+    if (!cohortVersion) cohortVersion = replay.sourceCohortVersion;
   }
   const fitCount = typedRecords.filter((record) => record.fit_label === "fit").length;
   const notFitCount = typedRecords.filter((record) => record.fit_label === "not_fit").length;

@@ -3689,10 +3689,14 @@ test("fresh cohort assignment supports a locked 8+8 challenge after a revealed d
   assert.match(route, /Complete or retire it before freezing another cohort/);
   assert.match(runner, /No active locked, unrevealed benchmark cohort exists/);
   assert.match(runner, /loadRevealedDevelopmentReplay/);
+  assert.match(runner, /!activeCohort\.cohortVersion && input\.split === "held_out"/);
+  assert.match(runner, /if \(!cohortVersion\) cohortVersion = replay\.sourceCohortVersion/);
   assert.match(runner, /replay_source_run_id/);
   assert.match(runner, /\.eq\("benchmark_cohort_version", cohortVersion\)/);
   assert.match(runner, /one-time held-out release must score the full/);
   assert.match(benchmarkRoute, /activeCohortVersion/);
+  assert.match(benchmarkRoute, /const replayDevelopmentSource = activeDevelopmentRecords\.length === 0/);
+  assert.match(benchmarkRoute, /activeCohortVersion \|\| replayDevelopmentSource\?\.cohortVersion/);
   assert.match(benchmarkRoute, /activeCohortConflict/);
   assert.match(benchmarkPage, /evidenceSummary\.readyFit < 8/);
   assert.match(benchmarkPage, /Freeze 8 \+ 8 challenge set/);

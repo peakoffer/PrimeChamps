@@ -98,7 +98,7 @@ export async function GET() {
       ? goldenLabels.filter((record) => record.benchmark_split === "development"
         && record.benchmark_cohort_version === activeCohortVersion)
       : [];
-    const replayDevelopmentSource = activeCohortVersion && activeDevelopmentRecords.length === 0
+    const replayDevelopmentSource = activeDevelopmentRecords.length === 0
       ? (runs || []).flatMap((run) => {
           if (run.benchmark_split !== "held_out" || run.status !== "completed") return [];
           const metrics = run.metrics && typeof run.metrics === "object"
@@ -108,7 +108,9 @@ export async function GET() {
           const caseIds = Array.isArray(metrics.case_ids)
             ? metrics.case_ids.filter((id): id is string => typeof id === "string")
             : [];
-          if (!sourceCohortVersion || sourceCohortVersion === activeCohortVersion || caseIds.length < 16) return [];
+          if (!sourceCohortVersion
+            || (activeCohortVersion && sourceCohortVersion === activeCohortVersion)
+            || caseIds.length < 16) return [];
           const sourceIds = new Set(caseIds);
           const sourceRecords = goldenLabels.filter((record) => sourceIds.has(String(record.id))
             && record.benchmark_split === "held_out"
@@ -132,7 +134,9 @@ export async function GET() {
         total: splitRecords.length,
         fit: splitRecords.filter((record) => record.fit_label === "fit").length,
         notFit: splitRecords.filter((record) => record.fit_label === "not_fit").length,
-        cohortVersion: activeCohortVersion,
+        cohortVersion: split === "development"
+          ? activeCohortVersion || replayDevelopmentSource?.cohortVersion || null
+          : activeCohortVersion,
         replaySourceRunId: split === "development" ? replayDevelopmentSource?.runId || null : null,
         replaySourceCohortVersion: split === "development" ? replayDevelopmentSource?.cohortVersion || null : null,
       };
