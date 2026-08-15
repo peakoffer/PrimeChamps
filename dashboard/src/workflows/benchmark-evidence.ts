@@ -234,6 +234,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
       body: JSON.stringify({
         model,
         input: prompt,
+        reasoning: { effort: "low" },
         tools: [{
           type: "openrouter:web_search",
           parameters: {
@@ -248,9 +249,9 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
             ],
           },
         }],
-        tool_choice: "auto",
+        tool_choice: "required",
         max_tool_calls: Math.min(10, records.length),
-        max_output_tokens: 2_500,
+        max_output_tokens: 6_000,
         store: false,
         text: {
           format: {
@@ -311,8 +312,24 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
         server_tool_use?: { web_search_requests?: number };
       };
     };
+    const rawSources = (data.output || []).flatMap((item) =>
+      item.type?.includes("web_search") ? item.action?.sources || [] : []
+    );
+    const searchRequests = data.usage?.server_tool_use?.web_search_requests || 0;
+    const costMicrousd = typeof data.usage?.cost === "number"
+      ? Math.round(data.usage.cost * 1_000_000)
+      : searchRequests > 0 ? searchRequests * 12_000 : null;
     if (data.status && data.status !== "completed") {
-      return { ...empty, model: data.model || model, error: `OpenRouter deep discovery was incomplete (${data.incomplete_details?.reason || data.status})` };
+      return {
+        ...empty,
+        model: data.model || model,
+        inputTokens: data.usage?.input_tokens || 0,
+        outputTokens: data.usage?.output_tokens || 0,
+        costMicrousd,
+        sourceCount: rawSources.length,
+        searchRequests,
+        error: `OpenRouter deep discovery was incomplete (${data.incomplete_details?.reason || data.status})`,
+      };
     }
     const messageParts = (data.output || []).flatMap((item) => item.type === "message" ? item.content || [] : []);
     const refusal = messageParts.find((part) => part.type === "refusal")?.refusal;
@@ -322,9 +339,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
     const objectText = outputText.match(/\{[\s\S]*\}/)?.[0];
     if (!objectText) return { ...empty, model: data.model || model, error: "OpenRouter deep discovery returned no structured output" };
     const payload = JSON.parse(objectText) as { athletes?: Array<{ athlete_name?: unknown; source_urls?: unknown }> };
-    const consultedSources = (data.output || []).flatMap((item) =>
-      item.type?.includes("web_search") ? item.action?.sources || [] : []
-    );
+    const consultedSources = rawSources;
     const citedSources = messageParts.flatMap((part) => part.annotations || [])
       .filter((annotation) => annotation.type === "url_citation")
       .map((annotation) => ({
@@ -332,7 +347,6 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
         title: annotation.title || annotation.url_citation?.title,
       }));
     const groundedSources = [...consultedSources, ...citedSources];
-    const searchRequests = data.usage?.server_tool_use?.web_search_requests || 0;
     const candidatesByRecord = groundedHistoricalSignalDiscoveryCandidates({
       records,
       proposed: Array.isArray(payload.athletes) ? payload.athletes : [],
@@ -343,9 +357,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
       model: data.model || model,
       inputTokens: data.usage?.input_tokens || 0,
       outputTokens: data.usage?.output_tokens || 0,
-      costMicrousd: typeof data.usage?.cost === "number"
-        ? Math.round(data.usage.cost * 1_000_000)
-        : searchRequests > 0 ? searchRequests * 12_000 : null,
+      costMicrousd,
       sourceCount: groundedSources.filter((source) => typeof source.url === "string" && source.url.startsWith("http")).length,
       searchRequests,
       error: null,
