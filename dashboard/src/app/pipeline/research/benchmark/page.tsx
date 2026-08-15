@@ -833,6 +833,22 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const validateSocialBladeConnection = async () => {
+    setWorking(true);
+    setMessage("Validating Social Blade with a recently paid profile that remains inside its free cache window…");
+    try {
+      const response = await fetch("/api/research/golden-records/social-blade-history?validate=connection", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Social Blade connection check failed");
+      setMessage(`Social Blade authenticated successfully. Reused a cached profile and charged ${payload.chargedCredits ?? "unknown"} credits${typeof payload.creditsRemaining === "number" ? `; ${payload.creditsRemaining} credits remain` : ""}.`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Social Blade connection check failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const runApifySocialBladePilot = async () => {
     const candidate = socialBladePlan.apifyPilotRecords[0];
     if (!socialBladePlan.apifyConfigured || !candidate || socialBladePlan.apifyPilotMaximumChargeUsd <= 0) return;
@@ -1169,6 +1185,13 @@ export default function ResearchBenchmarkPage() {
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               Reuse Instagram history
+            </button>
+            <button
+              disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured}
+              onClick={() => void validateSocialBladeConnection()}
+              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+            >
+              Check Social Blade
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.apifyConfigured || socialBladePlan.apifyPilotRecords.length === 0}
