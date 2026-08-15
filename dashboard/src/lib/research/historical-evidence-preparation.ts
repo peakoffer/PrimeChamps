@@ -19,7 +19,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-formula-sport-alias-v22";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-canonical-sport-slug-v23";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-direct-common-crawl-first-v17";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -1285,6 +1285,7 @@ export function extractPreparedDatedArticleEvidence(input: {
   const prepared = extractPreparedArchivedEvidence({
     record: input.record,
     candidate: { ...input.candidate, url: canonicalUrl },
+    sportEvidenceUrl: canonicalUrl,
     capture: {
       timestamp,
       capturedAt: modifiedAt,
@@ -1698,6 +1699,7 @@ export function extractPreparedArchivedEvidence(input: {
   candidate: HistoricalSearchCandidate;
   capture: WaybackCapture;
   html: string;
+  sportEvidenceUrl?: string;
 }): { evidence: PreparedArchivedEvidence | null; rejectionReason: string | null } {
   const { record, candidate, capture } = input;
   const cutoff = Date.parse(record.evidence_cutoff_at);
@@ -1713,7 +1715,12 @@ export function extractPreparedArchivedEvidence(input: {
     || !benchmarkSourceNamesAthlete(record.athlete_name, attributable)) {
     return { evidence: null, rejectionReason: "archived_page_does_not_name_exact_athlete" };
   }
-  if (!benchmarkSourceSupportsSport(record.sport, attributable)) {
+  // A publisher's server-rendered shell can omit the article body even when
+  // the validated canonical URL itself contains an unambiguous sport slug
+  // (for example `/formula-woman-nations-sara-fruncillo-intervista`). The
+  // canonical URL belongs to the exact athlete-naming page already proven
+  // above, so it is safe sport evidence while provider snippets are not.
+  if (!benchmarkSourceSupportsSport(record.sport, `${attributable}\n${input.sportEvidenceUrl || ""}`)) {
     return { evidence: null, rejectionReason: "archived_page_does_not_support_requested_sport" };
   }
   const domain = benchmarkSourceDomain(candidate.url);

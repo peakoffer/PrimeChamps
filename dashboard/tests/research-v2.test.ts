@@ -3264,6 +3264,22 @@ test("direct dated articles admit only tightly timestamped, attributable pre-cut
   });
   assert.equal(sara.rejectionReason, null);
   assert.ok(sara.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
+
+  const saraServerShellUrl = "https://sport.example/motori/2024/11/20/formula-woman-nations-sara-fruncillo-intervista";
+  const saraServerShellMetadata = { ...saraMetadata, url: saraServerShellUrl };
+  const saraServerShell = extractPreparedDatedArticleEvidence({
+    record: {
+      ...record, id: "golden-sara-shell", athlete_name: "Sara Fruncillo", sport: "Motorsports",
+      evidence_cutoff_at: "2025-12-10T23:59:59Z",
+    },
+    candidate: {
+      query: '"Sara Fruncillo" età motorsport', title: "Intervista a Sara Fruncillo",
+      url: saraServerShellUrl, snippet: "Provider metadata is never treated as evidence.",
+    },
+    html: `<html><head><link rel="canonical" href="${saraServerShellUrl}"><script type="application/ld+json">${JSON.stringify(saraServerShellMetadata)}</script></head><body><main><h1>Intervista a Sara Fruncillo</h1><p>Sara Fruncillo ha 25 anni.</p></main></body></html>`,
+  });
+  assert.equal(saraServerShell.rejectionReason, null);
+  assert.ok(saraServerShell.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
 });
 
 test("archived Instagram handles require athlete attribution and reject publisher footer accounts", () => {
