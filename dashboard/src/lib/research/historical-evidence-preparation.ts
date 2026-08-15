@@ -12,9 +12,9 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-per-athlete-grounded-search-v12";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-explicit-audience-grounded-search-v13";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-run-local-wayback-circuit-v15";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-wayback-availability-fallback-v16";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -614,6 +614,48 @@ export function waybackTimegateUrl(canonicalUrl: string, evidenceCutoffAt: strin
   if (!Number.isFinite(cutoff.getTime())) throw new Error("Archive lookup requires a valid evidence cutoff");
   const timestamp = cutoff.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   return `https://web.archive.org/web/${timestamp}id_/${canonicalHistoricalArchiveUrl(canonicalUrl)}`;
+}
+
+export function waybackAvailabilityUrl(canonicalUrl: string, evidenceCutoffAt: string) {
+  if (!isPublicHttpUrl(canonicalUrl)) throw new Error("Archive lookup requires a public HTTP URL");
+  const cutoff = new Date(evidenceCutoffAt);
+  if (!Number.isFinite(cutoff.getTime())) throw new Error("Archive lookup requires a valid evidence cutoff");
+  const params = new URLSearchParams({
+    url: canonicalHistoricalArchiveUrl(canonicalUrl),
+    timestamp: cutoff.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14),
+  });
+  return `https://archive.org/wayback/available?${params.toString()}`;
+}
+
+export function selectWaybackAvailabilityCapture(
+  payload: unknown,
+  canonicalUrl: string,
+  evidenceCutoffAt: string
+): WaybackCapture | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const body = payload as Record<string, unknown>;
+  const snapshots = body.archived_snapshots;
+  if (!snapshots || typeof snapshots !== "object" || Array.isArray(snapshots)) return null;
+  const closest = (snapshots as Record<string, unknown>).closest;
+  if (!closest || typeof closest !== "object" || Array.isArray(closest)) return null;
+  const capture = closest as Record<string, unknown>;
+  const timestamp = typeof capture.timestamp === "string" ? capture.timestamp : "";
+  const capturedAt = parseWaybackTimestamp(timestamp);
+  const cutoff = Date.parse(evidenceCutoffAt);
+  const requested = normalizedUrlForComparison(canonicalUrl);
+  const returnedUrl = typeof body.url === "string" ? body.url : "";
+  if (capture.available !== true || String(capture.status || "") !== "200"
+    || !capturedAt || !Number.isFinite(cutoff) || Date.parse(capturedAt) > cutoff
+    || requested !== normalizedUrlForComparison(returnedUrl)) return null;
+  return {
+    timestamp,
+    capturedAt,
+    originalUrl: canonicalHistoricalArchiveUrl(canonicalUrl),
+    statusCode: "200",
+    digest: null,
+    mimeType: "text/html",
+    archivedUrl: `https://web.archive.org/web/${timestamp}id_/${canonicalHistoricalArchiveUrl(canonicalUrl)}`,
+  };
 }
 
 export function selectWaybackRedirectCapture(
@@ -1692,7 +1734,7 @@ export function groundedHistoricalSignalDiscoveryCandidates(input: {
     const record = recordByName.get(normalizeEvidenceText(athleteName));
     if (!record || !Array.isArray(proposal.source_urls)) continue;
     const candidates = grouped.get(record.id) || [];
-    for (const value of proposal.source_urls.slice(0, 6)) {
+    for (const value of proposal.source_urls.slice(0, 8)) {
       if (typeof value !== "string") continue;
       const grounded = consultedByUrl.get(normalizedUrlForComparison(value));
       if (!grounded) continue;
@@ -1709,7 +1751,7 @@ export function groundedHistoricalSignalDiscoveryCandidates(input: {
         snippet: `${record.athlete_name} ${record.sport} archive candidate returned by a grounded source-discovery tool; no claim is trusted until archive extraction passes.`,
         position: candidates.length + 1,
       });
-      if (candidates.length >= 4) break;
+      if (candidates.length >= 6) break;
     }
     grouped.set(record.id, candidates);
   }

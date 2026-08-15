@@ -25,7 +25,9 @@ import {
   selectWaybackRedirectCapture,
   selectWikimediaSearchCandidates,
   selectWaybackCapture,
+  selectWaybackAvailabilityCapture,
   waybackCdxUrl,
+  waybackAvailabilityUrl,
   waybackTimegateUrl,
   wikimediaRevisionApiUrl,
   wikimediaSearchApiUrl,
@@ -236,7 +238,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
 
   const model = selectedModel.model;
   const calls = await Promise.all(records.map(async (record) => {
-    const prompt = `Use the web-search tool exactly once. Find up to four direct, archive-friendly public webpages that may contain historical audience-size or creator-activity evidence for this exact athlete:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\n\nSearch multilingual editorial interviews, athlete profiles, trade coverage, sponsor profiles, personal websites, and independent analytics pages. Prefer pages published on or before the cutoff. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, and matching sport.`;
+    const prompt = `Use the web-search tool exactly once. Find up to six direct, archive-friendly public webpages that explicitly mention historical audience size or repeat creator activity for this exact athlete:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\n\nPrioritize pages containing the athlete's name near a numeric follower or subscriber count, including multilingual terms such as followers, subscribers, fans, abonnés, seguidores, seguidoras, or social following. Also seek first-person interview language about posting, publishing, videos, vlogs, podcasts, photos, or social-media activity. Search editorial interviews, athlete profiles, trade coverage, sponsor profiles, personal websites, and independent analytics pages published on or before the cutoff. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, and matching sport.`;
     try {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -255,10 +257,10 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
             parameters: {
               engine: "exa",
               mode: "deep",
-              max_results: 4,
+              max_results: 6,
               max_uses: 1,
-              max_total_results: 4,
-              max_characters: 4_000,
+              max_total_results: 6,
+              max_characters: 3_000,
               excluded_domains: [
                 "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
                 "threads.net", "x.com", "twitter.com", "wikipedia.org", "reddit.com",
@@ -304,7 +306,11 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
         }));
       const inputTokens = Math.max(0, Number(data.usage?.prompt_tokens) || 0);
       const outputTokens = Math.max(0, Number(data.usage?.completion_tokens) || 0);
-      const searchRequests = Math.max(0, Number(data.usage?.server_tool_use?.web_search_requests) || 0);
+      const reportedSearchRequests = Math.max(0, Number(data.usage?.server_tool_use?.web_search_requests) || 0);
+      // OpenRouter currently returns citation annotations for successful Exa
+      // tool calls even when the optional usage counter is absent. The tool is
+      // capped at one call, so cited output is deterministic proof of one use.
+      const searchRequests = reportedSearchRequests || (sources.length > 0 ? 1 : 0);
       const estimatedCostMicrousd = Math.ceil(
         inputTokens * selectedModel!.price.inputUsdPerMillion
         + outputTokens * selectedModel!.price.outputUsdPerMillion
@@ -1005,6 +1011,35 @@ async function retrieveArchivedEvidenceCandidate(input: {
     // Continue to the generic archive providers when Wikimedia is unavailable.
   }
   let waybackRateLimited = input.waybackCircuitOpen || storedReplayRateLimited;
+  if (!input.waybackCircuitOpen) {
+    try {
+      const available = selectWaybackAvailabilityCapture(
+        await fetchJson(waybackAvailabilityUrl(candidate.url, input.record.evidence_cutoff_at)),
+        candidate.url,
+        input.record.evidence_cutoff_at,
+      );
+      if (available) {
+        const html = await fetchArchiveHtml(available.archivedUrl);
+        if (html) {
+          const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture: available, html });
+          if (prepared.evidence) {
+            return {
+              evidence: {
+                ...prepared.evidence,
+                archiveProvider: "internet_archive_wayback" as const,
+                providerRequestId: `available-${available.timestamp}`,
+              },
+              rejectionReason: null,
+              rateLimited: false,
+              waybackRateLimited: false,
+            };
+          }
+        }
+      }
+    } catch (error) {
+      waybackRateLimited = waybackRateLimited || error instanceof RetryableError;
+    }
+  }
   if (!input.waybackCircuitOpen && candidate.query.startsWith("Cutoff-safe external profiles referenced by ")) {
     try {
       const direct = await retrieveWaybackTimegateEvidenceCandidate({ record: input.record, candidate });

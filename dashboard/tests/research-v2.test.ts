@@ -125,9 +125,11 @@ import {
   selectWikimediaRevisionCapture,
   selectWikimediaSearchCandidates,
   selectWaybackCapture,
+  selectWaybackAvailabilityCapture,
   selectWaybackRedirectCapture,
   validatePreparedAgeEvidenceForSource,
   waybackCdxUrl,
+  waybackAvailabilityUrl,
   waybackTimegateUrl,
   wikimediaRevisionApiUrl,
   wikimediaSearchApiUrl,
@@ -2049,6 +2051,30 @@ test("Wayback selection uses the latest exact HTML capture no later than the evi
   assert.equal(cdxUrl.hostname, "web.archive.org");
   assert.equal(cdxUrl.searchParams.get("matchType"), "exact");
   assert.equal(cdxUrl.searchParams.get("to"), "20240601123456");
+  const availabilityUrl = new URL(waybackAvailabilityUrl(canonicalUrl, "2024-06-01T12:34:56Z"));
+  assert.equal(availabilityUrl.hostname, "archive.org");
+  assert.equal(availabilityUrl.searchParams.get("timestamp"), "20240601123456");
+  const availableCapture = selectWaybackAvailabilityCapture({
+    url: canonicalUrl,
+    archived_snapshots: {
+      closest: {
+        available: true,
+        status: "200",
+        timestamp: "20240501010101",
+        url: `http://web.archive.org/web/20240501010101/${canonicalUrl}`,
+      },
+    },
+  }, canonicalUrl, "2024-06-01T00:00:00Z");
+  assert.equal(availableCapture?.timestamp, "20240501010101");
+  assert.equal(availableCapture?.archivedUrl, `https://web.archive.org/web/20240501010101id_/${canonicalUrl}`);
+  assert.equal(selectWaybackAvailabilityCapture({
+    url: canonicalUrl,
+    archived_snapshots: { closest: { available: true, status: "200", timestamp: "20240701010101" } },
+  }, canonicalUrl, "2024-06-01T00:00:00Z"), null);
+  assert.equal(selectWaybackAvailabilityCapture({
+    url: "https://sports.example/athletes/other",
+    archived_snapshots: { closest: { available: true, status: "200", timestamp: "20240501010101" } },
+  }, canonicalUrl, "2024-06-01T00:00:00Z"), null);
   assert.equal(
     waybackTimegateUrl(canonicalUrl, "2024-06-01T12:34:56Z"),
     `https://web.archive.org/web/20240601123456id_/${canonicalUrl}`
@@ -2975,6 +3001,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /tool_choice: "required"/);
   assert.match(workflow, /max_tokens: 900/);
   assert.match(workflow, /server_tool_use\?\.web_search_requests/);
+  assert.match(workflow, /reportedSearchRequests \|\| \(sources\.length > 0 \? 1 : 0\)/);
   assert.match(workflow, /searchRequests \* 12_000/);
   assert.match(workflow, /groundedHistoricalSignalDiscoveryCandidates/);
   assert.match(workflow, /deepDiscoveryCostMicrousd/);

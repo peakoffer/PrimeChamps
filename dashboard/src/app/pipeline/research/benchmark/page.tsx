@@ -902,7 +902,7 @@ export default function ResearchBenchmarkPage() {
       if (!response.ok) throw new Error(payload.error || "Fresh signal recovery failed to start");
       setMessage(payload.discoveryReused
         ? `Queued ${payload.records} fresh positive cases from a saved discovery checkpoint. New Apify spend and scoring-token spend are zero.`
-        : `Queued ${payload.records} fresh positive cases with a $${payload.maxApifyChargeUsd.toFixed(2)} Google discovery ceiling${payload.deepDiscoveryConfigured ? " plus one bounded grounded OpenRouter/Exa source search" : ""}. Scoring tokens and outreach mutations remain zero.`
+        : `Queued ${payload.records} fresh positive cases with a $${payload.maxApifyChargeUsd.toFixed(2)} Google discovery ceiling${payload.deepDiscoveryConfigured ? " plus one bounded grounded OpenRouter/Exa source search per athlete" : ""}. Scoring tokens and outreach mutations remain zero.`
       );
       await load();
     } catch (error) {
