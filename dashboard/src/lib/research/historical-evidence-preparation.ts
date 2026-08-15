@@ -19,7 +19,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-direct-article-retry-v21";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-formula-sport-alias-v22";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-direct-common-crawl-first-v17";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";

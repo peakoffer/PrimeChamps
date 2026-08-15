@@ -192,6 +192,13 @@ test("historical motorcycle racing accepts explicit Spanish motorcycle evidence"
     ),
     true,
   );
+  assert.equal(
+    benchmarkSourceSupportsSport(
+      "Motorsports",
+      "Sara Fruncillo will race in the Formula Women Nations Cup before moving to F2000.",
+    ),
+    true,
+  );
 });
 
 test("surfing evidence accepts explicit Spanish and French athlete terms", () => {
