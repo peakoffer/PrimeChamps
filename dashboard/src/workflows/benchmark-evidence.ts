@@ -39,10 +39,12 @@ import {
 } from "@/lib/research/historical-evidence-preparation";
 import {
   benchmarkEvidenceFreezeReadiness,
+  selectLatestOpenRouterSonnet,
   selectLeakageSafeBenchmarkEvidence,
   type BenchmarkEvidenceClaimRow,
   type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
+  type OpenRouterBenchmarkModel,
 } from "@/lib/research/benchmark-runner-support";
 
 type EvidencePreparationWorkflowInput = {
@@ -212,159 +214,143 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
   };
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey || !records.length) return empty;
-  const model = process.env.OPENROUTER_EVIDENCE_DISCOVERY_MODEL?.trim()
-    || process.env.OPENROUTER_IDENTITY_MODEL?.trim()
-    || "google/gemini-3.7-flash";
-  const cases = records.map((record) => ({
-    athlete_name: record.athlete_name,
-    sport: record.sport,
-    evidence_cutoff: record.evidence_cutoff_at.slice(0, 10),
-    instagram_handle: record.instagram_handle || null,
-  }));
-  const prompt = `Find archive-friendly public webpages that may contain historical audience-size or creator-activity evidence for these athletes:\n${JSON.stringify(cases)}\n\nSearch multilingual editorial interviews, athlete profiles, trade coverage, sponsor profiles, personal websites, and independent analytics pages. Prefer pages published on or before each athlete's evidence_cutoff. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use the eventual commercial outcome. Return at most four direct source URLs per athlete, using only URLs actually consulted by the web-search tool. The URLs are only discovery candidates; a separate deterministic archive validator will reject anything without an immutable pre-cutoff capture, exact athlete identity, and matching sport.`;
+  let selectedModel: ReturnType<typeof selectLatestOpenRouterSonnet>;
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL || "https://crm.prime-champs.com",
-        "X-Title": "Prime Champs Historical Evidence Discovery",
-      },
-      body: JSON.stringify({
-        model,
-        input: prompt,
-        reasoning: { effort: "low" },
-        tools: [{
-          type: "openrouter:web_search",
-          parameters: {
-            engine: "exa",
-            mode: "deep",
-            max_results: 6,
-            max_uses: Math.min(10, records.length),
-            max_total_results: Math.min(60, Math.max(12, records.length * 6)),
-            excluded_domains: [
-              "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
-              "threads.net", "x.com", "twitter.com", "wikipedia.org", "reddit.com",
-            ],
-          },
-        }],
-        tool_choice: "required",
-        max_tool_calls: Math.min(10, records.length),
-        max_output_tokens: 6_000,
-        store: false,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "prime_champs_historical_signal_sources",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                athletes: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      athlete_name: { type: "string" },
-                      source_urls: { type: "array", items: { type: "string" } },
-                    },
-                    required: ["athlete_name", "source_urls"],
-                  },
-                },
-              },
-              required: ["athletes"],
-            },
-          },
-        },
-      }),
-      signal: AbortSignal.timeout(120_000),
+    const catalogResponse = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) {
-      return { ...empty, model, error: `OpenRouter deep discovery failed (${response.status}): ${(await response.text()).slice(0, 500)}` };
+    if (!catalogResponse.ok) {
+      return { ...empty, error: `OpenRouter model discovery failed (${catalogResponse.status})` };
     }
-    const data = await response.json() as {
-      status?: string;
-      model?: string;
-      output_text?: string;
-      incomplete_details?: { reason?: string };
-      output?: Array<{
-        type?: string;
-        action?: { sources?: Array<{ url?: string; title?: string }> };
-        content?: Array<{
-          type?: string;
-          text?: string;
-          refusal?: string;
-          annotations?: Array<{
-            type?: string;
-            url?: string;
-            title?: string;
-            url_citation?: { url?: string; title?: string };
-          }>;
-        }>;
-      }>;
-      usage?: {
-        input_tokens?: number;
-        output_tokens?: number;
-        cost?: number;
-        server_tool_use?: { web_search_requests?: number };
-      };
-    };
-    const rawSources = (data.output || []).flatMap((item) =>
-      item.type?.includes("web_search") ? item.action?.sources || [] : []
-    );
-    const searchRequests = data.usage?.server_tool_use?.web_search_requests || 0;
-    const costMicrousd = typeof data.usage?.cost === "number"
-      ? Math.round(data.usage.cost * 1_000_000)
-      : searchRequests > 0 ? searchRequests * 12_000 : null;
-    if (data.status && data.status !== "completed") {
-      return {
-        ...empty,
-        model: data.model || model,
-        inputTokens: data.usage?.input_tokens || 0,
-        outputTokens: data.usage?.output_tokens || 0,
-        costMicrousd,
-        sourceCount: rawSources.length,
-        searchRequests,
-        error: `OpenRouter deep discovery was incomplete (${data.incomplete_details?.reason || data.status})`,
-      };
-    }
-    const messageParts = (data.output || []).flatMap((item) => item.type === "message" ? item.content || [] : []);
-    const refusal = messageParts.find((part) => part.type === "refusal")?.refusal;
-    if (refusal) return { ...empty, model: data.model || model, error: `OpenRouter deep discovery refused: ${refusal.slice(0, 300)}` };
-    const outputText = messageParts.map((part) => part.type === "output_text" ? part.text || "" : "").join("\n")
-      || data.output_text || "";
-    const objectText = outputText.match(/\{[\s\S]*\}/)?.[0];
-    if (!objectText) return { ...empty, model: data.model || model, error: "OpenRouter deep discovery returned no structured output" };
-    const payload = JSON.parse(objectText) as { athletes?: Array<{ athlete_name?: unknown; source_urls?: unknown }> };
-    const consultedSources = rawSources;
-    const citedSources = messageParts.flatMap((part) => part.annotations || [])
-      .filter((annotation) => annotation.type === "url_citation")
-      .map((annotation) => ({
-        url: annotation.url || annotation.url_citation?.url,
-        title: annotation.title || annotation.url_citation?.title,
-      }));
-    const groundedSources = [...consultedSources, ...citedSources];
-    const candidatesByRecord = groundedHistoricalSignalDiscoveryCandidates({
-      records,
-      proposed: Array.isArray(payload.athletes) ? payload.athletes : [],
-      consultedSources: groundedSources,
-    });
-    return {
-      candidatesByRecord,
-      model: data.model || model,
-      inputTokens: data.usage?.input_tokens || 0,
-      outputTokens: data.usage?.output_tokens || 0,
-      costMicrousd,
-      sourceCount: groundedSources.filter((source) => typeof source.url === "string" && source.url.startsWith("http")).length,
-      searchRequests,
-      error: null,
-    };
+    const catalog = await catalogResponse.json() as { data?: OpenRouterBenchmarkModel[] };
+    selectedModel = selectLatestOpenRouterSonnet((catalog.data || []).filter((candidate) =>
+      candidate.supported_parameters?.includes("tools")
+      && candidate.supported_parameters.includes("tool_choice")
+    ));
+    if (!selectedModel) return { ...empty, error: "OpenRouter does not expose a current tool-capable Sonnet model" };
   } catch (error) {
-    return { ...empty, model, error: error instanceof Error ? error.message.slice(0, 500) : "OpenRouter deep discovery failed" };
+    return { ...empty, error: error instanceof Error ? error.message.slice(0, 500) : "OpenRouter model discovery failed" };
   }
+
+  const model = selectedModel.model;
+  const calls = await Promise.all(records.map(async (record) => {
+    const prompt = `Use the web-search tool exactly once. Find up to four direct, archive-friendly public webpages that may contain historical audience-size or creator-activity evidence for this exact athlete:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\n\nSearch multilingual editorial interviews, athlete profiles, trade coverage, sponsor profiles, personal websites, and independent analytics pages. Prefer pages published on or before the cutoff. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, and matching sport.`;
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.APP_URL || "https://crm.prime-champs.com",
+          "X-Title": "Prime Champs Historical Evidence Discovery",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          reasoning: { effort: "low", exclude: true },
+          tools: [{
+            type: "openrouter:web_search",
+            parameters: {
+              engine: "exa",
+              mode: "deep",
+              max_results: 4,
+              max_uses: 1,
+              max_total_results: 4,
+              max_characters: 4_000,
+              excluded_domains: [
+                "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
+                "threads.net", "x.com", "twitter.com", "wikipedia.org", "reddit.com",
+              ],
+            },
+          }],
+          tool_choice: "required",
+          max_tool_calls: 1,
+          max_tokens: 900,
+          provider: { require_parameters: true, data_collection: "deny" },
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!response.ok) {
+        return {
+          record, inputTokens: 0, outputTokens: 0, costMicrousd: 0, searchRequests: 0,
+          sources: [] as Array<{ url?: string; title?: string; content?: string }>,
+          error: `HTTP ${response.status}: ${(await response.text()).slice(0, 240)}`,
+        };
+      }
+      const data = await response.json() as {
+        model?: string;
+        choices?: Array<{ message?: { annotations?: Array<{
+          type?: string;
+          url?: string;
+          title?: string;
+          content?: string;
+          url_citation?: { url?: string; title?: string; content?: string };
+        }> } }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          cost?: number;
+          server_tool_use?: { web_search_requests?: number };
+        };
+      };
+      const sources = (data.choices || []).flatMap((choice) => choice.message?.annotations || [])
+        .filter((annotation) => annotation.type === "url_citation")
+        .map((annotation) => ({
+          url: annotation.url || annotation.url_citation?.url,
+          title: annotation.title || annotation.url_citation?.title,
+          content: annotation.content || annotation.url_citation?.content,
+        }));
+      const inputTokens = Math.max(0, Number(data.usage?.prompt_tokens) || 0);
+      const outputTokens = Math.max(0, Number(data.usage?.completion_tokens) || 0);
+      const searchRequests = Math.max(0, Number(data.usage?.server_tool_use?.web_search_requests) || 0);
+      const estimatedCostMicrousd = Math.ceil(
+        inputTokens * selectedModel!.price.inputUsdPerMillion
+        + outputTokens * selectedModel!.price.outputUsdPerMillion
+        + searchRequests * 12_000
+      );
+      const costMicrousd = typeof data.usage?.cost === "number" && data.usage.cost >= 0
+        ? Math.ceil(data.usage.cost * 1_000_000)
+        : estimatedCostMicrousd;
+      return {
+        record, inputTokens, outputTokens, costMicrousd, searchRequests, sources,
+        error: searchRequests < 1 ? "provider reported zero web searches" : sources.length < 1 ? "provider returned no URL citations" : null,
+      };
+    } catch (error) {
+      return {
+        record, inputTokens: 0, outputTokens: 0, costMicrousd: 0, searchRequests: 0,
+        sources: [] as Array<{ url?: string; title?: string; content?: string }>,
+        error: error instanceof Error ? error.message.slice(0, 240) : "OpenRouter search failed",
+      };
+    }
+  }));
+
+  const candidatesByRecord = Object.fromEntries(records.map((record) => {
+    const call = calls.find((item) => item.record.id === record.id);
+    const sources = call?.sources || [];
+    const proposed = [{ athlete_name: record.athlete_name, source_urls: sources.map((source) => source.url) }];
+    const grounded = groundedHistoricalSignalDiscoveryCandidates({ records: [record], proposed, consultedSources: sources });
+    return [record.id, grounded[record.id] || []];
+  }));
+  const uniqueSources = new Set(calls.flatMap((call) => call.sources)
+    .map((source) => typeof source.url === "string" ? source.url : "").filter(Boolean));
+  const failures = calls.filter((call) => call.error).map((call) => `${call.record.athlete_name}: ${call.error}`);
+  const searchRequests = calls.reduce((sum, call) => sum + call.searchRequests, 0);
+  const sourceCount = uniqueSources.size;
+  const error = searchRequests < 1 || sourceCount < 1
+    ? failures.slice(0, 3).join("; ") || "OpenRouter grounded discovery returned no searchable citations"
+    : null;
+  return {
+    candidatesByRecord,
+    model,
+    inputTokens: calls.reduce((sum, call) => sum + call.inputTokens, 0),
+    outputTokens: calls.reduce((sum, call) => sum + call.outputTokens, 0),
+    costMicrousd: calls.reduce((sum, call) => sum + call.costMicrousd, 0),
+    sourceCount,
+    searchRequests,
+    error,
+  };
 }
 
 function validatePreparationRecord(

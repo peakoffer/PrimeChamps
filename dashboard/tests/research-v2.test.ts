@@ -2830,12 +2830,14 @@ test("grounded deep signal discovery accepts only consulted exact-athlete sport 
     evidence_cutoff_at: "2026-07-07T12:00:00.000Z",
   }];
   const riderPost = "https://www.theriderpost.com/disciplines/water/surf/tessa-thyssen-surfe-fesses/";
+  const citedProfile = "https://example.org/profiles/tessa-thyssen";
   const candidates = groundedHistoricalSignalDiscoveryCandidates({
     records,
     proposed: [{
       athlete_name: "Tessa Thyssen",
       source_urls: [
         riderPost,
+        citedProfile,
         "https://not-consulted.example/surf/tessa-thyssen",
         "https://youtube.com/watch?v=tessa",
         "https://example.com/surf/someone-else",
@@ -2844,12 +2846,13 @@ test("grounded deep signal discovery accepts only consulted exact-athlete sport 
     }],
     consultedSources: [
       { url: riderPost, title: "Tessa Thyssen : Surfer, c'est montrer ses fesses" },
+      { url: citedProfile, title: "Athlete profile", content: "Tessa Thyssen is a professional surfing athlete and content creator." },
       { url: "https://youtube.com/watch?v=tessa", title: "Tessa Thyssen surfing interview" },
       { url: "https://example.com/surf/someone-else", title: "Someone Else surfing interview" },
       { url: "https://example.com/tennis/tessa-thyssen", title: "Tessa Thyssen tennis profile" },
     ],
   });
-  assert.deepEqual(candidates.tessa?.map((candidate) => candidate.url), [riderPost]);
+  assert.deepEqual(candidates.tessa?.map((candidate) => candidate.url), [riderPost, citedProfile]);
 });
 
 test("generated material signals require explicit athlete-relevant language", () => {
@@ -2958,14 +2961,18 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
   assert.match(workflow, /scoringTokensSpent: 0/);
   assert.match(workflow, /openrouter:web_search/);
-  assert.match(workflow, /google\/gemini-3\.7-flash/);
+  assert.match(workflow, /selectLatestOpenRouterSonnet/);
+  assert.match(workflow, /api\/v1\/chat\/completions/);
   assert.match(workflow, /engine: "exa"/);
   assert.match(workflow, /mode: "deep"/);
-  assert.match(workflow, /max_uses: Math\.min\(10, records\.length\)/);
-  assert.match(workflow, /max_tool_calls: Math\.min\(10, records\.length\)/);
-  assert.match(workflow, /reasoning: \{ effort: "low" \}/);
+  assert.match(workflow, /Promise\.all\(records\.map/);
+  assert.match(workflow, /max_uses: 1/);
+  assert.match(workflow, /max_tool_calls: 1/);
+  assert.match(workflow, /reasoning: \{ effort: "low", exclude: true \}/);
   assert.match(workflow, /tool_choice: "required"/);
-  assert.match(workflow, /max_output_tokens: 6_000/);
+  assert.match(workflow, /max_tokens: 900/);
+  assert.match(workflow, /server_tool_use\?\.web_search_requests/);
+  assert.match(workflow, /searchRequests \* 12_000/);
   assert.match(workflow, /groundedHistoricalSignalDiscoveryCandidates/);
   assert.match(workflow, /deepDiscoveryCostMicrousd/);
   assert.match(workflow, /deep_discovery_tokens_spent/);
