@@ -45,10 +45,12 @@ import {
 import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
+  calibrateResearchV2QualifiedBand,
   hasMeaningfulPersonalAudience,
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  researchV2PreAuditEvidenceComplete,
   stableEvidenceSetHash,
   type ResearchV2CitedSignal,
   type ResearchV2EvidenceSource,
@@ -3813,7 +3815,12 @@ function auditTokenSet(value: string) {
     .split(" ").filter((token) => token.length >= 5));
 }
 
-function candidateResearchV2EvidenceSources(athlete: ScoredAthlete): ResearchV2EvidenceSource[] {
+type ResearchV2EvidenceCandidate = EnrichedAthlete & {
+  momentum_evidence?: ResearchV2CitedSignal[];
+  creator_evidence?: ResearchV2CitedSignal[];
+};
+
+function candidateResearchV2EvidenceSources(athlete: ResearchV2EvidenceCandidate): ResearchV2EvidenceSource[] {
   const sources: ResearchV2EvidenceSource[] = (athlete.evidence || []).flatMap((item) =>
     item.url?.startsWith("http") ? [{
       url: item.url,
@@ -3836,7 +3843,7 @@ function candidateResearchV2EvidenceSources(athlete: ScoredAthlete): ResearchV2E
   return sources;
 }
 
-function deterministicResearchV2FinalistEvidence(athlete: ScoredAthlete, followerMinimum: number) {
+function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCandidate, followerMinimum: number) {
   const sources = candidateResearchV2EvidenceSources(athlete);
   return {
     currentMomentum: hasSourceBackedResearchV2Signal(athlete.momentum_evidence, sources),
@@ -4670,10 +4677,36 @@ Respond with ONLY valid JSON:
             && athlete.onlyfans_platform_status === "inactive";
           const platformFitCeiling = inactiveOnlyFansProfile ? 59 : platformCheckIncomplete ? 79 : 100;
           const platformAchievabilityCeiling = inactiveOnlyFansProfile ? 44 : platformCheckIncomplete ? 69 : 100;
-          const v2Score = buildResearchV2Score({
+          const momentumEvidence = parseResearchV2CitedSignals(parsed.momentum_evidence);
+          const creatorEvidence = parseResearchV2CitedSignals(parsed.creator_evidence);
+          const deterministicEvidence = deterministicResearchV2FinalistEvidence({
+            ...athlete,
+            momentum_evidence: momentumEvidence,
+            creator_evidence: creatorEvidence,
+          }, thesisParams.follower_min);
+          const allCoreEvidenceGatesPassed = researchV2PreAuditEvidenceComplete({
+            professionalSportVerified: athlete.discovery_verification?.passed === true,
+            identityConfirmed: (athlete.identity_confidence || 0) >= 70
+              && athlete.identity_corroborated === true,
+            adultEligibilityVerified: athlete.age_verified === true
+              && athlete.age_corroborated === true
+              && typeof athlete.age === "number"
+              && athlete.age >= 21,
+            publicAccount: athlete.is_private === false,
+            activeAccount: athlete.account_active === true,
+            currentAthleticMomentumVerified: deterministicEvidence.currentMomentum,
+            meaningfulAudienceVerified: deterministicEvidence.meaningfulAudience,
+            creatorPotentialVerified: deterministicEvidence.creatorPotential,
+            onlyFansPlatformActivityCompatible: deterministicEvidence.onlyFansPlatformCompatible,
+          });
+          const calibrated = calibrateResearchV2QualifiedBand({
             onlyfansFit: Math.min(parsed.onlyfans_fit_score, platformFitCeiling),
             commercialAchievability: Math.min(parsed.commercial_achievability_score, platformAchievabilityCeiling),
             researchConfidence: parsed.research_confidence_score,
+            allCoreEvidenceGatesPassed,
+          });
+          const v2Score = buildResearchV2Score({
+            ...calibrated,
             hasCriticalGap: platformCheckIncomplete || inactiveOnlyFansProfile,
             unsupportedMaterialClaims: 0,
           });
@@ -4714,8 +4747,8 @@ Respond with ONLY valid JSON:
             creator_signals: Array.isArray(parsed.creator_signals)
               ? parsed.creator_signals.filter((signal): signal is string => typeof signal === "string")
               : [],
-            momentum_evidence: parseResearchV2CitedSignals(parsed.momentum_evidence),
-            creator_evidence: parseResearchV2CitedSignals(parsed.creator_evidence),
+            momentum_evidence: momentumEvidence,
+            creator_evidence: creatorEvidence,
           };
         }
       } catch {

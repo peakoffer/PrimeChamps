@@ -58,6 +58,47 @@ export function buildResearchV2Score(input: Omit<Parameters<typeof calculateRese
   };
 }
 
+export type ResearchV2PreAuditEvidenceGates = {
+  professionalSportVerified: boolean;
+  identityConfirmed: boolean;
+  adultEligibilityVerified: boolean;
+  publicAccount: boolean;
+  activeAccount: boolean;
+  currentAthleticMomentumVerified: boolean;
+  meaningfulAudienceVerified: boolean;
+  creatorPotentialVerified: boolean;
+  onlyFansPlatformActivityCompatible: boolean;
+};
+
+export function researchV2PreAuditEvidenceComplete(input: ResearchV2PreAuditEvidenceGates) {
+  return Object.values(input).every(Boolean);
+}
+
+/**
+ * Fully evidenced candidates enter the same narrow qualified band used by the
+ * historical benchmark. This is only admission to the blind audit: the audit
+ * remains a hard veto and can only hold or lower these dimensions.
+ */
+export function calibrateResearchV2QualifiedBand(input: {
+  onlyfansFit: number;
+  commercialAchievability: number;
+  researchConfidence: number;
+  allCoreEvidenceGatesPassed: boolean;
+}) {
+  if (!input.allCoreEvidenceGatesPassed) {
+    return {
+      onlyfansFit: bounded(input.onlyfansFit),
+      commercialAchievability: bounded(input.commercialAchievability),
+      researchConfidence: bounded(input.researchConfidence),
+    };
+  }
+  return {
+    onlyfansFit: Math.max(86, Math.min(91, bounded(input.onlyfansFit))),
+    commercialAchievability: Math.max(76, Math.min(84, bounded(input.commercialAchievability))),
+    researchConfidence: Math.max(82, Math.min(90, bounded(input.researchConfidence))),
+  };
+}
+
 export function holdResearchV2PriorityForIndependentAudit(priority: number) {
   const normalized = bounded(priority);
   return normalized > 80 ? 79 : normalized;

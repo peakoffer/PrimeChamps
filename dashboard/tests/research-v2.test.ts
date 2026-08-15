@@ -37,10 +37,12 @@ test("benchmark evidence storage batches records below the database row ceiling"
 import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
+  calibrateResearchV2QualifiedBand,
   hasMeaningfulPersonalAudience,
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  researchV2PreAuditEvidenceComplete,
   researchV2CitedSignalIsSourceBacked,
   stableEvidenceSetHash,
 } from "../src/lib/research/v2-scoring.ts";
@@ -1528,6 +1530,57 @@ test("V2 priority cannot hide weak achievability or weak research confidence", (
     commercialAchievability: 84,
     researchConfidence: 88,
   }).priority, 88.4);
+});
+
+test("fully evidenced live candidates enter the benchmark-qualified audit band", () => {
+  const allCoreEvidenceGatesPassed = researchV2PreAuditEvidenceComplete({
+    professionalSportVerified: true,
+    identityConfirmed: true,
+    adultEligibilityVerified: true,
+    publicAccount: true,
+    activeAccount: true,
+    currentAthleticMomentumVerified: true,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
+  });
+  const calibrated = calibrateResearchV2QualifiedBand({
+    onlyfansFit: 80,
+    commercialAchievability: 69,
+    researchConfidence: 80,
+    allCoreEvidenceGatesPassed,
+  });
+  assert.deepEqual(calibrated, {
+    onlyfansFit: 86,
+    commercialAchievability: 76,
+    researchConfidence: 82,
+  });
+  assert.ok(buildResearchV2Score(calibrated).priority > 80);
+});
+
+test("qualified-band calibration cannot repair a missing evidence gate", () => {
+  const completeExceptAge = researchV2PreAuditEvidenceComplete({
+    professionalSportVerified: true,
+    identityConfirmed: true,
+    adultEligibilityVerified: false,
+    publicAccount: true,
+    activeAccount: true,
+    currentAthleticMomentumVerified: true,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
+  });
+  const original = {
+    onlyfansFit: 80,
+    commercialAchievability: 69,
+    researchConfidence: 80,
+  };
+  assert.equal(completeExceptAge, false);
+  assert.deepEqual(calibrateResearchV2QualifiedBand({
+    ...original,
+    allCoreEvidenceGatesPassed: completeExceptAge,
+  }), original);
+  assert.ok(buildResearchV2Score(original).priority < 80);
 });
 
 test("V2 final gate requires independent audit and every evidence gate", () => {
