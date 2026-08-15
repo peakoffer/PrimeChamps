@@ -3450,7 +3450,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.ok(ageSelectorStart >= 0 && ageSelectorEnd > ageSelectorStart);
   assert.doesNotMatch(ageSelector, /baselineCompleted/);
   assert.match(ageSelector, /readiness\.identity\.passed/);
-  assert.match(ageSelector, /readiness\.creatorPotential\.passed/);
+  assert.doesNotMatch(
+    ageSelector,
+    /&& readiness\.creatorPotential\.passed/,
+    "age recovery must not wait on the independent creator-evidence lane"
+  );
   assert.ok(
     ageSelector.indexOf("right.readiness.adult.independentSources")
       < ageSelector.indexOf("left.readiness.reasons.length"),
@@ -3467,6 +3471,16 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /RESEARCH_HELD_OUT_EVALUATION_ENABLED/);
   assert.match(benchmarkPage, /maxRecords: evidencePreparationMode === "age_recovery" \? 10 : 3/);
   assert.match(benchmarkPage, /maxApifyChargeUsd: evidencePreparationMode === "age_recovery" \? 0\.75 : 0\.5/);
+  const socialBladeRoute = readFileSync(new URL("../src/app/api/research/golden-records/social-blade-history/route.ts", import.meta.url), "utf8");
+  const socialBladeCandidateStart = socialBladeRoute.indexOf("async function buildCandidatePlan");
+  const socialBladeCandidateEnd = socialBladeRoute.indexOf("async function countApifyPublicHistoryAttempts", socialBladeCandidateStart);
+  const socialBladeCandidateSelector = socialBladeRoute.slice(socialBladeCandidateStart, socialBladeCandidateEnd);
+  assert.ok(socialBladeCandidateStart >= 0 && socialBladeCandidateEnd > socialBladeCandidateStart);
+  assert.doesNotMatch(
+    socialBladeCandidateSelector,
+    /!readiness\.adult\.passed/,
+    "Social Blade recovery must not wait on the independent age-evidence lane"
+  );
   assert.match(workflow, /preparationMode === "signal_recovery"/);
   assert.match(workflow, /fresh excluded, development, or locked held-out evidence recovery/);
   assert.match(route, /extraction_version: HISTORICAL_EVIDENCE_EXTRACTION_VERSION/);
@@ -3510,7 +3524,12 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /officialHistoryStats\.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS/);
   assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);
   assert.match(socialBladeHistoryRoute, /benchmarkEvidenceFreezeReadiness/);
-  assert.match(socialBladeHistoryRoute, /!readiness\.identity\.passed \|\| !readiness\.adult\.passed \|\| !readiness\.momentum\.passed/);
+  assert.match(socialBladeHistoryRoute, /!readiness\.identity\.passed \|\| !readiness\.momentum\.passed/);
+  assert.doesNotMatch(
+    socialBladeHistoryRoute,
+    /!readiness\.adult\.passed \|\| !readiness\.momentum\.passed/,
+    "paid audience recovery must not wait on the independent age lane"
+  );
   assert.match(socialBladeHistoryRoute, /readiness\.creatorPotential\.passed/);
   assert.match(socialBladeHistoryRoute, /reserveOfficialHistoryAttempt/);
   assert.match(socialBladeHistoryRoute, /persistOfficialHistoryFailure/);

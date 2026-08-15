@@ -116,10 +116,11 @@ async function buildCandidatePlan(organizationId: string) {
       fitLabel: "fit",
       selection,
     });
-    // Paid history is a last-mile audience/creator recovery tool. Never spend
-    // credits on a record that still fails identity, 21+, or current-momentum
-    // gates because a Social Blade response cannot resolve those blockers.
-    if (!readiness.identity.passed || !readiness.adult.passed || !readiness.momentum.passed
+    // Paid history can safely close the audience/creator gate independently
+    // of age recovery. Identity and current momentum must already be safe,
+    // but requiring 21+ here would deadlock records whose age lane was also
+    // waiting for creator evidence. Every gate is still required at freeze.
+    if (!readiness.identity.passed || !readiness.momentum.passed
       || readiness.creatorPotential.passed) return [];
     const handle = handleByRecord.get(record.id)?.handle;
     const existingSignals = signalTypesByRecord.get(record.id) || new Set<string>();
