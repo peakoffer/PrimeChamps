@@ -126,7 +126,18 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 | Evaluation | Internal Supabase harness and unit/CI regressions first | Smallest debuggable system with no new platform dependency | Braintrust for scaled comparisons; Langfuse for self-hosted tracing; Promptfoo for broader CI matrices |
 | Paid influencer data | No Modash contract now | The annual price is not justified before proving a measured data gap | Revisit with volume and coverage evidence |
 
-## Current production checkpoint — 13 August 2026
+## Current production checkpoint — 15 August 2026
+
+- Production `main` is at `b5ff137`; Vercel deployment `dpl_DohtgLhKJ6koE7ihWCH3c1GpEAQo` is `READY` and owns `crm.prime-champs.com`.
+- Research V2.4 adds deterministic qualified-band calibration only after every identity, two-source 21+, momentum, audience, creator, commercial-access, public-restriction, and claim-support gate passes. The independent audit remains a hard veto and score ceiling.
+- Social Blade is now an audit-shortlist-only live audience-history input. It requires an exact handle and at least a 30-day observation pair; shorter or unavailable history is neutral. No discovery or broad enrichment run can consume Social Blade credits.
+- Durable `fork_from_scoring` replay reuses Researcher scores and reruns only independent audits. It strips old audit artifacts, preserves the full evidence dossier, and avoids discovery, Instagram, age, and Researcher-token spend.
+- Development volleyball run `1bd17f30-3fc7-4cc2-8ea0-83b122ce442e` produced 64 sourced / 40 admitted / 17 enriched and scored / two audited candidates. Final audit-only proof `80bed462-19f3-454f-9178-0759dc53bfa4` returned one genuine finalist: Asjia O'Neal at 82. Brooke Nuneviller remained correctly rejected at 73 for a missing actionable public contact route.
+- The final replay recorded zero critical gaps and zero unsupported sampled claims for Asjia. It removed the invalid negative interpretation of a four-day follower window from finalist concerns. The two audits cost an estimated $0.084974 and used 14,047 input / 5,688 output tokens; no Researcher scoring was repeated.
+- Evaluation isolation remained perfect: zero live athlete links, notifications, drafts, outreach messages, or queue entries. The current shortfall is finalist yield (1/10), not score calibration. Increase input-side coverage and pre-ranking without weakening gates.
+- The full check passes: typecheck, lint with zero errors (53 existing warnings), 151 unit tests, and the production build.
+
+## Previous production checkpoint — 13 August 2026
 
 - The source-backed finalist gate began at `1763655`; the Social Blade adapter landed at `37bff04`, and archive retry throttling at `3efd01b`. Always confirm the current `main` deployment is READY before resuming paid work rather than treating an older hash in this document as authoritative.
 - Research prompt `research-v10-corroborated-identity-and-21-plus-gates` is active. Production scoring resolves the latest Anthropic Sonnet dynamically; the 12 August smoke run resolved `claude-sonnet-5`.
