@@ -18,6 +18,35 @@ export function normalizeEvaluationSports(values: unknown[]) {
   )).slice(0, 10);
 }
 
+const DOWNSTREAM_RESEARCH_ARTIFACT_KEYS = new Set([
+  "age",
+  "is_minor",
+  "score",
+  "score_breakdown",
+  "reasoning",
+  "concerns",
+  "career_stage",
+  "objective_fit",
+  "creator_signals",
+  "momentum_evidence",
+  "creator_evidence",
+  "onlyfans_fit_score",
+  "commercial_achievability_score",
+  "research_confidence_score",
+  "research_score_id",
+  "audit_id",
+]);
+
+function resetEnrichedCandidateForRescoring(candidate: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(candidate).filter(([key]) =>
+    !DOWNSTREAM_RESEARCH_ARTIFACT_KEYS.has(key)
+      && !key.startsWith("age_")
+      && !key.startsWith("onlyfans_")
+      && !key.startsWith("researcher_")
+      && !key.startsWith("audit_")
+  ));
+}
+
 export async function launchResearchEvaluations(input: {
   organizationId: string;
   requestedByUserId: string;
@@ -213,9 +242,10 @@ export async function forkResearchEvaluationFromEnrichment(sourceRunId: string) 
   const durableCandidateDetails = (candidateRows || []).flatMap((row) =>
     isFullCandidateCheckpoint(row.raw_candidate) ? [row.raw_candidate] : []
   );
-  const checkpointDetails = durableCandidateDetails.length > 0
+  const checkpointDetails = (durableCandidateDetails.length > 0
     ? durableCandidateDetails
-    : scoringDetails.filter(isFullCandidateCheckpoint);
+    : scoringDetails.filter(isFullCandidateCheckpoint))
+    .map(resetEnrichedCandidateForRescoring);
   if (rawResults.length === 0 || checkpointDetails.length === 0) {
     throw new Error("Source evaluation has no durable enrichment checkpoint to fork");
   }

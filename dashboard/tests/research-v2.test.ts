@@ -559,6 +559,16 @@ test("Anthropic structured-output retries expand truncated scoring and audit bud
   assert.match(workflow, /stop=\$\{data\.stop_reason \|\| "unknown"\}/);
 });
 
+test("enrichment checkpoint forks discard prior scoring and audit artifacts", () => {
+  const source = readFileSync(new URL("../src/lib/research/evaluation-runs.ts", import.meta.url), "utf8");
+  assert.match(source, /DOWNSTREAM_RESEARCH_ARTIFACT_KEYS/);
+  assert.match(source, /!key\.startsWith\("age_"\)/);
+  assert.match(source, /!key\.startsWith\("onlyfans_"\)/);
+  assert.match(source, /!key\.startsWith\("researcher_"\)/);
+  assert.match(source, /!key\.startsWith\("audit_"\)/);
+  assert.match(source, /\.map\(resetEnrichedCandidateForRescoring\)/);
+});
+
 test("paid enrichment gives fresh discovery priority without discarding memory", () => {
   const selected = selectBalancedResearchCandidates([
     ...Array.from({ length: 8 }, (_, index) => ({ id: `memory-${index}`, discovery_lane: "memory" as const })),
