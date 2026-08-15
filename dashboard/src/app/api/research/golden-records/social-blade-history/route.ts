@@ -204,6 +204,7 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
     : candidates.filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted).slice(0, 1);
   return {
     configured: Boolean(socialBladeCredentials()),
+    credentialStatus: socialBladeCredentialStatus(),
     candidateCount: candidates.length,
     pilotRecords: pilot.map((candidate) => ({
       id: candidate.id,

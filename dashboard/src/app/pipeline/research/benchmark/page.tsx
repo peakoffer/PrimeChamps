@@ -89,6 +89,12 @@ type EvidencePreparationRun = {
 
 type SocialBladeHistoryPlan = {
   configured: boolean;
+  credentialStatus: {
+    clientIdVariablePresent: boolean;
+    clientIdHasValue: boolean;
+    tokenVariablePresent: boolean;
+    tokenHasValue: boolean;
+  };
   candidateCount: number;
   pilotRecords: Array<{
     id: string;
@@ -121,6 +127,12 @@ type SocialBladeHistoryPlan = {
 
 const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   configured: false,
+  credentialStatus: {
+    clientIdVariablePresent: false,
+    clientIdHasValue: false,
+    tokenVariablePresent: false,
+    tokenHasValue: false,
+  },
   candidateCount: 0,
   pilotRecords: [],
   pilotMaximumCredits: 0,
@@ -1175,7 +1187,15 @@ export default function ResearchBenchmarkPage() {
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
               {!socialBladePlan.configured
-                ? "Social Blade not connected"
+                ? !socialBladePlan.credentialStatus.clientIdVariablePresent
+                  ? "Social Blade client ID variable missing"
+                  : !socialBladePlan.credentialStatus.clientIdHasValue
+                    ? "Social Blade client ID value empty"
+                    : !socialBladePlan.credentialStatus.tokenVariablePresent
+                      ? "Social Blade token variable missing"
+                      : !socialBladePlan.credentialStatus.tokenHasValue
+                        ? "Social Blade token value empty"
+                        : "Social Blade not connected"
                 : socialBladePlan.officialPilotExhausted
                   ? "Paid history recovery complete"
                 : socialBladePlan.pilotRecords.length === 0
