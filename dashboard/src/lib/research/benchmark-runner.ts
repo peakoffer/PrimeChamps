@@ -34,6 +34,7 @@ import {
   parseBenchmarkStructuredJson,
   projectedBenchmarkCallCostMicrousd,
   selectLeakageSafeBenchmarkEvidence,
+  validateBenchmarkStructuredValue,
   type BenchmarkEvidenceClaimRow,
   type BenchmarkEvidenceSourceRow,
   type BenchmarkDeterministicGateSummary,
@@ -47,7 +48,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v24";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v25";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -357,7 +358,7 @@ async function callStructuredSonnet<T>(input: {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const prompt = attempt === 1
       ? input.prompt
-      : `${input.prompt}\n\nThe prior response was incomplete or invalid. Return one complete JSON object matching the schema, with no markdown.`;
+      : `${input.prompt}\n\nThe prior response was incomplete or invalid. Return one complete JSON object with no markdown. Do not rename, omit, or add fields. Exact schema:\n${JSON.stringify(input.schema)}`;
     input.ledger.admit(prompt, input.maximumOutputTokens);
     const startedAt = Date.now();
     const openRouter = input.provider === "openrouter";
@@ -428,16 +429,22 @@ async function callStructuredSonnet<T>(input: {
     const truncated = openRouter ? payload.choices?.[0]?.finish_reason === "length" : payload.stop_reason === "max_tokens";
     if (rawStructuredOutput && !truncated) {
       try {
+        const value = parseBenchmarkStructuredJson<T>(rawStructuredOutput);
+        const validationErrors = validateBenchmarkStructuredValue(value, input.schema);
+        if (validationErrors.length) {
+          failureReasons.push(`attempt ${attempt}: schema mismatch (${validationErrors.slice(0, 3).join("; ")})`);
+          continue;
+        }
         return {
-          value: parseBenchmarkStructuredJson<T>(rawStructuredOutput),
+          value,
           usage: {
             ...accumulatedUsage,
             latencyMs: accumulatedLatencyMs,
             costMicrousd: accumulatedCostMicrousd,
           } satisfies ModelUsage,
         };
-      } catch {
-        failureReasons.push(`attempt ${attempt}: invalid JSON`);
+      } catch (error) {
+        failureReasons.push(`attempt ${attempt}: ${error instanceof Error ? error.message : "invalid JSON"}`);
       }
     } else {
       failureReasons.push(`attempt ${attempt}: ${truncated ? "max-token truncation" : "empty structured output"}`);
@@ -459,8 +466,8 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 7,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v7",
+    version: 8,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v8",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
@@ -472,11 +479,12 @@ async function ensureBenchmarkArtifacts(input: {
       audience_policy: "contextual_emerging_athlete_signal_not_a_50000_follower_floor",
       failed_core_gate_score_bands: { fit: "45-58", commercial_achievability: "35-44", research_confidence: "42-58" },
       material_claim_policy: "model_selects_refs_application_emits_immutable_claims_and_quotes",
+      structured_output_policy: "strict_runtime_schema_validation_before_persistence",
       platform_willingness_required: false,
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v7",
+    definition_hash: "research-v2-benchmark-rubric-v8",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -497,7 +505,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 14,
+      version: 15,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -523,14 +531,14 @@ async function ensureBenchmarkArtifacts(input: {
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
       content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence plus deterministic no-label gate summaries; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-researcher-v14",
+      content_hash: "research-v2-benchmark-researcher-v15",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
       content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries before comparison with the Researcher assessment; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-auditor-v14",
+      content_hash: "research-v2-benchmark-auditor-v15",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -800,6 +808,7 @@ Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
 All three scores must use the 0-100 numeric scale, never fractions from 0 to 1. Put only a failed core gate from the calibration definition in critical_gaps. Put optional missing amplifiers, stale-but-still-usable evidence, and non-blocking unanswered questions in limitations instead. A limitation must not become a critical gap merely because fresher or more complete evidence would be preferable. Keep the summary under 120 words and return no more than five critical gaps and five limitations.
+Return exactly these keys and types: identity_passed (boolean), eligibility_passed (boolean), source_verification_passed (boolean), commercial_constraints_complete (boolean), independent_fit_score (number), independent_achievability_score (number), independent_confidence_score (number), critical_gaps (string array), limitations (string array), failure_types (string array), summary (string). Do not rename or add fields.
 Return the required JSON only.`;
 }
 
@@ -825,7 +834,8 @@ ${JSON.stringify(deterministicPrecheck, null, 2)}
 
 Pass only when every material score and claim is supported by the frozen evidence. Material claims are immutable source records selected by E-number; do not call a canonical source claim unsupported merely because you would word it differently or because its authenticated pre-decision source is internal. List every actual unsupported Researcher conclusion in unsupported_material_claims. Correct a usable proposal when evidence supports lower scores. Never raise a Researcher or blind-auditor dimension. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from creator, audience, momentum, and accessibility evidence. Missing representation alone is not automatically critical. Treat every passed deterministic core gate as present; do not override it solely because an audience signal is qualitative, below 50,000, or lacks cross-platform corroboration.
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
-All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. If the proposal passes with no actual research-system error, return an empty findings array; never create a finding whose failure_type is "none". Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
+All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. If the proposal passes with no actual research-system error, return an empty findings array; never create a finding whose failure_type is "none". Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words.
+Return exactly these keys: verdict, corrected_fit_score, corrected_achievability_score, corrected_confidence_score, unsupported_material_claims, findings, summary. verdict must be pass, corrected, or fail. Each finding must contain exactly failure_type, severity, details, and proposed_fix. Do not rename or add fields. Return the required JSON only.`;
 }
 
 function actionableReviewFinding(finding: ReviewAssessment["findings"][number]) {

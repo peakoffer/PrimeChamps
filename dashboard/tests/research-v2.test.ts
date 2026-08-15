@@ -82,6 +82,7 @@ import {
   projectedBenchmarkCallCostMicrousd,
   selectLatestOpenRouterSonnet,
   selectLeakageSafeBenchmarkEvidence,
+  validateBenchmarkStructuredValue,
   sonnetPriceSnapshot,
   summarizeBenchmarkEvidenceReadiness,
   type BenchmarkEvidenceClaimRow,
@@ -1660,6 +1661,18 @@ test("benchmark structured output parser accepts strict JSON and harmless provid
   assert.throws(() => parseBenchmarkStructuredJson("not json"), /invalid structured JSON/);
 });
 
+test("benchmark structured output validator rejects provider-renamed and missing fields", () => {
+  const schema = {
+    type: "object", additionalProperties: false,
+    properties: { passed: { type: "boolean" }, score: { type: "number" } },
+    required: ["passed", "score"],
+  };
+  assert.deepEqual(validateBenchmarkStructuredValue({ passed: true, score: 82 }, schema), []);
+  const errors = validateBenchmarkStructuredValue({ audit_result: "PASS", score: 82 }, schema);
+  assert.ok(errors.some((error) => error.includes("passed is required")));
+  assert.ok(errors.some((error) => error.includes("audit_result is not allowed")));
+});
+
 test("benchmark finalist gates require two independent identity and adult sources", () => {
   const selection = selectLeakageSafeBenchmarkEvidence({
     record: BENCHMARK_CASE,
@@ -1999,7 +2012,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v24/);
+  assert.match(source, /research-v2-benchmark-runner-v25/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);

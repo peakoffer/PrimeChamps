@@ -651,6 +651,48 @@ export function parseBenchmarkStructuredJson<T>(value: unknown): T {
   throw new Error("invalid structured JSON");
 }
 
+/** Small strict validator for the JSON-schema subset used by benchmark calls. */
+export function validateBenchmarkStructuredValue(
+  value: unknown,
+  schema: Record<string, unknown>,
+  path = "$"
+): string[] {
+  const errors: string[] = [];
+  const type = schema.type;
+  if (type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [`${path} must be an object`];
+    const record = value as Record<string, unknown>;
+    const properties = schema.properties && typeof schema.properties === "object"
+      ? schema.properties as Record<string, Record<string, unknown>>
+      : {};
+    for (const required of Array.isArray(schema.required) ? schema.required : []) {
+      if (typeof required === "string" && !(required in record)) errors.push(`${path}.${required} is required`);
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(record)) if (!(key in properties)) errors.push(`${path}.${key} is not allowed`);
+    }
+    for (const [key, childSchema] of Object.entries(properties)) {
+      if (key in record) errors.push(...validateBenchmarkStructuredValue(record[key], childSchema, `${path}.${key}`));
+    }
+  } else if (type === "array") {
+    if (!Array.isArray(value)) return [`${path} must be an array`];
+    const itemSchema = schema.items && typeof schema.items === "object"
+      ? schema.items as Record<string, unknown>
+      : null;
+    if (itemSchema) value.forEach((item, index) => {
+      errors.push(...validateBenchmarkStructuredValue(item, itemSchema, `${path}[${index}]`));
+    });
+  } else if (type === "string") {
+    if (typeof value !== "string") errors.push(`${path} must be a string`);
+  } else if (type === "boolean") {
+    if (typeof value !== "boolean") errors.push(`${path} must be a boolean`);
+  } else if (type === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) errors.push(`${path} must be a finite number`);
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) errors.push(`${path} must match the enum`);
+  return errors.slice(0, 12);
+}
+
 export function benchmarkCaseReadiness(input: {
   record: BenchmarkGoldenCase;
   selection: BenchmarkEvidenceSelection;
@@ -764,6 +806,7 @@ SCORING
 - Return four to six distinct E-numbers in material_evidence_refs. Select the strongest frozen records that directly support identity, adult eligibility, momentum, audience/creator opportunity, and accessibility. Application code will create exact material claims and quotes from those immutable records; never invent an E-number.
 - Put only failed core gates in critical_gaps. Put optional missing amplifiers and unanswered non-blocking questions in limitations. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
 - Keep reasoning under 120 words and return no more than six material evidence references, five critical gaps, and five limitations.
+- Return exactly these keys and types: identity_confirmed (boolean), adult_eligibility_verified (boolean), onlyfans_fit_score (number), commercial_achievability_score (number), research_confidence_score (number), fit_label (fit, not_fit, or uncertain), achievability_label (high, medium, low, or uncertain), material_evidence_refs (string array), critical_gaps (string array), limitations (string array), reasoning (string). Do not rename or add fields.
 
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 

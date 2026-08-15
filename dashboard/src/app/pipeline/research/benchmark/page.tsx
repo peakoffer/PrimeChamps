@@ -1112,7 +1112,7 @@ export default function ResearchBenchmarkPage() {
         </section>
 
         <div className="mb-6 flex flex-col gap-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-4 text-sm text-amber-100/80 sm:flex-row sm:items-center sm:justify-between">
-          <p><strong className="font-medium text-amber-100">Dylan&apos;s 100-case outcome ledger is the benchmark source of truth.</strong> Signed and approved-but-not-signed are positive; rejected and stalled are negative. Outcomes stay out of every model prompt, and only dated public evidence is used as input.</p>
+          <p><strong className="font-medium text-amber-100">Dylan&apos;s 100-case outcome ledger is the benchmark source of truth.</strong> Signed and approved-but-not-signed are positive; rejected and stalled are negative. Outcomes stay out of every model prompt, and only dated pre-decision evidence is used as input.</p>
           <div className="flex flex-wrap gap-2 sm:justify-end">
             <Link href="/api/research/golden-records?format=blind-labeling-csv" className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100">
               Download blind worksheet
