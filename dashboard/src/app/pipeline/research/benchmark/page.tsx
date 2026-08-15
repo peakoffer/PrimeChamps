@@ -493,6 +493,15 @@ export default function ResearchBenchmarkPage() {
     && latestDevelopmentRun.calculated_metrics.unsupportedClaimRate === 0
     && latestDevelopmentRun.calculated_metrics.pointInTimeComplianceRate === 1
   );
+  const developmentSmokeNeedsPrecisionDenominator = Boolean(
+    latestDevelopmentRun?.status === "completed"
+    && latestDevelopmentRun.result_count >= 4
+    && latestDevelopmentRun.calculated_metrics
+    && latestDevelopmentRun.calculated_metrics.finalistsAbove80 === 0
+    && latestDevelopmentRun.calculated_metrics.sourceVerificationRate === 1
+    && latestDevelopmentRun.calculated_metrics.unsupportedClaimRate === 0
+    && latestDevelopmentRun.calculated_metrics.pointInTimeComplianceRate === 1
+  );
   const completedExcludedSignalRecordIdSet = useMemo(
     () => new Set(completedExcludedSignalRecordIds),
     [completedExcludedSignalRecordIds]
@@ -1336,12 +1345,14 @@ export default function ResearchBenchmarkPage() {
                   <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
                     Start four-case smoke test
                   </button>
-                  {developmentSmokePassed
+                  {(developmentSmokePassed || developmentSmokeNeedsPrecisionDenominator)
                     && latestDevelopmentRun
                     && latestDevelopmentRun.result_count < benchmarkReadiness.development.total
                     && (
                     <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(benchmarkReadiness.development.total, 1_500_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
-                      Start full development calibration ({benchmarkReadiness.development.total})
+                      {developmentSmokeNeedsPrecisionDenominator
+                        ? `Expand to establish precision (${benchmarkReadiness.development.total})`
+                        : `Start full development calibration (${benchmarkReadiness.development.total})`}
                     </button>
                   )}
                 </>
