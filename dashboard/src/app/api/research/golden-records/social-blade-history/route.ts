@@ -57,6 +57,15 @@ function socialBladeCredentials() {
   return clientId && token ? { clientId, token } : null;
 }
 
+function socialBladeCredentialStatus() {
+  return {
+    clientIdVariablePresent: Object.hasOwn(process.env, "SOCIAL_BLADE_CLIENT_ID"),
+    clientIdHasValue: Boolean(process.env.SOCIAL_BLADE_CLIENT_ID?.trim()),
+    tokenVariablePresent: Object.hasOwn(process.env, "SOCIAL_BLADE_TOKEN"),
+    tokenHasValue: Boolean(process.env.SOCIAL_BLADE_TOKEN?.trim()),
+  };
+}
+
 async function buildCandidatePlan(organizationId: string) {
   const admin = createAdminClient();
   const { data: records, error: recordError } = await admin.from("research_golden_records")
@@ -333,6 +342,10 @@ export async function GET() {
       countApifyPublicHistoryAttempts(user.organizationId),
       countOfficialHistoryAttempts(user.organizationId),
     ]);
+    const credentialStatus = socialBladeCredentialStatus();
+    if (!credentialStatus.clientIdHasValue || !credentialStatus.tokenHasValue) {
+      console.warn("Social Blade credentials unavailable", credentialStatus);
+    }
     return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount, officialHistoryStats) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not prepare Social Blade history plan";
