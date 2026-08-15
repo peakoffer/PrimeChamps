@@ -877,7 +877,11 @@ export async function startBenchmarkRun(input: {
       sources: evidenceRows.sources.filter((source) => source.golden_record_id === record.id),
       claims: evidenceRows.claims.filter((claim) => claim.golden_record_id === record.id),
     });
-    const readiness = benchmarkCaseReadiness({ record, selection });
+    const readiness = benchmarkCaseReadiness({
+      record,
+      selection,
+      allowRevealedHeldOutReplay: input.split === "development" && Boolean(replaySourceRunId),
+    });
     const evidenceReadiness = benchmarkEvidenceFreezeReadiness({ record, fitLabel: record.fit_label, selection });
     const reasons = [...readiness.reasons, ...evidenceReadiness.reasons];
     return reasons.length === 0 ? [] : [{ id: record.id, athlete: record.athlete_name, reasons }];
@@ -1177,7 +1181,11 @@ async function processBenchmarkCase(input: {
   const { admin, run, record, artifacts, ledger } = input;
   const evidenceRows = await loadEvidence(admin, run.organization_id, [record.id]);
   const selection = selectLeakageSafeBenchmarkEvidence({ record, sources: evidenceRows.sources, claims: evidenceRows.claims });
-  const readiness = benchmarkCaseReadiness({ record, selection });
+  const readiness = benchmarkCaseReadiness({
+    record,
+    selection,
+    allowRevealedHeldOutReplay: run.benchmark_split === "development" && Boolean(run.metrics.replay_source_run_id),
+  });
   const evidenceReadiness = benchmarkEvidenceFreezeReadiness({ record, fitLabel: record.fit_label, selection });
   const readinessReasons = [...readiness.reasons, ...evidenceReadiness.reasons];
   if (readinessReasons.length) throw new Error(`${record.athlete_name} is no longer benchmark-ready: ${readinessReasons.join(", ")}`);

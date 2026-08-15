@@ -1939,6 +1939,22 @@ test("benchmark finalist gates require two independent identity and adult source
     independentSources: 3,
   }, "two matching exact birth dates outrank a stale approximate-age snippet");
   assert.equal(benchmarkCaseReadiness({ record: BENCHMARK_CASE, selection }).ready, true);
+  const revealedReplayRecord = {
+    ...BENCHMARK_CASE,
+    benchmark_split: "held_out" as const,
+    held_out_locked_at: "2026-01-01T00:00:00.000Z",
+    held_out_revealed_at: "2026-01-02T00:00:00.000Z",
+  };
+  assert.deepEqual(
+    benchmarkCaseReadiness({ record: revealedReplayRecord, selection }).reasons,
+    ["held-out record is not locked and unrevealed"],
+    "a revealed held-out case must fail closed by default",
+  );
+  assert.equal(benchmarkCaseReadiness({
+    record: revealedReplayRecord,
+    selection,
+    allowRevealedHeldOutReplay: true,
+  }).ready, true, "an explicitly marked development replay may reuse a revealed archive");
   const creatorReadySelection = {
     ...selection,
     evidence: [

@@ -740,6 +740,7 @@ export function validateBenchmarkStructuredValue(
 export function benchmarkCaseReadiness(input: {
   record: BenchmarkGoldenCase;
   selection: BenchmarkEvidenceSelection;
+  allowRevealedHeldOutReplay?: boolean;
 }) {
   const { record, selection } = input;
   const reasons: string[] = [];
@@ -750,7 +751,9 @@ export function benchmarkCaseReadiness(input: {
   if (!record.benchmark_cohort_version) reasons.push("missing frozen cohort version");
   if (record.point_in_time_reliability !== "strong" && record.point_in_time_reliability !== "partial") reasons.push("point-in-time evidence is unusable");
   if (record.label_order_fit_before_outcome !== true && !outcomeGroundTruth) reasons.push("record lacks an authoritative ground-truth label");
-  if (record.benchmark_split === "held_out" && (!record.held_out_locked_at || record.held_out_revealed_at)) {
+  if (record.benchmark_split === "held_out"
+    && !input.allowRevealedHeldOutReplay
+    && (!record.held_out_locked_at || record.held_out_revealed_at)) {
     reasons.push("held-out record is not locked and unrevealed");
   }
   if (selection.evidence.length === 0) reasons.push("no leakage-safe evidence exists before the cutoff");
