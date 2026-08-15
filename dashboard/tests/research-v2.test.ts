@@ -746,6 +746,17 @@ test("Social Blade recovery uses the cheapest sufficient tier and only exact, re
       data: { id: { username: "example.athlete" }, daily: [{ date: "2026-03-01T00:00:00.000Z", followers: 120_000 }] },
     },
   }), null);
+  const widerWindowSnapshot = prepareSocialBladeInstagramSnapshot({
+    expectedHandle: "example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
+    maximumSnapshotAgeDays: 90,
+    response: {
+      status: { success: true },
+      data: { id: { username: "example.athlete" }, daily: [{ date: "2026-03-01T00:00:00.000Z", followers: 120_000, media: 220 }] },
+    },
+  });
+  assert.equal(widerWindowSnapshot?.snapshotAgeDays, 63);
+  assert.equal(widerWindowSnapshot?.followers, 120_000);
 });
 
 test("Apify public Social Blade recovery requires an exact dated daily row and never backdates a current profile", () => {
@@ -1582,6 +1593,19 @@ test("benchmark finalist gates require two independent identity and adult source
     passed: false,
     independentSources: 3,
   });
+  const staleApproximateAge = {
+    ...selection.evidence.find((item) => item.claimId === "age-claim-b")!,
+    sourceId: "stale-age",
+    claimId: "stale-age",
+    sourceRef: "E97",
+    independenceGroup: "stale-profile.test",
+    structuredValue: { age: 23 },
+    effectiveAt: "2025-06-01T00:00:00.000Z",
+  };
+  assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, [...selection.evidence, staleApproximateAge]), {
+    passed: true,
+    independentSources: 3,
+  }, "two matching exact birth dates outrank a stale approximate-age snippet");
   assert.equal(benchmarkCaseReadiness({ record: BENCHMARK_CASE, selection }).ready, true);
   const creatorReadySelection = {
     ...selection,
@@ -3105,6 +3129,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2/);
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_PILOT_ATTEMPTS = 5/);
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_RECOVERY_ATTEMPTS = 24/);
+  assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_SNAPSHOT_AGE_DAYS = 90/);
+  assert.match(socialBladeHistoryRoute, /OFFICIAL_HISTORY_PLAN_VERSION = "max90-v2"/);
   assert.match(socialBladeHistoryRoute, /officialValidationPassed/);
   assert.match(socialBladeHistoryRoute, /officialHistoryStats\.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS/);
   assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);

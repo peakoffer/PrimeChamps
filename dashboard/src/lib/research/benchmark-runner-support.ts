@@ -452,10 +452,23 @@ export function benchmarkAdultEligibilityGate(record: BenchmarkGoldenCase, evide
     && supportedAdultAge(item, record.evidence_cutoff_at!)
   );
   const groups = new Set(eligible.map((item) => item.independenceGroup));
-  const facts = eligible.map(adultAgeFact).filter((fact): fact is AdultAgeFact => fact !== null);
+  const factsWithSources = eligible
+    .map((item) => ({ fact: adultAgeFact(item), independenceGroup: item.independenceGroup }))
+    .filter((item): item is { fact: AdultAgeFact; independenceGroup: string } => item.fact !== null);
+  const facts = factsWithSources.map((item) => item.fact);
   const factsAgree = facts.length === eligible.length
     && facts.every((left, index) => facts.slice(index + 1).every((right) => adultAgeFactsAgree(left, right)));
-  return { passed: groups.size >= 2 && factsAgree, independentSources: groups.size };
+  const exactBirthDateFacts = factsWithSources.filter((item) => item.fact.exactBirthDate !== null);
+  const exactBirthDates = new Set(exactBirthDateFacts.map((item) => item.fact.exactBirthDate));
+  const exactBirthDateGroups = new Set(exactBirthDateFacts.map((item) => item.independenceGroup));
+  // Two independent, matching full birth dates are stronger than a stale or
+  // undated stated-age snippet. A conflicting full birth date still fails the
+  // gate because `exactBirthDates` then contains more than one value.
+  const corroboratedExactBirthDate = exactBirthDates.size === 1 && exactBirthDateGroups.size >= 2;
+  return {
+    passed: groups.size >= 2 && (factsAgree || corroboratedExactBirthDate),
+    independentSources: groups.size,
+  };
 }
 
 export function benchmarkCurrentMomentumGate(

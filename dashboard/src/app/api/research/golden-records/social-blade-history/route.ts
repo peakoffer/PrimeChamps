@@ -23,6 +23,8 @@ export const maxDuration = 300;
 const MAX_PILOT_RECORDS = 5;
 const MAX_PILOT_CREDITS = 10;
 const MAX_OFFICIAL_PILOT_ATTEMPTS = 5;
+const MAX_OFFICIAL_SNAPSHOT_AGE_DAYS = 90;
+const OFFICIAL_HISTORY_PLAN_VERSION = "max90-v2";
 // The first sixteen checkpointed lookups proved the exact-handle paid lane.
 // The funded second tranche remains one-profile-at-a-time and can authorize at
 // most eight more attempts before another explicit audit.
@@ -69,7 +71,12 @@ async function buildCandidatePlan(organizationId: string) {
     .filter((source) => source.provider === "apify_social_blade_public_history")
     .map((source) => source.golden_record_id));
   const officialHistoryAttemptedRecordIds = new Set(evidenceSources
-    .filter((source) => source.provider === "social_blade_instagram_history")
+    .filter((source) => source.provider === "social_blade_instagram_history"
+      // The first paid pass used a 31-day acceptance window even though the
+      // extended response can contain up to a year of daily history. Permit
+      // exactly one wider-window retry only for that specific no-snapshot
+      // result; wrong handles and all other failures remain final.
+      && source.exclusion_reason !== "No exact-handle snapshot within 31 days before the cutoff")
     .map((source) => source.golden_record_id));
 
   const recordById = new Map((records || []).map((record) => [record.id, record]));
@@ -190,6 +197,7 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
       cutoff: candidate.cutoff,
       historyTier: candidate.tier,
       maximumCredits: candidate.credits,
+      maximumSnapshotAgeDays: MAX_OFFICIAL_SNAPSHOT_AGE_DAYS,
     })),
     pilotMaximumCredits: pilot.reduce((sum, candidate) => sum + candidate.credits, 0),
     pilotLimit: MAX_PILOT_RECORDS,
@@ -236,7 +244,7 @@ async function fetchSocialBladeHistory(candidate: Candidate) {
 }
 
 function officialAttemptRequestId(candidate: Candidate) {
-  return `${candidate.handle}:${candidate.tier}:${candidate.cutoff.slice(0, 10)}:attempt`;
+  return `${candidate.handle}:${candidate.tier}:${candidate.cutoff.slice(0, 10)}:${OFFICIAL_HISTORY_PLAN_VERSION}:attempt`;
 }
 
 async function reserveOfficialHistoryAttempt(input: {
@@ -266,6 +274,8 @@ async function reserveOfficialHistoryAttempt(input: {
       handle: input.candidate.handle,
       evidence_cutoff_at: input.candidate.cutoff,
       history_tier: input.candidate.tier,
+      maximum_snapshot_age_days: MAX_OFFICIAL_SNAPSHOT_AGE_DAYS,
+      plan_version: OFFICIAL_HISTORY_PLAN_VERSION,
       maximum_credits_for_request: input.candidate.credits,
       attempt_state: "reserved",
       scoring_tokens_spent: 0,
@@ -294,6 +304,8 @@ async function persistOfficialHistoryFailure(input: {
       handle: input.candidate.handle,
       evidence_cutoff_at: input.candidate.cutoff,
       history_tier: input.candidate.tier,
+      maximum_snapshot_age_days: MAX_OFFICIAL_SNAPSHOT_AGE_DAYS,
+      plan_version: OFFICIAL_HISTORY_PLAN_VERSION,
       maximum_credits_for_request: input.candidate.credits,
       attempt_state: "failed",
       failure_reason: input.reason.slice(0, 500),
@@ -591,10 +603,10 @@ export async function POST(request: NextRequest) {
           expectedHandle: candidate.handle,
           evidenceCutoffAt: candidate.cutoff,
           response: payload,
-          maximumSnapshotAgeDays: 31,
+          maximumSnapshotAgeDays: MAX_OFFICIAL_SNAPSHOT_AGE_DAYS,
         });
         if (!snapshot) {
-          const reason = "No exact-handle snapshot within 31 days before the cutoff";
+          const reason = `No exact-handle snapshot within ${MAX_OFFICIAL_SNAPSHOT_AGE_DAYS} days before the cutoff`;
           await persistOfficialHistoryFailure({
             sourceId: reservedSourceId,
             candidate,
@@ -628,6 +640,8 @@ export async function POST(request: NextRequest) {
             evidence_cutoff_at: candidate.cutoff,
             snapshot_age_days: snapshot.snapshotAgeDays,
             history_tier: candidate.tier,
+            maximum_snapshot_age_days: MAX_OFFICIAL_SNAPSHOT_AGE_DAYS,
+            plan_version: OFFICIAL_HISTORY_PLAN_VERSION,
             maximum_credits_for_request: candidate.credits,
             credits_remaining_after_request: creditsRemaining,
             attempt_state: "matched",
