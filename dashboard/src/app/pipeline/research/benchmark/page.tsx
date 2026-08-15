@@ -81,6 +81,7 @@ type EvidencePreparationRun = {
     deep_discovery_tokens_spent?: number;
     deep_discovery_cost_microusd?: number | null;
     deep_discovery_source_count?: number;
+    deep_discovery_search_requests?: number;
     deep_discovery_error?: string | null;
   } | null;
   created_at: string;

@@ -2959,6 +2959,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /scoringTokensSpent: 0/);
   assert.match(workflow, /openrouter:web_search/);
   assert.match(workflow, /engine: "exa"/);
+  assert.match(workflow, /mode: "deep"/);
+  assert.match(workflow, /max_uses: Math\.min\(10, records\.length\)/);
+  assert.match(workflow, /max_tool_calls: Math\.min\(10, records\.length\)/);
   assert.match(workflow, /max_output_tokens: 2_500/);
   assert.match(workflow, /groundedHistoricalSignalDiscoveryCandidates/);
   assert.match(workflow, /deepDiscoveryCostMicrousd/);

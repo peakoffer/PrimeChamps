@@ -86,6 +86,7 @@ type DiscoveryBatch = {
   deepDiscoveryOutputTokens: number;
   deepDiscoveryCostMicrousd: number | null;
   deepDiscoverySourceCount: number;
+  deepDiscoverySearchRequests: number;
   deepDiscoveryError: string | null;
   deepDiscoveryReused: boolean;
   deepDiscoveryCandidatesByRecord: Record<string, HistoricalSearchCandidate[]>;
@@ -206,6 +207,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
     outputTokens: 0,
     costMicrousd: null as number | null,
     sourceCount: 0,
+    searchRequests: 0,
     error: null as string | null,
   };
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
@@ -236,7 +238,9 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
           type: "openrouter:web_search",
           parameters: {
             engine: "exa",
+            mode: "deep",
             max_results: 6,
+            max_uses: Math.min(10, records.length),
             max_total_results: Math.min(60, Math.max(12, records.length * 6)),
             excluded_domains: [
               "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
@@ -245,7 +249,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
           },
         }],
         tool_choice: "auto",
-        include: ["web_search_call.action.sources"],
+        max_tool_calls: Math.min(10, records.length),
         max_output_tokens: 2_500,
         store: false,
         text: {
@@ -300,7 +304,12 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
           }>;
         }>;
       }>;
-      usage?: { input_tokens?: number; output_tokens?: number; cost?: number };
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cost?: number;
+        server_tool_use?: { web_search_requests?: number };
+      };
     };
     if (data.status && data.status !== "completed") {
       return { ...empty, model: data.model || model, error: `OpenRouter deep discovery was incomplete (${data.incomplete_details?.reason || data.status})` };
@@ -323,6 +332,7 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
         title: annotation.title || annotation.url_citation?.title,
       }));
     const groundedSources = [...consultedSources, ...citedSources];
+    const searchRequests = data.usage?.server_tool_use?.web_search_requests || 0;
     const candidatesByRecord = groundedHistoricalSignalDiscoveryCandidates({
       records,
       proposed: Array.isArray(payload.athletes) ? payload.athletes : [],
@@ -333,8 +343,11 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
       model: data.model || model,
       inputTokens: data.usage?.input_tokens || 0,
       outputTokens: data.usage?.output_tokens || 0,
-      costMicrousd: typeof data.usage?.cost === "number" ? Math.round(data.usage.cost * 1_000_000) : null,
+      costMicrousd: typeof data.usage?.cost === "number"
+        ? Math.round(data.usage.cost * 1_000_000)
+        : searchRequests > 0 ? searchRequests * 12_000 : null,
       sourceCount: groundedSources.filter((source) => typeof source.url === "string" && source.url.startsWith("http")).length,
+      searchRequests,
       error: null,
     };
   } catch (error) {
@@ -499,6 +512,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       outputTokens: 0,
       costMicrousd: 0,
       sourceCount: reusableDeepDiscoveryCount,
+      searchRequests: 0,
       error: null,
       reused: true,
     }
@@ -511,6 +525,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
       outputTokens: 0,
       costMicrousd: null,
       sourceCount: 0,
+      searchRequests: 0,
       error: null,
       reused: false,
     };
@@ -548,6 +563,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     deepDiscoveryOutputTokens: deepDiscovery.outputTokens,
     deepDiscoveryCostMicrousd: deepDiscovery.costMicrousd,
     deepDiscoverySourceCount: deepDiscovery.sourceCount,
+    deepDiscoverySearchRequests: deepDiscovery.searchRequests,
     deepDiscoveryError: deepDiscovery.error,
     deepDiscoveryReused: deepDiscovery.reused,
     deepDiscoveryCandidatesByRecord: deepDiscovery.candidatesByRecord,
@@ -1250,6 +1266,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
           deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
           deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+          deep_discovery_search_requests: discovery.deepDiscoverySearchRequests,
           deep_discovery_error: discovery.deepDiscoveryError,
           deep_discovery_reused: discovery.deepDiscoveryReused,
           deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
@@ -1323,6 +1340,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
             deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
             deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+            deep_discovery_search_requests: discovery.deepDiscoverySearchRequests,
             deep_discovery_error: discovery.deepDiscoveryError,
             deep_discovery_reused: discovery.deepDiscoveryReused,
             deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
@@ -1346,6 +1364,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       deepDiscoveryTokensSpent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
       deepDiscoveryCostMicrousd: discovery.deepDiscoveryCostMicrousd,
       deepDiscoverySourceCount: discovery.deepDiscoverySourceCount,
+      deepDiscoverySearchRequests: discovery.deepDiscoverySearchRequests,
       deepDiscoveryError: discovery.deepDiscoveryError,
       deepDiscoveryReused: discovery.deepDiscoveryReused,
       deepDiscoveryCandidatesByRecord: discovery.deepDiscoveryCandidatesByRecord,
@@ -1385,6 +1404,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
             deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
             deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+            deep_discovery_search_requests: discovery.deepDiscoverySearchRequests,
             deep_discovery_error: discovery.deepDiscoveryError,
             deep_discovery_reused: discovery.deepDiscoveryReused,
             deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
@@ -1420,6 +1440,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
           deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
           deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+          deep_discovery_search_requests: discovery.deepDiscoverySearchRequests,
           deep_discovery_error: discovery.deepDiscoveryError,
           deep_discovery_reused: discovery.deepDiscoveryReused,
           deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
