@@ -15,6 +15,7 @@ import {
   dedupeHistoricalSearchCandidates,
   extractWikimediaExternalProfileCandidates,
   extractCommonCrawlWarcBody,
+  extractOfficialCommissionAdultEvidence,
   extractOfficialDatedProfileEvidence,
   extractPreparedArchivedEvidence,
   extractPreparedArchivedPdfEvidence,
@@ -113,11 +114,13 @@ type StoredPreparedAdultClaim = {
     domain: string;
     title: string | null;
     historical_as_of: string | null;
+    canonical_url: string;
   } | Array<{
     provider: string;
     domain: string;
     title: string | null;
     historical_as_of: string | null;
+    canonical_url: string;
   }>;
 };
 
@@ -614,10 +617,10 @@ async function reconcilePreparedAdultClaims(input: {
 
   const admin = createAdminClient({ disableRealtime: true });
   const [{ data: records, error: recordError }, { data: claims, error: claimError }] = await Promise.all([
-    admin.from("research_golden_records").select("id,athlete_name")
+    admin.from("research_golden_records").select("id,athlete_name,sport,evidence_cutoff_at")
       .eq("organization_id", input.organizationId).in("id", input.recordIds),
     admin.from("research_evidence_claims")
-      .select("id,golden_record_id,source_excerpt,effective_at,research_evidence_sources!inner(provider,domain,title,historical_as_of)")
+      .select("id,golden_record_id,source_excerpt,effective_at,research_evidence_sources!inner(provider,domain,title,historical_as_of,canonical_url)")
       .eq("organization_id", input.organizationId)
       .in("golden_record_id", input.recordIds)
       .eq("claim_type", "adult_eligibility")
@@ -626,17 +629,32 @@ async function reconcilePreparedAdultClaims(input: {
   ]);
   if (recordError) throw recordError;
   if (claimError) throw claimError;
-  const athleteByRecord = new Map((records || []).map((record) => [String(record.id), String(record.athlete_name)]));
+  const recordById = new Map((records || []).map((record) => [String(record.id), {
+    athleteName: String(record.athlete_name),
+    sport: String(record.sport),
+    evidenceCutoffAt: String(record.evidence_cutoff_at),
+  }]));
   const unsupportedIds = ((claims || []) as unknown as StoredPreparedAdultClaim[]).flatMap((claim) => {
-    const athleteName = athleteByRecord.get(claim.golden_record_id);
+    const record = recordById.get(claim.golden_record_id);
     const source = Array.isArray(claim.research_evidence_sources)
       ? claim.research_evidence_sources[0]
       : claim.research_evidence_sources;
-    if (!athleteName || !source) return [claim.id];
+    if (!record || !source) return [claim.id];
     const observedAtRaw = source.historical_as_of || claim.effective_at || "";
     const observedAt = Number.isFinite(Date.parse(observedAtRaw)) ? new Date(observedAtRaw) : new Date();
+    const officialCommissionEvidence = source.provider === "official_dated_profile"
+      ? extractOfficialCommissionAdultEvidence({
+        athleteName: record.athleteName,
+        sport: record.sport,
+        sourceUrl: source.canonical_url,
+        sourceText: claim.source_excerpt || "",
+        publishedAt: observedAtRaw,
+        evidenceCutoffAt: record.evidenceCutoffAt,
+      })
+      : null;
+    if (officialCommissionEvidence) return [];
     const validation = validatePreparedAgeEvidenceForSource({
-      athleteName,
+      athleteName: record.athleteName,
       text: claim.source_excerpt || "",
       domain: source.domain,
       title: source.title || "",

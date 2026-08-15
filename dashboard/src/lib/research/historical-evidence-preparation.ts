@@ -880,8 +880,18 @@ export function extractOfficialCommissionAdultEvidence(input: {
         const age = ageOnDate(birthDate, input.publishedAt);
         return age !== null && age >= 21 && age <= 80;
       });
+    const sportProof = [...priorLines].reverse().find((line) => benchmarkSourceSupportsSport(input.sport, line));
+    const proofRows = sportProof && sportProof !== header ? [sportProof, header] : [header];
+    if (/^\s*Pro\s*$/i.test(previousRow) && /\bDebut\b/i.test(row)) proofRows.push(previousRow);
+    proofRows.push(row);
+    if (/^\s*Pro\s*$/i.test(nextRow) && /^\s*Debut\b/i.test(followingRow)) {
+      proofRows.push(nextRow, followingRow);
+    }
     for (const birthDate of new Set(birthDates)) {
-      matches.push({ birthDate, excerpt: `${header}\n${row}`.slice(0, 1_000) });
+      // The stored claim excerpt is the immutable evidence replay boundary.
+      // Preserve the adjacent Pro / Debut rows when they substitute for a
+      // federal ID so a later replay can prove the same strict table shape.
+      matches.push({ birthDate, excerpt: proofRows.join("\n").slice(0, 1_000) });
     }
   }
   const uniqueBirthDates = new Set(matches.map((match) => match.birthDate));
