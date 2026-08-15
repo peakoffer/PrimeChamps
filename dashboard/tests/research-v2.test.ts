@@ -3002,7 +3002,7 @@ test("archive recovery prefers cutoff-safe direct and Common Crawl evidence befo
   assert.match(workflow, /extractPreparedDatedArticleEvidence/);
   assert.match(workflow, /isPublicHttpUrl\(url\.toString\(\)\)/);
   assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
-  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /spaced-common-crawl-v18/);
+  assert.match(HISTORICAL_ARCHIVE_PROVIDER_VERSION, /parallel-spaced-common-crawl-v19/);
   assert.equal(isPublicHttpUrl("https://example.com/athlete"), true);
   assert.equal(isPublicHttpUrl("http://169.254.169.254/latest/meta-data"), false);
   assert.equal(isPublicHttpUrl("http://192.168.1.12/private"), false);

@@ -883,19 +883,25 @@ async function retrieveCommonCrawlEvidenceCandidate(input: {
     input.record.evidence_cutoff_at,
     3
   );
-  for (const collectionId of collectionIds) {
-    const response = await fetch(commonCrawlIndexUrl(collectionId, input.candidate.url), {
-      headers: { Accept: "application/x-ndjson,text/plain", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
-      signal: AbortSignal.timeout(30_000),
-      cache: "no-store",
-    });
-    if (!response.ok) continue;
-    const capture = selectCommonCrawlCapture(
-      await response.text(),
-      collectionId,
-      input.candidate.url,
-      input.record.evidence_cutoff_at
-    );
+  const captures = await Promise.all(collectionIds.map(async (collectionId) => {
+    try {
+      const response = await fetch(commonCrawlIndexUrl(collectionId, input.candidate.url), {
+        headers: { Accept: "application/x-ndjson,text/plain", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+        signal: AbortSignal.timeout(20_000),
+        cache: "no-store",
+      });
+      if (!response.ok) return null;
+      return selectCommonCrawlCapture(
+        await response.text(),
+        collectionId,
+        input.candidate.url,
+        input.record.evidence_cutoff_at
+      );
+    } catch {
+      return null;
+    }
+  }));
+  for (const capture of captures) {
     if (!capture) continue;
     const html = await fetchCommonCrawlHtml(capture);
     if (!html) continue;
@@ -917,7 +923,7 @@ async function retrieveCommonCrawlEvidenceCandidate(input: {
       evidence: prepared.evidence ? {
         ...prepared.evidence,
         archiveProvider: "common_crawl" as const,
-        providerRequestId: `${collectionId}:${capture.timestamp}:${capture.offset}`,
+        providerRequestId: `${capture.collectionId}:${capture.timestamp}:${capture.offset}`,
       } : null,
       rejectionReason: prepared.rejectionReason,
     };

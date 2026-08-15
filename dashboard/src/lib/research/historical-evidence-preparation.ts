@@ -21,7 +21,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-formula-racing-label-v24";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-spaced-common-crawl-v18";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-parallel-spaced-common-crawl-v19";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
