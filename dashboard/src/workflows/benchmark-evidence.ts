@@ -241,8 +241,22 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
   }
 
   const model = selectedModel.model;
-  const calls = await Promise.all(records.map(async (record) => {
-    const prompt = `Use the web-search tool exactly once. Find up to six direct, archive-friendly public webpages that can close one or more missing evidence gates for this exact athlete:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\n\nSeek these facts as they existed on or before the cutoff: (1) exact date of birth or an explicit age, preferably from an official federation, commission, event, team, or reputable athlete profile; (2) dated recent athletic results, rankings, qualifications, signings, or competition momentum; (3) a numeric follower, subscriber, fan, or social-audience count, including multilingual terms such as abonnés, seguidores, or seguidoras; and (4) repeated creator activity such as publishing posts, videos, vlogs, podcasts, photos, interviews, or other social content. Prioritize direct official profiles, editorial interviews, event/result pages, trade coverage, sponsor profiles, personal websites, and independent analytics pages. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, matching sport, and explicit source text supporting a claim.`;
+  const lanes = [
+    {
+      name: "eligibility_momentum",
+      objective: "Find exact date-of-birth or explicit-age evidence and dated athletic results, rankings, qualifications, signings, starts, podiums, or competition momentum. Prioritize official federations, regulators, event results, teams, athlete profiles, and reputable dated sports coverage.",
+    },
+    {
+      name: "audience_creator",
+      objective: "Find a numeric follower, subscriber, fan, reach, view, or social-audience measurement and repeated creator activity such as posts, videos, vlogs, podcasts, photos, interviews, newsletters, or social publishing. Prioritize archived sponsorship decks, media kits, athlete marketplaces, analytics directories, sponsor profiles, personal sites, Linktree-style profiles, and reputable creator or trade coverage.",
+    },
+  ] as const;
+  // Two narrow searches consistently outperform one overloaded query while
+  // preserving a hard ceiling: at most two tool calls and ten cited URLs per
+  // athlete. Search results remain discovery metadata only; every accepted
+  // claim must still pass the immutable pre-cutoff archive validator.
+  const calls = await Promise.all(records.flatMap((record) => lanes.map(async (lane) => {
+    const prompt = `Use the web-search tool exactly once. Find up to five direct, archive-friendly public webpages for this exact athlete and this evidence lane only:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\nEvidence lane: ${lane.name}\nObjective: ${lane.objective}\n\nThe underlying fact and source page must have existed on or before the cutoff. Include multilingual sources and exact-handle pages when helpful. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, matching sport, and explicit source text supporting a claim.`;
     try {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -261,9 +275,9 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
             parameters: {
               engine: "exa",
               mode: "deep",
-              max_results: 6,
+              max_results: 5,
               max_uses: 1,
-              max_total_results: 6,
+              max_total_results: 5,
               max_characters: 3_000,
               excluded_domains: [
                 "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
@@ -273,14 +287,14 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
           }],
           tool_choice: "required",
           max_tool_calls: 1,
-          max_tokens: 900,
+          max_tokens: 650,
           provider: { require_parameters: true, data_collection: "deny" },
         }),
         signal: AbortSignal.timeout(60_000),
       });
       if (!response.ok) {
         return {
-          record, inputTokens: 0, outputTokens: 0, costMicrousd: 0, searchRequests: 0,
+          record, lane: lane.name, inputTokens: 0, outputTokens: 0, costMicrousd: 0, searchRequests: 0,
           sources: [] as Array<{ url?: string; title?: string; content?: string }>,
           error: `HTTP ${response.status}: ${(await response.text()).slice(0, 240)}`,
         };
@@ -324,28 +338,31 @@ async function discoverGroundedDeepSignalSources(records: EvidencePreparationRec
         ? Math.ceil(data.usage.cost * 1_000_000)
         : estimatedCostMicrousd;
       return {
-        record, inputTokens, outputTokens, costMicrousd, searchRequests, sources,
+        record, lane: lane.name, inputTokens, outputTokens, costMicrousd, searchRequests, sources,
         error: searchRequests < 1 ? "provider reported zero web searches" : sources.length < 1 ? "provider returned no URL citations" : null,
       };
     } catch (error) {
       return {
-        record, inputTokens: 0, outputTokens: 0, costMicrousd: 0, searchRequests: 0,
+        record, lane: lane.name, inputTokens: 0, outputTokens: 0, costMicrousd: 0, searchRequests: 0,
         sources: [] as Array<{ url?: string; title?: string; content?: string }>,
         error: error instanceof Error ? error.message.slice(0, 240) : "OpenRouter search failed",
       };
     }
-  }));
+  })));
 
   const candidatesByRecord = Object.fromEntries(records.map((record) => {
-    const call = calls.find((item) => item.record.id === record.id);
-    const sources = call?.sources || [];
+    const sources = Array.from(new Map(calls.filter((item) => item.record.id === record.id)
+      .flatMap((item) => item.sources)
+      .map((source) => [typeof source.url === "string" ? source.url : "", source] as const)
+      .filter(([url]) => Boolean(url))).values());
     const proposed = [{ athlete_name: record.athlete_name, source_urls: sources.map((source) => source.url) }];
     const grounded = groundedHistoricalSignalDiscoveryCandidates({ records: [record], proposed, consultedSources: sources });
     return [record.id, grounded[record.id] || []];
   }));
   const uniqueSources = new Set(calls.flatMap((call) => call.sources)
     .map((source) => typeof source.url === "string" ? source.url : "").filter(Boolean));
-  const failures = calls.filter((call) => call.error).map((call) => `${call.record.athlete_name}: ${call.error}`);
+  const failures = calls.filter((call) => call.error)
+    .map((call) => `${call.record.athlete_name} ${call.lane}: ${call.error}`);
   const searchRequests = calls.reduce((sum, call) => sum + call.searchRequests, 0);
   const sourceCount = uniqueSources.size;
   const error = searchRequests < 1 || sourceCount < 1

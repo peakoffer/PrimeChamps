@@ -124,6 +124,8 @@ import {
   extractPreparedArchivedEvidence,
   extractPreparedDatedArticleEvidence,
   groundedHistoricalSignalDiscoveryCandidates,
+  HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
+  HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS,
   historicalDiscoveryReplayCoverageMatches,
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
@@ -2879,6 +2881,17 @@ test("age recovery can add one free-only record while reusing paid discovery", (
   }), false);
 });
 
+test("two-lane signal recovery reuses paid discovery but refreshes grounded candidates", () => {
+  assert.match(HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION, /two-lane-grounded-signal-recovery-v15/);
+  assert.deepEqual(HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS, [
+    HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
+    "2026-08-15-gate-aware-positive-recovery-v14",
+  ]);
+  const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
+  assert.match(route, /HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS\.includes/);
+  assert.match(route, /reusableCheckpoint\?\.query_plan_version === queryPlanVersion/);
+});
+
 test("archived evidence extraction requires exact identity and sport and preserves dated age provenance", () => {
   const record = {
     id: "golden-jane",
@@ -3603,12 +3616,15 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /api\/v1\/chat\/completions/);
   assert.match(workflow, /engine: "exa"/);
   assert.match(workflow, /mode: "deep"/);
-  assert.match(workflow, /Promise\.all\(records\.map/);
+  assert.match(workflow, /Promise\.all\(records\.flatMap/);
+  assert.match(workflow, /eligibility_momentum/);
+  assert.match(workflow, /audience_creator/);
+  assert.match(workflow, /at most two tool calls and ten cited URLs per/);
   assert.match(workflow, /max_uses: 1/);
   assert.match(workflow, /max_tool_calls: 1/);
   assert.match(workflow, /reasoning: \{ effort: "low", exclude: true \}/);
   assert.match(workflow, /tool_choice: "required"/);
-  assert.match(workflow, /max_tokens: 900/);
+  assert.match(workflow, /max_tokens: 650/);
   assert.match(workflow, /server_tool_use\?\.web_search_requests/);
   assert.match(workflow, /reportedSearchRequests \|\| \(sources\.length > 0 \? 1 : 0\)/);
   assert.match(workflow, /searchRequests \* 12_000/);

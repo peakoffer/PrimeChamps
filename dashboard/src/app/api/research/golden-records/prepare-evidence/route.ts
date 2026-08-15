@@ -10,6 +10,7 @@ import {
   HISTORICAL_AGE_RECOVERY_QUERY_PLAN_VERSION,
   HISTORICAL_EVIDENCE_EXTRACTION_VERSION,
   HISTORICAL_EVIDENCE_QUERY_PLAN_VERSION,
+  HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS,
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   historicalDiscoveryReplayCoverageMatches,
   historicalEvidenceQueryPlanVersion,
@@ -482,6 +483,10 @@ export async function POST(request: NextRequest) {
         || (preparationMode === "age_recovery"
           && HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS.includes(
             checkpoint?.query_plan_version as typeof HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS[number]
+          ))
+        || (preparationMode === "signal_recovery"
+          && HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS.includes(
+            checkpoint?.query_plan_version as typeof HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS[number]
           ));
       return (run.status === "failed" || run.status === "cancelled"
           || checkpoint?.extraction_version !== HISTORICAL_EVIDENCE_EXTRACTION_VERSION
@@ -505,10 +510,12 @@ export async function POST(request: NextRequest) {
     const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
       ? reusableCheckpoint.provider_run_id
       : typeof reusableSummary?.providerRunId === "string" ? reusableSummary.providerRunId : undefined;
-    const reuseDeepDiscoveryCandidates = replayableDeepDiscoveryCandidates(
-      reusableCheckpoint?.deep_discovery_candidates || reusableSummary?.deepDiscoveryCandidatesByRecord,
-      recordIds,
-    );
+    const reuseDeepDiscoveryCandidates = reusableCheckpoint?.query_plan_version === queryPlanVersion
+      ? replayableDeepDiscoveryCandidates(
+        reusableCheckpoint?.deep_discovery_candidates || reusableSummary?.deepDiscoveryCandidatesByRecord,
+        recordIds,
+      )
+      : undefined;
     const reuseDeepDiscoveryModel = typeof reusableCheckpoint?.deep_discovery_model === "string"
       ? reusableCheckpoint.deep_discovery_model
       : typeof reusableSummary?.deepDiscoveryModel === "string" ? reusableSummary.deepDiscoveryModel : null;

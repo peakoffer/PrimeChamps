@@ -12,7 +12,11 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-gate-aware-positive-recovery-v14";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-two-lane-grounded-signal-recovery-v15";
+export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
+  HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
+  "2026-08-15-gate-aware-positive-recovery-v14",
+] as const;
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-boxing-section-age-attribution-v19";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-wayback-availability-fallback-v16";
 
