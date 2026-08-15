@@ -1,5 +1,59 @@
 export type SocialBladeHistoryTier = "default" | "extended" | "archive" | "vault";
 
+export type SocialBladeCredentialStatus = {
+  clientIdVariablePresent: boolean;
+  clientIdHasValue: boolean;
+  tokenVariablePresent: boolean;
+  tokenHasValue: boolean;
+  valuesDistinct: boolean;
+  maskedPlaceholderDetected: boolean;
+  usable: boolean;
+  validationError: string | null;
+};
+
+function looksLikeMaskedCredential(value: string) {
+  const compact = value.replace(/\s/g, "");
+  return compact.length >= 3 && /^[*.•·…]+$/u.test(compact);
+}
+
+/**
+ * Validates the Social Blade credential pair without returning either secret.
+ * This catches a common Vercel setup failure where the UI's masked placeholder
+ * is copied into both fields and the connection otherwise appears configured.
+ */
+export function inspectSocialBladeCredentials(input: {
+  clientId: string | undefined;
+  token: string | undefined;
+}): SocialBladeCredentialStatus {
+  const clientId = input.clientId?.trim() || "";
+  const token = input.token?.trim() || "";
+  const clientIdVariablePresent = typeof input.clientId === "string";
+  const tokenVariablePresent = typeof input.token === "string";
+  const clientIdHasValue = Boolean(clientId);
+  const tokenHasValue = Boolean(token);
+  const valuesDistinct = !clientIdHasValue || !tokenHasValue || clientId !== token;
+  const maskedPlaceholderDetected = looksLikeMaskedCredential(clientId) || looksLikeMaskedCredential(token);
+  const validationError = !clientIdHasValue
+    ? "Social Blade client ID is missing"
+    : !tokenHasValue
+      ? "Social Blade token is missing"
+      : maskedPlaceholderDetected
+        ? "Replace the masked Social Blade placeholder with the actual credential value"
+        : !valuesDistinct
+          ? "Social Blade client ID and token must be two different values"
+          : null;
+  return {
+    clientIdVariablePresent,
+    clientIdHasValue,
+    tokenVariablePresent,
+    tokenHasValue,
+    valuesDistinct,
+    maskedPlaceholderDetected,
+    usable: validationError === null,
+    validationError,
+  };
+}
+
 export type SocialBladeDailyInstagramMetric = {
   date?: string;
   followers?: number;

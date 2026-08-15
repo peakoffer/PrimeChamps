@@ -99,6 +99,7 @@ import {
 import { prepareHistoricalInstagramSnapshot } from "../src/lib/research/historical-instagram-history.ts";
 import {
   diagnoseSocialBladeInstagramResponse,
+  inspectSocialBladeCredentials,
   prepareApifyPublicSocialBladeInstagramSnapshot,
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
@@ -741,6 +742,20 @@ test("existing Apify Instagram history becomes evidence only for exact pre-cutof
 });
 
 test("Social Blade recovery uses the cheapest sufficient tier and only exact, recent pre-cutoff rows", () => {
+  assert.deepEqual(inspectSocialBladeCredentials({ clientId: undefined, token: undefined }), {
+    clientIdVariablePresent: false,
+    clientIdHasValue: false,
+    tokenVariablePresent: false,
+    tokenHasValue: false,
+    valuesDistinct: true,
+    maskedPlaceholderDetected: false,
+    usable: false,
+    validationError: "Social Blade client ID is missing",
+  });
+  assert.equal(inspectSocialBladeCredentials({ clientId: "•••••••••••", token: "•••••••••••" }).usable, false);
+  assert.equal(inspectSocialBladeCredentials({ clientId: "same-value", token: "same-value" }).usable, false);
+  assert.equal(inspectSocialBladeCredentials({ clientId: "actual-client-id", token: "actual-token" }).usable, true);
+
   const now = new Date("2026-08-13T12:00:00.000Z");
   assert.deepEqual(socialBladeHistoryTierForCutoff("2026-08-03T12:00:00.000Z", now), {
     tier: "default", credits: 1, ageDays: 10,

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { runApifyActorWithUsage } from "@/lib/apify";
 import {
   diagnoseSocialBladeInstagramResponse,
+  inspectSocialBladeCredentials,
   prepareApifyPublicSocialBladeInstagramSnapshot,
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
@@ -56,18 +57,18 @@ function normalizeHandle(value: unknown) {
 function socialBladeCredentials() {
   const clientId = process.env.SOCIAL_BLADE_CLIENT_ID?.trim();
   const token = process.env.SOCIAL_BLADE_TOKEN?.trim();
-  return clientId && token ? { clientId, token } : null;
+  const status = inspectSocialBladeCredentials({
+    clientId: process.env.SOCIAL_BLADE_CLIENT_ID,
+    token: process.env.SOCIAL_BLADE_TOKEN,
+  });
+  return status.usable && clientId && token ? { clientId, token } : null;
 }
 
 function socialBladeCredentialStatus() {
-  const clientId = process.env.SOCIAL_BLADE_CLIENT_ID;
-  const token = process.env.SOCIAL_BLADE_TOKEN;
-  return {
-    clientIdVariablePresent: typeof clientId === "string",
-    clientIdHasValue: Boolean(clientId?.trim()),
-    tokenVariablePresent: typeof token === "string",
-    tokenHasValue: Boolean(token?.trim()),
-  };
+  return inspectSocialBladeCredentials({
+    clientId: process.env.SOCIAL_BLADE_CLIENT_ID,
+    token: process.env.SOCIAL_BLADE_TOKEN,
+  });
 }
 
 async function buildCandidatePlan(organizationId: string) {
@@ -352,7 +353,7 @@ export async function GET() {
       countOfficialHistoryAttempts(user.organizationId),
     ]);
     const credentialStatus = socialBladeCredentialStatus();
-    if (!credentialStatus.clientIdHasValue || !credentialStatus.tokenHasValue) {
+    if (!credentialStatus.usable) {
       console.warn("Social Blade credentials unavailable", credentialStatus);
     }
     return NextResponse.json({ ok: true, ...publicPlan(candidates, apifyPublicAttemptCount, officialHistoryStats) });
@@ -574,7 +575,10 @@ export async function POST(request: NextRequest) {
       });
     }
     if (!socialBladeCredentials()) {
-      return NextResponse.json({ error: "Add SOCIAL_BLADE_CLIENT_ID and SOCIAL_BLADE_TOKEN to the server environment first" }, { status: 503 });
+      const credentialStatus = socialBladeCredentialStatus();
+      return NextResponse.json({
+        error: credentialStatus.validationError || "Add SOCIAL_BLADE_CLIENT_ID and SOCIAL_BLADE_TOKEN to the server environment first",
+      }, { status: 503 });
     }
     const officialHistoryStats = await countOfficialHistoryAttempts(user.organizationId);
     const officialValidationPassed = officialHistoryStats.attempts >= MAX_OFFICIAL_PILOT_ATTEMPTS

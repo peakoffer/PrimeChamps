@@ -94,6 +94,10 @@ type SocialBladeHistoryPlan = {
     clientIdHasValue: boolean;
     tokenVariablePresent: boolean;
     tokenHasValue: boolean;
+    valuesDistinct: boolean;
+    maskedPlaceholderDetected: boolean;
+    usable: boolean;
+    validationError: string | null;
   };
   candidateCount: number;
   pilotRecords: Array<{
@@ -132,6 +136,10 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
     clientIdHasValue: false,
     tokenVariablePresent: false,
     tokenHasValue: false,
+    valuesDistinct: true,
+    maskedPlaceholderDetected: false,
+    usable: false,
+    validationError: "Social Blade credentials are not configured",
   },
   candidateCount: 0,
   pilotRecords: [],
@@ -1199,20 +1207,7 @@ export default function ResearchBenchmarkPage() {
               {loading
                 ? "Checking Social Blade…"
                 : !socialBladePlan.configured
-                  ? [
-                      !socialBladePlan.credentialStatus.clientIdVariablePresent
-                        ? "client ID variable missing"
-                        : !socialBladePlan.credentialStatus.clientIdHasValue
-                          ? "client ID value empty"
-                          : null,
-                      !socialBladePlan.credentialStatus.tokenVariablePresent
-                        ? "token variable missing"
-                        : !socialBladePlan.credentialStatus.tokenHasValue
-                          ? "token value empty"
-                          : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "Social Blade not connected"
+                  ? socialBladePlan.credentialStatus.validationError || "Social Blade not connected"
                 : socialBladePlan.officialPilotExhausted
                   ? "Paid history recovery complete"
                 : socialBladePlan.pilotRecords.length === 0
