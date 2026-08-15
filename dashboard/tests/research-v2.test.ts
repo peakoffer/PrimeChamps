@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   assignGoldenRecordSplits,
+  selectBalancedChallengeHoldout,
   calculateBenchmarkMetrics,
   evaluateBenchmarkReleaseReadiness,
   freshBenchmarkLabelDeficits,
@@ -1135,6 +1136,33 @@ test("a minimum viable balanced cohort locks eight cases per label", () => {
   assert.equal(assignments.filter((item) => item.split === "held_out" && item.id.startsWith("not_fit-")).length, 8);
 });
 
+test("challenge holdout locks eight untouched cases per label without creating development cases", () => {
+  const records = [
+    ...Array.from({ length: 9 }, (_, index) => ({
+      id: `fit-${index}`,
+      fit_label: "fit" as const,
+      sport: index % 2 ? "Surfing" : "Volleyball",
+      final_outcome: "signed",
+      stratification_tags: [] as string[],
+    })),
+    ...Array.from({ length: 11 }, (_, index) => ({
+      id: `not-fit-${index}`,
+      fit_label: "not_fit" as const,
+      sport: index % 2 ? "Boxing" : "Tennis",
+      final_outcome: "stalled",
+      stratification_tags: [] as string[],
+    })),
+  ];
+  const challenge = selectBalancedChallengeHoldout(records, 8);
+  assert.equal(challenge.length, 16);
+  assert.equal(challenge.filter((record) => record.fit_label === "fit").length, 8);
+  assert.equal(challenge.filter((record) => record.fit_label === "not_fit").length, 8);
+  assert.throws(() => selectBalancedChallengeHoldout(
+    records.filter((record) => record.id !== "fit-0" && record.id !== "fit-1"),
+    8
+  ), /only 7 are available/);
+});
+
 test("benchmark summary separates provisional labels from benchmark-ready records", () => {
   const summary = summarizeGoldenRecords([
     {
@@ -2208,8 +2236,8 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.indexOf("rubricArchiveError") < source.indexOf("rubricActivateError"), "the previous rubric must be archived before the new one is activated");
   assert.match(source, /update\(\{ status: "archived" \}\)/);
   assert.match(source, /BENCHMARK_GOLDEN_RECORD_SELECT = .*stratification_tags/);
-  assert.equal((source.match(/\.select\(BENCHMARK_GOLDEN_RECORD_SELECT\)/g) || []).length, 2,
-    "run start and checkpoint resume must load the same ground-truth fields");
+  assert.equal((source.match(/\.select\(BENCHMARK_GOLDEN_RECORD_SELECT\)/g) || []).length, 3,
+    "run start, revealed development replay, and checkpoint resume must load the same ground-truth fields");
 });
 
 test("benchmark progress excludes researcher-only partial checkpoints", () => {
@@ -3513,21 +3541,27 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeAttemptMigration, /provider_request_id is not null/);
 });
 
-test("fresh cohort assignment uses the evidence-ready 16-per-label gate", () => {
+test("fresh cohort assignment supports a locked 8+8 challenge after a revealed development replay", () => {
   const route = readFileSync(new URL("../src/app/api/research/golden-records/route.ts", import.meta.url), "utf8");
   const benchmarkRoute = readFileSync(new URL("../src/app/api/research/benchmarks/route.ts", import.meta.url), "utf8");
   const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
-  assert.match(route, /if \(perLabel < 16\)/);
-  assert.match(route, /at least 16 leakage-safe evidence packets per label/);
+  assert.match(route, /const challengeMode = perLabel < 16/);
+  assert.match(route, /if \(perLabel < 8\)/);
+  assert.match(route, /selectBalancedChallengeHoldout\(untouchedEvidenceReady, 8\)/);
+  assert.match(route, /previouslyScoredIds/);
+  assert.match(route, /previously completed and revealed 8\+8 held-out run/);
   assert.match(route, /selectActiveBenchmarkCohort/);
   assert.match(route, /Complete or retire it before freezing another cohort/);
   assert.match(runner, /No active locked, unrevealed benchmark cohort exists/);
+  assert.match(runner, /loadRevealedDevelopmentReplay/);
+  assert.match(runner, /replay_source_run_id/);
   assert.match(runner, /\.eq\("benchmark_cohort_version", cohortVersion\)/);
   assert.match(runner, /one-time held-out release must score the full/);
   assert.match(benchmarkRoute, /activeCohortVersion/);
   assert.match(benchmarkRoute, /activeCohortConflict/);
-  assert.match(benchmarkPage, /evidenceSummary\.readyFit < 16/);
+  assert.match(benchmarkPage, /evidenceSummary\.readyFit < 8/);
+  assert.match(benchmarkPage, /Freeze 8 \+ 8 challenge set/);
   assert.match(benchmarkPage, /Development archive/);
   assert.doesNotMatch(route, /clean source pool requires 40 resolved-sport/);
 });

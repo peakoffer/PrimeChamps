@@ -191,7 +191,14 @@ type BenchmarkRun = {
 };
 
 type BenchmarkReadiness = {
-  development: { total: number; fit: number; notFit: number; cohortVersion: string | null };
+  development: {
+    total: number;
+    fit: number;
+    notFit: number;
+    cohortVersion: string | null;
+    replaySourceRunId?: string | null;
+    replaySourceCohortVersion?: string | null;
+  };
   heldOut: { total: number; fit: number; notFit: number; cohortVersion: string | null };
   canRunDevelopment: boolean;
   canRunHeldOut: boolean;
@@ -578,7 +585,7 @@ export default function ResearchBenchmarkPage() {
           costLimitMicrousd: 1_500_000,
           baselineRunId: latestDevelopmentRun?.id || null,
           changeDimension: "audit_rule",
-          changeDescription: "Frozen v17 one-time held-out release",
+          changeDescription: "Frozen OnlyFans activity-gate challenge release",
         }),
       });
       const payload = await response.json();
@@ -634,7 +641,9 @@ export default function ResearchBenchmarkPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Request failed");
       setMessage(body.action === "assign_splits"
-        ? `Assigned ${payload.development} development and ${payload.heldOut} held-out records.`
+        ? payload.mode === "challenge_holdout"
+          ? `Locked ${payload.heldOut} untouched challenge cases. Development will replay the prior revealed holdout; these new labels remain concealed.`
+          : `Assigned ${payload.development} development and ${payload.heldOut} held-out records.`
         : `Created ${payload.created} labeling records.`
       );
       await load();
@@ -1099,7 +1108,7 @@ export default function ResearchBenchmarkPage() {
         <section className="mb-6 grid gap-3 md:grid-cols-4">
           {[
             { label: "Fresh labeled pool", value: summary.readyForSplit, detail: `${summary.readyFit} positive + ${summary.readyNotFit} negative · never scored` },
-            { label: "Fresh evidence ready", value: `${evidenceSummary.readyForFreeze} / ${evidenceSummary.totalRecords}`, detail: `${evidenceSummary.readyFit} positive + ${evidenceSummary.readyNotFit} negative · gap ${Math.max(0, 16 - evidenceSummary.readyFit)} + ${Math.max(0, 16 - evidenceSummary.readyNotFit)}` },
+            { label: "Fresh evidence ready", value: `${evidenceSummary.readyForFreeze} / ${evidenceSummary.totalRecords}`, detail: `${evidenceSummary.readyFit} positive + ${evidenceSummary.readyNotFit} negative · challenge needs 8 + 8` },
             { label: "Development archive", value: summary.development, detail: "Historical frozen cases across completed cohorts" },
             { label: "Held-out archive", value: summary.heldOut, detail: `${summary.lockedHeldOut} ever locked · ${summary.revealedHeldOut} revealed` },
           ].map((metric) => (
@@ -1125,8 +1134,10 @@ export default function ResearchBenchmarkPage() {
                 event.currentTarget.value = "";
               }} />
             </label>
-            <button disabled={working || evidenceSummary.readyFit < 16 || evidenceSummary.readyNotFit < 16 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.development.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
-              Freeze benchmark cohort
+            <button disabled={working || evidenceSummary.readyFit < 8 || evidenceSummary.readyNotFit < 8 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.development.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+              {evidenceSummary.readyFit >= 16 && evidenceSummary.readyNotFit >= 16
+                ? "Freeze full benchmark cohort"
+                : "Freeze 8 + 8 challenge set"}
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun)}
@@ -1217,8 +1228,10 @@ export default function ResearchBenchmarkPage() {
               <h2 className="mt-2 text-base font-medium text-zinc-100">Latest Sonnet · bounded balanced runs · explicit cost ceilings</h2>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
                 {benchmarkReadiness.development.cohortVersion
-                  ? `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative development cases are active. The ${benchmarkReadiness.heldOut.total}-case held-out set remains locked.`
-                  : "No active benchmark cohort. Prepare at least 16 leakage-safe evidence packets per label, then freeze a fresh development and held-out cohort."}
+                  ? benchmarkReadiness.development.replaySourceRunId
+                    ? `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative revealed cases are available for development replay. The new ${benchmarkReadiness.heldOut.total}-case challenge set remains locked and unseen.`
+                    : `${benchmarkReadiness.development.fit} positive + ${benchmarkReadiness.development.notFit} negative development cases are active. The ${benchmarkReadiness.heldOut.total}-case held-out set remains locked.`
+                  : "No active benchmark cohort. Prepare at least eight leakage-safe evidence packets per label for a fresh challenge release."}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

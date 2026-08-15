@@ -350,6 +350,34 @@ export function assignGoldenRecordSplits(
   return assignments;
 }
 
+/**
+ * Creates a balanced holdout-only challenge set when the remaining untouched
+ * pool is too small to support another conventional development/holdout split.
+ * Development calibration must come from a previously revealed held-out run;
+ * these selected records remain unseen until their one-time release completes.
+ */
+export function selectBalancedChallengeHoldout(
+  records: GoldenSplitCandidate[],
+  perLabel = 8
+) {
+  const selected: GoldenSplitCandidate[] = [];
+  for (const fitLabel of ["fit", "not_fit"] as const) {
+    const eligible = records.filter((record) =>
+      record.fit_label === fitLabel
+      && !record.stratification_tags?.includes("development_only")
+    );
+    if (eligible.length < perLabel) {
+      throw new Error(`Challenge holdout needs ${perLabel} untouched ${fitLabel} cases; only ${eligible.length} are available`);
+    }
+    selected.push(...stratifiedSample(
+      eligible,
+      perLabel,
+      (record) => `${record.sport}|${record.final_outcome}`
+    ));
+  }
+  return selected.sort((left, right) => left.id.localeCompare(right.id));
+}
+
 export function stratifiedSample<T>(items: T[], count: number, stratum: (item: T) => string) {
   const groups = new Map<string, T[]>();
   for (const item of items) {

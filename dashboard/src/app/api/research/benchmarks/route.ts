@@ -66,7 +66,7 @@ export async function GET() {
         .order("created_at", { ascending: false })
         .limit(20),
       admin.from("research_golden_records")
-        .select("benchmark_split,fit_label,achievability_label,point_in_time_reliability,benchmark_cohort_version,split_assigned_at,held_out_locked_at,held_out_revealed_at")
+        .select("id,benchmark_split,fit_label,achievability_label,point_in_time_reliability,benchmark_cohort_version,split_assigned_at,held_out_locked_at,held_out_revealed_at")
         .eq("organization_id", user.organizationId)
         .contains("stratification_tags", ["dylan_outcome_ground_truth"]),
     ]);
@@ -94,16 +94,47 @@ export async function GET() {
     const goldenLabels = (labels || []) as Array<Record<string, unknown>>;
     const activeCohort = selectActiveBenchmarkCohort(goldenLabels);
     const activeCohortVersion = activeCohort.cohortVersion;
+    const activeDevelopmentRecords = activeCohortVersion
+      ? goldenLabels.filter((record) => record.benchmark_split === "development"
+        && record.benchmark_cohort_version === activeCohortVersion)
+      : [];
+    const replayDevelopmentSource = activeCohortVersion && activeDevelopmentRecords.length === 0
+      ? (runs || []).flatMap((run) => {
+          if (run.benchmark_split !== "held_out" || run.status !== "completed") return [];
+          const metrics = run.metrics && typeof run.metrics === "object"
+            ? run.metrics as Record<string, unknown>
+            : {};
+          const sourceCohortVersion = typeof metrics.cohort_version === "string" ? metrics.cohort_version : "";
+          const caseIds = Array.isArray(metrics.case_ids)
+            ? metrics.case_ids.filter((id): id is string => typeof id === "string")
+            : [];
+          if (!sourceCohortVersion || sourceCohortVersion === activeCohortVersion || caseIds.length < 16) return [];
+          const sourceIds = new Set(caseIds);
+          const sourceRecords = goldenLabels.filter((record) => sourceIds.has(String(record.id))
+            && record.benchmark_split === "held_out"
+            && record.benchmark_cohort_version === sourceCohortVersion
+            && Boolean(record.held_out_revealed_at));
+          if (sourceRecords.length !== caseIds.length
+            || sourceRecords.filter((record) => record.fit_label === "fit").length < 8
+            || sourceRecords.filter((record) => record.fit_label === "not_fit").length < 8) return [];
+          return [{ runId: String(run.id), cohortVersion: sourceCohortVersion, records: sourceRecords }];
+        })[0] || null
+      : null;
     const splitSummary = (split: "development" | "held_out") => {
-      const splitRecords = activeCohortVersion
+      let splitRecords = activeCohortVersion
         ? goldenLabels.filter((record) => record.benchmark_split === split
           && record.benchmark_cohort_version === activeCohortVersion)
         : [];
+      if (split === "development" && splitRecords.length === 0 && replayDevelopmentSource) {
+        splitRecords = replayDevelopmentSource.records;
+      }
       return {
         total: splitRecords.length,
         fit: splitRecords.filter((record) => record.fit_label === "fit").length,
         notFit: splitRecords.filter((record) => record.fit_label === "not_fit").length,
         cohortVersion: activeCohortVersion,
+        replaySourceRunId: split === "development" ? replayDevelopmentSource?.runId || null : null,
+        replaySourceCohortVersion: split === "development" ? replayDevelopmentSource?.cohortVersion || null : null,
       };
     };
     const development = splitSummary("development");
@@ -127,11 +158,18 @@ export async function GET() {
         record.benchmark_split === run.benchmark_split
         && record.benchmark_cohort_version === runCohortVersion
       ).length;
+      const checkpointTarget = typeof run.metrics === "object" && run.metrics
+        && "development_case_target" in run.metrics
+        ? asNumber(run.metrics.development_case_target)
+        : 0;
+      const effectiveSplitTotal = run.benchmark_split === "development"
+        ? Math.max(splitTotal, checkpointTarget)
+        : splitTotal;
       return {
         ...run,
         result_count: cases.length,
         calculated_metrics: calculatedMetrics,
-        release_readiness: evaluateBenchmarkReleaseReadiness(calculatedMetrics, { minimumCases: Math.max(2, splitTotal) }),
+        release_readiness: evaluateBenchmarkReleaseReadiness(calculatedMetrics, { minimumCases: Math.max(2, effectiveSplitTotal) }),
       };
     });
     return NextResponse.json({

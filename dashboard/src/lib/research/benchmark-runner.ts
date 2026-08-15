@@ -217,6 +217,9 @@ type RunCheckpoint = {
     blindOutputTokens: number;
     reviewOutputTokens: number;
   };
+  development_case_target?: number;
+  replay_source_run_id?: string | null;
+  replay_source_cohort_version?: string | null;
   lease_id: string | null;
   lease_expires_at: string | null;
   last_error?: string | null;
@@ -605,6 +608,53 @@ async function loadEvidence(admin: AdminClient, organizationId: string, recordId
   };
 }
 
+async function loadRevealedDevelopmentReplay(admin: AdminClient, organizationId: string, activeCohortVersion: string) {
+  const { data: completedRuns, error: completedRunError } = await admin
+    .from("research_benchmark_runs")
+    .select("id,metrics,created_at")
+    .eq("organization_id", organizationId)
+    .eq("benchmark_split", "held_out")
+    .eq("status", "completed")
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (completedRunError) throw completedRunError;
+  for (const run of completedRuns || []) {
+    const checkpoint = run.metrics && typeof run.metrics === "object"
+      ? run.metrics as Record<string, unknown>
+      : {};
+    const sourceCohortVersion = typeof checkpoint.cohort_version === "string"
+      ? checkpoint.cohort_version
+      : "";
+    const caseIds = Array.isArray(checkpoint.case_ids)
+      ? checkpoint.case_ids.filter((id): id is string => typeof id === "string")
+      : [];
+    if (!sourceCohortVersion || sourceCohortVersion === activeCohortVersion || caseIds.length < 16) continue;
+    const { data: sourceRecords, error: sourceRecordsError } = await admin
+      .from("research_golden_records")
+      .select(BENCHMARK_GOLDEN_RECORD_SELECT)
+      .eq("organization_id", organizationId)
+      .eq("benchmark_split", "held_out")
+      .eq("benchmark_cohort_version", sourceCohortVersion)
+      .not("held_out_revealed_at", "is", null)
+      .in("id", caseIds)
+      .order("id", { ascending: true });
+    if (sourceRecordsError) throw sourceRecordsError;
+    const typed = (sourceRecords || []) as Array<BenchmarkGoldenCase & {
+      fit_label: "fit" | "not_fit";
+      achievability_label: "high" | "medium" | "low";
+    }>;
+    if (typed.length !== caseIds.length
+      || typed.filter((record) => record.fit_label === "fit").length < 8
+      || typed.filter((record) => record.fit_label === "not_fit").length < 8) continue;
+    return {
+      records: typed,
+      sourceRunId: String(run.id),
+      sourceCohortVersion,
+    };
+  }
+  throw new Error("No completed, revealed 8+8 held-out run is available for development replay");
+}
+
 export async function startBenchmarkRun(input: {
   organizationId: string;
   userId: string;
@@ -649,16 +699,24 @@ export async function startBenchmarkRun(input: {
     .contains("stratification_tags", ["dylan_outcome_ground_truth"])
     .order("id", { ascending: true });
   if (recordsError) throw recordsError;
-  const typedRecords = (records || []) as Array<BenchmarkGoldenCase & {
+  let typedRecords = (records || []) as Array<BenchmarkGoldenCase & {
     fit_label: "fit" | "not_fit";
     achievability_label: "high" | "medium" | "low";
   }>;
+  let replaySourceRunId: string | null = null;
+  let replaySourceCohortVersion: string | null = null;
+  if (input.split === "development" && typedRecords.length === 0) {
+    const replay = await loadRevealedDevelopmentReplay(admin, input.organizationId, cohortVersion);
+    typedRecords = replay.records;
+    replaySourceRunId = replay.sourceRunId;
+    replaySourceCohortVersion = replay.sourceCohortVersion;
+  }
   const fitCount = typedRecords.filter((record) => record.fit_label === "fit").length;
   const notFitCount = typedRecords.filter((record) => record.fit_label === "not_fit").length;
   if (!fitCount || !notFitCount) {
     throw new Error(`${input.split} benchmark is not ready: it needs both fit and not-fit records (currently ${fitCount} fit, ${notFitCount} not fit)`);
   }
-  if (typedRecords.some((record) => record.benchmark_cohort_version !== cohortVersion)) {
+  if (!replaySourceRunId && typedRecords.some((record) => record.benchmark_cohort_version !== cohortVersion)) {
     throw new Error(`${input.split} benchmark records do not match the active frozen cohort`);
   }
   if (input.split === "held_out") {
@@ -697,8 +755,13 @@ export async function startBenchmarkRun(input: {
       cacheCreationInputTokens: integer(baseline.cache_creation_input_tokens),
       cacheReadInputTokens: integer(baseline.cache_read_input_tokens),
     }) as BenchmarkMetrics;
+    const developmentCaseTarget = Math.max(
+      developmentCohortSize || 0,
+      integer(baselineCheckpoint.development_case_target),
+      baselineCheckpoint.case_ids.length
+    );
     const releaseReadiness = evaluateBenchmarkReleaseReadiness(baselineMetrics, {
-      minimumCases: Math.max(2, developmentCohortSize || 0),
+      minimumCases: Math.max(2, developmentCaseTarget),
     });
     if (!releaseReadiness.ready) {
       throw new Error(`Development release gates have not passed: ${releaseReadiness.reasons.join("; ")}`);
@@ -766,6 +829,9 @@ export async function startBenchmarkRun(input: {
       + BENCHMARK_CALL_LIMITS.reviewOutputTokens
     ) * 2,
     call_limits: BENCHMARK_CALL_LIMITS,
+    development_case_target: input.split === "development" ? typedRecords.length : undefined,
+    replay_source_run_id: replaySourceRunId,
+    replay_source_cohort_version: replaySourceCohortVersion,
     lease_id: null,
     lease_expires_at: null,
     last_error: null,
@@ -775,7 +841,7 @@ export async function startBenchmarkRun(input: {
     .includes(input.changeDimension || "") ? input.changeDimension : "prompt";
   const { data: run, error: runError } = await admin.from("research_benchmark_runs").insert({
     organization_id: input.organizationId,
-    name: `${input.split === "held_out" ? "Held-out release" : "Development"} benchmark ${now.slice(0, 16).replace("T", " ")}`,
+    name: `${input.split === "held_out" ? "Held-out release" : replaySourceRunId ? "Development replay" : "Development"} benchmark ${now.slice(0, 16).replace("T", " ")}`,
     benchmark_split: input.split,
     status: "queued",
     baseline_run_id: input.baselineRunId || null,

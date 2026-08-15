@@ -8,6 +8,7 @@ import {
   isGoldenRecordReadyForSplit,
   maskGoldenRecordForBlindLabeling,
   parseGoldenRecordInput,
+  selectBalancedChallengeHoldout,
   selectActiveBenchmarkCohort,
   stratifiedSample,
   summarizeGoldenRecords,
@@ -230,23 +231,83 @@ export async function POST(request: NextRequest) {
         });
         return evidenceReadiness.ready;
       });
-      const evidenceReadyFit = evidenceReady.filter((record) => record.fit_label === "fit");
-      const evidenceReadyNotFit = evidenceReady.filter((record) => record.fit_label === "not_fit");
+      const { data: priorResults, error: priorResultsError } = evidenceReady.length
+        ? await admin.from("research_benchmark_results")
+            .select("golden_record_id")
+            .eq("organization_id", user.organizationId)
+            .in("golden_record_id", evidenceReady.map((record) => record.id))
+        : { data: [], error: null };
+      if (priorResultsError) throw priorResultsError;
+      const previouslyScoredIds = new Set((priorResults || []).map((result) => result.golden_record_id));
+      const untouchedEvidenceReady = evidenceReady.filter((record) => !previouslyScoredIds.has(record.id));
+      const evidenceReadyFit = untouchedEvidenceReady.filter((record) => record.fit_label === "fit");
+      const evidenceReadyNotFit = untouchedEvidenceReady.filter((record) => record.fit_label === "not_fit");
       const perLabel = Math.min(40, evidenceReadyFit.length, evidenceReadyNotFit.length);
-      if (perLabel < 16) {
-        return NextResponse.json({
-          error: `The cohort needs at least 16 leakage-safe evidence packets per label so eight per label can remain locked held out. Ready now: ${evidenceReadyFit.length} fit and ${evidenceReadyNotFit.length} not fit.`,
-        }, { status: 409 });
+      const challengeMode = perLabel < 16;
+      let replaySourceRunId: string | null = null;
+      let replaySourceCohortVersion: string | null = null;
+      if (challengeMode) {
+        if (perLabel < 8) {
+          return NextResponse.json({
+            error: `A fresh challenge release needs eight untouched, leakage-safe evidence packets per label. Ready now: ${evidenceReadyFit.length} fit and ${evidenceReadyNotFit.length} not fit.`,
+          }, { status: 409 });
+        }
+        const { data: archivedRuns, error: archivedRunError } = await admin
+          .from("research_benchmark_runs")
+          .select("id,metrics,created_at")
+          .eq("organization_id", user.organizationId)
+          .eq("benchmark_split", "held_out")
+          .eq("status", "completed")
+          .order("created_at", { ascending: false })
+          .limit(10);
+        if (archivedRunError) throw archivedRunError;
+        const replayIds = Array.from(new Set((archivedRuns || []).flatMap((run) => {
+          const metrics = run.metrics && typeof run.metrics === "object" ? run.metrics as Record<string, unknown> : {};
+          return Array.isArray(metrics.case_ids) ? metrics.case_ids.filter((id): id is string => typeof id === "string") : [];
+        })));
+        const { data: replayRecords, error: replayRecordsError } = replayIds.length
+          ? await admin.from("research_golden_records")
+              .select("id,fit_label,benchmark_split,benchmark_cohort_version,held_out_revealed_at")
+              .eq("organization_id", user.organizationId)
+              .in("id", replayIds)
+          : { data: [], error: null };
+        if (replayRecordsError) throw replayRecordsError;
+        const replayById = new Map((replayRecords || []).map((record) => [record.id, record]));
+        const replaySource = (archivedRuns || []).find((run) => {
+          const metrics = run.metrics && typeof run.metrics === "object" ? run.metrics as Record<string, unknown> : {};
+          const caseIds = Array.isArray(metrics.case_ids)
+            ? metrics.case_ids.filter((id): id is string => typeof id === "string")
+            : [];
+          const cohortVersion = typeof metrics.cohort_version === "string" ? metrics.cohort_version : "";
+          const rows = caseIds.map((id) => replayById.get(id)).filter(Boolean);
+          return caseIds.length >= 16
+            && rows.length === caseIds.length
+            && rows.every((record) => record?.benchmark_split === "held_out"
+              && record.benchmark_cohort_version === cohortVersion
+              && Boolean(record.held_out_revealed_at))
+            && rows.filter((record) => record?.fit_label === "fit").length >= 8
+            && rows.filter((record) => record?.fit_label === "not_fit").length >= 8;
+        });
+        if (!replaySource) {
+          return NextResponse.json({
+            error: "A holdout-only challenge set requires one previously completed and revealed 8+8 held-out run for development replay.",
+          }, { status: 409 });
+        }
+        const replayMetrics = replaySource.metrics as Record<string, unknown>;
+        replaySourceRunId = replaySource.id;
+        replaySourceCohortVersion = String(replayMetrics.cohort_version || "");
       }
       const selectBalancedLabel = (records: typeof evidenceReadyFit) => stratifiedSample(
         records,
         perLabel,
         (record) => `${record.sport}|${record.final_outcome}`
       );
-      const cohortRecords = [
-        ...selectBalancedLabel(evidenceReadyFit),
-        ...selectBalancedLabel(evidenceReadyNotFit),
-      ];
+      const cohortRecords = challengeMode
+        ? selectBalancedChallengeHoldout(untouchedEvidenceReady, 8)
+        : [
+            ...selectBalancedLabel(evidenceReadyFit),
+            ...selectBalancedLabel(evidenceReadyNotFit),
+          ];
       const heldOutEligible = (label: "fit" | "not_fit") => cohortRecords.filter((record) =>
         record.fit_label === label && !record.stratification_tags?.includes("development_only")
       ).length;
@@ -256,8 +317,10 @@ export async function POST(request: NextRequest) {
         }, { status: 409 });
       }
       const assignedAt = new Date().toISOString();
-      const cohortVersion = `onlyfans-athlete-v1-${assignedAt.slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
-      const assignments = assignGoldenRecordSplits(cohortRecords, cohortVersion);
+      const cohortVersion = `onlyfans-athlete-${challengeMode ? "challenge-v2" : "v2"}-${assignedAt.slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
+      const assignments = challengeMode
+        ? cohortRecords.map((record) => ({ id: record.id, split: "held_out" as const }))
+        : assignGoldenRecordSplits(cohortRecords, cohortVersion);
       const developmentIds = assignments.filter((assignment) => assignment.split === "development").map((assignment) => assignment.id);
       const heldOutIds = assignments.filter((assignment) => assignment.split === "held_out").map((assignment) => assignment.id);
 
@@ -298,7 +361,11 @@ export async function POST(request: NextRequest) {
         cohortVersion,
         assigned: assignments.length,
         evidenceReadyPool: evidenceReady.length,
+        untouchedEvidenceReadyPool: untouchedEvidenceReady.length,
         perLabel,
+        mode: challengeMode ? "challenge_holdout" : "standard",
+        replaySourceRunId,
+        replaySourceCohortVersion,
         development: assignments.filter((assignment) => assignment.split === "development").length,
         heldOut: assignments.filter((assignment) => assignment.split === "held_out").length,
       });
