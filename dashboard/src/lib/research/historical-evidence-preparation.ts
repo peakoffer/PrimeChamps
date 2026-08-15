@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-observed-stated-age-extraction-v10";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-jsonld-localized-age-extraction-v11";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-14-all-multilingual-profiles-v11";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -107,6 +107,8 @@ export type OfficialCommissionAdultEvidence = {
   excerpt: string;
   publishedAt: string;
 };
+
+export type OfficialCompetitionEntryAdultEvidence = OfficialCommissionAdultEvidence;
 
 export type PreparedEvidenceClaim = {
   claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athlete_profile" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
@@ -583,7 +585,28 @@ function normalizeEvidenceText(value: string) {
 }
 
 export function archivedHtmlToText(html: string) {
-  return decodeHtmlEntities(html
+  const jsonLdText = Array.from(html.matchAll(
+    /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  )).flatMap((match) => {
+    try {
+      const parsed = JSON.parse(decodeHtmlEntities(match[1]));
+      const values: string[] = [];
+      const visit = (value: unknown) => {
+        if (Array.isArray(value)) return value.forEach(visit);
+        if (!value || typeof value !== "object") return;
+        const record = value as Record<string, unknown>;
+        for (const key of ["headline", "name", "description", "articleBody"]) {
+          if (typeof record[key] === "string") values.push(record[key] as string);
+        }
+        if (record["@graph"]) visit(record["@graph"]);
+      };
+      visit(parsed);
+      return values;
+    } catch {
+      return [];
+    }
+  }).join("\n");
+  return decodeHtmlEntities(`${jsonLdText}\n${html}`
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1>/gi, " ")
     .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>|<\/h[1-6]>/gi, "\n")
@@ -611,7 +634,12 @@ function regulatorDateTokens(publishedAt: string) {
   const year = String(date.getUTCFullYear());
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
-  return [`${year}${month}${day}`, `${month}-${day}-${year.slice(-2)}`, `${month}_${day}_${year.slice(-2)}`];
+  return [
+    `${year}${month}${day}`,
+    `${month}-${day}-${year.slice(-2)}`,
+    `${month}_${day}_${year.slice(-2)}`,
+    `${Number(month)}-${Number(day)}-${year.slice(-2)}`,
+  ];
 }
 
 function ageOnDate(birthDate: string, at: string) {
@@ -652,7 +680,12 @@ export function extractOfficialCommissionAdultEvidence(input: {
   for (let index = 0; index < lines.length; index += 1) {
     const row = lines[index];
     if (!` ${normalizeEvidenceText(row)} `.includes(` ${normalizedAthlete} `)) continue;
-    if (!/\b[A-Z]{2}-?\d{5,}\b/.test(row)) continue;
+    // Some commission PDFs wrap "Pro" onto the line immediately before the
+    // athlete row and leave "Debut" on the row itself. Keep that exception
+    // tightly bounded to the adjacent line instead of relaxing the row check.
+    const previousRow = lines[index - 1] || "";
+    const wrappedProDebut = /^\s*Pro\s*$/i.test(previousRow) && /\bDebut\b/i.test(row);
+    if (!/\b[A-Z]{2}-?\d{5,}\b/.test(row) && !wrappedProDebut) continue;
     // Multi-page commission exports often print the table header only once,
     // then place several bouts beneath it. Keep the window bounded but wide
     // enough to retain that header on a normal results page.
@@ -687,6 +720,65 @@ export function extractOfficialCommissionAdultEvidence(input: {
     excerpt: winner.excerpt,
     publishedAt: publishedAt.toISOString(),
   };
+}
+
+/**
+ * Extract an exact DOB from a dated official WorldWCR biographical entry list.
+ * The source domain, event year, table header, exact rider tokens, sport, stated
+ * age, and DOB must agree. This deliberately does not accept arbitrary PDFs.
+ */
+export function extractOfficialCompetitionEntryAdultEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceText: string;
+  publishedAt: string;
+  evidenceCutoffAt: string;
+}): OfficialCompetitionEntryAdultEvidence | null {
+  let url: URL;
+  try { url = new URL(input.sourceUrl); } catch { return null; }
+  if (url.hostname.toLowerCase() !== "resources.worldsbk.com") return null;
+  const eventYear = url.pathname.match(/\/results\/(20\d{2})\/[A-Z0-9_-]+\/WCR\//i)?.[1];
+  const publishedAt = new Date(input.publishedAt);
+  const cutoff = new Date(input.evidenceCutoffAt);
+  if (!eventYear || !Number.isFinite(publishedAt.getTime()) || !Number.isFinite(cutoff.getTime())
+    || publishedAt > cutoff || Number(eventYear) !== publishedAt.getUTCFullYear()) return null;
+  if (!/\bWorldWCR\b/i.test(input.sourceText) || !/\bBiographical Entry List\b/i.test(input.sourceText)
+    || !/\bRider\b[\s\S]{0,180}\bDate of Birth\b/i.test(input.sourceText.slice(0, 2_500))) return null;
+
+  const athleteTokens = normalizeEvidenceText(input.athleteName).split(" ").filter((token) => token.length > 1);
+  if (athleteTokens.length < 2) return null;
+  const lines = input.sourceText.split(/\r?\n/);
+  const matches: Array<{ birthDate: string; excerpt: string }> = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const riderLine = lines[index];
+    const normalizedRow = normalizeEvidenceText(riderLine);
+    if (!athleteTokens.every((token) => ` ${normalizedRow} `.includes(` ${token} `))) continue;
+    const detailLine = lines[index + 1] || "";
+    const context = `${riderLine}\n${detailLine}`;
+    if (!benchmarkSourceSupportsSport(input.sport, `${input.sourceText.slice(0, 500)}\n${context}`)) continue;
+    const ageMatch = detailLine.match(/^\s*(\d{1,2})\s+/);
+    const dateMatch = detailLine.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/);
+    if (!ageMatch || !dateMatch) continue;
+    const birthDate = normalizeNumericBirthDate(Number(dateMatch[3]), Number(dateMatch[2]), Number(dateMatch[1]));
+    if (!birthDate) continue;
+    const calculatedAge = ageOnDate(birthDate, input.publishedAt);
+    if (calculatedAge === null || calculatedAge < 21 || calculatedAge > 80
+      || Math.abs(calculatedAge - Number(ageMatch[1])) > 1) continue;
+    matches.push({
+      birthDate,
+      excerpt: `${input.sourceText.split(/\r?\n/).slice(0, 9).join("\n")}\n${context}`.slice(0, 1_000),
+    });
+  }
+  const uniqueBirthDates = new Set(matches.map((match) => match.birthDate));
+  if (uniqueBirthDates.size !== 1) return null;
+  const winner = matches[0];
+  return winner ? {
+    birthDate: winner.birthDate,
+    domain: benchmarkSourceDomain(input.sourceUrl),
+    excerpt: winner.excerpt,
+    publishedAt: publishedAt.toISOString(),
+  } : null;
 }
 
 const RESERVED_INSTAGRAM_PATHS = new Set([
@@ -811,10 +903,14 @@ function evidenceExcerpt(name: string, text: string) {
 }
 
 function statedAgeSharesAthleteClause(name: string, evidence: string) {
-  const surname = name.trim().split(/\s+/).at(-1)?.toLowerCase();
+  const indexAlignedFold = (value: string) => value.toLowerCase().split("").map((character) => {
+    const manual = ({ "ł": "l", "ø": "o", "ð": "d", "þ": "t", "ß": "s" } as Record<string, string>)[character];
+    return manual || character.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").slice(0, 1);
+  }).join("");
+  const surname = indexAlignedFold(name.trim().split(/\s+/).at(-1) || "");
   if (!surname) return false;
-  const lower = evidence.toLowerCase();
-  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)|(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*\d{1,2}\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i.exec(evidence);
+  const lower = indexAlignedFold(evidence);
+  const ageMatch = /\bage\s*[:\-]?\s*\d{1,2}(?!\d)|\b\d{1,2}\s*(?:years?\s*old|year-old|yo\b)|\b(?:cumpl(?:e|[ií]a|i[oó]|ir[aá])|tiene)\s+\d{1,2}\s+a[nñ]os\b|\b(?:[aâ]g[eé]e?\s+de|a)\s+\d{1,2}\s+ans\b|,\s*\d{1,2}\s+ans\b|\b\d{1,2}\s+jahre\s+alt\b|\b(?:tem|completou)\s+\d{1,2}\s+anos\b|,\s*(?:un(?:a)?\s+)?(?:joven|deportista|surfista|atleta)?\s*de\s+(?:\(\s*entonces\s*\)\s*)?\d{1,2}\s+a[nñ]os\b|(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*\d{1,2}\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i.exec(evidence);
   if (!ageMatch || ageMatch.index === undefined) return false;
   const beforeAge = lower.slice(0, ageMatch.index);
   const surnameIndex = beforeAge.lastIndexOf(surname);
@@ -973,11 +1069,34 @@ export function validatePreparedAgeEvidenceForSource(input: {
       return { attributableAge: wider, officialCompactBirthDate: null };
     }
   }
+
+  // Spanish editorial profiles often switch from the exact full name in the
+  // headline to the athlete's first name in the body ("Violeta tiene 22
+  // años"). Only allow that shortcut on an exact athlete-titled page and only
+  // for an explicit current-age verb, never for childhood-history phrasing.
+  const firstName = input.athleteName.trim().split(/\s+/)[0]?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const localizedCurrentAge = firstName
+    ? input.text.match(new RegExp(`\\b${firstName}\\s+(?:tiene|cumpl(?:e|[ií]a|i[oó]|ir[aá]))\\s+(\\d{1,2})\\s+a[nñ]os\\b`, "i"))
+    : null;
+  const localizedAge = Number(localizedCurrentAge?.[1]);
+  if (localizedCurrentAge && localizedCurrentAge.index !== undefined
+    && Number.isFinite(localizedAge) && localizedAge >= 10 && localizedAge <= 80) {
+    return {
+      attributableAge: {
+        parsed: { age: localizedAge, birthYear: null, precision: "stated_age" as const },
+        evidence: input.text.slice(
+          Math.max(0, localizedCurrentAge.index - 180),
+          Math.min(input.text.length, localizedCurrentAge.index + localizedCurrentAge[0].length + 320),
+        ).trim(),
+      },
+      officialCompactBirthDate: null,
+    };
+  }
   return { attributableAge: null, officialCompactBirthDate: null };
 }
 
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
-  athletic_momentum: /\b(?:ranked|ranking|champion|finalist|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)\b/i,
+  athletic_momentum: /(?:^|[^\p{L}\p{N}])(?:ranked|ranking|champion(?:ne)?|finalist(?:e)?|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|classement|class[ée]e?|termin[ée]e?|m[ée]daill[ée]e?|victoire|vainqueur|gagn[ée]e?|qualifi[ée]e?|campe[óo]n|campeona|campe[ãa]|finalista|medallista|medalhista|gan[óo]|venceu|vit[óo]ria|clasific[óo]|classifica[çc][ãa]o|qualificou|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)(?=$|[^\p{L}\p{N}])/iu,
   audience_signal: /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
   creator_behavior_signal: /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i,
   commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
@@ -1098,7 +1217,16 @@ export function extractPreparedArchivedEvidence(input: {
     // pages commonly retain an old datePublished value while updating the age
     // in place, so attaching a stated age to that publication date invents a
     // contradiction with an otherwise consistent birth-date source.
-    const ageEffectiveAt = attributableAge?.parsed.precision === "stated_age"
+    const newsSchema = /["']@type["']\s*:\s*["']NewsArticle["']/i.test(input.html);
+    const articleBodyInSchema = /["']articleBody["']\s*:/i.test(input.html);
+    const modifiedValue = input.html.match(/["']dateModified["']\s*:\s*["']([^"']+)["']/i)?.[1];
+    const modifiedAt = modifiedValue ? Date.parse(decodeHtmlEntities(modifiedValue)) : Number.NaN;
+    const publishedTimestamp = publication.publishedAt ? Date.parse(publication.publishedAt) : Number.NaN;
+    const newsWasNotLaterRewritten = Number.isFinite(modifiedAt) && Number.isFinite(publishedTimestamp)
+      && modifiedAt >= publishedTimestamp && modifiedAt - publishedTimestamp <= 7 * 24 * 60 * 60 * 1_000;
+    const immutableDatedNewsArticle = Boolean(publication.publishedAt && newsSchema
+      && (articleBodyInSchema || newsWasNotLaterRewritten));
+    const ageEffectiveAt = attributableAge?.parsed.precision === "stated_age" && !immutableDatedNewsArticle
       ? capture.capturedAt
       : effectiveAt;
     claims.push({
@@ -1113,7 +1241,7 @@ export function extractPreparedArchivedEvidence(input: {
           : undefined,
         age: attributableAge?.parsed.age,
         precision: birthDate ? "birth_date" : attributableAge?.parsed.precision,
-        age_as_of: capture.capturedAt,
+        age_as_of: ageEffectiveAt,
       },
       sourceExcerpt: ageExcerpt,
       effectiveAt: ageEffectiveAt,

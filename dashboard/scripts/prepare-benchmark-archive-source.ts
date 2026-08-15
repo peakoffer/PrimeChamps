@@ -1,11 +1,19 @@
 import { config } from "dotenv";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import {
+  commonCrawlIndexUrl,
+  extractCommonCrawlWarcBody,
   extractPreparedArchivedEvidence,
+  selectCommonCrawlCapture,
+  selectCommonCrawlCollections,
+  selectWikimediaRevisionCapture,
   selectWaybackCapture,
+  wikimediaRevisionApiUrl,
   waybackCdxUrl,
   type HistoricalSearchCandidate,
+  type PreparedArchivedEvidence,
 } from "../src/lib/research/historical-evidence-preparation.ts";
 import { ONLYFANS_HISTORICAL_DATASET } from "../src/lib/research/historical-benchmark.ts";
 
@@ -19,15 +27,17 @@ function argument(name: string) {
 const athleteName = argument("athlete");
 const canonicalUrl = argument("url");
 const requiredClaim = argument("required-claim") || "adult_eligibility";
-if (!new Set(["adult_eligibility", "athlete_profile"]).has(requiredClaim)) {
-  throw new Error("--required-claim must be adult_eligibility or athlete_profile");
+if (!new Set(["adult_eligibility", "athlete_profile", "athletic_momentum"]).has(requiredClaim)) {
+  throw new Error("--required-claim must be adult_eligibility, athlete_profile, or athletic_momentum");
 }
 if (!athleteName || !canonicalUrl) {
   throw new Error("Usage requires --athlete=\"Athlete Name\" and --url=https://public-source.example/profile");
 }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
+const serviceKey = process.env.SUPABASE_SECRET_KEY
+  || process.env.SUPABASE_SERVICE_KEY
+  || process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!supabaseUrl || !serviceKey) throw new Error("Supabase server credentials are not configured");
 const admin = createClient(supabaseUrl, serviceKey, {
   auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
@@ -43,44 +53,149 @@ if (matches?.length !== 1) throw new Error(`Expected one Dylan benchmark record 
 const record = matches[0];
 if (record.fit_label !== "fit" && record.fit_label !== "not_fit") throw new Error("Benchmark record has no binary fit label");
 
-const cdxResponse = await fetch(waybackCdxUrl(canonicalUrl, record.evidence_cutoff_at), {
-  headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
-  signal: AbortSignal.timeout(45_000),
-});
-if (!cdxResponse.ok) throw new Error(`Internet Archive capture lookup failed (${cdxResponse.status})`);
-const capture = selectWaybackCapture(await cdxResponse.json(), canonicalUrl, record.evidence_cutoff_at);
-if (!capture) throw new Error("No exact HTML capture exists before this benchmark record's evidence cutoff");
-
-const archiveResponse = await fetch(capture.archivedUrl, {
-  headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
-  signal: AbortSignal.timeout(45_000),
-});
-if (!archiveResponse.ok) throw new Error(`Archived page fetch failed (${archiveResponse.status})`);
-const html = (await archiveResponse.text()).slice(0, 360_000);
 const candidate: HistoricalSearchCandidate = {
   query: `operator supplied authoritative archive source for ${record.athlete_name}`,
   title: argument("title") || canonicalUrl,
   url: canonicalUrl,
   snippet: "Operator-supplied public URL; exact athlete, sport, cutoff, and archived content are validated before persistence.",
 };
-const prepared = extractPreparedArchivedEvidence({
-  record: {
-    id: record.id,
-    athlete_name: record.athlete_name,
-    sport: record.sport,
-    fit_label: record.fit_label,
-    evidence_cutoff_at: record.evidence_cutoff_at,
-  },
-  candidate,
-  capture,
-  html,
-});
-if (!prepared.evidence) throw new Error(`Archived source rejected: ${prepared.rejectionReason || "unknown reason"}`);
-if (!prepared.evidence.claims.some((claim) => claim.claimType === requiredClaim)) {
-  throw new Error(`Archived source did not contain the required ${requiredClaim} evidence`);
+
+function hasRequiredClaim(evidence: PreparedArchivedEvidence | null) {
+  return Boolean(evidence?.claims.some((claim) => claim.claimType === requiredClaim));
 }
 
-const item = prepared.evidence;
+async function retrieveCommonCrawlEvidence() {
+  const collectionsResponse = await fetch("https://index.commoncrawl.org/collinfo.json", {
+    headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!collectionsResponse?.ok) return null;
+  const collectionIds = selectCommonCrawlCollections(
+    await collectionsResponse.json(), record.evidence_cutoff_at, 3,
+  );
+  for (const collectionId of collectionIds) {
+    let indexResponse: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      indexResponse = await fetch(commonCrawlIndexUrl(collectionId, canonicalUrl), {
+        headers: { Accept: "application/x-ndjson,text/plain", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+        signal: AbortSignal.timeout(30_000),
+      }).catch(() => null);
+      if (indexResponse?.ok) break;
+    }
+    if (!indexResponse?.ok) continue;
+    const capture = selectCommonCrawlCapture(
+      await indexResponse.text(), collectionId, canonicalUrl, record.evidence_cutoff_at,
+    );
+    if (!capture) continue;
+    const lastByte = capture.offset + capture.length - 1;
+    const warcResponse = await fetch(capture.warcUrl, {
+      headers: {
+        Accept: "application/warc,application/octet-stream",
+        Range: `bytes=${capture.offset}-${lastByte}`,
+        "User-Agent": "PrimeChampsResearch/1.0 evidence-audit",
+      },
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (warcResponse.status !== 206) continue;
+    const compressed = Buffer.from(await warcResponse.arrayBuffer());
+    if (!compressed.length || compressed.length > 2_000_000) continue;
+    let decompressed: string;
+    try {
+      decompressed = gunzipSync(compressed, { maxOutputLength: 6_000_000 }).toString("utf8");
+    } catch {
+      continue;
+    }
+    const html = extractCommonCrawlWarcBody(decompressed)?.slice(0, 360_000);
+    if (!html) continue;
+    const prepared = extractPreparedArchivedEvidence({
+      record, candidate,
+      capture: {
+        timestamp: capture.timestamp,
+        capturedAt: capture.capturedAt,
+        originalUrl: capture.originalUrl,
+        statusCode: capture.statusCode,
+        digest: capture.digest,
+        mimeType: capture.mimeType,
+        archivedUrl: `${capture.warcUrl}#offset=${capture.offset}&length=${capture.length}`,
+      },
+      html,
+    });
+    if (hasRequiredClaim(prepared.evidence)) {
+      return {
+        item: {
+          ...prepared.evidence!,
+          archiveProvider: "common_crawl" as const,
+          providerRequestId: `${collectionId}:${capture.timestamp}:${capture.offset}`,
+        },
+        html,
+      };
+    }
+  }
+  return null;
+}
+
+async function retrieveWikimediaRevisionEvidence() {
+  const apiUrl = wikimediaRevisionApiUrl(canonicalUrl, record.evidence_cutoff_at);
+  if (!apiUrl) return null;
+  const response = await fetch(apiUrl, {
+    headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!response?.ok) return null;
+  const capture = selectWikimediaRevisionCapture(
+    await response.json(), canonicalUrl, record.evidence_cutoff_at,
+  );
+  if (!capture) return null;
+  const prepared = extractPreparedArchivedEvidence({
+    record,
+    candidate,
+    capture: {
+      timestamp: capture.timestamp,
+      capturedAt: capture.capturedAt,
+      originalUrl: canonicalUrl,
+      statusCode: "200",
+      digest: capture.sha1,
+      mimeType: "text/x-wiki",
+      archivedUrl: capture.historicalUrl,
+    },
+    html: capture.content,
+  });
+  if (!hasRequiredClaim(prepared.evidence)) return null;
+  return {
+    item: {
+      ...prepared.evidence!,
+      archiveProvider: "wikimedia_revision" as const,
+      providerRequestId: String(capture.revisionId),
+    },
+    html: capture.content,
+  };
+}
+
+let recovered: { item: PreparedArchivedEvidence; html: string } | null = await retrieveWikimediaRevisionEvidence();
+if (!recovered) {
+  const cdxResponse = await fetch(waybackCdxUrl(canonicalUrl, record.evidence_cutoff_at), {
+    headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    signal: AbortSignal.timeout(45_000),
+  }).catch(() => null);
+  const capture = cdxResponse?.ok
+    ? selectWaybackCapture(await cdxResponse.json(), canonicalUrl, record.evidence_cutoff_at)
+    : null;
+  if (capture) {
+    const archiveResponse = await fetch(capture.archivedUrl, {
+      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+      signal: AbortSignal.timeout(45_000),
+    }).catch(() => null);
+    if (archiveResponse?.ok) {
+      const html = (await archiveResponse.text()).slice(0, 360_000);
+      const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
+      if (hasRequiredClaim(prepared.evidence)) recovered = { item: prepared.evidence!, html };
+    }
+  }
+}
+if (!recovered) recovered = await retrieveCommonCrawlEvidence();
+if (!recovered) throw new Error(`No cutoff-safe Wikimedia, Wayback, or Common Crawl capture contained the required ${requiredClaim} evidence`);
+
+const { item, html } = recovered;
 const verifiedAt = new Date().toISOString();
 const { data: source, error: sourceError } = await admin.from("research_evidence_sources").upsert({
   organization_id: record.organization_id,
@@ -91,8 +206,8 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   title: item.title,
   publisher: item.domain,
   source_type: "archive",
-  provider: "internet_archive_wayback",
-  provider_request_id: item.captureTimestamp,
+  provider: item.archiveProvider || "internet_archive_wayback",
+  provider_request_id: item.providerRequestId || item.captureTimestamp,
   published_at: item.publishedAt,
   retrieved_at: verifiedAt,
   historical_as_of: item.historicalAsOf,

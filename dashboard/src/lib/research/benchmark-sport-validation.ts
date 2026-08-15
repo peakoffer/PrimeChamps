@@ -55,7 +55,7 @@ const SPORT_TERMS: Partial<Record<BenchmarkSport, string[]>> = {
   Rugby: ["rugby"], Running: ["running", "runner", "ultrarunner", "ultra runner"],
   Skateboarding: ["skateboarding", "skateboarder"], Skiing: ["skiing", "skier"],
   Snowboarding: ["snowboarding", "snowboarder"], Soccer: ["soccer", "footballer", "football player", "futbol", "fútbol"],
-  Softball: ["softball"], Surfing: ["surfing", "surfer", "world surf league"], Swimming: ["swimming", "swimmer"],
+  Softball: ["softball"], Surfing: ["surfing", "surfer", "surfista", "surfeur", "surfeuse", "world surf league"], Swimming: ["swimming", "swimmer"],
   Tennis: ["tennis", "atp tour", "wta tour"], "Track & Field": ["track and field", "athletics", "heptathlon", "pole vault"],
   Triathlon: ["triathlon", "triathlete"], Volleyball: ["volleyball"], Wakeboarding: ["wakeboarding", "wakeboarder"],
   Wingfoil: ["wingfoil", "wing foil"],
@@ -88,7 +88,13 @@ const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
   "MMA / LFA": ["mixed martial arts", "mma", "ufc", "lfa", "legacy fighting alliance"],
   "Motorcycle Road Racing": [
     "motorcycle road racing", "motorcycle racer", "motorbike racing", "road racer",
-    "superbike", "motogp", "moto gp", "isle of man tt",
+    "superbike", "motogp", "moto gp", "isle of man tt", "worldwcr", "motociclismo",
+    "mundial femenino de velocidad", "carreras de motos",
+  ],
+  Motorsports: [
+    "motorsport", "racing driver", "motorcycle racing", "motorcycle racer", "motorbike racing",
+    "road racer", "superbike", "motogp", "moto gp", "worldwcr", "motociclismo",
+    "mundial femenino de velocidad", "carreras de motos",
   ],
   "Racquet Sports": ["racquet sports", "tennis", "padel", "pickleball", "badminton", "squash"],
   "Supercross / Motocross": ["supercross", "motocross"],

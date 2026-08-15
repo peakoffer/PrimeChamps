@@ -104,8 +104,10 @@ export function parseAgeEvidence(text: string, now = new Date()): ParsedAgeEvide
 
   // "aged 15" frequently describes when an athlete started a sport, not their
   // age at publication. Only accept an explicit age field or current-age phrase.
-  const stated = text.match(/\bage\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)/i);
-  const statedAge = Number(stated?.[1] || stated?.[2]);
+  const stated = text.match(
+    /\bage\s*[:\-]?\s*(\d{1,2})(?!\d)|\b(\d{1,2})\s*(?:years?\s*old|year-old|yo\b)|\b(?:cumpl(?:e|[ií]a|i[oó]|ir[aá])|tiene)\s+(\d{1,2})\s+a[nñ]os\b|\b(?:[aâ]g[eé]e?\s+de|a)\s+(\d{1,2})\s+ans\b|^\s*,\s*(\d{1,2})\s+ans\b|\b(\d{1,2})\s+jahre\s+alt\b|\b(?:tem|completou)\s+(\d{1,2})\s+anos\b/i
+  );
+  const statedAge = Number(stated?.slice(1).find(Boolean));
   const statedContext = stated?.index === undefined
     ? ""
     : text.slice(Math.max(0, stated.index - 80), stated.index).toLowerCase();
@@ -183,7 +185,10 @@ export function parseAgeEvidenceForAthlete(
     const editorialAge = evidence.match(
       /^\s*(?:\[[^\]\r\n]{1,40}\]\s*)?,\s*(\d{1,2})\s*,\s*(?:has|is|plays|competes|spent|was|won|joined|became|made)\b/i
     );
-    const age = Number(editorialAge?.[1]);
+    const localizedEditorialAge = evidence.match(
+      /^\s*,\s*(?:(?:un(?:a)?\s+)?(?:joven|deportista|surfista|atleta)?\s*de\s+(?:\(\s*entonces\s*\)\s*)?(\d{1,2})\s+a[nñ]os|(\d{1,2})\s+ans)\b/i
+    );
+    const age = Number(editorialAge?.[1] || localizedEditorialAge?.[1] || localizedEditorialAge?.[2]);
     if (Number.isFinite(age) && age >= 10 && age <= 80) {
       return {
         parsed: { age, birthYear: null, precision: "stated_age" as const },

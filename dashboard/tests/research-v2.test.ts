@@ -104,6 +104,7 @@ import {
   commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
   extractCommonCrawlWarcBody,
+  extractOfficialCompetitionEntryAdultEvidence,
   extractOfficialCommissionAdultEvidence,
   extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
@@ -135,6 +136,145 @@ test("historical motorcycle racing accepts road-racing and WorldWCR evidence", (
   ), true);
 });
 
+test("historical motorcycle racing accepts explicit Spanish motorcycle evidence", () => {
+  assert.equal(
+    benchmarkSourceSupportsSport(
+      "Motorcycle Road Racing",
+      "Pakita Ruiz compite en motociclismo en el Mundial femenino de velocidad",
+    ),
+    true,
+  );
+  assert.equal(
+    benchmarkSourceSupportsSport(
+      "Motorcycle Road Racing",
+      "Pakita Ruiz is a generic racing driver",
+    ),
+    false,
+  );
+  assert.equal(
+    benchmarkSourceSupportsSport(
+      "Motorsports",
+      "Maria Herrera appears on the official WorldWCR biographical entry list",
+    ),
+    true,
+  );
+});
+
+test("surfing evidence accepts explicit Spanish and French athlete terms", () => {
+  assert.equal(benchmarkSourceSupportsSport("Surfing", "Violeta Sanchez es surfista profesional"), true);
+  assert.equal(benchmarkSourceSupportsSport("Surfing", "Violeta Sanchez est une surfeuse professionnelle"), true);
+});
+
+test("archived Spanish birthday reporting is attributable without treating childhood ages as current", () => {
+  const currentAge = validatePreparedAgeEvidenceForSource({
+    athleteName: "Pakita Ruiz",
+    title: "Pakita Ruiz celebra su cumpleaños en el Mundial",
+    domain: "ultimahora.es",
+    observedAt: new Date("2024-08-11T18:56:00Z"),
+    text: "Pakita Ruiz, que este domingo cumplía 27 años, terminó quinta en el Mundial femenino de velocidad.",
+  });
+  assert.equal(currentAge.attributableAge?.parsed.age, 27);
+  assert.equal(currentAge.attributableAge?.parsed.precision, "stated_age");
+
+  const appositiveAge = validatePreparedAgeEvidenceForSource({
+    athleteName: "Violeta Sanchez",
+    title: "A profile mentioning Violeta Sanchez",
+    domain: "publisher.es",
+    observedAt: new Date("2024-01-22T12:00:00Z"),
+    text: "La surfista Violeta Sánchez, una joven de (entonces) 22 años, vivía en Cantabria.",
+  });
+  assert.equal(appositiveAge.attributableAge?.parsed.age, 22);
+
+  const frenchAppositiveAge = validatePreparedAgeEvidenceForSource({
+    athleteName: "Estelle Poret",
+    title: "Champions de jet ski: les Poret sont tombés dedans quand ils étaient petits",
+    domain: "leprogres.fr",
+    observedAt: new Date("2020-01-08T12:12:00Z"),
+    text: "Estelle Poret, 23 ans, est vice-championne du monde de jet ski.",
+  });
+  assert.equal(frenchAppositiveAge.attributableAge?.parsed.age, 23);
+
+  const childhoodAge = validatePreparedAgeEvidenceForSource({
+    athleteName: "Pakita Ruiz",
+    title: "Pakita Ruiz profile",
+    domain: "example.es",
+    observedAt: new Date("2024-08-11T18:56:00Z"),
+    text: "Pakita Ruiz tenía 16 años cuando empezó y compite desde los tres años.",
+  });
+  assert.equal(childhoodAge.attributableAge, null);
+});
+
+test("archived JSON-LD article bodies remain available for exact athlete evidence", () => {
+  const prepared = extractPreparedArchivedEvidence({
+    record: {
+      id: "violeta",
+      athlete_name: "Violeta Sanchez",
+      sport: "Surfing",
+      fit_label: "fit",
+      evidence_cutoff_at: "2026-08-04T12:00:00Z",
+    },
+    candidate: {
+      query: "operator supplied",
+      title: "Violeta Sanchez athlete profile",
+      url: "https://publisher.example/violeta",
+      snippet: "Violeta Sanchez is a professional surfer.",
+    },
+    capture: {
+      timestamp: "20230519000506",
+      capturedAt: "2023-05-19T00:05:06Z",
+      originalUrl: "https://publisher.example/violeta",
+      statusCode: "200",
+      digest: "digest",
+      mimeType: "text/html",
+      archivedUrl: "https://web.archive.org/example",
+    },
+    html: `<html><head><title>Violeta Sanchez athlete profile</title><script type="application/ld+json">${JSON.stringify({
+      "@type": "NewsArticle",
+      datePublished: "2023-05-10T08:00:00Z",
+      headline: "Violeta Sanchez athlete profile",
+      articleBody: "Violeta Sanchez es surfista profesional. Violeta tiene 22 años y compite internacionalmente.",
+    })}</script></head><body></body></html>`,
+  });
+  assert.equal(prepared.rejectionReason, null);
+  assert.equal(prepared.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"), true);
+  const newsAge = prepared.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(newsAge?.effectiveAt, "2023-05-10T08:00:00.000Z");
+  assert.equal(newsAge?.structuredValue.age_as_of, "2023-05-10T08:00:00.000Z");
+
+  const staticNewsBody = extractPreparedArchivedEvidence({
+    record: {
+      id: "violeta-static",
+      athlete_name: "Violeta Sanchez",
+      sport: "Surfing",
+      fit_label: "fit",
+      evidence_cutoff_at: "2026-08-04T12:00:00Z",
+    },
+    candidate: {
+      query: "operator supplied",
+      title: "A dated article about Violeta Sanchez",
+      url: "https://news.example/violeta",
+      snippet: "Violeta Sanchez is a surfer.",
+    },
+    capture: {
+      timestamp: "20260207045903",
+      capturedAt: "2026-02-07T04:59:03Z",
+      originalUrl: "https://news.example/violeta",
+      statusCode: "200",
+      digest: "digest-2",
+      mimeType: "text/html",
+      archivedUrl: "https://web.archive.org/example-2",
+    },
+    html: `<html><head><title>A dated article about Violeta Sanchez</title><script type="application/ld+json">${JSON.stringify({
+      "@type": "NewsArticle",
+      datePublished: "2024-01-22T17:29:44Z",
+      dateModified: "2024-01-22T17:30:26Z",
+      headline: "A dated article about Violeta Sanchez",
+    })}</script></head><body>La surfista Violeta Sánchez, una joven de (entonces) 22 años, vivía en España.</body></html>`,
+  });
+  const staticNewsAge = staticNewsBody.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(staticNewsAge?.effectiveAt, "2024-01-22T17:29:44.000Z");
+});
+
 test("official commission tables resolve DOB only from a dated exact-athlete regulator row", () => {
   const california = extractOfficialCommissionAdultEvidence({
     athleteName: "Crystal Pittman",
@@ -161,6 +301,19 @@ test("official commission tables resolve DOB only from a dated exact-athlete reg
     ].join("\n"),
   });
   assert.equal(florida?.birthDate, "1986-08-06");
+  const proDebutWithoutFederalId = extractOfficialCommissionAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl: "https://www2.myfloridalicense.com/pro/sbc/documents/1-23-26-Brand_Risk_Promotions-Results_without_med.pdf",
+    publishedAt: "2026-01-23",
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+    sourceText: [
+      "Bout Corner Sport Participant Name Hometown DOB Federal ID Weight Result",
+      "Pro",
+      "Blue Boxing Daryn Harris Miami, FL 11/24/1999 Debut 119.4 Win",
+    ].join("\n"),
+  });
+  assert.equal(proDebutWithoutFederalId?.birthDate, "1999-11-24");
   assert.equal(extractOfficialCommissionAdultEvidence({
     athleteName: "Crystal Pittman",
     sport: "Combat Sports",
@@ -168,6 +321,52 @@ test("official commission tables resolve DOB only from a dated exact-athlete reg
     publishedAt: "2024-06-10",
     evidenceCutoffAt: "2026-07-30T12:00:00Z",
     sourceText: california?.excerpt || "",
+  }), null);
+});
+
+test("official WorldWCR entry lists resolve a DOB only from an exact dated rider row", () => {
+  const sourceText = [
+    "1.1 WorldWCR 107/05",
+    "Acerbis Italian Round, 20-22 September 2024",
+    "Biographical Entry List Cremona Circuit 3.768 m",
+    "No. Rider (Abbreviation) Nat Bike Wins Podiums Pole Races Tyres",
+    "Age Date of Birth Place of Birth Team 2024 2024 2024 2024",
+    "17 46 RUIZ Pakita (Rui) ESP Yamaha YZF-R7 6 Pirelli",
+    "27 11/08/1997 Palma de Mallorca PS Racing Team 46+1 6",
+  ].join("\n");
+  const evidence = extractOfficialCompetitionEntryAdultEvidence({
+    athleteName: "Pakita Ruiz",
+    sport: "Motorcycle Road Racing",
+    sourceUrl: "https://resources.worldsbk.com/files/results/2024/CRE/WCR/L1A/RID/Entry.pdf?version=abc",
+    sourceText,
+    publishedAt: "2024-09-20",
+    evidenceCutoffAt: "2026-02-11T12:00:00Z",
+  });
+  assert.equal(evidence?.birthDate, "1997-08-11");
+  const broadHistoricalSport = extractOfficialCompetitionEntryAdultEvidence({
+    athleteName: "Maria Herrera",
+    sport: "Motorsports",
+    sourceUrl: "https://resources.worldsbk.com/files/results/2025/JER/WCR/L1A/RID/Entry.pdf?version=abc",
+    sourceText: sourceText.replace("RUIZ Pakita", "HERRERA Maria").replace("27 11/08/1997", "29 26/08/1996"),
+    publishedAt: "2025-10-17",
+    evidenceCutoffAt: "2025-12-10T12:00:00Z",
+  });
+  assert.equal(broadHistoricalSport?.birthDate, "1996-08-26");
+  assert.equal(extractOfficialCompetitionEntryAdultEvidence({
+    athleteName: "Different Rider",
+    sport: "Motorcycle Road Racing",
+    sourceUrl: "https://resources.worldsbk.com/files/results/2024/CRE/WCR/L1A/RID/Entry.pdf?version=abc",
+    sourceText,
+    publishedAt: "2024-09-20",
+    evidenceCutoffAt: "2026-02-11T12:00:00Z",
+  }), null);
+  assert.equal(extractOfficialCompetitionEntryAdultEvidence({
+    athleteName: "Pakita Ruiz",
+    sport: "Motorcycle Road Racing",
+    sourceUrl: "https://untrusted.example/results/2024/CRE/WCR/L1A/RID/Entry.pdf",
+    sourceText,
+    publishedAt: "2024-09-20",
+    evidenceCutoffAt: "2026-02-11T12:00:00Z",
   }), null);
 });
 
@@ -2447,6 +2646,21 @@ test("generated material signals require explicit athlete-relevant language", ()
   }) || "", /Jane Doe.*She won/);
   assert.equal(preparedMomentumEffectiveAt("She won the national championship in 2021.", "2026-05-10T00:00:00.000Z"), "2021-01-01T00:00:00.000Z");
   assert.equal(preparedMomentumEffectiveAt("Current X Games medals and results", "2026-05-10T00:00:00.000Z"), "2026-05-10T00:00:00.000Z");
+});
+
+test("material momentum recognizes attributable French, Spanish, and Portuguese competition language", () => {
+  assert.equal(preparedEvidenceSignalSupported(
+    "athletic_momentum",
+    "Tessa Thyssen a terminé la saison 2024 à la treizième place du classement mondial.",
+  ), true);
+  assert.equal(preparedEvidenceSignalSupported(
+    "athletic_momentum",
+    "Violeta Sanchez ganó la final y se clasificó para el mundial.",
+  ), true);
+  assert.equal(preparedEvidenceSignalSupported(
+    "athletic_momentum",
+    "A atleta venceu a final e garantiu a classificação.",
+  ), true);
 });
 
 test("archive signal revalidation quarantines claims without deleting evidence or touching live tables", () => {
