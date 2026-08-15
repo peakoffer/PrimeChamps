@@ -561,6 +561,8 @@ test("Anthropic structured-output retries expand truncated scoring and audit bud
   assert.match(workflow, /stop_reason\?: string/);
   assert.match(workflow, /stop=\$\{payload\.stop_reason \|\| "unknown"\}/);
   assert.match(workflow, /stop=\$\{data\.stop_reason \|\| "unknown"\}/);
+  assert.match(workflow, /owned podcast\/vlog\/newsletter is helpful but not required/);
+  assert.match(workflow, /follower-growth window under 30 days is neutral/);
 });
 
 test("top-of-funnel commercial readiness requires a public route and measured audience", () => {

@@ -3961,7 +3961,9 @@ You have NOT been shown the Researcher's score. Independently determine whether 
 
 Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Independently require a specific current athletic-momentum source, a meaningful verified audience, a concrete source-backed creator/content behavior signal, and a completed exact-match OnlyFans platform check. No exact profile is neutral. An exact active profile is positive evidence; an exact inactive, closed, or dormant profile is a critical contradiction. Sponsorship alone is not creator behavior. Do not infer adult-content willingness from appearance or identity.
 
-Creator potential is about demonstrated ability to sustain personal audience content, not evidence of adult-content intent. A recent pattern of content-rich personal/behind-the-scenes posts plus an owned format such as a video, vlog, podcast, newsletter, or recurring series is substantive creator behavior. Sponsorship may strengthen that pattern but can never satisfy the gate by itself.
+Creator potential is about demonstrated ability to sustain personal audience content, not evidence of adult-content intent. A sustained recent pattern of content-rich personal, lifestyle, fitness, or behind-the-scenes posts is substantive creator-potential evidence. An owned format such as a video, vlog, podcast, newsletter, or recurring series strengthens that evidence but is not required. Sponsorship may strengthen a broader pattern but can never satisfy the gate by itself.
+
+Calibration rules: an exact-match OnlyFans check that completed with no profile found is neutral and must not reduce fit, achievability, or confidence. A follower-growth snapshot shorter than 30 days is also neutral and must not be treated as flat or declining growth. Score only the positive evidence and material unresolved risks actually present in the dossier.
 
 For this top-of-funnel decision, "commercial constraints complete" means the public dossier establishes an actionable business or representation contact route, measured audience scale, and a completed public search for known sponsorship/contract/policy restrictions. Exact rates and private contract terms are normally unavailable before contact: record them as unknown and lower achievability/confidence, but do not fail the candidate for those private unknowns alone. Fail this gate when there is no actionable contact route, the public constraint search did not complete, or a known public conflict is unresolved.
 
@@ -4018,6 +4020,12 @@ RESEARCHER PROPOSAL:
 - Concerns: ${(athlete.concerns || []).join("; ") || "none"}
 
 Return pass only if the proposed dimensions are justified and there is no critical gap. Return corrected when the opportunity remains usable but one or more dimensions require an evidence-based correction. Return fail for wrong identity, unverified adult eligibility, unsupported material claims, source re-fetch failure, or any critical unresolved gap. Use the documented failure taxonomy names.`;
+  const reviewPromptWithCalibration = `${reviewPrompt}
+
+CALIBRATION REMINDER:
+- Sustained recent personal/lifestyle/fitness/behind-the-scenes content is valid creator-potential evidence; an owned podcast/vlog/newsletter is helpful but not required.
+- A completed exact-match OnlyFans check with no profile found is neutral, not negative.
+- A follower-growth window under 30 days is neutral, not evidence of flat or declining growth.`;
   const reviewCall = await callStructuredAuditModel<{
     verdict: "pass" | "corrected" | "fail";
     corrected_fit_score: number;
@@ -4025,7 +4033,7 @@ Return pass only if the proposed dimensions are justified and there is no critic
     corrected_confidence_score: number;
     findings: Array<{ failure_type: string; severity: "critical" | "high" | "medium" | "low"; details: string; proposed_fix: string }>;
     summary: string;
-  }>(scoringModel, reviewPrompt, RESEARCH_AUDIT_REVIEW_SCHEMA as unknown as Record<string, unknown>);
+  }>(scoringModel, reviewPromptWithCalibration, RESEARCH_AUDIT_REVIEW_SCHEMA as unknown as Record<string, unknown>);
   const review = reviewCall.value;
   const auditUsage = {
     inputTokens: blindCall.usage.inputTokens + reviewCall.usage.inputTokens,
