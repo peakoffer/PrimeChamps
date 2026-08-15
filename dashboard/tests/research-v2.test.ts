@@ -1668,6 +1668,36 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.equal(summary.blockerCounts["fewer than four supported public claims exist before the cutoff"], 1);
 });
 
+test("dated stated-age evidence matures conservatively by the cutoff", () => {
+  const baseAgeEvidence = {
+    ...selectLeakageSafeBenchmarkEvidence({
+      record: BENCHMARK_CASE,
+      sources: BENCHMARK_SOURCES.filter((source) => source.id === "age-a"),
+      claims: BENCHMARK_CLAIMS.filter((claim) => claim.id === "age-claim-a"),
+    }).evidence[0],
+    claimType: "adult_eligibility",
+    claim: "Example Athlete was age 19.",
+    excerpt: "Example Athlete profile. Age: 19.",
+    structuredValue: { age: 19 },
+    effectiveAt: "2022-01-01T00:00:00.000Z",
+  };
+  const corroboratingAge = {
+    ...baseAgeEvidence,
+    sourceId: "age-b",
+    claimId: "age-b-stated",
+    sourceRef: "E2",
+    independenceGroup: "university.test",
+  };
+  assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, [baseAgeEvidence, corroboratingAge]), {
+    passed: true,
+    independentSources: 2,
+  });
+  assert.equal(benchmarkAdultEligibilityGate(BENCHMARK_CASE, [
+    { ...baseAgeEvidence, effectiveAt: "2024-07-01T00:00:00.000Z" },
+    { ...corroboratingAge, effectiveAt: "2024-07-01T00:00:00.000Z" },
+  ]).passed, false);
+});
+
 test("benchmark prompts are constructed from a safe whitelist and never expose labels or outcomes", () => {
   const record = {
     ...BENCHMARK_CASE,

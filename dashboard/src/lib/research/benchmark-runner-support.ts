@@ -365,6 +365,27 @@ function ageAtCutoff(birthDate: string, cutoff: string) {
   return age;
 }
 
+function completedYearsBetween(observedAt: string, cutoff: string) {
+  const observed = new Date(observedAt);
+  const at = new Date(cutoff);
+  if (!Number.isFinite(observed.getTime()) || !Number.isFinite(at.getTime()) || observed > at) return null;
+  let years = at.getUTCFullYear() - observed.getUTCFullYear();
+  if (at.getUTCMonth() < observed.getUTCMonth()
+    || (at.getUTCMonth() === observed.getUTCMonth() && at.getUTCDate() < observed.getUTCDate())) years -= 1;
+  return Math.max(0, years);
+}
+
+function statedAgeSupportsAdultAtCutoff(age: number, observedAt: string | null, cutoff: string) {
+  if (!Number.isInteger(age) || age < 0 || age > 100) return false;
+  if (age >= 21) return true;
+  if (!observedAt) return false;
+  const elapsed = completedYearsBetween(observedAt, cutoff);
+  // This is a lower bound: someone explicitly described as 19 three full
+  // years before the cutoff must be at least 22 at the cutoff, even without
+  // manufacturing a birthday. Partial years never round up.
+  return elapsed !== null && age + elapsed >= 21;
+}
+
 function supportedAdultAge(evidence: LeakageSafeBenchmarkEvidence, cutoff: string) {
   const value = evidence.structuredValue;
   const birthDate = typeof value.birth_date === "string" ? value.birth_date
@@ -374,13 +395,15 @@ function supportedAdultAge(evidence: LeakageSafeBenchmarkEvidence, cutoff: strin
   if (typeof value.birth_year === "number") {
     return new Date(cutoff).getUTCFullYear() - value.birth_year > 21;
   }
-  if (typeof value.age === "number") return value.age >= 21;
+  if (typeof value.age === "number") {
+    return statedAgeSupportsAdultAtCutoff(value.age, evidence.effectiveAt, cutoff);
+  }
 
   const text = `${evidence.claim} ${evidence.excerpt}`;
   const fullDate = text.match(/(?:born|birth(?:day| date)?|dob)\D{0,20}(\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\s+\d{1,2},?\s+\d{4})/i)?.[1];
   if (fullDate) return (ageAtCutoff(fullDate, cutoff) ?? -1) >= 21;
   const statedAge = text.match(/\bage(?:d)?\s*[:,-]?\s*(\d{1,2})\b/i)?.[1];
-  if (statedAge) return Number(statedAge) >= 21;
+  if (statedAge) return statedAgeSupportsAdultAtCutoff(Number(statedAge), evidence.effectiveAt, cutoff);
   const birthYear = text.match(/(?:born|birth year)\D{0,12}((?:19|20)\d{2})/i)?.[1];
   return birthYear ? new Date(cutoff).getUTCFullYear() - Number(birthYear) > 21 : false;
 }
