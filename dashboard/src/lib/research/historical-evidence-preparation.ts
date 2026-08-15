@@ -12,7 +12,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-attributed-audience-creator-recovery-v7";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-multisport-audience-creator-recovery-v8";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
@@ -1561,24 +1561,36 @@ export function extractPreparedArchivedEvidence(input: {
   };
 }
 
+function historicalSportSearchExpression(sport: string) {
+  const normalized = normalizeEvidenceText(sport);
+  if (/american football/.test(normalized)) return '("American football" OR NFL OR "NCAA football")';
+  if (/beach volleyball/.test(normalized)) return '("beach volleyball" OR "volley-ball de plage" OR "voley playa")';
+  if (/volleyball/.test(normalized)) return '(volleyball OR "volley-ball" OR voleibol OR pallavolo)';
+  if (/cliff diving|high diving/.test(normalized)) return '("cliff diving" OR "high diving" OR "plongeon de haut vol")';
+  if (/surf/.test(normalized)) return '(surf OR surfing OR surfer OR surfeur OR surfeuse OR surfista)';
+  if (/combat|mma|boxing|kickbox|bare knuckle/.test(normalized)) return '(MMA OR UFC OR boxing OR boxe OR kickboxing OR fighter OR combattant)';
+  if (/football|soccer/.test(normalized)) return '(footballer OR football OR soccer OR footballeur OR futbolista)';
+  if (/motorcycle|motocross|supercross|motogp|superbike/.test(normalized)) return '(motorcycle OR motorbike OR motocross OR supercross OR superbike OR MotoGP OR rider OR pilote)';
+  if (/motorsport|motor racing|formula|rally|nascar|indycar|gt racing/.test(normalized)) return '(motorsport OR racing OR racer OR driver OR pilote OR rally OR formula)';
+  if (/bmx|cycling|mountain biking|cyclocross/.test(normalized)) return '(BMX OR cycling OR cyclist OR rider OR cyclisme)';
+  if (/track|athletics|running|pole vault/.test(normalized)) return '(athletics OR "track and field" OR running OR athlétisme OR atletismo OR paralympic)';
+  if (/freediv|apnea/.test(normalized)) return '(freediving OR freediver OR apnea OR apnée)';
+  if (/triathlon/.test(normalized)) return '(triathlon OR triathlete OR triathlète OR triatleta)';
+  if (/jet ski|aquabike/.test(normalized)) return '(aquabike OR "jet ski" OR jetski)';
+  if (/racquet sports/.test(normalized)) return '(pickleball OR tennis OR padel OR badminton OR squash)';
+  if (/tennis/.test(normalized)) return '(tennis OR tennista)';
+  if (/padel/.test(normalized)) return '(padel OR pádel)';
+  if (/ski|snowboard/.test(normalized)) return '(ski OR skiing OR snowboard OR snowboarding)';
+  if (/climb/.test(normalized)) return '(climbing OR climber OR escalade OR escaladora)';
+  return `"${sport.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim()}"`;
+}
+
 export function buildHistoricalEvidenceQueries(record: Pick<EvidencePreparationRecord, "athlete_name" | "sport" | "evidence_cutoff_at">) {
   const cutoff = new Date(record.evidence_cutoff_at);
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
   const excludeSocial = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:x.com -site:twitter.com";
-  const broadSportExpressions: Record<string, string> = {
-    "American Football": "(\"American football\" OR NFL OR \"NCAA football\")",
-    "Beach Volleyball": "\"beach volleyball\"",
-    "Cliff Diving": "(\"cliff diving\" OR \"high diving\")",
-    "Combat Sports": "(MMA OR UFC OR boxing OR kickboxing OR fighter)",
-    Football: "(footballer OR soccer)",
-    "Jet Ski / Aquabike": "(aquabike OR \"jet ski\")",
-    "MMA / LFA": "(MMA OR LFA OR \"Legacy Fighting Alliance\")",
-    "Motorcycle Road Racing": "(\"motorcycle road racing\" OR superbike OR MotoGP OR \"Isle of Man TT\")",
-    "Racquet Sports": "(pickleball OR tennis OR padel OR badminton OR squash)",
-    "Supercross / Motocross": "(supercross OR motocross)",
-  };
-  const sportExpression = broadSportExpressions[record.sport] || `"${record.sport}"`;
+  const sportExpression = historicalSportSearchExpression(record.sport);
   return [
     `"${record.athlete_name}" ${sportExpression} athlete profile biography ${excludeSocial} before:${before}`,
     `"${record.athlete_name}" ${sportExpression} ("date of birth" OR birthday OR born OR age) (profile OR bio OR roster) ${excludeSocial} before:${before}`,
@@ -1614,9 +1626,7 @@ export function buildHistoricalAgeRecoveryQueries(record: Pick<EvidencePreparati
   if (!Number.isFinite(cutoff.getTime())) return [];
   const before = cutoff.toISOString().slice(0, 10);
   const excludeSocial = "-site:instagram.com -site:facebook.com -site:tiktok.com -site:x.com -site:twitter.com";
-  const baseline = buildHistoricalEvidenceQueries(record);
-  const sportExpression = baseline[0]?.slice(`"${record.athlete_name}" `.length).split(" athlete profile biography ")[0]
-    || `"${record.sport}"`;
+  const sportExpression = historicalSportSearchExpression(record.sport);
   const handle = typeof record.instagram_handle === "string"
     ? record.instagram_handle.trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "")
     : "";
@@ -1643,11 +1653,12 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
     : "";
   const audienceDomains = "(site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com OR site:socialauditor.io OR site:hiveinfluence.io OR site:crevideo.com OR site:influencers.club)";
   const handleExpression = handle ? `("@${handle}" OR "${handle}")` : "(Instagram OR TikTok OR YouTube)";
+  const sportExpression = historicalSportSearchExpression(record.sport);
   return [
     `"${record.athlete_name}" ${handleExpression} (followers OR subscribers OR engagement) ${audienceDomains} before:${before}`,
     `"${record.athlete_name}" (followers OR abonnés OR seguidores OR seguidoras OR subscribers OR influencer) before:${before}`,
-    `"${record.athlete_name}" "${record.sport}" (followers OR abonnés OR seguidores OR subscribers OR audience OR influencer OR vlogs) before:${before}`,
-    `"${record.athlete_name}" "${record.sport}" ("content creator" OR vlog OR vlogs OR YouTube OR podcast OR interview OR posting OR posts OR videos OR "réseaux sociaux" OR publicaciones OR publicação OR publicações) before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} (followers OR abonnés OR seguidores OR subscribers OR audience OR influencer OR vlogs) before:${before}`,
+    `"${record.athlete_name}" ${sportExpression} ("content creator" OR vlog OR vlogs OR YouTube OR podcast OR interview OR posting OR posts OR videos OR posté OR poster OR publier OR photos OR "réseaux sociaux" OR publicaciones OR publicar OR fotos OR publicação OR publicações) before:${before}`,
   ];
 }
 

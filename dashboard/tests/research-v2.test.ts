@@ -2709,7 +2709,7 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
     sport: "Combat Sports",
     evidence_cutoff_at: "2025-01-01T00:00:00Z",
   });
-  assert.ok(broadSportQueries.every((query) => query.includes("(MMA OR UFC OR boxing OR kickboxing OR fighter)")));
+  assert.ok(broadSportQueries.every((query) => query.includes("(MMA OR UFC OR boxing OR boxe OR kickboxing OR fighter OR combattant)")));
   assert.ok(broadSportQueries.every((query) => !query.includes('"Combat Sports"')));
   assert.ok(queries[1].includes('("date of birth" OR birthday OR born OR age)'));
   const ageRecovery = buildHistoricalAgeRecoveryQueries({
@@ -2791,6 +2791,32 @@ test("historical signal recovery uses a known cutoff-safe Instagram handle witho
   assert.match(queries[1], /abonnés/);
   assert.match(queries[2], /followers/);
   assert.match(queries[3], /content creator/);
+});
+
+test("historical signal recovery searches multilingual sport aliases instead of brittle exact labels", () => {
+  const surfing = buildHistoricalSignalRecoveryQueries({
+    athlete_name: "Tessa Thyssen",
+    sport: "Surfing",
+    evidence_cutoff_at: "2026-07-07T12:00:00.000Z",
+    instagram_handle: "@tessathyssen",
+  });
+  assert.match(surfing[2], /surf OR surfing OR surfer OR surfeur OR surfeuse OR surfista/);
+  assert.doesNotMatch(surfing[3], /"Surfing"/);
+  assert.match(surfing[3], /posté OR poster OR publier OR photos/);
+  const athletics = buildHistoricalSignalRecoveryQueries({
+    athlete_name: "Catarina Guimaraes",
+    sport: "Track & Field",
+    evidence_cutoff_at: "2025-08-21T12:00:00.000Z",
+    instagram_handle: null,
+  });
+  assert.match(athletics[3], /athlétisme OR atletismo/);
+  const freediving = buildHistoricalSignalRecoveryQueries({
+    athlete_name: "Harry McCahill",
+    sport: "Freediving",
+    evidence_cutoff_at: "2025-01-01T12:00:00.000Z",
+    instagram_handle: null,
+  });
+  assert.match(freediving[3], /freediving OR freediver OR apnea OR apnée/);
 });
 
 test("generated material signals require explicit athlete-relevant language", () => {
