@@ -71,6 +71,8 @@ import {
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   buildBenchmarkResearcherPrompt,
+  benchmarkDeterministicGateSummary,
+  canonicalBenchmarkMaterialClaims,
   compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
   evaluateBenchmarkMaterialClaimCitations,
@@ -1584,6 +1586,70 @@ test("benchmark material claims require a real frozen quote that supports the cl
   assert.equal(irrelevantQuote.unsupportedClaimCount, 1);
 });
 
+test("benchmark material claim support is evaluated across corroborating citations and numeric facts", () => {
+  const evidence = [
+    {
+      sourceId: "age-a", claimId: "age-a", sourceRef: "E1", url: "https://one.test/athlete",
+      domain: "one.test", title: "Pakita Ruiz profile", claimType: "adult_eligibility",
+      claim: "Pakita Ruiz has an official competition birth date of 1997-08-11.",
+      excerpt: "Pakita Ruiz has an official competition birth date of 1997-08-11.",
+      effectiveAt: "2024-08-11T00:00:00Z", independenceGroup: "one.test", material: true,
+      structuredValue: { birth_date: "1997-08-11" },
+    },
+    {
+      sourceId: "age-b", claimId: "age-b", sourceRef: "E2", url: "https://two.test/athlete",
+      domain: "two.test", title: "Pakita Ruiz turns 27", claimType: "adult_eligibility",
+      claim: "Pakita Ruiz turned 27 on August 11, 2024.",
+      excerpt: "Pakita Ruiz turned 27 on August 11, 2024.",
+      effectiveAt: "2024-08-11T00:00:00Z", independenceGroup: "two.test", material: true,
+      structuredValue: { age: 27 },
+    },
+  ];
+  const quality = evaluateBenchmarkMaterialClaimCitations([{
+    claim: "Pakita Ruiz's birth date is 1997-08-11, corroborated by an independent report that she turned 27 in August 2024.",
+    evidence_support: [
+      { evidence_ref: "E1", quote: evidence[0].claim },
+      { evidence_ref: "E2", quote: evidence[1].claim },
+    ],
+  }], evidence);
+  assert.equal(quality.sourceVerificationRate, 1);
+});
+
+test("models select evidence refs while application code emits immutable material claims", () => {
+  const evidence = [
+    {
+      sourceId: "one", claimId: "one", sourceRef: "E1", url: "https://one.test/athlete",
+      domain: "one.test", title: "Athlete profile", claimType: "sport_identity",
+      claim: "Example Athlete competes in professional volleyball.", excerpt: "Example Athlete competes in professional volleyball.",
+      effectiveAt: "2026-01-01T00:00:00Z", independenceGroup: "one.test", material: true, structuredValue: {},
+    },
+    {
+      sourceId: "two", claimId: "two", sourceRef: "E2", url: "https://two.test/athlete",
+      domain: "two.test", title: "Athlete audience", claimType: "audience_signal",
+      claim: "Example Athlete had 25,000 followers.", excerpt: "Example Athlete had 25,000 followers.",
+      effectiveAt: "2026-01-01T00:00:00Z", independenceGroup: "two.test", material: true, structuredValue: {},
+    },
+    {
+      sourceId: "three", claimId: "three", sourceRef: "E3", url: "https://three.test/athlete",
+      domain: "three.test", title: "Athlete creator activity", claimType: "creator_behavior_signal",
+      claim: "Example Athlete publishes weekly training videos.", excerpt: "Example Athlete publishes weekly training videos.",
+      effectiveAt: "2026-01-01T00:00:00Z", independenceGroup: "three.test", material: true, structuredValue: {},
+    },
+    {
+      sourceId: "four", claimId: "four", sourceRef: "E4", url: "https://four.test/athlete",
+      domain: "four.test", title: "Athlete result", claimType: "athletic_momentum",
+      claim: "Example Athlete won a 2025 tournament.", excerpt: "Example Athlete won a 2025 tournament.",
+      effectiveAt: "2025-06-01T00:00:00Z", independenceGroup: "four.test", material: true, structuredValue: {},
+    },
+  ];
+  const claims = canonicalBenchmarkMaterialClaims(["E1", "E2", "E3", "E4"], evidence);
+  assert.equal(claims.length, 4);
+  assert.equal(claims[1].claim, evidence[1].claim);
+  assert.deepEqual(claims[1].evidence_support, [{ evidence_ref: "E2", quote: evidence[1].claim }]);
+  assert.equal(evaluateBenchmarkMaterialClaimCitations(claims, evidence).sourceVerificationRate, 1);
+  assert.equal(evaluateBenchmarkMaterialClaimCitations(canonicalBenchmarkMaterialClaims(["E1", "E99"], evidence), evidence).unsupportedClaimCount > 0, true);
+});
+
 test("benchmark finalist gates require two independent identity and adult sources", () => {
   const selection = selectLeakageSafeBenchmarkEvidence({
     record: BENCHMARK_CASE,
@@ -1705,6 +1771,19 @@ test("benchmark finalist gates require two independent identity and adult source
   assert.equal(summary.recordsWithAnySafeEvidence, 1);
   assert.equal(summary.safeClaimCount, 7);
   assert.equal(summary.blockerCounts["fewer than four supported public claims exist before the cutoff"], 1);
+});
+
+test("deterministic benchmark precheck exposes evidence gates without labels or outcomes", () => {
+  const selection = selectLeakageSafeBenchmarkEvidence({
+    record: BENCHMARK_CASE,
+    sources: BENCHMARK_SOURCES.filter((source) => source.id !== "future" && source.id !== "outcome"),
+    claims: BENCHMARK_CLAIMS.filter((claim) => claim.id !== "future-claim" && claim.id !== "outcome-claim"),
+  });
+  const summary = benchmarkDeterministicGateSummary(BENCHMARK_CASE, selection.evidence);
+  assert.equal(summary.identity.passed, true);
+  assert.equal(summary.adultEligibility.passed, true);
+  assert.equal(typeof summary.allCoreEvidenceGatesPassed, "boolean");
+  assert.equal("fit_label" in summary, false);
 });
 
 test("dated stated-age evidence matures conservatively by the cutoff", () => {
@@ -1910,7 +1989,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v22/);
+  assert.match(source, /research-v2-benchmark-runner-v23/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -1918,7 +1997,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.match(source, /call_limits: BENCHMARK_CALL_LIMITS/);
   assert.match(source, /maximumOutputTokens: run\.metrics\.call_limits\.blindOutputTokens/);
   assert.match(source, /0-100 numeric scale, never fractions from 0 to 1/);
-  assert.match(source, /Do not require public evidence that the athlete wants OnlyFans or adult content/);
+  assert.match(source, /Do not require evidence that the athlete wants OnlyFans or adult content/);
   assert.match(source, /Missing representation alone is not automatically critical/);
   assert.match(source, /BENCHMARK_PRE_OUTREACH_CALIBRATION/);
   assert.match(source, /const auditorCaught = researcherFailure && finalPredictionCorrect/);

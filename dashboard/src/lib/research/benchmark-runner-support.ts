@@ -40,9 +40,10 @@ export const BENCHMARK_PRE_OUTREACH_CALIBRATION = `PRE-OUTREACH CALIBRATION
 - Finalist anchor: when those core dimensions are all present, use fit 86-91, commercial achievability 76-84, and research confidence 82-90. Do not apply this anchor when any core dimension is missing or contradictory.
 - Fit 80-85 is a promising reserve, not automatically a finalist, when the evidence is positive but one core dimension is thin, stale, or only indirectly supported.
 - Performance, training, behind-the-scenes, interview, podcast, and personality-led social content all count as creator behavior; lifestyle content is not required.
-- A roughly 50,000-500,000 personal audience is a meaningful accessibility band when corroborated by athlete-centered public evidence. One platform is sufficient; missing cross-platform data is optional, not critical.
-- Commercial achievability 70-85 is supported for a non-iconic or realistically accessible career tier with a meaningful audience and creator/brand behavior. Representation, a public business email, or prior platform activity strengthens the score but is not required.
-- Research confidence 80-90 is supported when identity and 21+ are independently corroborated, material claims cite valid evidence, the cutoff is respected, and the core momentum/audience/creator dimensions are present. Missing optional amplifiers must not cap confidence below 80.
+- A roughly 50,000-500,000 personal audience is a strong accessibility band, not a hard minimum. A smaller or qualitative athlete-specific audience signal can still be meaningful for an emerging or niche-sport athlete when creator behavior and realistic career-tier accessibility are present. One platform is sufficient; missing cross-platform data is optional, not critical.
+- Treat the deterministic precheck as the authoritative reading of whether the frozen dossier contains each core signal. Do not turn a passed audience or creator gate into a failure solely because the audience is below 50,000, qualitative, or lacks cross-platform corroboration. Strength can affect the score within the anchor range, but it is not a missing gate.
+- Commercial achievability 70-85 is supported for a non-iconic or realistically accessible career tier with a meaningful audience and creator/brand behavior. Representation, a business contact path, or prior platform activity strengthens the score but is not required.
+- Research confidence 80-90 is supported when identity and 21+ are independently corroborated, material claims cite valid pre-decision evidence, the cutoff is respected, and the core momentum/audience/creator dimensions are present. Missing optional amplifiers must not cap confidence below 80.
 - Fit below 60 is appropriate when public evidence lacks both a meaningful personal audience and creator/brand behavior even if the athlete is competitively successful.
 - Critical gaps are limited to unresolved identity, insufficient 21+ corroboration, no source-backed current athletic relevance, no meaningful audience/creator evidence, material contradiction, invalid citations, or post-cutoff evidence. Do not list representation, cross-platform reach, platform-specific history, adult-content willingness, lifestyle content, market receptivity, or exact economics as critical when the core proxies are present.`;
 
@@ -282,7 +283,8 @@ function normalizedQuoteText(value: string) {
 }
 
 function materialClaimTokens(value: string) {
-  return normalizedTokens(value).filter((token) => token.length >= 4 && !MATERIAL_CLAIM_STOP_WORDS.has(token));
+  return normalizedTokens(value).filter((token) => (/^\d+$/.test(token) || token.length >= 4)
+    && !MATERIAL_CLAIM_STOP_WORDS.has(token));
 }
 
 /**
@@ -306,6 +308,7 @@ export function evaluateBenchmarkMaterialClaimCitations(
       continue;
     }
     const claimTokens = materialClaimTokens(claim);
+    const aggregateSupportTokens = new Set<string>();
     const invalidSupport = supports.find((support) => {
       const item = evidenceByRef.get(typeof support?.evidence_ref === "string" ? support.evidence_ref : "");
       const quote = typeof support?.quote === "string" ? support.quote.trim() : "";
@@ -313,11 +316,13 @@ export function evaluateBenchmarkMaterialClaimCitations(
       const dossierText = normalizedQuoteText(`${item.title}\n${item.claim}\n${item.excerpt}`);
       const normalizedQuote = normalizedQuoteText(quote);
       if (!dossierText.includes(normalizedQuote)) return true;
-      const quoteTokens = new Set(materialClaimTokens(quote));
-      const overlap = claimTokens.filter((token) => quoteTokens.has(token)).length;
-      return claimTokens.length < 2 || overlap < Math.max(2, Math.ceil(claimTokens.length * 0.5));
+      for (const token of materialClaimTokens(`${item.title}\n${item.claim}\n${item.excerpt}\n${JSON.stringify(item.structuredValue)}`)) {
+        aggregateSupportTokens.add(token);
+      }
+      return false;
     });
-    if (invalidSupport) {
+    const overlap = claimTokens.filter((token) => aggregateSupportTokens.has(token)).length;
+    if (invalidSupport || claimTokens.length < 2 || overlap < Math.max(2, Math.ceil(claimTokens.length * 0.5))) {
       failures.push({ claim, reason: "citation_missing_or_quote_does_not_support_claim" });
       continue;
     }
@@ -536,6 +541,82 @@ export function benchmarkCreatorPotentialGate(record: BenchmarkGoldenCase, evide
   };
 }
 
+export type BenchmarkDeterministicGateSummary = {
+  identity: { passed: boolean; independentSources: number };
+  adultEligibility: { passed: boolean; independentSources: number };
+  currentMomentum: { passed: boolean; evidenceCount: number; freshestAt: string | null };
+  audience: { passed: boolean; evidenceCount: number };
+  creatorBehavior: { passed: boolean; evidenceCount: number };
+  allCoreEvidenceGatesPassed: boolean;
+};
+
+export function benchmarkDeterministicGateSummary(
+  record: BenchmarkGoldenCase,
+  evidence: LeakageSafeBenchmarkEvidence[]
+): BenchmarkDeterministicGateSummary {
+  const identity = benchmarkIdentityGate(record, evidence);
+  const adult = benchmarkAdultEligibilityGate(record, evidence);
+  const momentum = benchmarkCurrentMomentumGate(record, evidence);
+  const creator = benchmarkCreatorPotentialGate(record, evidence);
+  const summary = {
+    identity: { passed: identity.passed, independentSources: identity.independentSources },
+    adultEligibility: { passed: adult.passed, independentSources: adult.independentSources },
+    currentMomentum: {
+      passed: momentum.passed,
+      evidenceCount: momentum.recentEvidenceCount,
+      freshestAt: momentum.freshestAt,
+    },
+    audience: { passed: creator.audienceEvidenceCount > 0, evidenceCount: creator.audienceEvidenceCount },
+    creatorBehavior: { passed: creator.creatorEvidenceCount > 0, evidenceCount: creator.creatorEvidenceCount },
+    allCoreEvidenceGatesPassed: false,
+  };
+  summary.allCoreEvidenceGatesPassed = summary.identity.passed
+    && summary.adultEligibility.passed
+    && summary.currentMomentum.passed
+    && summary.audience.passed
+    && summary.creatorBehavior.passed;
+  return summary;
+}
+
+function canonicalBenchmarkSupportQuote(item: LeakageSafeBenchmarkEvidence) {
+  return item.claim.trim().length >= 12 ? item.claim.trim() : item.excerpt.trim();
+}
+
+/**
+ * Models select frozen evidence records; application code owns the resulting
+ * material claims and quotes. This prevents paraphrase drift from manufacturing
+ * a citation while still failing closed on missing or invented E-numbers.
+ */
+export function canonicalBenchmarkMaterialClaims(
+  evidenceRefs: string[] | undefined,
+  evidence: LeakageSafeBenchmarkEvidence[],
+  minimumClaims = 4
+): BenchmarkMaterialClaim[] {
+  const evidenceByRef = new Map(evidence.map((item) => [item.sourceRef, item]));
+  const uniqueRefs = Array.from(new Set((evidenceRefs || [])
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)))
+    .slice(0, 6);
+  const claims = uniqueRefs.map((evidenceRef): BenchmarkMaterialClaim => {
+    const item = evidenceByRef.get(evidenceRef);
+    if (!item) return { claim: `Invalid frozen evidence reference ${evidenceRef}`, evidence_support: [] };
+    const quote = canonicalBenchmarkSupportQuote(item);
+    if (quote.length < 12) return { claim: item.claim || item.title, evidence_support: [] };
+    return {
+      claim: item.claim,
+      evidence_support: [{ evidence_ref: evidenceRef, quote }],
+    };
+  });
+  if (claims.length < minimumClaims) {
+    claims.push({
+      claim: `Researcher selected only ${claims.length} frozen evidence records; at least ${minimumClaims} are required.`,
+      evidence_support: [],
+    });
+  }
+  return claims;
+}
+
 export function benchmarkCaseReadiness(input: {
   record: BenchmarkGoldenCase;
   selection: BenchmarkEvidenceSelection;
@@ -612,6 +693,7 @@ export function summarizeBenchmarkEvidenceReadiness(entries: Array<{
 }
 
 export function buildBenchmarkResearcherPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
+  const gates = benchmarkDeterministicGateSummary(record, evidence);
   const dossier = evidence.map((item) => [
     `[${item.sourceRef}] ${item.title}`,
     `URL: ${item.url}`,
@@ -622,12 +704,16 @@ export function buildBenchmarkResearcherPrompt(record: BenchmarkGoldenCase, evid
   ].filter(Boolean).join("\n")).join("\n\n");
   return `You are the Researcher in a leakage-safe historical evaluation of an athlete opportunity model.
 
-Assess only the public evidence supplied below as it existed by the cutoff. You are not being shown any historical decision, outcome, benchmark label, private correspondence, or future information. Do not guess missing facts. Do not infer adult-content willingness from identity, appearance, or sport.
+Assess only the frozen pre-decision evidence supplied below as it existed by the cutoff. It can include public sources and authenticated internal market intelligence that was known before the decision; both are valid when present in this dossier. You are not being shown any historical decision, outcome, benchmark label, outcome correspondence, or future information. Do not guess missing facts. Do not infer adult-content willingness from identity, appearance, or sport.
 
 CANDIDATE
 Name: ${record.athlete_name}
 Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
+
+DETERMINISTIC EVIDENCE PRECHECK
+${JSON.stringify(gates, null, 2)}
+This precheck is computed from the same frozen dossier, contains no label or outcome, and is independently audited. Treat each passed core evidence gate as present. A score may still be lowered for a real contradiction or inaccessible career economics, but not by relabeling a passed gate as missing.
 
 SCORING
 - Every score uses the 0-100 numeric scale, never fractions from 0 to 1.
@@ -638,14 +724,13 @@ SCORING
 - Do not require public evidence that the athlete wants OnlyFans or adult content. That is not normally knowable before outreach; its absence is neutral and must not be listed as a critical gap.
 - Missing representation or a public business contact lowers achievability only when the rest of the public proxy evidence is insufficient; it is not an automatic blocker.
 - A strong pre-outreach fit may be supported by verified-adult status, current athletic momentum, a meaningful personal audience, creator-led content, and realistic career-tier accessibility without any platform-specific signal.
-- Cite evidence using only the supplied E-numbers. If evidence is missing, return a lower score and list the gap.
-- For every material claim, copy an exact supporting quote from each cited E-number into evidence_support. Keep the claim close to the quoted wording; a valid E-number without a matching quote is unsupported.
+- Return four to six distinct E-numbers in material_evidence_refs. Select the strongest frozen records that directly support identity, adult eligibility, momentum, audience/creator opportunity, and accessibility. Application code will create exact material claims and quotes from those immutable records; never invent an E-number.
 - Put only failed core gates in critical_gaps. Put optional missing amplifiers and unanswered non-blocking questions in limitations. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
-- Keep reasoning under 120 words and return no more than six material claims, five critical gaps, and five limitations.
+- Keep reasoning under 120 words and return no more than six material evidence references, five critical gaps, and five limitations.
 
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 
-PUBLIC EVIDENCE AVAILABLE BY THE CUTOFF
+FROZEN EVIDENCE AVAILABLE BY THE CUTOFF
 ${dossier || "No eligible evidence."}
 
 Return the required JSON only.`;

@@ -525,10 +525,12 @@ export function calculateBenchmarkMetrics(results: BenchmarkCaseResult[], priori
       results.reduce((total, result) => total + result.unsupportedClaimRate, 0),
       results.length
     ),
-    auditorCatchRate: rate(
-      researcherFailures.filter((result) => result.auditorCaughtResearcherFailure).length,
-      researcherFailures.length
-    ),
+    // A run with no Researcher mistakes is not an undefined audit failure. The
+    // independent audit still reviewed every case, while catch rate is vacuously
+    // satisfied because there was nothing to catch.
+    auditorCatchRate: researcherFailures.length > 0
+      ? rate(researcherFailures.filter((result) => result.auditorCaughtResearcherFailure).length, researcherFailures.length)
+      : 1,
     totalCostMicrousd,
     averageCostMicrousd: rate(totalCostMicrousd, results.length),
     costPerValidatedCandidateMicrousd: rate(totalCostMicrousd, truePositivePriority.length),

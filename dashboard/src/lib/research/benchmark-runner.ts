@@ -20,11 +20,13 @@ import {
   benchmarkAdultEligibilityGate,
   benchmarkCreatorPotentialGate,
   benchmarkCurrentMomentumGate,
+  benchmarkDeterministicGateSummary,
   benchmarkCaseReadiness,
   benchmarkEvidenceFreezeReadiness,
   benchmarkIdentityGate,
   BENCHMARK_PRE_OUTREACH_CALIBRATION,
   buildBenchmarkResearcherPrompt,
+  canonicalBenchmarkMaterialClaims,
   compactBenchmarkModelEvidence,
   estimateBenchmarkCostMicrousd,
   evaluateBenchmarkMaterialClaimCitations,
@@ -43,7 +45,7 @@ import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/resea
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v22";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v23";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -67,28 +69,9 @@ const RESEARCHER_SCHEMA = {
     research_confidence_score: { type: "number" },
     fit_label: { type: "string", enum: ["fit", "not_fit", "uncertain"] },
     achievability_label: { type: "string", enum: ["high", "medium", "low", "uncertain"] },
-    material_claims: {
+    material_evidence_refs: {
       type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          claim: { type: "string" },
-          evidence_support: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                evidence_ref: { type: "string" },
-                quote: { type: "string" },
-              },
-              required: ["evidence_ref", "quote"],
-            },
-          },
-        },
-        required: ["claim", "evidence_support"],
-      },
+      items: { type: "string" },
     },
     critical_gaps: { type: "array", items: { type: "string" } },
     limitations: { type: "array", items: { type: "string" } },
@@ -97,7 +80,7 @@ const RESEARCHER_SCHEMA = {
   required: [
     "identity_confirmed", "adult_eligibility_verified", "onlyfans_fit_score",
     "commercial_achievability_score", "research_confidence_score", "fit_label",
-    "achievability_label", "material_claims", "critical_gaps", "limitations", "reasoning",
+    "achievability_label", "material_evidence_refs", "critical_gaps", "limitations", "reasoning",
   ],
 } as const;
 
@@ -163,6 +146,7 @@ type ResearcherAssessment = {
   research_confidence_score: number;
   fit_label: "fit" | "not_fit" | "uncertain";
   achievability_label: "high" | "medium" | "low" | "uncertain";
+  material_evidence_refs: string[];
   material_claims: Array<{
     claim: string;
     evidence_support: Array<{ evidence_ref: string; quote: string }>;
@@ -171,6 +155,8 @@ type ResearcherAssessment = {
   limitations: string[];
   reasoning: string;
 };
+
+type ResearcherModelAssessment = Omit<ResearcherAssessment, "material_claims">;
 
 type BlindAssessment = {
   identity_passed: boolean;
@@ -471,8 +457,8 @@ async function ensureBenchmarkArtifacts(input: {
   const { data: rubric, error: rubricError } = await admin.from("research_rubric_versions").upsert({
     organization_id: organizationId,
     rubric_key: "onlyfans_benchmark_fit_achievability_confidence",
-    version: 5,
-    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v5",
+    version: 6,
+    name: "Leakage-safe pre-outreach OnlyFans athlete benchmark rubric v6",
     definition: {
       dimensions: ["onlyfans_fit", "commercial_achievability", "research_confidence"],
       priority_weights: { onlyfans_fit: 0.45, commercial_achievability: 0.35, research_confidence: 0.2 },
@@ -480,12 +466,14 @@ async function ensureBenchmarkArtifacts(input: {
         "two_source_identity", "two_source_21_plus", "current_momentum", "audience",
         "creator_behavior", "commercial_constraints", "exact_quote_material_claim_support", "blind_audit",
       ],
-      audit_score_policy: "minimum_of_researcher_blind_auditor_and_review",
+      audit_score_policy: "minimum_of_researcher_blind_auditor_and_review_with_deterministic_evidence_precheck",
+      audience_policy: "contextual_emerging_athlete_signal_not_a_50000_follower_floor",
+      material_claim_policy: "model_selects_refs_application_emits_immutable_claims_and_quotes",
       platform_willingness_required: false,
       achievability_basis: "public_pre_outreach_proxies",
       outreach_disabled: true,
     },
-    definition_hash: "research-v2-benchmark-rubric-v5",
+    definition_hash: "research-v2-benchmark-rubric-v6",
     status: "draft",
     created_by_user_id: userId,
     activated_at: null,
@@ -506,7 +494,7 @@ async function ensureBenchmarkArtifacts(input: {
   const ensurePrompt = async (row: Record<string, unknown>) => {
     const { data, error } = await admin.from("research_prompt_versions").upsert({
       organization_id: organizationId,
-      version: 12,
+      version: 13,
       status: "draft",
       created_by_user_id: userId,
       activated_at: null,
@@ -531,15 +519,15 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time pre-outreach assessment using supplied public evidence; labels and outcomes are withheld; each material claim requires an exact frozen-dossier quote; platform willingness is not required or inferred; scores use public creator, momentum, audience, and accessibility proxies.",
-      content_hash: "research-v2-benchmark-researcher-v12",
+      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence plus deterministic no-label gate summaries; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
+      content_hash: "research-v2-benchmark-researcher-v13",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
       prompt_key: "research-v2-benchmark-blind-auditor",
       role: "auditor",
-      content: "Independent blind pre-outreach evidence audit before comparison with the Researcher assessment; the comparison stage rechecks every material claim against the frozen dossier and every corrected dimension is a hard ceiling; platform willingness is not required or inferred.",
-      content_hash: "research-v2-benchmark-auditor-v12",
+      content: "Independent blind pre-outreach evidence audit using deterministic no-label gate summaries before comparison with the Researcher assessment; application-owned immutable material claims are rechecked and every corrected dimension is a hard ceiling; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
+      content_hash: "research-v2-benchmark-auditor-v13",
       output_schema: { blind: BLIND_AUDITOR_SCHEMA, review: REVIEW_SCHEMA },
     }),
   ]);
@@ -787,15 +775,20 @@ export async function startBenchmarkRun(input: {
 }
 
 function blindPrompt(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
-  return `You are the independent blind Auditor in a historical athlete benchmark. You have not seen the Researcher's score or any benchmark label, outcome, private correspondence, or post-cutoff information.
+  const gates = benchmarkDeterministicGateSummary(record, evidence);
+  return `You are the independent blind Auditor in a historical athlete benchmark. You have not seen the Researcher's score or any benchmark label, outcome, outcome correspondence, or post-cutoff information.
 
-Independently determine whether the supplied public evidence establishes the exact athlete identity, corroborated 21+ eligibility, current athletic momentum at the cutoff, creator/audience opportunity, and realistic pre-outreach commercial accessibility. Missing evidence is a gap, not permission to infer. Do not infer adult-content willingness from appearance, identity, or sport. Do not require public evidence that the athlete wants OnlyFans or adult content; its absence is neutral and must not be listed as a critical gap. Judge achievability from public proxies such as career tier, audience, creator behavior, partnerships, representation or public business access, geography, and likely economics. Missing representation is not an automatic blocker when other accessibility proxies are strong.
+Independently determine whether the supplied frozen pre-decision evidence establishes the exact athlete identity, corroborated 21+ eligibility, current athletic momentum at the cutoff, creator/audience opportunity, and realistic pre-outreach commercial accessibility. The dossier can include public sources and authenticated internal market intelligence that was known before the decision; do not reject a dossier record merely because it is internal. Missing evidence is a gap, not permission to infer. Do not infer adult-content willingness from appearance, identity, or sport. Do not require evidence that the athlete wants OnlyFans or adult content; its absence is neutral and must not be listed as a critical gap. Judge achievability from pre-outreach proxies such as career tier, audience, creator behavior, partnerships, representation or business access, geography, and likely economics. Missing representation is not an automatic blocker when other accessibility proxies are strong.
 
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 
 Candidate: ${record.athlete_name}
 Sport: ${record.sport}
 Evidence cutoff: ${record.evidence_cutoff_at}
+
+Deterministic evidence precheck (computed only from the frozen dossier; no label or outcome):
+${JSON.stringify(gates, null, 2)}
+Treat each passed core evidence gate as present. Do not override a passed audience or creator gate solely because the signal is qualitative, below 50,000, or lacks cross-platform corroboration.
 
 Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
@@ -807,8 +800,10 @@ Return the required JSON only.`;
 function reviewPrompt(
   researcher: ResearcherAssessment,
   blind: BlindAssessment,
-  evidence: LeakageSafeBenchmarkEvidence[]
+  evidence: LeakageSafeBenchmarkEvidence[],
+  record: BenchmarkGoldenCase
 ) {
+  const gates = benchmarkDeterministicGateSummary(record, evidence);
   return `You are completing stage two of a blind benchmark audit. The independent assessment below was completed before the Researcher proposal was disclosed. Compare them now without using any historical outcome or golden label.
 
 INDEPENDENT BLIND ASSESSMENT
@@ -817,10 +812,13 @@ ${JSON.stringify(blind)}
 RESEARCHER PROPOSAL
 ${JSON.stringify(researcher)}
 
-FROZEN PUBLIC EVIDENCE
+FROZEN PRE-DECISION EVIDENCE
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
 
-Pass only when every material score and claim is supported by the frozen evidence. List every unsupported Researcher claim in unsupported_material_claims, including claims whose quote is present but does not establish the stated conclusion. Correct a usable proposal when evidence supports lower scores. Never raise a Researcher or blind-auditor dimension. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from public creator, audience, momentum, and accessibility proxies. Missing representation alone is not automatically critical.
+DETERMINISTIC EVIDENCE PRECHECK (NO LABEL OR OUTCOME)
+${JSON.stringify(gates, null, 2)}
+
+Pass only when every material score and claim is supported by the frozen evidence. Material claims are immutable source records selected by E-number; do not call a canonical source claim unsupported merely because you would word it differently or because its authenticated pre-decision source is internal. List every actual unsupported Researcher conclusion in unsupported_material_claims. Correct a usable proposal when evidence supports lower scores. Never raise a Researcher or blind-auditor dimension. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from creator, audience, momentum, and accessibility evidence. Missing representation alone is not automatically critical. Treat every passed deterministic core gate as present; do not override it solely because an audience signal is qualitative, below 50,000, or lacks cross-platform corroboration.
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. If the proposal passes with no actual research-system error, return an empty findings array; never create a finding whose failure_type is "none". Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words. Return the required JSON only.`;
 }
@@ -959,7 +957,7 @@ async function processBenchmarkCase(input: {
       costMicrousd: integer(score.cost_microusd),
     };
   } else {
-    const researcherCall = await callStructuredSonnet<ResearcherAssessment>({
+    const researcherCall = await callStructuredSonnet<ResearcherModelAssessment>({
       prompt: buildBenchmarkResearcherPrompt(record, modelEvidence),
       schema: RESEARCHER_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
@@ -967,7 +965,10 @@ async function processBenchmarkCase(input: {
       maximumOutputTokens: run.metrics.call_limits.researcherOutputTokens,
       ledger,
     });
-    researcher = researcherCall.value;
+    researcher = {
+      ...researcherCall.value,
+      material_claims: canonicalBenchmarkMaterialClaims(researcherCall.value.material_evidence_refs, modelEvidence),
+    };
     researcherUsage = researcherCall.usage;
     const citationQuality = evaluateBenchmarkMaterialClaimCitations(researcher.material_claims || [], modelEvidence);
     const researcherScore = buildResearchV2Score({
@@ -1057,7 +1058,7 @@ async function processBenchmarkCase(input: {
   let reviewUsage = checkpointAssessment.review_usage as ModelUsage | undefined;
   if (!review || !reviewUsage) {
     const reviewCall = await callStructuredSonnet<ReviewAssessment>({
-      prompt: reviewPrompt(researcher, blind, modelEvidence),
+      prompt: reviewPrompt(researcher, blind, modelEvidence, record),
       schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
       model: run.metrics.model,
       provider: run.metrics.provider,
