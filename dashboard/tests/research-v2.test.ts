@@ -2947,6 +2947,9 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /retrieveArchivedEvidenceCandidate\.maxRetries = 0/);
   assert.doesNotMatch(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
   assert.doesNotMatch(workflow, /skipWayback/);
+  assert.match(workflow, /let waybackCircuitOpen = false/);
+  assert.match(workflow, /if \(archiveResult\.waybackRateLimited\) waybackCircuitOpen = true/);
+  assert.match(workflow, /candidate\.storedCapture && !input\.waybackCircuitOpen/);
   assert.match(workflow, /rateLimited: waybackRateLimited && !commonCrawl\.evidence/);
   assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
   assert.match(workflow, /Cutoff-safe external profiles referenced by/);

@@ -937,12 +937,13 @@ async function retrieveArchivedEvidenceCandidate(input: {
   record: EvidencePreparationRecord;
   candidate: HistoricalSearchCandidate;
   commonCrawlCollections: unknown;
+  waybackCircuitOpen: boolean;
 }) {
   "use step";
 
   const { candidate } = input;
   let storedReplayRateLimited = false;
-  if (candidate.storedCapture) {
+  if (candidate.storedCapture && !input.waybackCircuitOpen) {
     try {
       const html = await fetchArchiveHtml(candidate.storedCapture.archivedUrl);
       if (html) {
@@ -1003,8 +1004,8 @@ async function retrieveArchivedEvidenceCandidate(input: {
   } catch {
     // Continue to the generic archive providers when Wikimedia is unavailable.
   }
-  let waybackRateLimited = storedReplayRateLimited;
-  if (candidate.query.startsWith("Cutoff-safe external profiles referenced by ")) {
+  let waybackRateLimited = input.waybackCircuitOpen || storedReplayRateLimited;
+  if (!input.waybackCircuitOpen && candidate.query.startsWith("Cutoff-safe external profiles referenced by ")) {
     try {
       const direct = await retrieveWaybackTimegateEvidenceCandidate({ record: input.record, candidate });
       if (direct.evidence) {
@@ -1023,29 +1024,31 @@ async function retrieveArchivedEvidenceCandidate(input: {
       waybackRateLimited = error instanceof RetryableError;
     }
   }
-  try {
-    const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
-    const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
-    if (capture) {
-      const html = await fetchArchiveHtml(capture.archivedUrl);
-      if (html) {
-        const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
-        if (prepared.evidence) {
-          return {
-            evidence: {
-              ...prepared.evidence,
-              archiveProvider: "internet_archive_wayback" as const,
-              providerRequestId: capture.timestamp,
-            },
-            rejectionReason: null,
-            rateLimited: false,
-            waybackRateLimited: false,
-          };
+  if (!input.waybackCircuitOpen) {
+    try {
+      const cdx = await fetchJson(waybackCdxUrl(candidate.url, input.record.evidence_cutoff_at));
+      const capture = selectWaybackCapture(cdx, candidate.url, input.record.evidence_cutoff_at);
+      if (capture) {
+        const html = await fetchArchiveHtml(capture.archivedUrl);
+        if (html) {
+          const prepared = extractPreparedArchivedEvidence({ record: input.record, candidate, capture, html });
+          if (prepared.evidence) {
+            return {
+              evidence: {
+                ...prepared.evidence,
+                archiveProvider: "internet_archive_wayback" as const,
+                providerRequestId: capture.timestamp,
+              },
+              rejectionReason: null,
+              rateLimited: false,
+              waybackRateLimited: false,
+            };
+          }
         }
       }
+    } catch (error) {
+      waybackRateLimited = waybackRateLimited || error instanceof RetryableError;
     }
-  } catch (error) {
-    waybackRateLimited = waybackRateLimited || error instanceof RetryableError;
   }
   try {
     const commonCrawl = await retrieveCommonCrawlEvidenceCandidate({
@@ -1274,6 +1277,7 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
     });
     const results: Awaited<ReturnType<typeof persistPreparedRecordEvidence>>[] = [];
     const deferredCandidates: Array<{ recordId: string; url: string }> = [];
+    let waybackCircuitOpen = false;
     for (const record of discovery.records) {
       const evidence: PreparedArchivedEvidence[] = [];
       const rejections: Array<{ url: string; reason: string }> = [];
@@ -1284,10 +1288,11 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           record,
           candidate,
           commonCrawlCollections,
+          waybackCircuitOpen,
         });
+        if (archiveResult.waybackRateLimited) waybackCircuitOpen = true;
         if (archiveResult?.rateLimited) {
           deferredCandidates.push({ recordId: record.id, url: candidate.url });
-          await sleep("5s");
           continue;
         }
         if (archiveResult?.evidence) {
