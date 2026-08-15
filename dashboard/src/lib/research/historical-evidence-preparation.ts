@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-stored-source-extraction-replay-v14";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-exact-stored-capture-replay-v15";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -68,15 +68,24 @@ export type HistoricalSearchCandidate = {
   snippet: string;
   displayedDate?: string;
   position?: number;
+  storedCapture?: {
+    archivedUrl: string;
+    capturedAt: string;
+    contentHash: string | null;
+    timestamp: string;
+  };
 };
 
 export type StoredPreparedEvidenceSource = {
+  archived_url: string | null;
   canonical_url: string | null;
+  content_hash: string | null;
   eligible_before_cutoff: boolean | null;
   golden_record_id: string;
   historical_as_of: string | null;
   metadata: Record<string, unknown> | null;
   provider: string;
+  provider_request_id: string | null;
   retrieval_status: string;
   title: string | null;
 };
@@ -207,11 +216,32 @@ export function buildStoredPreparedEvidenceReplayCandidates(input: {
       || historicalAsOf > cutoff
       || sourceExtractionVersion === extractionVersion
       || !canonicalUrl) return [];
+    let storedCapture: HistoricalSearchCandidate["storedCapture"];
+    if (source.provider === "internet_archive_wayback" && source.archived_url) {
+      try {
+        const archivedUrl = new URL(source.archived_url);
+        const timestamp = source.provider_request_id
+          || archivedUrl.pathname.match(/^\/web\/(\d{14})/i)?.[1]
+          || "";
+        if (archivedUrl.protocol === "https:" && archivedUrl.hostname === "web.archive.org"
+          && /^\d{14}$/.test(timestamp)) {
+          storedCapture = {
+            archivedUrl: archivedUrl.toString(),
+            capturedAt: new Date(historicalAsOf).toISOString(),
+            contentHash: source.content_hash,
+            timestamp,
+          };
+        }
+      } catch {
+        // The canonical URL can still use the normal archive fallbacks.
+      }
+    }
     return [{
       query: `Cutoff-safe external profiles referenced by stored evidence for "${input.record.athlete_name}"`,
       title: source.title || `${input.record.athlete_name} archived public profile`,
       url: canonicalUrl,
       snippet: `Previously verified cutoff-safe source; replayed under ${extractionVersion}.`,
+      ...(storedCapture ? { storedCapture } : {}),
     }];
   }), {
     athleteName: input.record.athlete_name,

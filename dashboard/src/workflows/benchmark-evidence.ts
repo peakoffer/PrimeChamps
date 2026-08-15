@@ -246,7 +246,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     .order("effective_at", { ascending: false });
   if (profileClaimError) throw profileClaimError;
   const { data: storedPreparedSources, error: storedPreparedSourceError } = await admin.from("research_evidence_sources")
-    .select("golden_record_id,canonical_url,title,provider,historical_as_of,retrieval_status,eligible_before_cutoff,metadata")
+    .select("golden_record_id,canonical_url,archived_url,title,provider,provider_request_id,historical_as_of,content_hash,retrieval_status,eligible_before_cutoff,metadata")
     .eq("organization_id", input.organizationId)
     .in("golden_record_id", input.recordIds)
     .in("provider", ["internet_archive_wayback", "common_crawl", "wikimedia_revision", "official_dated_profile"])
@@ -737,6 +737,42 @@ async function retrieveArchivedEvidenceCandidate(input: {
   "use step";
 
   const { candidate } = input;
+  let storedReplayRateLimited = false;
+  if (candidate.storedCapture) {
+    try {
+      const html = await fetchArchiveHtml(candidate.storedCapture.archivedUrl);
+      if (html) {
+        const prepared = extractPreparedArchivedEvidence({
+          record: input.record,
+          candidate,
+          capture: {
+            timestamp: candidate.storedCapture.timestamp,
+            capturedAt: candidate.storedCapture.capturedAt,
+            originalUrl: candidate.url,
+            statusCode: "200",
+            digest: candidate.storedCapture.contentHash,
+            mimeType: "text/html",
+            archivedUrl: candidate.storedCapture.archivedUrl,
+          },
+          html,
+        });
+        if (prepared.evidence) {
+          return {
+            evidence: {
+              ...prepared.evidence,
+              archiveProvider: "internet_archive_wayback" as const,
+              providerRequestId: candidate.storedCapture.timestamp,
+            },
+            rejectionReason: null,
+            rateLimited: false,
+            waybackRateLimited: false,
+          };
+        }
+      }
+    } catch (error) {
+      storedReplayRateLimited = error instanceof RetryableError;
+    }
+  }
   try {
     const official = await retrieveOfficialDatedProfileEvidenceCandidate({ record: input.record, candidate });
     if (official.evidence) {
@@ -763,7 +799,7 @@ async function retrieveArchivedEvidenceCandidate(input: {
   } catch {
     // Continue to the generic archive providers when Wikimedia is unavailable.
   }
-  let waybackRateLimited = false;
+  let waybackRateLimited = storedReplayRateLimited;
   if (candidate.query.startsWith("Cutoff-safe external profiles referenced by ")) {
     try {
       const direct = await retrieveWaybackTimegateEvidenceCandidate({ record: input.record, candidate });

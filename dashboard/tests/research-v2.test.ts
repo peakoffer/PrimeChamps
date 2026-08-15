@@ -2085,11 +2085,14 @@ test("stored cutoff-safe evidence is replayed exactly once after an extraction u
     instagram_handle: null,
   };
   const common = {
+    archived_url: "https://web.archive.org/web/20240101000000id_/https://www.lyonfemmes.com/article/estelle-poret",
     canonical_url: "https://www.lyonfemmes.com/article/estelle-poret?utm_source=google",
+    content_hash: "ARCHIVE-HASH",
     eligible_before_cutoff: true,
     golden_record_id: record.id,
     historical_as_of: "2024-01-01T00:00:00Z",
     provider: "internet_archive_wayback",
+    provider_request_id: "20240101000000",
     retrieval_status: "retrieved",
     title: "Estelle Poret, championne lyonnaise de jet-ski",
   };
@@ -2105,6 +2108,12 @@ test("stored cutoff-safe evidence is replayed exactly once after an extraction u
   assert.equal(replay.length, 1);
   assert.equal(replay[0]?.url, "https://www.lyonfemmes.com/article/estelle-poret");
   assert.match(replay[0]?.query || "", /stored evidence/);
+  assert.deepEqual(replay[0]?.storedCapture, {
+    archivedUrl: "https://web.archive.org/web/20240101000000id_/https://www.lyonfemmes.com/article/estelle-poret",
+    capturedAt: "2024-01-01T00:00:00.000Z",
+    contentHash: "ARCHIVE-HASH",
+    timestamp: "20240101000000",
+  });
   const alreadyCurrent = buildStoredPreparedEvidenceReplayCandidates({
     record,
     extractionVersion: "extract-v2",
