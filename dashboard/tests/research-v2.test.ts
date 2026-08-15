@@ -43,6 +43,7 @@ import {
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
   researchV2CommercialAccessSnapshot,
+  researchV2CreatorActivitySnapshot,
   researchV2PreAuditEvidenceComplete,
   researchV2CitedSignalIsSourceBacked,
   stableEvidenceSetHash,
@@ -582,6 +583,29 @@ test("top-of-funnel commercial readiness requires a public route and measured au
     engagementRate: 8.67,
   });
   assert.equal(personalOnly.actionableContactRoute, false);
+});
+
+test("creator activity requires a sustained personal or owned-format pattern, not sponsorship alone", () => {
+  const now = new Date("2026-08-15T12:00:00Z");
+  const substantive = researchV2CreatorActivitySnapshot({
+    now,
+    posts: [
+      { timestamp: "2026-08-14T12:00:00Z", caption: "A day in my life preparing for tournament week and everything behind the scenes." },
+      { timestamp: "2026-08-08T12:00:00Z", caption: "New training vlog is live — sharing my full recovery routine and prep." },
+      { timestamp: "2026-08-01T12:00:00Z", caption: "Travel week with my team, my favorite meals, and practice moments." },
+      { timestamp: "2026-07-25T12:00:00Z", caption: "Partnered with Example. #ad #PaidPartnership" },
+    ],
+  });
+  assert.equal(substantive.substantiveCreatorActivity, true);
+
+  const sponsorshipOnly = researchV2CreatorActivitySnapshot({
+    now,
+    posts: Array.from({ length: 4 }, (_, index) => ({
+      timestamp: `2026-08-0${index + 1}T12:00:00Z`,
+      caption: "Partnered with Example for this campaign. #ad #PaidPartnership",
+    })),
+  });
+  assert.equal(sponsorshipOnly.substantiveCreatorActivity, false);
 });
 
 test("enrichment checkpoint forks discard prior scoring and audit artifacts", () => {

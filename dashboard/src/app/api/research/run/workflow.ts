@@ -52,6 +52,7 @@ import {
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
   researchV2CommercialAccessSnapshot,
+  researchV2CreatorActivitySnapshot,
   researchV2PreAuditEvidenceComplete,
   stableEvidenceSetHash,
   type ResearchV2CitedSignal,
@@ -3850,6 +3851,7 @@ function candidateResearchV2EvidenceSources(athlete: ResearchV2EvidenceCandidate
 
 function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCandidate, followerMinimum: number) {
   const sources = candidateResearchV2EvidenceSources(athlete);
+  const creatorActivity = researchV2CreatorActivitySnapshot({ posts: athlete.latest_posts });
   return {
     currentMomentum: hasSourceBackedResearchV2Signal(athlete.momentum_evidence, sources),
     meaningfulAudience: hasMeaningfulPersonalAudience({
@@ -3857,7 +3859,9 @@ function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCand
       engagementRate: athlete.engagement_rate,
       followerMinimum,
     }),
-    creatorPotential: hasSourceBackedResearchV2Signal(athlete.creator_evidence, sources),
+    creatorPotential: hasSourceBackedResearchV2Signal(athlete.creator_evidence, sources)
+      && creatorActivity.substantiveCreatorActivity,
+    creatorActivity,
     onlyFansPlatformCheckCompleted: athlete.onlyfans_platform_check_completed === true,
     onlyFansPlatformCompatible: athlete.onlyfans_platform_check_completed === true
       && !(athlete.onlyfans_profile_exact_match === true && athlete.onlyfans_platform_status === "inactive"),
@@ -3949,11 +3953,14 @@ async function auditPriorityCandidate(
     followerCount: athlete.follower_count,
     engagementRate: athlete.engagement_rate,
   });
+  const creatorActivity = researchV2CreatorActivitySnapshot({ posts: athlete.latest_posts });
   const blindPrompt = `You are the independent blind auditor for a Prime Champs athlete research candidate.
 
 You have NOT been shown the Researcher's score. Independently determine whether the public evidence supports this person as a current, source-verified adult athlete and whether the research is complete enough to judge OnlyFans fit and commercial achievability.
 
 Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Independently require a specific current athletic-momentum source, a meaningful verified audience, a concrete source-backed creator/content behavior signal, and a completed exact-match OnlyFans platform check. No exact profile is neutral. An exact active profile is positive evidence; an exact inactive, closed, or dormant profile is a critical contradiction. Sponsorship alone is not creator behavior. Do not infer adult-content willingness from appearance or identity.
+
+Creator potential is about demonstrated ability to sustain personal audience content, not evidence of adult-content intent. A recent pattern of content-rich personal/behind-the-scenes posts plus an owned format such as a video, vlog, podcast, newsletter, or recurring series is substantive creator behavior. Sponsorship may strengthen that pattern but can never satisfy the gate by itself.
 
 For this top-of-funnel decision, "commercial constraints complete" means the public dossier establishes an actionable business or representation contact route, measured audience scale, and a completed public search for known sponsorship/contract/policy restrictions. Exact rates and private contract terms are normally unavailable before contact: record them as unknown and lower achievability/confidence, but do not fail the candidate for those private unknowns alone. Fail this gate when there is no actionable contact route, the public constraint search did not complete, or a known public conflict is unresolved.
 
@@ -3971,6 +3978,7 @@ CANDIDATE (NO PROPOSED SCORE):
 - Recent Instagram posts: ${(athlete.latest_posts || []).slice(0, 6).map((post) => `${post.timestamp || "unknown date"} (${post.url || "missing URL"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "none"}
 - Exact OnlyFans platform check: completed ${athlete.onlyfans_platform_check_completed === true ? "yes" : "no"}; status ${athlete.onlyfans_platform_status || "unknown"}; exact match ${athlete.onlyfans_profile_exact_match === true ? "yes" : "no"}; profile ${athlete.onlyfans_profile_url || athlete.onlyfans_profile_username || "none"}; last seen ${athlete.onlyfans_profile_last_seen || "unknown"}; posts ${athlete.onlyfans_profile_posts_count ?? "unknown"}; subscriptions ${athlete.onlyfans_subscriptions_open === null || athlete.onlyfans_subscriptions_open === undefined ? "unknown" : athlete.onlyfans_subscriptions_open ? "open" : "closed"}; ${athlete.onlyfans_platform_reason || "no provider explanation"}
 - Top-of-funnel commercial access: actionable route ${commercialAccess.actionableContactRoute ? "yes" : "no"}; audience scale measured ${commercialAccess.audienceScaleMeasured ? "yes" : "no"}; public constraint search completed ${commercialConstraintSearchCompleted ? "yes" : "no"}; ${commercialAccess.signals.join("; ") || "no public route or audience baseline"}
+- Measured recent creator activity (90 days): substantive ${creatorActivity.substantiveCreatorActivity ? "yes" : "no"}; ${creatorActivity.recentPostCount} recent posts; ${creatorActivity.contentRichPostCount} content-rich; ${creatorActivity.personalNarrativePostCount} personal/behind-the-scenes; ${creatorActivity.ownedFormatPostCount} owned-format; ${creatorActivity.sponsoredPostCount} sponsored
 - Research evidence: ${(athlete.evidence || []).slice(0, 12).map((item) => `${(item.title || "Source").slice(0, 200)} (${item.url || "missing URL"}): ${(item.sourceExcerpt || item.claim).slice(0, 700)}`).join(" | ") || "none"}
 - Independently retrieved audit evidence: ${independentResults.slice(0, 10).map((item) => `${item.title.slice(0, 200)} (${item.url}): ${item.snippet.slice(0, 500)}`).join(" | ") || "none retrieved"}
 - Random claim re-fetch: ${claimSample.sampled} sampled; ${claimSample.unsupported} failed; ${claimSample.failures.join(" | ") || "no failures"}

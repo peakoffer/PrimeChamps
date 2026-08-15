@@ -45,6 +45,39 @@ export function researchV2CommercialAccessSnapshot(input: {
   };
 }
 
+export function researchV2CreatorActivitySnapshot(input: {
+  posts?: Array<{ caption?: string | null; timestamp?: string | null; url?: string | null }> | null;
+  now?: Date;
+}) {
+  const now = input.now || new Date();
+  const cutoff = now.getTime() - 90 * 24 * 60 * 60 * 1_000;
+  const recentPosts = (input.posts || []).filter((post) => {
+    const timestamp = post.timestamp ? Date.parse(post.timestamp) : Number.NaN;
+    return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= now.getTime() + 24 * 60 * 60 * 1_000;
+  });
+  const contentRichPosts = recentPosts.filter((post) => (post.caption?.trim().length || 0) >= 20);
+  const personalNarrativePosts = contentRichPosts.filter((post) =>
+    /\b(?:i|i'm|i’ve|i've|me|my|we|our|life|routine|prep|behind the scenes|bts|travel|week|day in)\b/i.test(post.caption || "")
+  );
+  const ownedFormatPosts = contentRichPosts.filter((post) =>
+    /\b(?:video|vlog|podcast|episode|youtube|newsletter|series|channel|livestream|live stream)\b/i.test(post.caption || "")
+  );
+  const sponsoredPosts = contentRichPosts.filter((post) =>
+    /(?:#ad\b|#paidpartnership\b|paid partnership|sponsored by|partnered with)/i.test(post.caption || "")
+  );
+  const substantiveCreatorActivity = recentPosts.length >= 4
+    && contentRichPosts.length >= 3
+    && (personalNarrativePosts.length >= 2 || ownedFormatPosts.length >= 1);
+  return {
+    substantiveCreatorActivity,
+    recentPostCount: recentPosts.length,
+    contentRichPostCount: contentRichPosts.length,
+    personalNarrativePostCount: personalNarrativePosts.length,
+    ownedFormatPostCount: ownedFormatPosts.length,
+    sponsoredPostCount: sponsoredPosts.length,
+  };
+}
+
 function bounded(value: number) {
   if (!Number.isFinite(value)) throw new Error("Research V2 scores must be finite numbers");
   return Math.max(0, Math.min(100, Math.round(value * 100) / 100));
