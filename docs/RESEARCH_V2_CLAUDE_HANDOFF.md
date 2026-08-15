@@ -1,6 +1,6 @@
 # OnlyFans Athlete Research V2 — Claude Handoff
 
-**Checkpoint date:** 2026-08-13
+**Checkpoint date:** 2026-08-15
 **Repository:** `/Users/zacharyvanheyningen/Projects/primechamps`  
 **GitHub:** `peakoffer/PrimeChamps`  
 **Local branch:** `codex/research-engine-quality-loop`  
@@ -16,6 +16,21 @@ Continue the existing objective; do not replace it with a smaller proxy:
 > Build and validate a production-ready, evaluation-only OnlyFans athlete research agent that returns up to 10 genuinely strong candidates per requested sport without padding results or inflating scores. A candidate may score above 80 only after verified identity, corroborated 21+ eligibility, source-backed athletic momentum and creator potential, realistic commercial achievability, and an independent quality audit. Use the latest Sonnet model for scoring, bounded API and token budgets, replayable checkpoints, development and locked held-out benchmarks, and iterative audit-driven improvements. Production readiness requires 100% identity and age-gate accuracy for finalists, zero unsupported material claims, at least 90% held-out precision for candidates scoring 80+, at least 90% audit pass accuracy, and absolutely no outreach or live pipeline promotion during testing. Returning fewer than 10 candidates is correct whenever the available evidence does not support 10 qualified results.
 
 The goal is **not complete**. The production gates are substantially stronger and Dylan's enriched benchmark is safely imported, but a fresh evidence-ready cohort, development calibration, and locked held-out proof are still missing.
+
+## Current checkpoint — read this before older chronology
+
+This block supersedes older counts later in this document. The older sections remain as an audit trail of how the current state was reached.
+
+- The authoritative 100-case audit currently finds 44 evidence-ready records: 17 positive and 27 negative. It loads 1,072 sources and 2,155 claims, of which 1,657 are cutoff-safe model evidence. Point-in-time compliance is 100/100.
+- Two disjoint 8+8 development / 8+8 held-out cohorts have been completed and revealed. Current assignments are 32 development, 32 held-out, and 36 excluded. Every held-out record is now archive-only and must never be tuned or reused as held-out.
+- The newest full development run `ee02fd30-4b14-4851-95e0-650c35514352` passed the measured gates on 16 cases for about $0.962.
+- The newest one-time held-out run `c990033d-38b0-4139-9d27-cd2dbd23bf38` completed 16 cases using `anthropic/claude-sonnet-5` through OpenRouter for about $0.942. It achieved 100% finalist identity, 100% finalist 21+, 100% source verification, zero unsupported claims, 100% point-in-time compliance, and 93.75% audit-decision accuracy. Its above-80 precision was 7/8 = 87.5%, below the required 90%; production readiness is therefore **not proven**.
+- The single above-80 false positive was Murat Kazgan. His packet safely proved identity, age, momentum, audience/creator behavior, and accessibility. The later outcome said the opportunity was rejected because his OnlyFans profile had not been active, but no pre-decision evidence in the packet disclosed that fact. This is an observability miss, not a fabricated claim.
+- The audit now measures OnlyFans-platform observability explicitly: 0 active, 0 inactive, and 100 not observed across all 100 historical cases. Absence therefore remains neutral. Turning missing platform data into an automatic failure would eliminate every positive example and manufacture precision from unavailable information.
+- The remaining fresh pool contains 12 positive and 24 negative records; none is currently evidence-ready. A third proof needs at least eight evidence-ready records per label. The positive side is the binding constraint.
+- The latest excluded-positive recovery run processed nine priority records, consulted 43 grounded sources, inserted 74 archived sources / 232 safe claims, spent $0.0885 on Apify and about $0.2562 on latest-Sonnet grounded discovery, and made zero scoring or outreach writes. It produced 0/9 evidence-complete packets. Do not replay it unchanged.
+- Production now recognizes `SOCIAL_BLADE_CLIENT_ID` and `SOCIAL_BLADE_TOKEN`. Nineteen distinct profiles have checkpointed official attempts; 13 produced cutoff-safe matches and six did not. The last provider response reported 71 credits remaining. Social Blade's own terms state that history begins only when Social Blade first starts tracking a profile, so extended/archive/vault cannot reconstruct earlier dates that were never collected. Do not repeat failed handles.
+- Official-response failures now persist secret-free handle/date diagnostics, and the benchmark UI distinguishes “no eligible paid-history lookups” from successful evidence completion.
 
 ## Non-negotiable product intent
 
@@ -188,7 +203,7 @@ Primary implementation files:
 
 Required environment-variable names are documented in the app/Vercel configuration. Never print, paste into chat, log, or commit their values. Important names include `OPENAI_API_KEY`, `APIFY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `SOCIAL_BLADE_CLIENT_ID`, `SOCIAL_BLADE_TOKEN`, Supabase server credentials, and `RESEARCH_EVALUATION_SECRET` or `CRON_SECRET`.
 
-## Historical benchmark status
+## Historical benchmark status (older chronology; current counts are above)
 
 - Dylan source truth: 100/100 outcomes, 44 positive and 56 negative.
 - Enriched workbook validation: zero locked-source differences, zero duplicate names/refs, 748 detail ledger rows covering all 100 athletes, zero post-cutoff rows, and 420 usable claim rows across 76 athletes. The other 24 correctly contain only `Not available` audit notes.

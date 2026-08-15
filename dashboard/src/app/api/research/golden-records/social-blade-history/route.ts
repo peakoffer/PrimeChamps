@@ -3,12 +3,14 @@ import { requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runApifyActorWithUsage } from "@/lib/apify";
 import {
+  diagnoseSocialBladeInstagramResponse,
   prepareApifyPublicSocialBladeInstagramSnapshot,
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
   type ApifyPublicSocialBladeRow,
   type SocialBladeHistoryTier,
   type SocialBladeInstagramResponse,
+  type SocialBladeInstagramResponseDiagnostics,
 } from "@/lib/research/social-blade-history";
 import { ONLYFANS_HISTORICAL_DATASET } from "@/lib/research/historical-benchmark";
 import {
@@ -311,6 +313,7 @@ async function persistOfficialHistoryFailure(input: {
   candidate: Candidate;
   reason: string;
   creditsRemaining?: number | null;
+  responseDiagnostics?: SocialBladeInstagramResponseDiagnostics;
 }) {
   const admin = createAdminClient();
   const { error } = await admin.from("research_evidence_sources").update({
@@ -327,6 +330,9 @@ async function persistOfficialHistoryFailure(input: {
       maximum_credits_for_request: input.candidate.credits,
       attempt_state: "failed",
       failure_reason: input.reason.slice(0, 500),
+      ...(input.responseDiagnostics
+        ? { response_diagnostics: input.responseDiagnostics }
+        : {}),
       ...(typeof input.creditsRemaining === "number"
         ? { credits_remaining_after_request: input.creditsRemaining }
         : {}),
@@ -634,6 +640,11 @@ export async function POST(request: NextRequest) {
             candidate,
             reason,
             creditsRemaining,
+            responseDiagnostics: diagnoseSocialBladeInstagramResponse({
+              expectedHandle: candidate.handle,
+              evidenceCutoffAt: candidate.cutoff,
+              response: payload,
+            }),
           });
           failures.push({ recordId: candidate.id, athleteName: candidate.athleteName, reason });
           continue;

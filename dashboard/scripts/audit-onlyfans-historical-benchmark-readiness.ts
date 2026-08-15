@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import { ONLYFANS_HISTORICAL_DATASET } from "../src/lib/research/historical-benchmark.ts";
 import {
+  benchmarkOnlyFansPlatformActivityGate,
   benchmarkEvidenceFreezeReadiness,
   selectLeakageSafeBenchmarkEvidence,
   summarizeBenchmarkEvidenceReadiness,
@@ -126,6 +127,15 @@ const byCurrentSplit = Object.fromEntries(["development", "held_out", "excluded"
     readyNotFit: subset.filter((entry) => entry.readiness.ready && entry.record.fit_label === "not_fit").length,
   }];
 }));
+const platformActivitySummary = (subset: typeof entries) => {
+  const statuses = subset.map((entry) => benchmarkOnlyFansPlatformActivityGate(entry.selection.evidence).status);
+  return {
+    records: subset.length,
+    active: statuses.filter((status) => status === "active").length,
+    inactive: statuses.filter((status) => status === "inactive").length,
+    notObserved: statuses.filter((status) => status === "not_observed").length,
+  };
+};
 console.log(JSON.stringify({
   dataset: ONLYFANS_HISTORICAL_DATASET,
   ...summary,
@@ -141,6 +151,14 @@ console.log(JSON.stringify({
   fit: byLabel("fit"),
   notFit: byLabel("not_fit"),
   byCurrentSplit,
+  onlyFansPlatformActivity: {
+    all: platformActivitySummary(entries),
+    fit: platformActivitySummary(entries.filter((entry) => entry.record.fit_label === "fit")),
+    notFit: platformActivitySummary(entries.filter((entry) => entry.record.fit_label === "not_fit")),
+    development: platformActivitySummary(entries.filter((entry) => entry.record.benchmark_split === "development")),
+    heldOut: platformActivitySummary(entries.filter((entry) => entry.record.benchmark_split === "held_out")),
+    excluded: platformActivitySummary(entries.filter((entry) => entry.record.benchmark_split === "excluded")),
+  },
   unresolvedSport: entries.filter((entry) => entry.record.sport === "Needs enrichment").length,
   currentSplitCounts: Object.fromEntries(["development", "held_out", "excluded"].map((split) => [
     split, entries.filter((entry) => entry.record.benchmark_split === split).length,

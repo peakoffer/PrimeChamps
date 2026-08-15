@@ -1189,6 +1189,10 @@ export default function ResearchBenchmarkPage() {
                 ? "Add the two server-side Social Blade credentials first"
                 : socialBladePlan.officialPilotExhausted
                   ? "The checkpointed recovery allowance is complete; audit readiness before spending more"
+                  : socialBladePlan.pilotRecords.length === 0
+                    ? socialBladePlan.candidateCount === 0
+                      ? "No remaining positive has the identity, momentum, handle, and missing-audience combination required for a safe paid lookup"
+                      : "Every currently eligible positive already has a checkpointed paid-history attempt"
                   : undefined}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
@@ -1212,7 +1216,9 @@ export default function ResearchBenchmarkPage() {
                 : socialBladePlan.officialPilotExhausted
                   ? "Paid history recovery complete"
                 : socialBladePlan.pilotRecords.length === 0
-                  ? "Historical audience complete"
+                  ? socialBladePlan.candidateCount === 0
+                    ? "No eligible paid-history lookups"
+                    : "Paid-history candidates exhausted"
                   : `${socialBladePlan.officialValidationPassed ? "Recover" : "Check"} ${socialBladePlan.pilotRecords[0].athleteName} · ≤${socialBladePlan.pilotMaximumCredits} credits`}
             </button>
             <button

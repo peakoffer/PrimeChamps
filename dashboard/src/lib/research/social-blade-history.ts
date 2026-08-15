@@ -34,6 +34,23 @@ export type SocialBladeHistoricalClaim = {
   material: true;
 };
 
+export type SocialBladeInstagramResponseDiagnostics = {
+  expectedHandle: string | null;
+  returnedHandle: string | null;
+  returnedDisplayName: string | null;
+  exactHandleMatch: boolean;
+  providerSuccess: boolean;
+  providerStatus: number | null;
+  providerError: string | null;
+  dailyRowCount: number;
+  validDatedRowCount: number;
+  preCutoffRowCount: number;
+  earliestDailyAt: string | null;
+  latestDailyAt: string | null;
+  latestPreCutoffAt: string | null;
+  latestPreCutoffAgeDays: number | null;
+};
+
 export type ApifyPublicSocialBladeRow = {
   recordType?: string;
   platform?: string;
@@ -57,6 +74,55 @@ function normalizeHandle(value: unknown) {
 
 function validMetric(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Produces a secret-free explanation of why an official history response did
+ * or did not yield a cutoff-safe snapshot. Persisting this beside a failed
+ * paid lookup lets us distinguish wrong-handle, empty-history, post-cutoff,
+ * and stale-history failures without paying to repeat the same request.
+ */
+export function diagnoseSocialBladeInstagramResponse(input: {
+  expectedHandle: string;
+  evidenceCutoffAt: string;
+  response: SocialBladeInstagramResponse;
+}): SocialBladeInstagramResponseDiagnostics {
+  const expectedHandle = normalizeHandle(input.expectedHandle);
+  const returnedHandle = normalizeHandle(input.response.data?.id?.username);
+  const cutoff = Date.parse(input.evidenceCutoffAt);
+  const dailyRows = input.response.data?.statistics?.daily || input.response.data?.daily || [];
+  const datedRows = dailyRows.flatMap((metric) => {
+    const timestamp = typeof metric.date === "string" ? Date.parse(metric.date) : Number.NaN;
+    return Number.isFinite(timestamp) ? [{ timestamp }] : [];
+  }).sort((left, right) => left.timestamp - right.timestamp);
+  const preCutoffRows = Number.isFinite(cutoff)
+    ? datedRows.filter(({ timestamp }) => timestamp <= cutoff)
+    : [];
+  const earliest = datedRows[0]?.timestamp;
+  const latest = datedRows.at(-1)?.timestamp;
+  const latestPreCutoff = preCutoffRows.at(-1)?.timestamp;
+  return {
+    expectedHandle: expectedHandle || null,
+    returnedHandle: returnedHandle || null,
+    returnedDisplayName: input.response.data?.id?.display_name?.trim() || null,
+    exactHandleMatch: Boolean(expectedHandle && returnedHandle === expectedHandle),
+    providerSuccess: input.response.status?.success === true,
+    providerStatus: typeof input.response.status?.status === "number"
+      ? input.response.status.status
+      : null,
+    providerError: input.response.status?.error?.slice(0, 300) || null,
+    dailyRowCount: dailyRows.length,
+    validDatedRowCount: datedRows.length,
+    preCutoffRowCount: preCutoffRows.length,
+    earliestDailyAt: typeof earliest === "number" ? new Date(earliest).toISOString() : null,
+    latestDailyAt: typeof latest === "number" ? new Date(latest).toISOString() : null,
+    latestPreCutoffAt: typeof latestPreCutoff === "number"
+      ? new Date(latestPreCutoff).toISOString()
+      : null,
+    latestPreCutoffAgeDays: typeof latestPreCutoff === "number" && Number.isFinite(cutoff)
+      ? Math.floor((cutoff - latestPreCutoff) / DAY_MS)
+      : null,
+  };
 }
 
 export function socialBladeHistoryTierForCutoff(

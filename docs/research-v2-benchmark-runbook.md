@@ -116,7 +116,26 @@ No metric is considered passed when its denominator is zero. Fewer than ten reco
 
 The runtime enforces that last rule separately from target coverage. A short or empty qualified list is a valid no-padding result; `targetMet` and `shortfall` report coverage without marking an unsafe candidate as a quality pass.
 
-## Current data status (2026-08-13)
+## Current data status (2026-08-15)
+
+Dylan's 100-case ledger remains the sole commercial ground truth: 44 positive and 56 negative. The current bounded audit loads 1,072 evidence sources and 2,155 claims, retains 1,657 cutoff-safe model claims, and finds 44 evidence-ready packets (17 positive / 27 negative) with 100/100 point-in-time compliance.
+
+Two disjoint benchmark releases are complete and revealed, leaving 32 development, 32 held-out, and 36 excluded records. The newest held-out release `c990033d-38b0-4139-9d27-cd2dbd23bf38` passed identity, 21+, source, unsupported-claim, point-in-time, and audit-accuracy gates, but above-80 precision was 7/8 = 87.5%. The one miss was Murat Kazgan; his later negative outcome depended on inactive OnlyFans use that was absent from the pre-decision evidence packet. All revealed records are archive-only. Never tune against Murat or rerun either revealed held-out set.
+
+OnlyFans platform activity is not observed in any of the 100 cutoff-safe packets (0 active / 0 inactive / 100 not observed). Missing platform evidence therefore stays neutral. A future weekly internal-intelligence record can supply a dated active/inactive contradiction when it was genuinely known before scoring, but the benchmark must not infer it from the outcome.
+
+The fresh excluded pool is 12 positive / 24 negative and currently 0/36 evidence-ready. A new challenge release requires at least eight evidence-ready cases per label. The positive side is the binding constraint; do not start another scoring benchmark until it closes.
+
+The latest nine-positive recovery run examined 43 grounded candidates, inserted 74 archived sources / 232 safe claims, spent $0.0885 on Apify plus about $0.2562 on latest-Sonnet search, and yielded 0/9 complete packets. Social Blade is configured and has 71 credits remaining, but its official service can return historical rows only from the date a profile first entered Social Blade tracking. Nineteen distinct official lookups are checkpointed; 13 matched, six failed. Never retry a failed handle. New failures persist exact returned-handle and date-range diagnostics without credentials or account secrets.
+
+The next valid sequence is:
+
+1. Recover at least eight excluded positives using genuinely pre-decision evidence not already exhausted—prefer dated internal weekly-intelligence artifacts or source documents that explicitly state historical audience/activity.
+2. Recover eight excluded negatives only after the positive quota is plausible; do not spend merely because negatives are easier.
+3. Freeze a new 8+8 challenge cohort once, precommit any sport/achievability calibration before scoring, run full development, and unlock held-out only if development passes every release gate.
+4. Run held-out once. If precision above 80 is below 90%, archive the cohort and do not tune against it.
+
+## Recovery chronology (2026-08-13; retained for provenance)
 
 Dylan's enriched source supplies the complete 100-case outcome benchmark: 44 positive and 56 negative. It was compared cell-for-cell with the original locked 100-row benchmark and Evidence Index, then imported as 420 individually dated detail sources and claims. All 100 cases are point-in-time compliant. The corrected bounded-batch and athlete-attribution audit now finds 28 evidence-ready cases.
 

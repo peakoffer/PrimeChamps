@@ -544,7 +544,12 @@ export function benchmarkCreatorPotentialGate(record: BenchmarkGoldenCase, evide
   };
 }
 
-export function benchmarkOnlyFansPlatformActivityGate(evidence: LeakageSafeBenchmarkEvidence[]) {
+export function benchmarkOnlyFansPlatformActivityGate(evidence: LeakageSafeBenchmarkEvidence[]): {
+  passed: boolean;
+  status: "active" | "inactive" | "not_observed";
+  evidenceCount: number;
+  freshestAt: string | null;
+} {
   const signals = evidence.filter((item) => {
     const text = `${item.title}\n${item.claim}\n${item.excerpt}`;
     return item.claimType === "onlyfans_platform_activity_signal"
@@ -566,7 +571,7 @@ export function benchmarkOnlyFansPlatformActivityGate(evidence: LeakageSafeBench
   const latest = classified[0];
   return {
     passed: latest?.status !== "inactive",
-    status: latest?.status || "not_observed" as "active" | "inactive" | "not_observed",
+    status: latest?.status || "not_observed",
     evidenceCount: classified.length,
     freshestAt: latest?.item.effectiveAt || null,
   };

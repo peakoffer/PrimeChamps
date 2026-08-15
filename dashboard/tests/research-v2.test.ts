@@ -98,6 +98,7 @@ import {
 } from "../src/lib/research/historical-social-snapshot.ts";
 import { prepareHistoricalInstagramSnapshot } from "../src/lib/research/historical-instagram-history.ts";
 import {
+  diagnoseSocialBladeInstagramResponse,
   prepareApifyPublicSocialBladeInstagramSnapshot,
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
@@ -775,6 +776,44 @@ test("Social Blade recovery uses the cheapest sufficient tier and only exact, re
   });
   assert.equal(widerWindowSnapshot?.snapshotAgeDays, 63);
   assert.equal(widerWindowSnapshot?.followers, 120_000);
+});
+
+test("Social Blade failure diagnostics separate wrong handles from stale cutoff history", () => {
+  const diagnostics = diagnoseSocialBladeInstagramResponse({
+    expectedHandle: "@example.athlete",
+    evidenceCutoffAt: "2026-05-03T12:00:00.000Z",
+    response: {
+      status: { success: true, status: 200 },
+      info: { credits: { available: 71 } },
+      data: {
+        id: { username: "different.person", display_name: "Different Person" },
+        statistics: {
+          daily: [
+            { date: "invalid-date", followers: 100 },
+            { date: "2026-03-01T00:00:00.000Z", followers: 120_000 },
+            { date: "2026-05-04T00:00:00.000Z", followers: 121_000 },
+          ],
+        },
+      },
+    },
+  });
+  assert.deepEqual(diagnostics, {
+    expectedHandle: "example.athlete",
+    returnedHandle: "different.person",
+    returnedDisplayName: "Different Person",
+    exactHandleMatch: false,
+    providerSuccess: true,
+    providerStatus: 200,
+    providerError: null,
+    dailyRowCount: 3,
+    validDatedRowCount: 2,
+    preCutoffRowCount: 1,
+    earliestDailyAt: "2026-03-01T00:00:00.000Z",
+    latestDailyAt: "2026-05-04T00:00:00.000Z",
+    latestPreCutoffAt: "2026-03-01T00:00:00.000Z",
+    latestPreCutoffAgeDays: 63,
+  });
+  assert.equal("credits" in diagnostics, false, "credit/account data must not leak into diagnostics");
 });
 
 test("Apify public Social Blade recovery requires an exact dated daily row and never backdates a current profile", () => {
