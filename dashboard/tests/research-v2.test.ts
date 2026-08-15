@@ -104,6 +104,7 @@ import {
   commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
   extractCommonCrawlWarcBody,
+  extractOfficialCommissionAdultEvidence,
   extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
@@ -126,6 +127,42 @@ import {
   wikimediaRevisionApiUrl,
   wikimediaSearchApiUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
+
+test("official commission tables resolve DOB only from a dated exact-athlete regulator row", () => {
+  const california = extractOfficialCommissionAdultEvidence({
+    athleteName: "Crystal Pittman",
+    sport: "Combat Sports",
+    sourceUrl: "https://www.dca.ca.gov/csac/meetings/materials/20240610_materials.pdf",
+    publishedAt: "2024-06-10",
+    evidenceCutoffAt: "2026-07-30T12:00:00Z",
+    sourceText: [
+      "04/27/24 Bare Knuckle Fighting Championship",
+      "BOUT RND ATHLETE WT LIC FED ID# EXP DATE DOB REC PURSE",
+      "Crystal Pittman 135.0 APP CA1028229 08/14/25 08/06/86 4-1 $500",
+    ].join("\n"),
+  });
+  assert.equal(california?.birthDate, "1986-08-06");
+  const florida = extractOfficialCommissionAdultEvidence({
+    athleteName: "Crystal Pittman",
+    sport: "Combat Sports",
+    sourceUrl: "https://www2.myfloridalicense.com/pro/sbc/documents/05-02-25-BKFC_Promotions-Results_without_med.pdf",
+    publishedAt: "2025-05-02",
+    evidenceCutoffAt: "2026-07-30T12:00:00Z",
+    sourceText: [
+      "Bout Corner Sport Participant Name Hometown DOB Federal ID",
+      "Blue Bare Knuckle Crystal Pittman Visalia, CA 08/06/1986 CA-1028229 135.6",
+    ].join("\n"),
+  });
+  assert.equal(florida?.birthDate, "1986-08-06");
+  assert.equal(extractOfficialCommissionAdultEvidence({
+    athleteName: "Crystal Pittman",
+    sport: "Combat Sports",
+    sourceUrl: "https://example.com/20240610_materials.pdf",
+    publishedAt: "2024-06-10",
+    evidenceCutoffAt: "2026-07-30T12:00:00Z",
+    sourceText: california?.excerpt || "",
+  }), null);
+});
 
 test("evaluation profiles default to a genuinely bounded smoke budget", () => {
   assert.equal(normalizeResearchEvaluationProfile(undefined), "smoke");

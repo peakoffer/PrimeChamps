@@ -14,10 +14,9 @@ import { ONLYFANS_HISTORICAL_DATASET } from "@/lib/research/historical-benchmark
 import {
   benchmarkEvidenceFreezeReadiness,
   selectLeakageSafeBenchmarkEvidence,
-  type BenchmarkEvidenceClaimRow,
-  type BenchmarkEvidenceSourceRow,
   type BenchmarkGoldenCase,
 } from "@/lib/research/benchmark-runner-support";
+import { loadBenchmarkEvidenceRows } from "@/lib/research/benchmark-evidence-storage";
 
 export const maxDuration = 300;
 
@@ -60,20 +59,13 @@ async function buildCandidatePlan(organizationId: string) {
   const recordIds = (records || []).map((record) => record.id);
   if (!recordIds.length) return [] as Candidate[];
 
-  const { data: claims, error: claimError } = await admin.from("research_evidence_claims")
-    .select("id,golden_record_id,evidence_source_id,claim_type,claim_text,structured_value,source_excerpt,effective_at,observed_at,support_status,independence_group,material,eligible_for_scoring,exclusion_reason")
-    .eq("organization_id", organizationId)
-    .in("golden_record_id", recordIds);
-  if (claimError) throw claimError;
-  const { data: evidenceSources, error: historySourceError } = await admin.from("research_evidence_sources")
-    .select("id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason")
-    .eq("organization_id", organizationId)
-    .in("golden_record_id", recordIds);
-  if (historySourceError) throw historySourceError;
-  const apifyPublicAttemptedRecordIds = new Set((evidenceSources || [])
+  const { claims, sources: evidenceSources } = await loadBenchmarkEvidenceRows({
+    admin, organizationId, recordIds,
+  });
+  const apifyPublicAttemptedRecordIds = new Set(evidenceSources
     .filter((source) => source.provider === "apify_social_blade_public_history")
     .map((source) => source.golden_record_id));
-  const officialHistoryAttemptedRecordIds = new Set((evidenceSources || [])
+  const officialHistoryAttemptedRecordIds = new Set(evidenceSources
     .filter((source) => source.provider === "social_blade_instagram_history")
     .map((source) => source.golden_record_id));
 
@@ -81,7 +73,8 @@ async function buildCandidatePlan(organizationId: string) {
   const handleByRecord = new Map<string, { handle: string; effectiveAt: string }>();
   const signalTypesByRecord = new Map<string, Set<string>>();
   const safeClaimCountByRecord = new Map<string, number>();
-  for (const claim of claims || []) {
+  for (const claim of claims) {
+    if (!claim.golden_record_id || !claim.effective_at) continue;
     const record = recordById.get(claim.golden_record_id);
     if (!record?.evidence_cutoff_at || Date.parse(claim.effective_at) > Date.parse(record.evidence_cutoff_at)) continue;
     safeClaimCountByRecord.set(record.id, (safeClaimCountByRecord.get(record.id) || 0) + 1);
@@ -105,10 +98,8 @@ async function buildCandidatePlan(organizationId: string) {
     const benchmarkRecord = record as BenchmarkGoldenCase;
     const selection = selectLeakageSafeBenchmarkEvidence({
       record: benchmarkRecord,
-      sources: ((evidenceSources || []) as BenchmarkEvidenceSourceRow[])
-        .filter((source) => source.golden_record_id === record.id),
-      claims: ((claims || []) as BenchmarkEvidenceClaimRow[])
-        .filter((claim) => claim.golden_record_id === record.id),
+      sources: evidenceSources.filter((source) => source.golden_record_id === record.id),
+      claims: claims.filter((claim) => claim.golden_record_id === record.id),
     });
     const readiness = benchmarkEvidenceFreezeReadiness({
       record: benchmarkRecord,

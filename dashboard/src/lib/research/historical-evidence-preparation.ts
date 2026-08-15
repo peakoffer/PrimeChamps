@@ -101,6 +101,13 @@ export type CommonCrawlCapture = {
   warcUrl: string;
 };
 
+export type OfficialCommissionAdultEvidence = {
+  birthDate: string;
+  domain: string;
+  excerpt: string;
+  publishedAt: string;
+};
+
 export type PreparedEvidenceClaim = {
   claimType: "sport_identity" | "adult_eligibility" | "candidate_evidence" | "athlete_profile" | "athletic_momentum" | "audience_signal" | "commercial_achievability_signal";
   claimText: string;
@@ -585,6 +592,101 @@ export function archivedHtmlToText(html: string) {
     .replace(/\n\s*\n+/g, "\n")
     .trim()
     .slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters);
+}
+
+function trustedAthleticCommissionDocumentDomain(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname.endsWith(".gov")
+      || hostname === "myfloridalicense.com"
+      || hostname.endsWith(".myfloridalicense.com");
+  } catch {
+    return false;
+  }
+}
+
+function regulatorDateTokens(publishedAt: string) {
+  const date = new Date(publishedAt);
+  if (!Number.isFinite(date.getTime())) return [];
+  const year = String(date.getUTCFullYear());
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return [`${year}${month}${day}`, `${month}-${day}-${year.slice(-2)}`, `${month}_${day}_${year.slice(-2)}`];
+}
+
+function ageOnDate(birthDate: string, at: string) {
+  const birth = new Date(birthDate);
+  const observed = new Date(at);
+  if (!Number.isFinite(birth.getTime()) || !Number.isFinite(observed.getTime())) return null;
+  let age = observed.getUTCFullYear() - birth.getUTCFullYear();
+  if (observed.getUTCMonth() < birth.getUTCMonth()
+    || (observed.getUTCMonth() === birth.getUTCMonth() && observed.getUTCDate() < birth.getUTCDate())) age -= 1;
+  return age;
+}
+
+/**
+ * Extract an exact DOB only from an official commission participant table.
+ * The athlete, regulator ID, DOB header, sport, and dated document must all
+ * agree; other dates such as license expiration are rejected by the adult-age
+ * plausibility check.
+ */
+export function extractOfficialCommissionAdultEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceText: string;
+  publishedAt: string;
+  evidenceCutoffAt: string;
+}): OfficialCommissionAdultEvidence | null {
+  if (!trustedAthleticCommissionDocumentDomain(input.sourceUrl)) return null;
+  const publishedAt = new Date(input.publishedAt);
+  const cutoff = new Date(input.evidenceCutoffAt);
+  if (!Number.isFinite(publishedAt.getTime()) || !Number.isFinite(cutoff.getTime())
+    || publishedAt > cutoff) return null;
+  const dateTokens = regulatorDateTokens(input.publishedAt);
+  if (!dateTokens.some((token) => input.sourceUrl.toLowerCase().includes(token.toLowerCase()))) return null;
+
+  const lines = input.sourceText.split(/\r?\n/);
+  const normalizedAthlete = normalizeEvidenceText(input.athleteName);
+  const matches: Array<{ birthDate: string; excerpt: string }> = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const row = lines[index];
+    if (!` ${normalizeEvidenceText(row)} `.includes(` ${normalizedAthlete} `)) continue;
+    if (!/\b[A-Z]{2}-?\d{5,}\b/.test(row)) continue;
+    // Multi-page commission exports often print the table header only once,
+    // then place several bouts beneath it. Keep the window bounded but wide
+    // enough to retain that header on a normal results page.
+    const priorLines = lines.slice(Math.max(0, index - 80), index + 1);
+    const header = [...priorLines].reverse().find((line) => /\bDOB\b/i.test(line)
+      && /\b(?:ATHLETE|PARTICIPANT)\b/i.test(line));
+    if (!header) continue;
+    const context = lines.slice(Math.max(0, index - 80), Math.min(lines.length, index + 3)).join("\n");
+    if (!benchmarkSourceSupportsSport(input.sport, context)) continue;
+    const birthDates = Array.from(row.matchAll(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})\b/g), (match) => {
+      const month = Number(match[1]);
+      const day = Number(match[2]);
+      const rawYear = Number(match[3]);
+      const year = match[3].length === 2 ? (rawYear <= 30 ? 2000 + rawYear : 1900 + rawYear) : rawYear;
+      return normalizeNumericBirthDate(year, month, day);
+    }).filter((value): value is string => Boolean(value))
+      .filter((birthDate) => {
+        const age = ageOnDate(birthDate, input.publishedAt);
+        return age !== null && age >= 21 && age <= 80;
+      });
+    for (const birthDate of new Set(birthDates)) {
+      matches.push({ birthDate, excerpt: `${header}\n${row}`.slice(0, 1_000) });
+    }
+  }
+  const uniqueBirthDates = new Set(matches.map((match) => match.birthDate));
+  if (uniqueBirthDates.size !== 1) return null;
+  const winner = matches.find((match) => match.birthDate === [...uniqueBirthDates][0]);
+  if (!winner) return null;
+  return {
+    birthDate: winner.birthDate,
+    domain: benchmarkSourceDomain(input.sourceUrl),
+    excerpt: winner.excerpt,
+    publishedAt: publishedAt.toISOString(),
+  };
 }
 
 const RESERVED_INSTAGRAM_PATHS = new Set([
