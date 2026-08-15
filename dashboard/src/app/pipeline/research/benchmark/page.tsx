@@ -418,6 +418,11 @@ export default function ResearchBenchmarkPage() {
       const [payload, preparationPayload, benchmarkPayload, socialBladePayload] = await Promise.all([
         response.json(), preparationResponse.json(), benchmarkResponse.json(), socialBladeResponse.json(),
       ]);
+      // Connector health must not fall back to its initial "missing" state just
+      // because an unrelated benchmark panel fails to load.
+      if (socialBladeResponse.ok) {
+        setSocialBladePlan(socialBladePayload || INITIAL_SOCIAL_BLADE_PLAN);
+      }
       if (!response.ok) throw new Error(payload.error || "Could not load benchmark records");
       if (!preparationResponse.ok) throw new Error(preparationPayload.error || "Could not load evidence preparation");
       if (!benchmarkResponse.ok) throw new Error(benchmarkPayload.error || "Could not load benchmark runs");
@@ -434,7 +439,6 @@ export default function ResearchBenchmarkPage() {
       setEvidencePreparationMode(preparationPayload.preparationMode === "age_recovery" ? "age_recovery" : "baseline");
       setBenchmarkRuns(benchmarkPayload.runs || []);
       setBenchmarkReadiness(benchmarkPayload.readiness || INITIAL_BENCHMARK_READINESS);
-      setSocialBladePlan(socialBladePayload || INITIAL_SOCIAL_BLADE_PLAN);
       setSelected((current) => current
         ? (payload.records || []).find((record: GoldenRecord) => record.id === current.id) || null
         : null
