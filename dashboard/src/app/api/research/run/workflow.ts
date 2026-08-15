@@ -3789,7 +3789,7 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
         output_config: { format: { type: "json_schema", schema } },
         messages: [{ role: "user", content: sanitizeUnicodeForJson(prompt) }],
       }),
-    });
+    }, attempt === 1 ? 75_000 : 120_000);
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);
       throw new Error(`${model} audit failed (${response.status}): ${details || response.statusText}`);
@@ -4668,7 +4668,7 @@ Respond with ONLY valid JSON:
             : `${prompt}\n\nYour previous response was not valid complete JSON. Return one complete JSON object only, with no markdown fence or extra prose.`),
         }],
       }),
-    });
+    }, attempt === 1 ? 75_000 : 120_000);
 
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);

@@ -557,6 +557,7 @@ test("Anthropic structured-output retries expand truncated scoring and audit bud
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
   assert.match(workflow, /const maxTokens = attempt === 1 \? 2_400 : 4_800/);
   assert.match(workflow, /const maxTokens = attempt === 1 \? 1_800 : 3_600/);
+  assert.equal((workflow.match(/attempt === 1 \? 75_000 : 120_000/g) || []).length, 2);
   assert.match(workflow, /stop_reason\?: string/);
   assert.match(workflow, /stop=\$\{payload\.stop_reason \|\| "unknown"\}/);
   assert.match(workflow, /stop=\$\{data\.stop_reason \|\| "unknown"\}/);
