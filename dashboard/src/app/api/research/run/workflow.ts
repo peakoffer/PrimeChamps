@@ -51,6 +51,7 @@ import {
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  researchV2CommercialAccessSnapshot,
   researchV2PreAuditEvidenceComplete,
   stableEvidenceSetHash,
   type ResearchV2CitedSignal,
@@ -3925,14 +3926,17 @@ async function auditPriorityCandidate(
   );
 
   let independentResults: Array<{ title: string; url: string; snippet: string }> = [];
+  let commercialConstraintSearchCompleted = false;
   try {
     const currentYear = new Date().getUTCFullYear();
     const auditSearch = await runApifyGoogleSearchQueries([
       `"${athlete.name}" ${athlete.sport} ${currentYear} results ranking roster award breakout`,
       `"${athlete.name}" ${athlete.sport} agent representation management NIL sponsorship`,
       `"${athlete.name}" ${athlete.sport} creator YouTube podcast vlog lifestyle collaboration business`,
+      `"${athlete.name}" ${athlete.sport} sponsorship exclusivity content policy social media commercial restrictions`,
       `"${athlete.name}" ${athlete.sport} retired injury controversy contract`,
     ], 10);
+    commercialConstraintSearchCompleted = true;
     independentResults = auditSearch.results.filter((result) =>
       evidenceNamesAthlete(athlete.name, `${result.title} ${result.snippet}`)
     );
@@ -3940,11 +3944,18 @@ async function auditPriorityCandidate(
     log(`    Independent audit search failed for ${athlete.name}: ${describeError(error)}`);
   }
   const claimSample = await refetchMaterialClaimSample(athlete);
+  const commercialAccess = researchV2CommercialAccessSnapshot({
+    bio: athlete.bio,
+    followerCount: athlete.follower_count,
+    engagementRate: athlete.engagement_rate,
+  });
   const blindPrompt = `You are the independent blind auditor for a Prime Champs athlete research candidate.
 
 You have NOT been shown the Researcher's score. Independently determine whether the public evidence supports this person as a current, source-verified adult athlete and whether the research is complete enough to judge OnlyFans fit and commercial achievability.
 
 Check for wrong-person matches, stale roster/career information, unsupported claims, missing contradictory evidence, unverified adult eligibility, weak source provenance, and missing representation/economics/access constraints. Independently require a specific current athletic-momentum source, a meaningful verified audience, a concrete source-backed creator/content behavior signal, and a completed exact-match OnlyFans platform check. No exact profile is neutral. An exact active profile is positive evidence; an exact inactive, closed, or dormant profile is a critical contradiction. Sponsorship alone is not creator behavior. Do not infer adult-content willingness from appearance or identity.
+
+For this top-of-funnel decision, "commercial constraints complete" means the public dossier establishes an actionable business or representation contact route, measured audience scale, and a completed public search for known sponsorship/contract/policy restrictions. Exact rates and private contract terms are normally unavailable before contact: record them as unknown and lower achievability/confidence, but do not fail the candidate for those private unknowns alone. Fail this gate when there is no actionable contact route, the public constraint search did not complete, or a known public conflict is unresolved.
 
 CANDIDATE (NO PROPOSED SCORE):
 - Name: ${athlete.name}
@@ -3959,6 +3970,7 @@ CANDIDATE (NO PROPOSED SCORE):
 - Instagram profile / bio: ${athlete.instagram_url || "missing"} / ${(athlete.bio || "not available").slice(0, 500)}
 - Recent Instagram posts: ${(athlete.latest_posts || []).slice(0, 6).map((post) => `${post.timestamp || "unknown date"} (${post.url || "missing URL"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "none"}
 - Exact OnlyFans platform check: completed ${athlete.onlyfans_platform_check_completed === true ? "yes" : "no"}; status ${athlete.onlyfans_platform_status || "unknown"}; exact match ${athlete.onlyfans_profile_exact_match === true ? "yes" : "no"}; profile ${athlete.onlyfans_profile_url || athlete.onlyfans_profile_username || "none"}; last seen ${athlete.onlyfans_profile_last_seen || "unknown"}; posts ${athlete.onlyfans_profile_posts_count ?? "unknown"}; subscriptions ${athlete.onlyfans_subscriptions_open === null || athlete.onlyfans_subscriptions_open === undefined ? "unknown" : athlete.onlyfans_subscriptions_open ? "open" : "closed"}; ${athlete.onlyfans_platform_reason || "no provider explanation"}
+- Top-of-funnel commercial access: actionable route ${commercialAccess.actionableContactRoute ? "yes" : "no"}; audience scale measured ${commercialAccess.audienceScaleMeasured ? "yes" : "no"}; public constraint search completed ${commercialConstraintSearchCompleted ? "yes" : "no"}; ${commercialAccess.signals.join("; ") || "no public route or audience baseline"}
 - Research evidence: ${(athlete.evidence || []).slice(0, 12).map((item) => `${(item.title || "Source").slice(0, 200)} (${item.url || "missing URL"}): ${(item.sourceExcerpt || item.claim).slice(0, 700)}`).join(" | ") || "none"}
 - Independently retrieved audit evidence: ${independentResults.slice(0, 10).map((item) => `${item.title.slice(0, 200)} (${item.url}): ${item.snippet.slice(0, 500)}`).join(" | ") || "none retrieved"}
 - Random claim re-fetch: ${claimSample.sampled} sampled; ${claimSample.unsupported} failed; ${claimSample.failures.join(" | ") || "no failures"}
@@ -4026,6 +4038,9 @@ Return pass only if the proposed dimensions are justified and there is no critic
     !blind.audience_evidence_passed ? "Independent auditor did not verify meaningful audience evidence" : null,
     !blind.creator_evidence_passed ? "Independent auditor did not verify creator potential" : null,
     !blind.commercial_constraints_complete ? "Commercial access, representation, or economics constraints remain incomplete" : null,
+    !commercialAccess.actionableContactRoute ? "No actionable public business or representation contact route was established" : null,
+    !commercialAccess.audienceScaleMeasured ? "Follower and engagement evidence did not establish measurable audience scale" : null,
+    !commercialConstraintSearchCompleted ? "Public sponsorship, contract, and content-policy constraint research did not complete" : null,
   ].filter((gap): gap is string => Boolean(gap));
   const unsupportedBlindClaims = Array.isArray(blind.unsupported_claims)
     ? blind.unsupported_claims.filter((claim): claim is string => typeof claim === "string" && Boolean(claim.trim()))
@@ -4043,6 +4058,9 @@ Return pass only if the proposed dimensions are justified and there is no critic
     || !blind.audience_evidence_passed
     || !blind.creator_evidence_passed
     || !blind.commercial_constraints_complete
+    || !commercialAccess.actionableContactRoute
+    || !commercialAccess.audienceScaleMeasured
+    || !commercialConstraintSearchCompleted
     || !deterministicEvidence.currentMomentum
     || !deterministicEvidence.meaningfulAudience
     || !deterministicEvidence.creatorPotential
@@ -4120,7 +4138,10 @@ Return pass only if the proposed dimensions are justified and there is no critic
     meaningfulAudienceVerified: deterministicEvidence.meaningfulAudience && blind.audience_evidence_passed,
     creatorPotentialVerified: deterministicEvidence.creatorPotential && blind.creator_evidence_passed,
     onlyFansPlatformActivityCompatible: deterministicEvidence.onlyFansPlatformCompatible,
-    commercialConstraintsComplete: blind.commercial_constraints_complete,
+    commercialConstraintsComplete: blind.commercial_constraints_complete
+      && commercialAccess.actionableContactRoute
+      && commercialAccess.audienceScaleMeasured
+      && commercialConstraintSearchCompleted,
     materialClaimsVerified: blind.source_verification_passed && claimSample.unsupported === 0 && (blind.unsupported_claims?.length || 0) === 0,
     auditorVerdict: verdict,
     criticalGapCount: criticalGaps.length,
@@ -4526,6 +4547,8 @@ DIMENSION CALIBRATION:
 2. CREATOR / BUSINESS FIT (25%)
    - Personal-brand ownership, content consistency, and direct audience relationship
    - Fitness, lifestyle, behind-the-scenes, or personality-led content is a useful signal
+   - Prefer explicit paid-partnership/ad posts, named podcasts/videos/newsletters, or documented recurring creator work over vague lifestyle captions
+   - Describe only the observable behavior in the cited post; a vague "link in bio" or personal announcement is not evidence of a creator platform, product, revenue, or adult-content interest
    - Never infer willingness to create adult content from appearance or identity
 
 3. AUDIENCE QUALITY & GROWTH (20%; active thesis range is ${thesisParams.follower_min.toLocaleString()}-${thesisParams.follower_max.toLocaleString()})

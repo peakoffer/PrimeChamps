@@ -42,6 +42,7 @@ import {
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  researchV2CommercialAccessSnapshot,
   researchV2PreAuditEvidenceComplete,
   researchV2CitedSignalIsSourceBacked,
   stableEvidenceSetHash,
@@ -557,6 +558,30 @@ test("Anthropic structured-output retries expand truncated scoring and audit bud
   assert.match(workflow, /stop_reason\?: string/);
   assert.match(workflow, /stop=\$\{payload\.stop_reason \|\| "unknown"\}/);
   assert.match(workflow, /stop=\$\{data\.stop_reason \|\| "unknown"\}/);
+});
+
+test("top-of-funnel commercial readiness requires a public route and measured audience", () => {
+  const direct = researchV2CommercialAccessSnapshot({
+    bio: "Business inquiries: devon@example.com",
+    followerCount: 138_791,
+    engagementRate: 12.95,
+  });
+  assert.equal(direct.actionableContactRoute, true);
+  assert.equal(direct.audienceScaleMeasured, true);
+
+  const represented = researchV2CommercialAccessSnapshot({
+    bio: "Business inquiries: @valorsportsagency",
+    followerCount: 76_614,
+    engagementRate: 8.67,
+  });
+  assert.equal(represented.actionableContactRoute, true);
+
+  const personalOnly = researchV2CommercialAccessSnapshot({
+    bio: "Athlete | coffee | travel",
+    followerCount: 76_614,
+    engagementRate: 8.67,
+  });
+  assert.equal(personalOnly.actionableContactRoute, false);
 });
 
 test("enrichment checkpoint forks discard prior scoring and audit artifacts", () => {

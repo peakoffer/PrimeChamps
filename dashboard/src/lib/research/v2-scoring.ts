@@ -16,6 +16,35 @@ export type ResearchV2EvidenceSource = {
   text?: string;
 };
 
+export function researchV2CommercialAccessSnapshot(input: {
+  bio?: string | null;
+  followerCount?: number | null;
+  engagementRate?: number | null;
+}) {
+  const bio = input.bio?.trim() || "";
+  const emails = Array.from(new Set(bio.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || []));
+  const businessLanguage = /\b(?:business inquiries?|booking|collabs?|collaborations?|management|manager|agency|agent|representation)\b/i.test(bio);
+  const taggedAccounts = businessLanguage
+    ? Array.from(new Set(bio.match(/@[a-z0-9._]+/gi) || []))
+    : [];
+  const actionableContactRoute = emails.length > 0 || taggedAccounts.length > 0;
+  const audienceScaleMeasured = typeof input.followerCount === "number"
+    && input.followerCount > 0
+    && typeof input.engagementRate === "number"
+    && input.engagementRate >= 0;
+  return {
+    actionableContactRoute,
+    audienceScaleMeasured,
+    signals: [
+      ...emails.map((email) => `public business email: ${email}`),
+      ...taggedAccounts.map((handle) => `public business/representation account: ${handle}`),
+      ...(audienceScaleMeasured
+        ? [`verified audience baseline: ${input.followerCount} followers at ${input.engagementRate}% engagement`]
+        : []),
+    ],
+  };
+}
+
 function bounded(value: number) {
   if (!Number.isFinite(value)) throw new Error("Research V2 scores must be finite numbers");
   return Math.max(0, Math.min(100, Math.round(value * 100) / 100));
