@@ -3789,7 +3789,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /Promise\.all\(records\.flatMap/);
   assert.match(workflow, /eligibility_momentum/);
   assert.match(workflow, /audience_creator/);
-  assert.match(workflow, /Age recovery gets one narrow search; signal recovery gets two/);
+  assert.match(workflow, /Age recovery gets one narrow search with a slightly wider result window/);
   assert.match(workflow, /name: "adult_eligibility"/);
   assert.match(workflow, /input\.preparationMode === "age_recovery"/);
   assert.match(workflow, /requireSportInDiscoveryMetadata: preparationMode !== "age_recovery"/);
@@ -3797,9 +3797,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /directDatedArticleRejection/);
   assert.match(workflow, /max_uses: 1/);
   assert.match(workflow, /max_tool_calls: 1/);
+  assert.match(workflow, /maximumResults = preparationMode === "age_recovery" \? 8 : 5/);
+  assert.match(workflow, /Do not stop after finding one strong source/);
   assert.match(workflow, /reasoning: \{ effort: "low", exclude: true \}/);
   assert.match(workflow, /tool_choice: "required"/);
-  assert.match(workflow, /max_tokens: 650/);
+  assert.match(workflow, /max_tokens: preparationMode === "age_recovery" \? 900 : 650/);
   assert.match(workflow, /server_tool_use\?\.web_search_requests/);
   assert.match(workflow, /reportedSearchRequests \|\| \(sources\.length > 0 \? 1 : 0\)/);
   assert.match(workflow, /searchRequests \* 12_000/);

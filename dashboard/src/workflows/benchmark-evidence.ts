@@ -258,12 +258,17 @@ async function discoverGroundedDeepSources(
       name: "audience_creator",
       objective: "Find a numeric follower, subscriber, fan, reach, view, or social-audience measurement and repeated creator activity such as posts, videos, vlogs, podcasts, photos, interviews, newsletters, or social publishing. Prioritize archived sponsorship decks, media kits, athlete marketplaces, analytics directories, sponsor profiles, personal sites, Linktree-style profiles, and reputable creator or trade coverage.",
     }] as const;
-  // Age recovery gets one narrow search; signal recovery gets two. Both lanes
-  // stay bounded to one tool call and five cited URLs per athlete. Search
-  // results remain discovery metadata only; every accepted claim must still
-  // pass the immutable pre-cutoff archive validator.
+  // Age recovery gets one narrow search with a slightly wider result window
+  // because the benchmark requires two independent adult sources. Signal
+  // recovery gets two lanes with the original five-result ceiling. Both stay
+  // bounded to one tool call per lane, and search results remain discovery
+  // metadata until the immutable pre-cutoff archive validator accepts them.
   const calls = await Promise.all(records.flatMap((record) => lanes.map(async (lane) => {
-    const prompt = `Use the web-search tool exactly once. Find up to five direct, archive-friendly public webpages for this exact athlete and this evidence lane only:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\nEvidence lane: ${lane.name}\nObjective: ${lane.objective}\n\nThe underlying fact and source page must have existed on or before the cutoff. Include multilingual sources and exact-handle pages when helpful. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, matching sport, and explicit source text supporting a claim.`;
+    const maximumResults = preparationMode === "age_recovery" ? 8 : 5;
+    const ageSearchInstruction = preparationMode === "age_recovery"
+      ? ` Search the exact quoted name with multiple explicit age constructions (for example "years old", "N anni", "N años", "N ans", and birth-date terms). Do not stop after finding one strong source: find independent domains until the ${maximumResults}-result ceiling.`
+      : "";
+    const prompt = `Use the web-search tool exactly once. Find up to ${maximumResults} direct, archive-friendly public webpages for this exact athlete and this evidence lane only:\n\nAthlete: ${record.athlete_name}\nSport: ${record.sport}\nEvidence cutoff: ${record.evidence_cutoff_at.slice(0, 10)}\nKnown Instagram handle at the time: ${record.instagram_handle || "not available"}\nEvidence lane: ${lane.name}\nObjective: ${lane.objective}${ageSearchInstruction}\n\nThe underlying fact and source page must have existed on or before the cutoff. Include multilingual sources and exact-handle pages when helpful. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use any eventual commercial outcome. Cite every result in the final response. A separate deterministic archive validator will reject any URL without an immutable pre-cutoff capture, exact athlete identity, matching sport, and explicit source text supporting a claim.`;
     try {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -282,10 +287,10 @@ async function discoverGroundedDeepSources(
             parameters: {
               engine: "exa",
               mode: "deep",
-              max_results: 5,
+              max_results: maximumResults,
               max_uses: 1,
-              max_total_results: 5,
-              max_characters: 3_000,
+              max_total_results: maximumResults,
+              max_characters: preparationMode === "age_recovery" ? 4_500 : 3_000,
               excluded_domains: [
                 "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
                 "threads.net", "x.com", "twitter.com", "wikipedia.org", "reddit.com",
@@ -294,7 +299,7 @@ async function discoverGroundedDeepSources(
           }],
           tool_choice: "required",
           max_tool_calls: 1,
-          max_tokens: 650,
+          max_tokens: preparationMode === "age_recovery" ? 900 : 650,
           provider: { require_parameters: true, data_collection: "deny" },
         }),
         signal: AbortSignal.timeout(60_000),
