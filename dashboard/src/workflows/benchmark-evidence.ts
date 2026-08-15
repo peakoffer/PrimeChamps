@@ -17,6 +17,7 @@ import {
   extractCommonCrawlWarcBody,
   extractOfficialDatedProfileEvidence,
   extractPreparedArchivedEvidence,
+  groundedHistoricalSignalDiscoveryCandidates,
   preparedEvidenceSignalSupported,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
@@ -54,6 +55,8 @@ type EvidencePreparationWorkflowInput = {
   benchmarkSplit: "excluded" | "development" | "held_out" | null;
   queryPlanVersion: string;
   reuseProviderRunId?: string;
+  reuseDeepDiscoveryCandidates?: Record<string, HistoricalSearchCandidate[]>;
+  reuseDeepDiscoveryModel?: string | null;
 };
 
 type SearchPage = {
@@ -78,6 +81,14 @@ type DiscoveryBatch = {
   sourceApifyCostMicrousd: number | null;
   discoveryReused: boolean;
   chargedEventCounts: Record<string, number>;
+  deepDiscoveryModel: string | null;
+  deepDiscoveryInputTokens: number;
+  deepDiscoveryOutputTokens: number;
+  deepDiscoveryCostMicrousd: number | null;
+  deepDiscoverySourceCount: number;
+  deepDiscoveryError: string | null;
+  deepDiscoveryReused: boolean;
+  deepDiscoveryCandidatesByRecord: Record<string, HistoricalSearchCandidate[]>;
 };
 
 type StoredPreparedSignalClaim = {
@@ -185,6 +196,150 @@ function quotedAthleteName(query: string) {
 function normalizeName(value: string) {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
     .replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+async function discoverGroundedDeepSignalSources(records: EvidencePreparationRecord[]) {
+  const empty = {
+    candidatesByRecord: Object.fromEntries(records.map((record) => [record.id, [] as HistoricalSearchCandidate[]])),
+    model: null as string | null,
+    inputTokens: 0,
+    outputTokens: 0,
+    costMicrousd: null as number | null,
+    sourceCount: 0,
+    error: null as string | null,
+  };
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey || !records.length) return empty;
+  const model = process.env.OPENROUTER_EVIDENCE_DISCOVERY_MODEL?.trim()
+    || process.env.OPENROUTER_IDENTITY_MODEL?.trim()
+    || "google/gemini-3.6-flash";
+  const cases = records.map((record) => ({
+    athlete_name: record.athlete_name,
+    sport: record.sport,
+    evidence_cutoff: record.evidence_cutoff_at.slice(0, 10),
+    instagram_handle: record.instagram_handle || null,
+  }));
+  const prompt = `Find archive-friendly public webpages that may contain historical audience-size or creator-activity evidence for these athletes:\n${JSON.stringify(cases)}\n\nSearch multilingual editorial interviews, athlete profiles, trade coverage, sponsor profiles, personal websites, and independent analytics pages. Prefer pages published on or before each athlete's evidence_cutoff. Exclude Instagram, Facebook, TikTok, YouTube, LinkedIn, X, Threads, Wikipedia, Reddit, search pages, and OnlyFans. Do not infer facts and do not use the eventual commercial outcome. Return at most four direct source URLs per athlete, using only URLs actually consulted by the web-search tool. The URLs are only discovery candidates; a separate deterministic archive validator will reject anything without an immutable pre-cutoff capture, exact athlete identity, and matching sport.`;
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "https://crm.prime-champs.com",
+        "X-Title": "Prime Champs Historical Evidence Discovery",
+      },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        tools: [{
+          type: "openrouter:web_search",
+          parameters: {
+            engine: "exa",
+            max_results: 6,
+            max_total_results: Math.min(60, Math.max(12, records.length * 6)),
+            excluded_domains: [
+              "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "linkedin.com",
+              "threads.net", "x.com", "twitter.com", "wikipedia.org", "reddit.com",
+            ],
+          },
+        }],
+        tool_choice: "auto",
+        include: ["web_search_call.action.sources"],
+        max_output_tokens: 2_500,
+        store: false,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "prime_champs_historical_signal_sources",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                athletes: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      athlete_name: { type: "string" },
+                      source_urls: { type: "array", items: { type: "string" } },
+                    },
+                    required: ["athlete_name", "source_urls"],
+                  },
+                },
+              },
+              required: ["athletes"],
+            },
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) {
+      return { ...empty, model, error: `OpenRouter deep discovery failed (${response.status}): ${(await response.text()).slice(0, 500)}` };
+    }
+    const data = await response.json() as {
+      status?: string;
+      model?: string;
+      output_text?: string;
+      incomplete_details?: { reason?: string };
+      output?: Array<{
+        type?: string;
+        action?: { sources?: Array<{ url?: string; title?: string }> };
+        content?: Array<{
+          type?: string;
+          text?: string;
+          refusal?: string;
+          annotations?: Array<{
+            type?: string;
+            url?: string;
+            title?: string;
+            url_citation?: { url?: string; title?: string };
+          }>;
+        }>;
+      }>;
+      usage?: { input_tokens?: number; output_tokens?: number; cost?: number };
+    };
+    if (data.status && data.status !== "completed") {
+      return { ...empty, model: data.model || model, error: `OpenRouter deep discovery was incomplete (${data.incomplete_details?.reason || data.status})` };
+    }
+    const messageParts = (data.output || []).flatMap((item) => item.type === "message" ? item.content || [] : []);
+    const refusal = messageParts.find((part) => part.type === "refusal")?.refusal;
+    if (refusal) return { ...empty, model: data.model || model, error: `OpenRouter deep discovery refused: ${refusal.slice(0, 300)}` };
+    const outputText = messageParts.map((part) => part.type === "output_text" ? part.text || "" : "").join("\n")
+      || data.output_text || "";
+    const objectText = outputText.match(/\{[\s\S]*\}/)?.[0];
+    if (!objectText) return { ...empty, model: data.model || model, error: "OpenRouter deep discovery returned no structured output" };
+    const payload = JSON.parse(objectText) as { athletes?: Array<{ athlete_name?: unknown; source_urls?: unknown }> };
+    const consultedSources = (data.output || []).flatMap((item) =>
+      item.type?.includes("web_search") ? item.action?.sources || [] : []
+    );
+    const citedSources = messageParts.flatMap((part) => part.annotations || [])
+      .filter((annotation) => annotation.type === "url_citation")
+      .map((annotation) => ({
+        url: annotation.url || annotation.url_citation?.url,
+        title: annotation.title || annotation.url_citation?.title,
+      }));
+    const groundedSources = [...consultedSources, ...citedSources];
+    const candidatesByRecord = groundedHistoricalSignalDiscoveryCandidates({
+      records,
+      proposed: Array.isArray(payload.athletes) ? payload.athletes : [],
+      consultedSources: groundedSources,
+    });
+    return {
+      candidatesByRecord,
+      model: data.model || model,
+      inputTokens: data.usage?.input_tokens || 0,
+      outputTokens: data.usage?.output_tokens || 0,
+      costMicrousd: typeof data.usage?.cost === "number" ? Math.round(data.usage.cost * 1_000_000) : null,
+      sourceCount: groundedSources.filter((source) => typeof source.url === "string" && source.url.startsWith("http")).length,
+      error: null,
+    };
+  } catch (error) {
+    return { ...empty, model, error: error instanceof Error ? error.message.slice(0, 500) : "OpenRouter deep discovery failed" };
+  }
 }
 
 function validatePreparationRecord(
@@ -333,6 +488,32 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     }
     grouped.set(record.id, previous);
   }
+  const reusableDeepDiscoveryCandidates = input.reuseDeepDiscoveryCandidates;
+  const reusableDeepDiscoveryCount = Object.values(reusableDeepDiscoveryCandidates || {})
+    .reduce((sum, candidates) => sum + candidates.length, 0);
+  const deepDiscovery = input.preparationMode === "signal_recovery" && reusableDeepDiscoveryCount > 0
+    ? {
+      candidatesByRecord: reusableDeepDiscoveryCandidates!,
+      model: input.reuseDeepDiscoveryModel || "saved_grounded_discovery_checkpoint",
+      inputTokens: 0,
+      outputTokens: 0,
+      costMicrousd: 0,
+      sourceCount: reusableDeepDiscoveryCount,
+      error: null,
+      reused: true,
+    }
+    : input.preparationMode === "signal_recovery"
+      ? { ...(await discoverGroundedDeepSignalSources(records)), reused: false }
+      : {
+      candidatesByRecord: Object.fromEntries(records.map((record) => [record.id, [] as HistoricalSearchCandidate[]])),
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costMicrousd: null,
+      sourceCount: 0,
+      error: null,
+      reused: false,
+    };
   const wikimediaCandidates = input.preparationMode === "age_recovery"
     ? await discoverWikimediaAgeCandidates(records)
     : new Map<string, HistoricalSearchCandidate[]>();
@@ -347,6 +528,7 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
         }),
         ...buildOfficialDatedProfileCandidates(record),
         ...(wikimediaCandidates.get(record.id) || []),
+        ...(deepDiscovery.candidatesByRecord[record.id] || []),
         ...(grouped.get(record.id) || []),
       ], {
         preferAuthoritativeAgeSources: input.preparationMode === "age_recovery",
@@ -361,6 +543,14 @@ async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInpu
     sourceApifyCostMicrousd,
     discoveryReused,
     chargedEventCounts: provider.usage.chargedEventCounts,
+    deepDiscoveryModel: deepDiscovery.model,
+    deepDiscoveryInputTokens: deepDiscovery.inputTokens,
+    deepDiscoveryOutputTokens: deepDiscovery.outputTokens,
+    deepDiscoveryCostMicrousd: deepDiscovery.costMicrousd,
+    deepDiscoverySourceCount: deepDiscovery.sourceCount,
+    deepDiscoveryError: deepDiscovery.error,
+    deepDiscoveryReused: deepDiscovery.reused,
+    deepDiscoveryCandidatesByRecord: deepDiscovery.candidatesByRecord,
   };
 }
 discoverHistoricalEvidence.maxRetries = 0;
@@ -1054,6 +1244,15 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           source_apify_cost_microusd: discovery.sourceApifyCostMicrousd,
           charged_event_counts: discovery.chargedEventCounts,
           discovered_url_count: Object.values(discovery.candidatesByRecord).reduce((sum, values) => sum + values.length, 0),
+          deep_discovery_model: discovery.deepDiscoveryModel,
+          deep_discovery_input_tokens: discovery.deepDiscoveryInputTokens,
+          deep_discovery_output_tokens: discovery.deepDiscoveryOutputTokens,
+          deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
+          deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
+          deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+          deep_discovery_error: discovery.deepDiscoveryError,
+          deep_discovery_reused: discovery.deepDiscoveryReused,
+          deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
           scoring_tokens_spent: 0,
         },
       },
@@ -1118,6 +1317,15 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             last_record_id: record.id,
             processed_record_ids: results.map((result) => result.recordId),
             provider_run_id: discovery.providerRunId,
+            deep_discovery_model: discovery.deepDiscoveryModel,
+            deep_discovery_input_tokens: discovery.deepDiscoveryInputTokens,
+            deep_discovery_output_tokens: discovery.deepDiscoveryOutputTokens,
+            deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
+            deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
+            deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+            deep_discovery_error: discovery.deepDiscoveryError,
+            deep_discovery_reused: discovery.deepDiscoveryReused,
+            deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
             scoring_tokens_spent: 0,
           },
         },
@@ -1132,6 +1340,15 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       maxApifyChargeUsd: input.maxApifyChargeUsd,
       actualApifyCostMicrousd: discovery.actualApifyCostMicrousd,
       sourceApifyCostMicrousd: discovery.sourceApifyCostMicrousd,
+      deepDiscoveryModel: discovery.deepDiscoveryModel,
+      deepDiscoveryInputTokens: discovery.deepDiscoveryInputTokens,
+      deepDiscoveryOutputTokens: discovery.deepDiscoveryOutputTokens,
+      deepDiscoveryTokensSpent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
+      deepDiscoveryCostMicrousd: discovery.deepDiscoveryCostMicrousd,
+      deepDiscoverySourceCount: discovery.deepDiscoverySourceCount,
+      deepDiscoveryError: discovery.deepDiscoveryError,
+      deepDiscoveryReused: discovery.deepDiscoveryReused,
+      deepDiscoveryCandidatesByRecord: discovery.deepDiscoveryCandidatesByRecord,
       scoringTokensSpent: 0,
       excludedUnsupportedSignals: signalReconciliation.excludedUnsupportedSignals,
       excludedUnsupportedAgeClaims: adultReconciliation.excludedUnsupportedAgeClaims,
@@ -1162,6 +1379,15 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
             provider_run_id: discovery.providerRunId,
             processed_record_ids: results.map((result) => result.recordId),
             deferred_archive_candidates: unresolvedDeferredCandidates,
+            deep_discovery_model: discovery.deepDiscoveryModel,
+            deep_discovery_input_tokens: discovery.deepDiscoveryInputTokens,
+            deep_discovery_output_tokens: discovery.deepDiscoveryOutputTokens,
+            deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
+            deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
+            deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+            deep_discovery_error: discovery.deepDiscoveryError,
+            deep_discovery_reused: discovery.deepDiscoveryReused,
+            deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
             scoring_tokens_spent: 0,
           },
           summary,
@@ -1188,6 +1414,15 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
           benchmark_split: input.benchmarkSplit,
           provider_run_id: discovery.providerRunId,
           processed_record_ids: results.map((result) => result.recordId),
+          deep_discovery_model: discovery.deepDiscoveryModel,
+          deep_discovery_input_tokens: discovery.deepDiscoveryInputTokens,
+          deep_discovery_output_tokens: discovery.deepDiscoveryOutputTokens,
+          deep_discovery_tokens_spent: discovery.deepDiscoveryInputTokens + discovery.deepDiscoveryOutputTokens,
+          deep_discovery_cost_microusd: discovery.deepDiscoveryCostMicrousd,
+          deep_discovery_source_count: discovery.deepDiscoverySourceCount,
+          deep_discovery_error: discovery.deepDiscoveryError,
+          deep_discovery_reused: discovery.deepDiscoveryReused,
+          deep_discovery_candidates: discovery.deepDiscoveryCandidatesByRecord,
           scoring_tokens_spent: 0,
         },
         summary,

@@ -12,7 +12,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-archive-friendly-signal-recovery-v9";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-grounded-deep-signal-recovery-v10";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
@@ -1670,6 +1670,47 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
 const HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS = new Set([
   "facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com",
 ]);
+
+export function groundedHistoricalSignalDiscoveryCandidates(input: {
+  records: Array<Pick<EvidencePreparationRecord, "id" | "athlete_name" | "sport" | "evidence_cutoff_at">>;
+  proposed: Array<{ athlete_name?: unknown; source_urls?: unknown }>;
+  consultedSources: Array<{ url?: unknown; title?: unknown }>;
+}) {
+  const recordByName = new Map(input.records.map((record) => [normalizeEvidenceText(record.athlete_name), record]));
+  const consultedByUrl = new Map(input.consultedSources.flatMap((source) => {
+    const url = typeof source.url === "string" ? source.url.trim() : "";
+    const normalized = normalizedUrlForComparison(url);
+    return normalized ? [[normalized, { url, title: typeof source.title === "string" ? source.title.trim() : "" }] as const] : [];
+  }));
+  const grouped = new Map(input.records.map((record) => [record.id, [] as HistoricalSearchCandidate[]]));
+  for (const proposal of input.proposed) {
+    const athleteName = typeof proposal.athlete_name === "string" ? proposal.athlete_name.trim() : "";
+    const record = recordByName.get(normalizeEvidenceText(athleteName));
+    if (!record || !Array.isArray(proposal.source_urls)) continue;
+    const candidates = grouped.get(record.id) || [];
+    for (const value of proposal.source_urls.slice(0, 6)) {
+      if (typeof value !== "string") continue;
+      const grounded = consultedByUrl.get(normalizedUrlForComparison(value));
+      if (!grounded) continue;
+      const evidenceText = `${grounded.title}\n${grounded.url}`;
+      const domain = benchmarkSourceDomain(grounded.url);
+      if (!domain || HISTORICAL_DISCOVERY_EXCLUDED_DOMAINS.has(domain)
+        || domain === "youtube.com" || domain === "linkedin.com" || domain === "threads.net"
+        || !benchmarkSourceNamesAthlete(record.athlete_name, evidenceText)
+        || !benchmarkSourceSupportsSport(record.sport, evidenceText)) continue;
+      candidates.push({
+        query: `Grounded deep signal discovery for "${record.athlete_name}" before ${record.evidence_cutoff_at.slice(0, 10)}`,
+        title: grounded.title || `${record.athlete_name} ${record.sport} profile`,
+        url: grounded.url,
+        snippet: `${record.athlete_name} ${record.sport} archive candidate returned by a grounded source-discovery tool; no claim is trusted until archive extraction passes.`,
+        position: candidates.length + 1,
+      });
+      if (candidates.length >= 4) break;
+    }
+    grouped.set(record.id, candidates);
+  }
+  return Object.fromEntries(grouped);
+}
 const AUTHORITATIVE_AGE_SOURCE_DOMAINS = new Set([
   "wikipedia.org", "olympedia.org", "paralympic.org", "teamusa.com",
   "worldathletics.org", "worldaquatics.com", "olympics.com", "espn.com",

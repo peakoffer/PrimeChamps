@@ -112,6 +112,7 @@ import {
   extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
   extractPreparedArchivedEvidence,
+  groundedHistoricalSignalDiscoveryCandidates,
   historicalDiscoveryReplayCoverageMatches,
   normalizeWikipediaWikitext,
   normalizeEvidencePreparationBudget,
@@ -2821,6 +2822,36 @@ test("historical signal recovery searches multilingual sport aliases instead of 
   assert.match(freediving[3], /freediving OR freediver OR apnea OR apnée/);
 });
 
+test("grounded deep signal discovery accepts only consulted exact-athlete sport sources", () => {
+  const records = [{
+    id: "tessa",
+    athlete_name: "Tessa Thyssen",
+    sport: "Surfing",
+    evidence_cutoff_at: "2026-07-07T12:00:00.000Z",
+  }];
+  const riderPost = "https://www.theriderpost.com/disciplines/water/surf/tessa-thyssen-surfe-fesses/";
+  const candidates = groundedHistoricalSignalDiscoveryCandidates({
+    records,
+    proposed: [{
+      athlete_name: "Tessa Thyssen",
+      source_urls: [
+        riderPost,
+        "https://not-consulted.example/surf/tessa-thyssen",
+        "https://youtube.com/watch?v=tessa",
+        "https://example.com/surf/someone-else",
+        "https://example.com/tennis/tessa-thyssen",
+      ],
+    }],
+    consultedSources: [
+      { url: riderPost, title: "Tessa Thyssen : Surfer, c'est montrer ses fesses" },
+      { url: "https://youtube.com/watch?v=tessa", title: "Tessa Thyssen surfing interview" },
+      { url: "https://example.com/surf/someone-else", title: "Someone Else surfing interview" },
+      { url: "https://example.com/tennis/tessa-thyssen", title: "Tessa Thyssen tennis profile" },
+    ],
+  });
+  assert.deepEqual(candidates.tessa?.map((candidate) => candidate.url), [riderPost]);
+});
+
 test("generated material signals require explicit athlete-relevant language", () => {
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "Skip to main content Instagram YouTube"), false);
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);
@@ -2926,6 +2957,14 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /maxTotalChargeUsd: input\.maxApifyChargeUsd/);
   assert.match(workflow, /outside the enforced \$0\.50-\$1\.00 range/);
   assert.match(workflow, /scoringTokensSpent: 0/);
+  assert.match(workflow, /openrouter:web_search/);
+  assert.match(workflow, /engine: "exa"/);
+  assert.match(workflow, /max_output_tokens: 2_500/);
+  assert.match(workflow, /groundedHistoricalSignalDiscoveryCandidates/);
+  assert.match(workflow, /deepDiscoveryCostMicrousd/);
+  assert.match(workflow, /deep_discovery_tokens_spent/);
+  assert.match(route, /deepDiscoveryConfigured/);
+  assert.match(benchmarkPage, /grounded search/);
   assert.match(workflow, /item\.archiveProvider \|\| "internet_archive_wayback"/);
   assert.match(workflow, /selectCommonCrawlCapture/);
   assert.match(workflow, /Range: `bytes=\$\{capture\.offset\}-\$\{lastByte\}`/);

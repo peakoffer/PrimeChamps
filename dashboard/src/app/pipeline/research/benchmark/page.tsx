@@ -75,6 +75,13 @@ type EvidencePreparationRun = {
     benchmark_split?: "excluded" | "development" | "held_out" | null;
     processed_record_ids?: string[];
     provider_run_id?: string;
+    deep_discovery_model?: string | null;
+    deep_discovery_input_tokens?: number;
+    deep_discovery_output_tokens?: number;
+    deep_discovery_tokens_spent?: number;
+    deep_discovery_cost_microusd?: number | null;
+    deep_discovery_source_count?: number;
+    deep_discovery_error?: string | null;
   } | null;
   created_at: string;
 };
@@ -894,7 +901,7 @@ export default function ResearchBenchmarkPage() {
       if (!response.ok) throw new Error(payload.error || "Fresh signal recovery failed to start");
       setMessage(payload.discoveryReused
         ? `Queued ${payload.records} fresh positive cases from a saved discovery checkpoint. New Apify spend and scoring-token spend are zero.`
-        : `Queued ${payload.records} fresh positive cases with a $${payload.maxApifyChargeUsd.toFixed(2)} discovery ceiling. Scoring tokens and outreach mutations remain zero.`
+        : `Queued ${payload.records} fresh positive cases with a $${payload.maxApifyChargeUsd.toFixed(2)} Google discovery ceiling${payload.deepDiscoveryConfigured ? " plus one bounded grounded OpenRouter/Exa source search" : ""}. Scoring tokens and outreach mutations remain zero.`
       );
       await load();
     } catch (error) {
@@ -1190,7 +1197,14 @@ export default function ResearchBenchmarkPage() {
         {latestEvidenceRun && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-500">
             <span>Latest evidence run: <strong className="font-medium text-zinc-300">{titleize(latestEvidenceRun.status)}</strong> · {latestEvidenceRun.records_ready}/{latestEvidenceRun.records_processed} packets ready · {latestEvidenceRun.safe_claim_count} safe claims</span>
-            <span>Discovery ceiling ${(latestEvidenceRun.max_apify_charge_microusd / 1_000_000).toFixed(2)} USD · scoring tokens 0</span>
+            <span>
+              Discovery ceiling ${(latestEvidenceRun.max_apify_charge_microusd / 1_000_000).toFixed(2)} USD
+              {latestEvidenceRun.checkpoint?.deep_discovery_model
+                ? ` · grounded search ${latestEvidenceRun.checkpoint.deep_discovery_tokens_spent || 0} tokens${typeof latestEvidenceRun.checkpoint.deep_discovery_cost_microusd === "number" ? ` / $${(latestEvidenceRun.checkpoint.deep_discovery_cost_microusd / 1_000_000).toFixed(4)}` : ""}`
+                : ""}
+              {latestEvidenceRun.checkpoint?.deep_discovery_error ? " · grounded search failed safely" : ""}
+              {" · scoring tokens 0"}
+            </span>
             {latestEvidenceRun.error_message && <span className="w-full text-red-300/80">{latestEvidenceRun.error_message}</span>}
           </div>
         )}

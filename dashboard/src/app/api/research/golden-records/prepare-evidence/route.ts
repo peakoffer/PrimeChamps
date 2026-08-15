@@ -15,6 +15,7 @@ import {
   historicalEvidenceQueryPlanVersion,
   normalizeEvidencePreparationBudget,
   type HistoricalEvidencePreparationMode,
+  type HistoricalSearchCandidate,
 } from "@/lib/research/historical-evidence-preparation";
 import { prepareBenchmarkEvidenceWorkflow } from "@/workflows/benchmark-evidence";
 import {
@@ -80,6 +81,30 @@ function completedRecordIds(
       ? run.record_ids.filter((id): id is string => typeof id === "string")
       : [];
   }));
+}
+
+function replayableDeepDiscoveryCandidates(value: unknown, recordIds: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const candidates = Object.fromEntries(recordIds.map((recordId) => {
+    const items = Array.isArray(raw[recordId]) ? raw[recordId] as unknown[] : [];
+    return [recordId, items.slice(0, 4).flatMap((item): HistoricalSearchCandidate[] => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const candidate = item as Record<string, unknown>;
+      const url = typeof candidate.url === "string" ? candidate.url.slice(0, 2_000) : "";
+      if (!url.startsWith("https://")) return [];
+      return [{
+        query: typeof candidate.query === "string" ? candidate.query.slice(0, 500) : "Saved grounded deep discovery",
+        title: typeof candidate.title === "string" ? candidate.title.slice(0, 300) : "Historical source",
+        url,
+        snippet: typeof candidate.snippet === "string" ? candidate.snippet.slice(0, 700) : "",
+        position: typeof candidate.position === "number" && Number.isFinite(candidate.position)
+          ? candidate.position
+          : undefined,
+      }];
+    })];
+  }));
+  return Object.values(candidates).some((items) => items.length > 0) ? candidates : undefined;
 }
 
 async function unresolvedFitRecordsForAgeRecovery(input: {
@@ -480,6 +505,13 @@ export async function POST(request: NextRequest) {
     const reuseProviderRunId = typeof reusableCheckpoint?.provider_run_id === "string"
       ? reusableCheckpoint.provider_run_id
       : typeof reusableSummary?.providerRunId === "string" ? reusableSummary.providerRunId : undefined;
+    const reuseDeepDiscoveryCandidates = replayableDeepDiscoveryCandidates(
+      reusableCheckpoint?.deep_discovery_candidates || reusableSummary?.deepDiscoveryCandidatesByRecord,
+      recordIds,
+    );
+    const reuseDeepDiscoveryModel = typeof reusableCheckpoint?.deep_discovery_model === "string"
+      ? reusableCheckpoint.deep_discovery_model
+      : typeof reusableSummary?.deepDiscoveryModel === "string" ? reusableSummary.deepDiscoveryModel : null;
     const { data: preparationRun, error: insertError } = await admin.from("research_evidence_preparation_runs").insert({
       organization_id: user.organizationId,
       requested_by_user_id: user.id,
@@ -512,6 +544,8 @@ export async function POST(request: NextRequest) {
         benchmarkSplit: preparationMode === "signal_recovery" ? signalRecoverySplit : null,
         queryPlanVersion,
         reuseProviderRunId,
+        reuseDeepDiscoveryCandidates,
+        reuseDeepDiscoveryModel,
       }]);
       const { error: linkError } = await admin.from("research_evidence_preparation_runs")
         .update({ workflow_run_id: workflow.runId })
@@ -526,6 +560,8 @@ export async function POST(request: NextRequest) {
         maxApifyChargeUsd,
         preparationMode,
         discoveryReused: Boolean(reuseProviderRunId),
+        deepDiscoveryReused: Boolean(reuseDeepDiscoveryCandidates),
+        deepDiscoveryConfigured: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
         scoringTokensSpent: 0,
       }, { status: 202 });
     } catch (error) {
