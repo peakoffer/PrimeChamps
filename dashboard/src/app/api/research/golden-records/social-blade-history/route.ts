@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { runApifyActorWithUsage } from "@/lib/apify";
 import {
   diagnoseSocialBladeInstagramResponse,
+  fetchSocialBladeInstagramHistory,
   inspectSocialBladeCredentials,
   prepareApifyPublicSocialBladeInstagramSnapshot,
   prepareSocialBladeInstagramSnapshot,
@@ -248,20 +249,12 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
 async function fetchSocialBladeHistory(candidate: Candidate) {
   const credentials = socialBladeCredentials();
   if (!credentials) throw new Error("Social Blade credentials are not configured");
-  const url = new URL("https://matrix.sbapis.com/b/instagram/statistics");
-  url.searchParams.set("query", candidate.handle);
-  url.searchParams.set("history", candidate.tier);
-  url.searchParams.set("allow-stale", "true");
-  const response = await fetch(url, {
-    headers: { clientid: credentials.clientId, token: credentials.token },
-    cache: "no-store",
-    signal: AbortSignal.timeout(30_000),
+  const { payload, sourceUrl } = await fetchSocialBladeInstagramHistory({
+    ...credentials,
+    handle: candidate.handle,
+    history: candidate.tier,
   });
-  const payload = await response.json() as SocialBladeInstagramResponse;
-  if (!response.ok || payload.status?.success !== true) {
-    throw new Error(payload.status?.error || `Social Blade request failed (${response.status})`);
-  }
-  return { payload, sourceUrl: url.toString() };
+  return { payload, sourceUrl };
 }
 
 async function checkSocialBladeConnection(organizationId: string) {

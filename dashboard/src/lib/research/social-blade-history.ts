@@ -88,6 +88,17 @@ export type SocialBladeHistoricalClaim = {
   material: true;
 };
 
+export type SocialBladeAudienceTrend = {
+  handle: string;
+  startAt: string;
+  endAt: string;
+  startFollowers: number;
+  endFollowers: number;
+  followerGrowthAbsolute: number;
+  followerGrowthPercent: number;
+  daysBetweenSnapshots: number;
+};
+
 export type SocialBladeInstagramResponseDiagnostics = {
   expectedHandle: string | null;
   returnedHandle: string | null;
@@ -121,6 +132,80 @@ export type ApifyPublicSocialBladeRow = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
+
+export async function fetchSocialBladeInstagramHistory(input: {
+  clientId: string;
+  token: string;
+  handle: string;
+  history?: SocialBladeHistoryTier;
+  timeoutMs?: number;
+}) {
+  const handle = normalizeHandle(input.handle);
+  if (!input.clientId.trim() || !input.token.trim()) throw new Error("Social Blade credentials are not configured");
+  if (!handle) throw new Error("A Social Blade Instagram handle is required");
+  const url = new URL("https://matrix.sbapis.com/b/instagram/statistics");
+  url.searchParams.set("query", handle);
+  url.searchParams.set("history", input.history || "default");
+  url.searchParams.set("allow-stale", "true");
+  const response = await fetch(url, {
+    headers: { clientid: input.clientId.trim(), token: input.token.trim() },
+    cache: "no-store",
+    signal: AbortSignal.timeout(input.timeoutMs ?? 30_000),
+  });
+  const payload = await response.json() as SocialBladeInstagramResponse;
+  if (!response.ok || payload.status?.success !== true) {
+    throw new Error(payload.status?.error || `Social Blade request failed (${response.status})`);
+  }
+  return { payload, sourceUrl: url.toString() };
+}
+
+/**
+ * Produces a real follower-growth window only when Social Blade returns an
+ * exact-handle pair of dated rows at least 30 days apart. Shorter windows are
+ * intentionally neutral so a few days of ordinary variance cannot be called
+ * growth or decline by either model.
+ */
+export function prepareSocialBladeAudienceTrend(input: {
+  expectedHandle: string;
+  response: SocialBladeInstagramResponse;
+  minimumWindowDays?: number;
+  maximumWindowDays?: number;
+}): SocialBladeAudienceTrend | null {
+  const expectedHandle = normalizeHandle(input.expectedHandle);
+  const returnedHandle = normalizeHandle(input.response.data?.id?.username);
+  if (!expectedHandle || returnedHandle !== expectedHandle || input.response.status?.success !== true) return null;
+  const minimumWindowDays = Math.max(30, input.minimumWindowDays ?? 30);
+  const maximumWindowDays = Math.max(minimumWindowDays, Math.min(90, input.maximumWindowDays ?? 45));
+  const rows = (input.response.data?.statistics?.daily || input.response.data?.daily || [])
+    .flatMap((metric) => {
+      const timestamp = typeof metric.date === "string" ? Date.parse(metric.date) : Number.NaN;
+      const followers = validMetric(metric.followers);
+      return Number.isFinite(timestamp) && followers !== null && followers > 0
+        ? [{ timestamp, followers: Math.round(followers) }]
+        : [];
+    })
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const end = rows.at(-1);
+  if (!end) return null;
+  const eligibleStarts = rows.filter((row) => {
+    const days = Math.floor((end.timestamp - row.timestamp) / DAY_MS);
+    return days >= minimumWindowDays && days <= maximumWindowDays;
+  });
+  const start = eligibleStarts.at(-1);
+  if (!start) return null;
+  const daysBetweenSnapshots = Math.floor((end.timestamp - start.timestamp) / DAY_MS);
+  const followerGrowthAbsolute = end.followers - start.followers;
+  return {
+    handle: expectedHandle,
+    startAt: new Date(start.timestamp).toISOString(),
+    endAt: new Date(end.timestamp).toISOString(),
+    startFollowers: start.followers,
+    endFollowers: end.followers,
+    followerGrowthAbsolute,
+    followerGrowthPercent: Math.round((followerGrowthAbsolute / start.followers) * 100 * 10_000) / 10_000,
+    daysBetweenSnapshots,
+  };
+}
 
 function normalizeHandle(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/^@/, "").toLowerCase() : "";

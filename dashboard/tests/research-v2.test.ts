@@ -109,6 +109,7 @@ import {
   diagnoseSocialBladeInstagramResponse,
   inspectSocialBladeCredentials,
   prepareApifyPublicSocialBladeInstagramSnapshot,
+  prepareSocialBladeAudienceTrend,
   prepareSocialBladeInstagramSnapshot,
   socialBladeHistoryTierForCutoff,
 } from "../src/lib/research/social-blade-history.ts";
@@ -1006,6 +1007,52 @@ test("Social Blade failure diagnostics separate wrong handles from stale cutoff 
     latestPreCutoffAgeDays: 63,
   });
   assert.equal("credits" in diagnostics, false, "credit/account data must not leak into diagnostics");
+});
+
+test("Social Blade audience trend requires an exact handle and at least a 30-day window", () => {
+  const response = {
+    status: { success: true },
+    data: {
+      id: { username: "example.athlete" },
+      statistics: {
+        daily: [
+          { date: "2026-07-01T00:00:00.000Z", followers: 100_000 },
+          { date: "2026-07-20T00:00:00.000Z", followers: 101_000 },
+          { date: "2026-08-01T00:00:00.000Z", followers: 104_000 },
+        ],
+      },
+    },
+  };
+  assert.deepEqual(prepareSocialBladeAudienceTrend({
+    expectedHandle: "@example.athlete",
+    response,
+  }), {
+    handle: "example.athlete",
+    startAt: "2026-07-01T00:00:00.000Z",
+    endAt: "2026-08-01T00:00:00.000Z",
+    startFollowers: 100_000,
+    endFollowers: 104_000,
+    followerGrowthAbsolute: 4_000,
+    followerGrowthPercent: 4,
+    daysBetweenSnapshots: 31,
+  });
+  assert.equal(prepareSocialBladeAudienceTrend({
+    expectedHandle: "different.person",
+    response,
+  }), null);
+  assert.equal(prepareSocialBladeAudienceTrend({
+    expectedHandle: "example.athlete",
+    response: {
+      status: { success: true },
+      data: {
+        id: { username: "example.athlete" },
+        daily: [
+          { date: "2026-07-20T00:00:00.000Z", followers: 101_000 },
+          { date: "2026-08-01T00:00:00.000Z", followers: 104_000 },
+        ],
+      },
+    },
+  }), null);
 });
 
 test("Apify public Social Blade recovery requires an exact dated daily row and never backdates a current profile", () => {
@@ -1943,7 +1990,9 @@ test("live research evaluation exits before athlete writes and suppresses notifi
   assert.match(workflow, /athlete\.age_corroborated === true/);
   assert.match(workflow, /athlete\.identity_corroborated === true/);
   assert.match(workflow, /evaluateCorroboratedInstagramIdentity/);
-  assert.match(workflow, /research-v2\.3-rubric-onlyfans-platform-activity-gate-v4/);
+  assert.match(workflow, /research-v2\.4-rubric-audit-qualified-band-social-blade-v5/);
+  assert.match(workflow, /lookupSocialBladeAuditSignal/);
+  assert.match(workflow, /short-window snapshot only/);
   assert.match(workflow, /two independent agreeing public sources/);
   assert.match(workflow, /lookupOnlyFansPlatformSignals/);
   assert.match(workflow, /OnlyFans platform check did not complete/);

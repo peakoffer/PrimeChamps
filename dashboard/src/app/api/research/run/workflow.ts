@@ -80,6 +80,16 @@ import {
   selectOnlyFansPlatformSignal,
   type OnlyFansPlatformSignal,
 } from "@/lib/research/onlyfans-platform-signal";
+import {
+  fetchSocialBladeInstagramHistory,
+  inspectSocialBladeCredentials,
+  prepareSocialBladeAudienceTrend,
+  type SocialBladeAudienceTrend,
+} from "@/lib/research/social-blade-history";
+import {
+  estimateBenchmarkCostMicrousd,
+  sonnetPriceSnapshot,
+} from "@/lib/research/benchmark-runner-support";
 
 const APIFY_API_KEY = process.env.APIFY_API_KEY;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
@@ -87,6 +97,8 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_RESEARCH_MODEL = process.env.OPENAI_RESEARCH_MODEL || "gpt-5.6";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const SOCIAL_BLADE_CLIENT_ID = process.env.SOCIAL_BLADE_CLIENT_ID;
+const SOCIAL_BLADE_TOKEN = process.env.SOCIAL_BLADE_TOKEN;
 const OPENROUTER_IDENTITY_MODEL = process.env.OPENROUTER_IDENTITY_MODEL || "google/gemini-3.7-flash";
 const RESEARCH_IDENTITY_PROVIDER = process.env.RESEARCH_IDENTITY_PROVIDER === "openrouter"
   ? "openrouter"
@@ -162,7 +174,7 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
 } as const;
 
 const RESEARCH_V2_RUBRIC_DEFINITION = {
-  version: "v2.3",
+  version: "v2.4",
   dimensions: {
     onlyfans_fit: "Public-evidence opportunity quality, independent of price or access",
     commercial_achievability: "Access, representation, likely economics, geography, and realistic close probability",
@@ -188,8 +200,8 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   },
 } as const;
 
-const RESEARCHER_PROMPT_RECORD = "Research V2.3 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity, two independent agreeing sources proving 21+ eligibility, and a completed exact-match OnlyFans platform check with no inactive-profile contradiction.";
-const AUDITOR_PROMPT_RECORD = "Research V2.3 blind auditor: independently verify corroborated exact-person Instagram identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, exact-match OnlyFans platform activity compatibility, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score.";
+const RESEARCHER_PROMPT_RECORD = "Research V2.4 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity, two independent agreeing sources proving 21+ eligibility, and a completed exact-match OnlyFans platform check with no inactive-profile contradiction. Audience windows shorter than 30 days are neutral.";
+const AUDITOR_PROMPT_RECORD = "Research V2.4 blind auditor: independently verify corroborated exact-person Instagram identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, exact-match OnlyFans platform activity compatibility, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score. Fully passing top-of-funnel evidence is calibrated into the qualified band without requiring owned media or private contract terms.";
 
 const RESEARCH_AUDIT_BLIND_SCHEMA = {
   type: "object",
@@ -678,10 +690,10 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
   const { data: rubric, error: rubricError } = await supabase.from("research_rubric_versions").upsert({
     organization_id: input.organizationId,
     rubric_key: "onlyfans_fit_achievability_confidence",
-    version: 4,
-    name: "OnlyFans fit, achievability, confidence, and priority v2.3",
+    version: 5,
+    name: "OnlyFans fit, achievability, confidence, and priority v2.4",
     definition: RESEARCH_V2_RUBRIC_DEFINITION,
-    definition_hash: "research-v2.3-rubric-onlyfans-platform-activity-gate-v4",
+    definition_hash: "research-v2.4-rubric-audit-qualified-band-social-blade-v5",
     status: "active",
     activated_at: new Date().toISOString(),
   }, { onConflict: "organization_id,rubric_key,version" }).select("id").single();
@@ -694,13 +706,13 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
       .eq("prompt_key", promptKey)
       .eq("role", role)
       .eq("status", "active")
-      .neq("version", 4);
+      .neq("version", 5);
     if (promptArchiveError) throw promptArchiveError;
     const { data, error } = await supabase.from("research_prompt_versions").upsert({
       organization_id: input.organizationId,
       prompt_key: promptKey,
       role,
-      version: 4,
+      version: 5,
       content,
       content_hash: contentHash,
       output_schema: role === "auditor"
@@ -713,8 +725,8 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     return data.id as string;
   };
   const [researcherPromptVersionId, auditorPromptVersionId] = await Promise.all([
-    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.3-researcher-onlyfans-platform-activity-gate-v4"),
-    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.3-blind-auditor-onlyfans-platform-activity-gate-v4"),
+    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.4-researcher-neutral-short-growth-v5"),
+    ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.4-blind-auditor-qualified-band-social-blade-v5"),
   ]);
 
   const ensureModel = async (capability: "judgment" | "audit") => {
@@ -763,7 +775,8 @@ function evidenceSourceType(url: string) {
 async function persistResearchV2EvidenceAndScore(
   input: ResearchWorkflowInput,
   athlete: ScoredAthlete,
-  artifacts: ResearchV2Artifacts
+  artifacts: ResearchV2Artifacts,
+  scoringModel: string
 ): Promise<ScoredAthlete> {
   if (athlete.research_score_id) return athlete;
   const candidateKey = researchCandidateKey(athlete.name, athlete.sport);
@@ -877,6 +890,12 @@ async function persistResearchV2EvidenceAndScore(
       && athlete.identity_corroborated === true
       && (athlete.identity_confidence || 0) >= 70 ? 0 : 1,
     is_final: false,
+    cost_microusd: estimatedSonnetCostMicrousd(scoringModel, {
+      inputTokens: athlete.researcher_input_tokens || 0,
+      outputTokens: athlete.researcher_output_tokens || 0,
+      cacheCreationInputTokens: athlete.researcher_cache_creation_input_tokens || 0,
+      cacheReadInputTokens: athlete.researcher_cache_read_input_tokens || 0,
+    }),
     input_tokens: athlete.researcher_input_tokens || 0,
     output_tokens: athlete.researcher_output_tokens || 0,
     cache_creation_input_tokens: athlete.researcher_cache_creation_input_tokens || 0,
@@ -3715,7 +3734,7 @@ async function scoreAthletes(
     }));
     const completedBatch = batchScores.filter((candidate): candidate is ScoredAthlete => candidate !== null);
     const versionedBatch = await Promise.all(
-      completedBatch.map((candidate) => persistResearchV2EvidenceAndScore(input, candidate, v2Artifacts))
+      completedBatch.map((candidate) => persistResearchV2EvidenceAndScore(input, candidate, v2Artifacts, scoringModel))
     );
     await persistPartialScoringCheckpoint(input, versionedBatch, scoringModel);
     scored.push(...versionedBatch);
@@ -3771,6 +3790,20 @@ function normalizedAnthropicUsage(usage: AnthropicUsage | undefined) {
   };
 }
 
+function estimatedSonnetCostMicrousd(model: string, usage: {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+}) {
+  try {
+    return estimateBenchmarkCostMicrousd(usage, sonnetPriceSnapshot(model));
+  } catch (error) {
+    log(`    Sonnet cost estimate unavailable for ${model}: ${describeError(error)}`);
+    return 0;
+  }
+}
+
 async function callStructuredAuditModel<T>(model: string, prompt: string, schema: Record<string, unknown>) {
   if (!ANTHROPIC_API_KEY) throw new Error("Anthropic audit model is not configured");
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -3820,6 +3853,56 @@ async function callStructuredAuditModel<T>(model: string, prompt: string, schema
 function auditTokenSet(value: string) {
   return new Set(value.toLowerCase().replace(/<[^>]+>/g, " ").replace(/[^a-z0-9]+/g, " ")
     .split(" ").filter((token) => token.length >= 5));
+}
+
+type SocialBladeAuditSignal = {
+  lookupCompleted: boolean;
+  creditsRemaining: number | null;
+  trend: SocialBladeAudienceTrend | null;
+  reason: string;
+};
+
+async function lookupSocialBladeAuditSignal(athlete: ScoredAthlete): Promise<SocialBladeAuditSignal> {
+  const credentialStatus = inspectSocialBladeCredentials({
+    clientId: SOCIAL_BLADE_CLIENT_ID,
+    token: SOCIAL_BLADE_TOKEN,
+  });
+  if (!credentialStatus.usable || !SOCIAL_BLADE_CLIENT_ID || !SOCIAL_BLADE_TOKEN || !athlete.instagram_handle) {
+    return {
+      lookupCompleted: false,
+      creditsRemaining: null,
+      trend: null,
+      reason: credentialStatus.validationError || "Social Blade audit history was not configured",
+    };
+  }
+  try {
+    const { payload } = await fetchSocialBladeInstagramHistory({
+      clientId: SOCIAL_BLADE_CLIENT_ID,
+      token: SOCIAL_BLADE_TOKEN,
+      handle: athlete.instagram_handle,
+      history: "default",
+    });
+    const trend = prepareSocialBladeAudienceTrend({
+      expectedHandle: athlete.instagram_handle,
+      response: payload,
+    });
+    const creditsRemaining = typeof payload.info?.credits?.available === "number"
+      ? payload.info.credits.available
+      : null;
+    log(`    Social Blade audit history checked for @${athlete.instagram_handle}; ${trend ? `${trend.daysBetweenSnapshots}-day trend measured` : "no qualifying 30-day trend"}${creditsRemaining === null ? "" : `; ${creditsRemaining} credits remain`}`);
+    return {
+      lookupCompleted: true,
+      creditsRemaining,
+      trend,
+      reason: trend
+        ? `Exact-handle ${trend.daysBetweenSnapshots}-day follower trend measured`
+        : "Exact-handle lookup completed, but no two dated rows at least 30 days apart were returned",
+    };
+  } catch (error) {
+    const reason = `Social Blade audit history failed safely: ${describeError(error)}`;
+    log(`    ${reason}`);
+    return { lookupCompleted: false, creditsRemaining: null, trend: null, reason };
+  }
 }
 
 type ResearchV2EvidenceCandidate = EnrichedAthlete & {
@@ -3949,6 +4032,7 @@ async function auditPriorityCandidate(
     log(`    Independent audit search failed for ${athlete.name}: ${describeError(error)}`);
   }
   const claimSample = await refetchMaterialClaimSample(athlete);
+  const socialBladeAudience = await lookupSocialBladeAuditSignal(athlete);
   const commercialAccess = researchV2CommercialAccessSnapshot({
     bio: athlete.bio,
     followerCount: athlete.follower_count,
@@ -3965,7 +4049,13 @@ Creator potential is about demonstrated ability to sustain personal audience con
 
 Calibration rules: an exact-match OnlyFans check that completed with no profile found is neutral and must not reduce fit, achievability, or confidence. A follower-growth snapshot shorter than 30 days is also neutral and must not be treated as flat or declining growth. Score only the positive evidence and material unresolved risks actually present in the dossier.
 
-For this top-of-funnel decision, "commercial constraints complete" means the public dossier establishes an actionable business or representation contact route, measured audience scale, and a completed public search for known sponsorship/contract/policy restrictions. Exact rates and private contract terms are normally unavailable before contact: record them as unknown and lower achievability/confidence, but do not fail the candidate for those private unknowns alone. Fail this gate when there is no actionable contact route, the public constraint search did not complete, or a known public conflict is unresolved.
+Score-band calibration for this top-of-funnel review:
+- Fit 80 means evidence-backed and ready for human review, not perfect and not guaranteed to convert. When current momentum, meaningful audience, and substantive creator activity all pass with no contradiction, fit should normally be 80-84. An owned podcast, vlog, newsletter, or recurring series can strengthen fit above that band but its absence cannot push an otherwise passing candidate below 80.
+- Achievability should normally be 70-84 when an actionable public business/representation route exists and the public restriction search found no known conflict. Unknown private rates or contract terms are expected before contact and cannot by themselves push achievability below 70.
+- Confidence should normally be 80-90 when identity, two-source adult eligibility, point-in-time currency, source verification, and the sampled-claim re-fetch all pass with zero unsupported claims. Private commercial terms do not lower research confidence.
+- Scores below those bands require a named failed gate, known conflict, contradiction, unsupported material claim, or other specific evidence weakness relevant to that dimension.
+
+For this top-of-funnel decision, "commercial constraints complete" means the public dossier establishes an actionable business or representation contact route, measured audience scale, and a completed public search for known sponsorship/contract/policy restrictions. Exact rates and private contract terms are normally unavailable before contact: record them as unknown and, at most, cap achievability within the qualified band; do not lower research confidence or fail the candidate for those private unknowns alone. Fail this gate when there is no actionable contact route, the public constraint search did not complete, or a known public conflict is unresolved.
 
 CANDIDATE (NO PROPOSED SCORE):
 - Name: ${athlete.name}
@@ -3982,11 +4072,14 @@ CANDIDATE (NO PROPOSED SCORE):
 - Exact OnlyFans platform check: completed ${athlete.onlyfans_platform_check_completed === true ? "yes" : "no"}; status ${athlete.onlyfans_platform_status || "unknown"}; exact match ${athlete.onlyfans_profile_exact_match === true ? "yes" : "no"}; profile ${athlete.onlyfans_profile_url || athlete.onlyfans_profile_username || "none"}; last seen ${athlete.onlyfans_profile_last_seen || "unknown"}; posts ${athlete.onlyfans_profile_posts_count ?? "unknown"}; subscriptions ${athlete.onlyfans_subscriptions_open === null || athlete.onlyfans_subscriptions_open === undefined ? "unknown" : athlete.onlyfans_subscriptions_open ? "open" : "closed"}; ${athlete.onlyfans_platform_reason || "no provider explanation"}
 - Top-of-funnel commercial access: actionable route ${commercialAccess.actionableContactRoute ? "yes" : "no"}; audience scale measured ${commercialAccess.audienceScaleMeasured ? "yes" : "no"}; public constraint search completed ${commercialConstraintSearchCompleted ? "yes" : "no"}; ${commercialAccess.signals.join("; ") || "no public route or audience baseline"}
 - Measured recent creator activity (90 days): substantive ${creatorActivity.substantiveCreatorActivity ? "yes" : "no"}; ${creatorActivity.recentPostCount} recent posts; ${creatorActivity.contentRichPostCount} content-rich; ${creatorActivity.personalNarrativePostCount} personal/behind-the-scenes; ${creatorActivity.ownedFormatPostCount} owned-format; ${creatorActivity.sponsoredPostCount} sponsored
+- Social Blade exact-handle audience history: ${socialBladeAudience.trend
+    ? `${socialBladeAudience.trend.followerGrowthPercent}% (${socialBladeAudience.trend.followerGrowthAbsolute >= 0 ? "+" : ""}${socialBladeAudience.trend.followerGrowthAbsolute}) over ${socialBladeAudience.trend.daysBetweenSnapshots} days, ${socialBladeAudience.trend.startAt.slice(0, 10)} to ${socialBladeAudience.trend.endAt.slice(0, 10)}`
+    : `${socialBladeAudience.reason}; neutral and do not infer growth or decline`}
 - Research evidence: ${(athlete.evidence || []).slice(0, 12).map((item) => `${(item.title || "Source").slice(0, 200)} (${item.url || "missing URL"}): ${(item.sourceExcerpt || item.claim).slice(0, 700)}`).join(" | ") || "none"}
 - Independently retrieved audit evidence: ${independentResults.slice(0, 10).map((item) => `${item.title.slice(0, 200)} (${item.url}): ${item.snippet.slice(0, 500)}`).join(" | ") || "none retrieved"}
 - Random claim re-fetch: ${claimSample.sampled} sampled; ${claimSample.unsupported} failed; ${claimSample.failures.join(" | ") || "no failures"}
 
-Return the strict JSON assessment. Independent fit, achievability, and confidence must be evidence-based; missing commercial facts lower achievability/confidence.`;
+Return the strict JSON assessment. Independent fit, achievability, and confidence must be evidence-based; missing required public commercial evidence lowers achievability, while ordinary private pre-contact unknowns do not lower research confidence.`;
   const blindCall = await callStructuredAuditModel<{
     identity_passed: boolean;
     eligibility_passed: boolean;
@@ -4025,7 +4118,8 @@ Return pass only if the proposed dimensions are justified and there is no critic
 CALIBRATION REMINDER:
 - Sustained recent personal/lifestyle/fitness/behind-the-scenes content is valid creator-potential evidence; an owned podcast/vlog/newsletter is helpful but not required.
 - A completed exact-match OnlyFans check with no profile found is neutral, not negative.
-- A follower-growth window under 30 days is neutral, not evidence of flat or declining growth.`;
+- A follower-growth window under 30 days is neutral, not evidence of flat or declining growth.
+- A candidate whose identity, eligibility, momentum, audience, creator evidence, commercial access, sources, and sampled claims all pass belongs in the qualified score bands above. Do not invent a perfection requirement after marking every gate passed.`;
   const reviewCall = await callStructuredAuditModel<{
     verdict: "pass" | "corrected" | "fail";
     corrected_fit_score: number;
@@ -4072,11 +4166,24 @@ CALIBRATION REMINDER:
     creatorEvidencePassed: blind.creator_evidence_passed,
     commercialConstraintsComplete: blind.commercial_constraints_complete,
   });
+  const rawReviewCriticalGaps = review.findings
+    .filter((finding) => finding.severity === "critical")
+    .map((finding) => finding.details);
+  const normalizedReviewCriticalGaps = normalizeResearchV2BlindCriticalGaps({
+    criticalGaps: rawReviewCriticalGaps,
+    identityPassed: blind.identity_passed,
+    eligibilityPassed: blind.eligibility_passed,
+    sourceVerificationPassed: blind.source_verification_passed,
+    currentMomentumPassed: blind.current_momentum_passed,
+    audienceEvidencePassed: blind.audience_evidence_passed,
+    creatorEvidencePassed: blind.creator_evidence_passed,
+    commercialConstraintsComplete: blind.commercial_constraints_complete,
+  });
   const criticalGaps = Array.from(new Set([
     ...normalizedBlindCriticalGaps,
     ...deterministicGaps,
     ...unsupportedBlindClaims.map((claim) => `Unsupported material claim: ${claim}`),
-    ...review.findings.filter((finding) => finding.severity === "critical").map((finding) => finding.details),
+    ...normalizedReviewCriticalGaps,
   ]));
   const forcedFailure = !blind.identity_passed
     || !blind.eligibility_passed
@@ -4096,6 +4203,19 @@ CALIBRATION REMINDER:
     || claimSample.unsupported > 0
     || criticalGaps.length > 0;
   const verdict = forcedFailure ? "fail" : review.verdict;
+  const auditCoreEvidencePassed = !forcedFailure;
+  const calibratedBlind = calibrateResearchV2QualifiedBand({
+    onlyfansFit: blind.independent_fit_score,
+    commercialAchievability: blind.independent_achievability_score,
+    researchConfidence: blind.independent_confidence_score,
+    allCoreEvidenceGatesPassed: auditCoreEvidencePassed,
+  });
+  const calibratedReview = calibrateResearchV2QualifiedBand({
+    onlyfansFit: review.corrected_fit_score,
+    commercialAchievability: review.corrected_achievability_score,
+    researchConfidence: review.corrected_confidence_score,
+    allCoreEvidenceGatesPassed: auditCoreEvidencePassed && review.verdict !== "fail",
+  });
   const corrected = buildAuditorConstrainedResearchV2Score({
     researcher: {
       onlyfansFit: athlete.onlyfans_fit_score,
@@ -4103,14 +4223,14 @@ CALIBRATION REMINDER:
       researchConfidence: athlete.research_confidence_score,
     },
     independentAudit: {
-      onlyfansFit: blind.independent_fit_score,
-      commercialAchievability: blind.independent_achievability_score,
-      researchConfidence: blind.independent_confidence_score,
+      onlyfansFit: calibratedBlind.onlyfansFit,
+      commercialAchievability: calibratedBlind.commercialAchievability,
+      researchConfidence: calibratedBlind.researchConfidence,
     },
     reviewCorrection: {
-      onlyfansFit: review.corrected_fit_score,
-      commercialAchievability: review.corrected_achievability_score,
-      researchConfidence: review.corrected_confidence_score,
+      onlyfansFit: calibratedReview.onlyfansFit,
+      commercialAchievability: calibratedReview.commercialAchievability,
+      researchConfidence: calibratedReview.researchConfidence,
     },
     hasCriticalGap: forcedFailure,
     unsupportedMaterialClaims: claimSample.unsupported + unsupportedBlindClaims.length,
@@ -4128,7 +4248,12 @@ CALIBRATION REMINDER:
     }),
   };
   const normalizedFindings = [
-    ...review.findings,
+    ...review.findings.map((finding) => ({
+      ...finding,
+      severity: finding.severity === "critical" && !normalizedReviewCriticalGaps.includes(finding.details)
+        ? "high" as const
+        : finding.severity,
+    })),
     ...deterministicGaps.map((detail) => ({
       failure_type: "criteria_drift",
       severity: "critical" as const,
@@ -4192,7 +4317,7 @@ CALIBRATION REMINDER:
       ...(athlete.evidence || []),
       ...independentResults.map((item) => ({ url: item.url, claim: item.snippet, sourceExcerpt: item.snippet })),
     ]),
-    assessment: { blind, review, claimSample, deterministicEvidence },
+    assessment: { blind, review, claimSample, deterministicEvidence, socialBladeAudience, calibratedBlind, calibratedReview },
     unsourced_claim_count: claimSample.unsupported + (blind.unsupported_claims?.length || 0),
     critical_gap_count: criticalGaps.length,
     is_final: passesFinal,
@@ -4227,6 +4352,7 @@ CALIBRATION REMINDER:
     commercial_constraints_complete: blind.commercial_constraints_complete,
     critical_gap_count: criticalGaps.length,
     summary: review.summary,
+    cost_microusd: estimatedSonnetCostMicrousd(scoringModel, auditUsage),
     input_tokens: auditUsage.inputTokens,
     output_tokens: auditUsage.outputTokens,
     cache_creation_input_tokens: auditUsage.cacheCreationInputTokens,
@@ -4532,7 +4658,11 @@ ATHLETE PROFILE:
 - Posts: ${athlete.posts_count || "unknown"}
 - Engagement: ${typeof athlete.engagement_rate === "number" ? `${athlete.engagement_rate.toFixed(2)}%` : "not available"}
 - Average likes/comments: ${typeof athlete.average_likes === "number" ? Math.round(athlete.average_likes).toLocaleString() : "not available"} / ${typeof athlete.average_comments === "number" ? Math.round(athlete.average_comments).toLocaleString() : "not available"}
-- Audience history: ${athlete.momentum_metrics?.status === "measured" ? `${athlete.momentum_metrics.follower_growth_percent?.toFixed(2) || "0.00"}% follower change over ${athlete.momentum_metrics.days_between_snapshots || "unknown"} days` : "baseline snapshot only; do not claim measured growth"}
+- Audience history: ${athlete.momentum_metrics?.status === "measured" && (athlete.momentum_metrics.days_between_snapshots || 0) >= 30
+    ? `${athlete.momentum_metrics.follower_growth_percent?.toFixed(2) || "0.00"}% follower change over ${athlete.momentum_metrics.days_between_snapshots} days`
+    : athlete.momentum_metrics?.status === "measured"
+      ? `short-window snapshot only (${athlete.momentum_metrics.days_between_snapshots || "unknown"} days); neutral, do not claim growth or decline`
+      : "baseline snapshot only; do not claim measured growth"}
 - Latest post date: ${athlete.last_posted_at || "not available"}
 - Recent post evidence: ${athlete.latest_posts?.slice(0, 4).map((post) => `${post.timestamp || "unknown date"} (${post.url || "URL unavailable"}): ${(post.caption || "no caption").slice(0, 300)}`).join(" | ") || "not available"}
 - Bio: ${athlete.bio || "No bio"}
@@ -4595,8 +4725,8 @@ DIMENSION CALIBRATION:
 
 V2 SEPARATE JUDGMENTS:
 - ONLYFANS FIT (0-100): public evidence that this is an attractive athlete/content partnership opportunity. Do not include price, access, or likelihood of closing in this dimension.
-- COMMERCIAL ACHIEVABILITY (0-100): realistic access, representation complexity, likely economics, audience size, current fame, geography, and evidence that Prime Champs could reach and close the opportunity. Missing economics or representation evidence lowers this dimension; it does not mean the athlete is a poor fit.
-- RESEARCH CONFIDENCE (0-100): completeness, freshness, source quality, identity certainty, age verification, and whether material claims have direct URLs. Unknown commercial facts must reduce confidence.
+- COMMERCIAL ACHIEVABILITY (0-100): realistic access, representation complexity, likely economics, audience size, current fame, geography, and evidence that Prime Champs could reach and close the opportunity. Missing required public access or representation evidence lowers this dimension; ordinary private pre-contact rates and contract terms do not fail it.
+- RESEARCH CONFIDENCE (0-100): completeness, freshness, source quality, identity certainty, age verification, and whether material claims have direct URLs. Ordinary private commercial facts are outside this research-confidence dimension.
 - OVERALL PRIORITY is calculated deterministically after your response. Do not inflate any dimension to fill the requested candidate count.
 - Historical OnlyFans outcomes are labels for offline evaluation only and must never be used as candidate research evidence.
 
