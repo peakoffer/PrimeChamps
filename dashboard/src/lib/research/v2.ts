@@ -614,6 +614,24 @@ export function calculateBenchmarkMetrics(
 
 export type BenchmarkMetrics = ReturnType<typeof calculateBenchmarkMetrics>;
 
+export function auditPipelineCaughtResearcherFailure(input: {
+  researcherFailure: boolean;
+  finalPredictionCorrect: boolean;
+  researcherPriority: number;
+  finalPriority: number;
+  actualPriority: boolean;
+}) {
+  if (!input.researcherFailure) return false;
+  if (input.finalPredictionCorrect) return true;
+  // The independent audit pipeline includes application-owned deterministic
+  // guardrails after the two model reviews. If that layer removes a false
+  // finalist, the operational miss was caught even when the descriptive fit
+  // label remains imperfect.
+  return input.researcherPriority > 80
+    && input.finalPriority <= 80
+    && input.actualPriority === false;
+}
+
 export function evaluateBenchmarkReleaseReadiness(
   metrics: BenchmarkMetrics | null | undefined,
   options: { minimumCases: number }

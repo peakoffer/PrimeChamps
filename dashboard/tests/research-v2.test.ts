@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   assignGoldenRecordSplits,
+  auditPipelineCaughtResearcherFailure,
   selectBalancedChallengeHoldout,
   calculateBenchmarkMetrics,
   evaluateBenchmarkReleaseReadiness,
@@ -44,6 +45,7 @@ import {
   stableEvidenceSetHash,
 } from "../src/lib/research/v2-scoring.ts";
 import { sanitizeUnicodeForJson } from "../src/lib/research/text-safety.ts";
+import { applyResearchObjectiveScoreGuardrails } from "../src/lib/research/scoring.ts";
 import {
   historicalOutcomeGroundTruth,
   historicalBenchmarkNamesMatch,
@@ -66,6 +68,7 @@ import {
 } from "../src/lib/research/benchmark-sport-validation.ts";
 import {
   benchmarkAdultEligibilityGate,
+  benchmarkCorroboratedAgeAtCutoff,
   benchmarkCaseReadiness,
   benchmarkCurrentMomentumGate,
   benchmarkCreatorPotentialGate,
@@ -1697,6 +1700,41 @@ test("blind and review scores are hard ceilings and can never inflate the resear
   assert.equal(holdResearchV2PriorityForIndependentAudit(80), 80);
 });
 
+test("verified age above the recruiting profile maximum cannot become a finalist", () => {
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 81,
+    age: 40,
+    targetAgeMin: 21,
+    maximumPriorityAge: 35,
+  }), 69);
+  assert.equal(applyResearchObjectiveScoreGuardrails({
+    score: 81,
+    age: 35,
+    targetAgeMin: 21,
+    maximumPriorityAge: 35,
+  }), 81);
+  const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
+  assert.match(runner, /benchmarkCorroboratedAgeAtCutoff/);
+  assert.match(runner, /applyResearchObjectiveScoreGuardrails/);
+});
+
+test("the audit pipeline counts a deterministic false-finalist demotion as caught", () => {
+  assert.equal(auditPipelineCaughtResearcherFailure({
+    researcherFailure: true,
+    finalPredictionCorrect: false,
+    researcherPriority: 84,
+    finalPriority: 69,
+    actualPriority: false,
+  }), true);
+  assert.equal(auditPipelineCaughtResearcherFailure({
+    researcherFailure: true,
+    finalPredictionCorrect: false,
+    researcherPriority: 84,
+    finalPriority: 84,
+    actualPriority: false,
+  }), false);
+});
+
 test("V2 evidence citations must match a frozen source URL and source text", () => {
   const sources = [{
     url: "https://league.test/athletes/example?tracking=1",
@@ -1993,6 +2031,7 @@ test("benchmark finalist gates require two independent identity and adult source
   });
   assert.deepEqual(benchmarkIdentityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
   assert.deepEqual(benchmarkAdultEligibilityGate(BENCHMARK_CASE, selection.evidence), { passed: true, independentSources: 2 });
+  assert.equal(benchmarkCorroboratedAgeAtCutoff(BENCHMARK_CASE, selection.evidence), 27);
   const contradictoryAge = {
     ...selection.evidence.find((item) => item.claimId === "age-claim-b")!,
     sourceId: "age-conflict",
@@ -2133,6 +2172,7 @@ test("deterministic benchmark precheck exposes evidence gates without labels or 
   const summary = benchmarkDeterministicGateSummary(BENCHMARK_CASE, selection.evidence);
   assert.equal(summary.identity.passed, true);
   assert.equal(summary.adultEligibility.passed, true);
+  assert.equal(summary.adultEligibility.verifiedAgeAtCutoff, 27);
   assert.equal(typeof summary.allCoreEvidenceGatesPassed, "boolean");
   assert.equal("fit_label" in summary, false);
 });
@@ -2346,7 +2386,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v27/);
+  assert.match(source, /research-v2-benchmark-runner-v28/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);
@@ -2364,7 +2404,8 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.match(source, /Do not require evidence that the athlete wants OnlyFans or adult content/);
   assert.match(source, /Missing representation alone is not automatically critical/);
   assert.match(source, /BENCHMARK_PRE_OUTREACH_CALIBRATION/);
-  assert.match(source, /const auditorCaught = researcherFailure && finalPredictionCorrect/);
+  assert.match(source, /auditPipelineCaughtResearcherFailure/);
+  assert.match(source, /const finalHigh = finalCorrected\.priority > 80/);
   assert.match(source, /compatible replay checkpoint; start a fresh development smoke test/);
   assert.match(source, /Development release gates have not passed/);
   assert.ok(!source.includes("researcher.unsupported_claims"), "unsupported researcher claims must come from citation validity, not self-report");

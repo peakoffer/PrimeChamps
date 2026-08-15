@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
   calculateBenchmarkMetrics,
+  auditPipelineCaughtResearcherFailure,
   evaluateBenchmarkReleaseReadiness,
   selectActiveBenchmarkCohort,
   stratifiedSample,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/research/v2-scoring";
 import {
   benchmarkAdultEligibilityGate,
+  benchmarkCorroboratedAgeAtCutoff,
   benchmarkCreatorPotentialGate,
   benchmarkCurrentMomentumGate,
   benchmarkDeterministicGateSummary,
@@ -46,6 +48,7 @@ import {
   type BenchmarkTokenUsage,
   type LeakageSafeBenchmarkEvidence,
 } from "@/lib/research/benchmark-runner-support";
+import { applyResearchObjectiveScoreGuardrails } from "@/lib/research/scoring";
 import { resolveBenchmarkSonnet, type BenchmarkModelProvider } from "@/lib/research/benchmark-model-provider";
 import {
   DEFAULT_RECRUITING_PROFILE,
@@ -56,7 +59,7 @@ import {
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v27";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v28";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -1194,6 +1197,7 @@ async function processBenchmarkCase(input: {
   const momentumGate = benchmarkCurrentMomentumGate(record, selection.evidence);
   const creatorPotentialGate = benchmarkCreatorPotentialGate(record, selection.evidence);
   const onlyFansPlatformGate = benchmarkOnlyFansPlatformActivityGate(selection.evidence);
+  const verifiedAgeAtCutoff = benchmarkCorroboratedAgeAtCutoff(record, selection.evidence);
   const deterministicPrecheck = benchmarkDeterministicGateSummary(record, selection.evidence);
   const modelEvidence = compactBenchmarkModelEvidence(selection.evidence);
   const recruitingThesisContext = formatRecruitingProfileForPrompt(run.metrics.recruiting_profile_snapshot);
@@ -1422,9 +1426,19 @@ async function processBenchmarkCase(input: {
     auditorVerdict: verdict,
     criticalGapCount: criticalGaps.length,
   });
-  const finalCorrected = passesFinalGate
-    ? corrected
-    : { ...corrected, priority: Math.min(corrected.priority, 74) };
+  const gatedPriority = passesFinalGate ? corrected.priority : Math.min(corrected.priority, 74);
+  const finalCorrected = {
+    ...corrected,
+    priority: applyResearchObjectiveScoreGuardrails({
+      score: gatedPriority,
+      age: verifiedAgeAtCutoff,
+      targetAgeMin: run.metrics.recruiting_profile_snapshot.parameters.target_age_min,
+      maximumPriorityAge: run.metrics.recruiting_profile_snapshot.parameters.maximum_priority_age,
+    }),
+  };
+  const agePriorityCeilingApplied = verifiedAgeAtCutoff !== null
+    && verifiedAgeAtCutoff > run.metrics.recruiting_profile_snapshot.parameters.maximum_priority_age
+    && finalCorrected.priority < gatedPriority;
   const correctedFitLabel = fitLabelForScore(corrected.onlyfansFit);
   const correctedAchievabilityLabel = achievabilityLabelForScore(corrected.commercialAchievability);
   const auditUsage = combinedUsage(blindUsage, reviewUsage);
@@ -1444,7 +1458,7 @@ async function processBenchmarkCase(input: {
     prompt_version_id: artifacts.auditorPromptVersionId,
     model_version_id: artifacts.auditorModelVersionId,
     evidence_set_hash: evidenceHash,
-    assessment: { benchmark_run_id: run.id, blind, review, deterministic_gates: { identityGate, adultGate, momentumGate, creatorPotentialGate }, proposed_finalist: proposedFinalist, forced_failure: forcedFailure },
+    assessment: { benchmark_run_id: run.id, blind, review, deterministic_gates: { identityGate, adultGate, verifiedAgeAtCutoff, momentumGate, creatorPotentialGate }, proposed_finalist: proposedFinalist, forced_failure: forcedFailure },
     unsourced_claim_count: unsupportedCount,
     critical_gap_count: criticalGaps.length,
     is_final: false,
@@ -1498,6 +1512,12 @@ async function processBenchmarkCase(input: {
     ...(!creatorPotentialGate.passed ? [{ failure_type: "missing_source", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "The evidence does not establish both audience and creator behavior.", proposed_fix: "Add a dated audience snapshot and creator-behavior source before treating this case as a finalist." }] : []),
     ...(!onlyFansPlatformGate.passed ? [{ failure_type: "criteria_drift", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "An exact existing OnlyFans profile is inactive or closed at the evidence cutoff.", proposed_fix: "Require fresher exact-profile evidence proving reactivation before reconsidering this candidate." }] : []),
     ...(!blind.commercial_constraints_complete ? [{ failure_type: "achievability_error", severity: proposedFinalist ? "critical" as const : "medium" as const, details: "Commercial achievability constraints are incomplete.", proposed_fix: "Resolve career-tier accessibility and likely economics before treating this case as a finalist." }] : []),
+    ...(agePriorityCeilingApplied ? [{
+      failure_type: "criteria_drift",
+      severity: "medium" as const,
+      details: `Verified age ${verifiedAgeAtCutoff} exceeds the recruiting profile's maximum priority age of ${run.metrics.recruiting_profile_snapshot.parameters.maximum_priority_age}.`,
+      proposed_fix: "Keep the athlete below the finalist threshold unless a future recruiting profile explicitly changes the maximum priority age.",
+    }] : []),
   ];
   if (findings.length) {
     const { error } = await admin.from("research_audit_findings").insert(findings.map((finding) => ({
@@ -1508,7 +1528,7 @@ async function processBenchmarkCase(input: {
       details: finding.details,
       proposed_fix: finding.proposed_fix,
       researcher_missed: true,
-      auditor_caught: verdict !== "pass",
+      auditor_caught: verdict !== "pass" || agePriorityCeilingApplied,
     })));
     if (error) throw error;
   }
@@ -1532,10 +1552,16 @@ async function processBenchmarkCase(input: {
     ));
   const finalPredictionCorrect = correctedFitLabel === record.fit_label
     && correctedAchievabilityLabel === record.achievability_label;
-  const auditorCaught = researcherFailure && finalPredictionCorrect;
+  const auditorCaught = auditPipelineCaughtResearcherFailure({
+    researcherFailure,
+    finalPredictionCorrect,
+    researcherPriority: researcherScoring.priority,
+    finalPriority: finalCorrected.priority,
+    actualPriority,
+  });
   const totalUsage = combinedUsage(researcherUsage, auditUsage);
   const totalCost = researcherUsage.costMicrousd + auditCostMicrousd;
-  const finalHigh = passesFinalGate;
+  const finalHigh = finalCorrected.priority > 80;
   const failureTypes = Array.from(new Set([
     ...findings.map((finding) => normalizeFailureType(finding.failure_type)),
     ...(researcherFailure ? [auditorCaught ? "researcher_miss_caught_by_auditor" : "researcher_and_auditor_missed"] : []),

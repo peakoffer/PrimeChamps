@@ -479,6 +479,40 @@ export function benchmarkAdultEligibilityGate(record: BenchmarkGoldenCase, evide
   };
 }
 
+function ageAtUtcDate(birthDate: string, atDate: string) {
+  const birth = new Date(`${birthDate}T00:00:00.000Z`);
+  const at = new Date(atDate);
+  if (!Number.isFinite(birth.getTime()) || !Number.isFinite(at.getTime()) || birth > at) return null;
+  let age = at.getUTCFullYear() - birth.getUTCFullYear();
+  const birthdayPassed = at.getUTCMonth() > birth.getUTCMonth()
+    || (at.getUTCMonth() === birth.getUTCMonth() && at.getUTCDate() >= birth.getUTCDate());
+  if (!birthdayPassed) age -= 1;
+  return age >= 0 && age <= 120 ? age : null;
+}
+
+/**
+ * Returns an exact age only when two independent cutoff-safe sources agree on
+ * the full birth date. Approximate ages remain useful for the 21+ gate but can
+ * never trigger a deterministic business-priority ceiling.
+ */
+export function benchmarkCorroboratedAgeAtCutoff(
+  record: BenchmarkGoldenCase,
+  evidence: LeakageSafeBenchmarkEvidence[]
+) {
+  if (!record.evidence_cutoff_at) return null;
+  const exactFacts = evidence
+    .filter((item) => /(age|birth|date_of_birth|dob|eligibility)/.test(item.claimType)
+      && evidenceNamesAthlete(record.athlete_name, item)
+      && supportedAdultAge(item, record.evidence_cutoff_at!))
+    .map((item) => ({ fact: adultAgeFact(item), group: item.independenceGroup }))
+    .filter((item): item is { fact: AdultAgeFact & { exactBirthDate: string }; group: string } =>
+      Boolean(item.fact?.exactBirthDate));
+  const dates = new Set(exactFacts.map((item) => item.fact.exactBirthDate));
+  const groups = new Set(exactFacts.map((item) => item.group));
+  if (dates.size !== 1 || groups.size < 2) return null;
+  return ageAtUtcDate([...dates][0], record.evidence_cutoff_at);
+}
+
 export function benchmarkCurrentMomentumGate(
   record: BenchmarkGoldenCase,
   evidence: LeakageSafeBenchmarkEvidence[],
@@ -579,7 +613,7 @@ export function benchmarkOnlyFansPlatformActivityGate(evidence: LeakageSafeBench
 
 export type BenchmarkDeterministicGateSummary = {
   identity: { passed: boolean; independentSources: number };
-  adultEligibility: { passed: boolean; independentSources: number };
+  adultEligibility: { passed: boolean; independentSources: number; verifiedAgeAtCutoff: number | null };
   currentMomentum: { passed: boolean; evidenceCount: number; freshestAt: string | null };
   audience: { passed: boolean; evidenceCount: number };
   creatorBehavior: { passed: boolean; evidenceCount: number };
@@ -603,7 +637,11 @@ export function benchmarkDeterministicGateSummary(
   const platformActivity = benchmarkOnlyFansPlatformActivityGate(evidence);
   const summary = {
     identity: { passed: identity.passed, independentSources: identity.independentSources },
-    adultEligibility: { passed: adult.passed, independentSources: adult.independentSources },
+    adultEligibility: {
+      passed: adult.passed,
+      independentSources: adult.independentSources,
+      verifiedAgeAtCutoff: benchmarkCorroboratedAgeAtCutoff(record, evidence),
+    },
     currentMomentum: {
       passed: momentum.passed,
       evidenceCount: momentum.recentEvidenceCount,
