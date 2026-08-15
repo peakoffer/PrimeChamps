@@ -3768,6 +3768,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /let waybackCircuitOpen = false/);
   assert.match(workflow, /if \(archiveResult\.waybackRateLimited\) waybackCircuitOpen = true/);
   assert.match(workflow, /candidate\.storedCapture && !input\.waybackCircuitOpen/);
+  assert.match(route, /items\.slice\(0, EVIDENCE_PREPARATION_LIMITS\.archiveUrlsPerRecord\)/);
   assert.match(workflow, /wayback_rate_limited_after_direct_and_common_crawl_miss/);
   assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
   assert.match(workflow, /Cutoff-safe external profiles referenced by/);

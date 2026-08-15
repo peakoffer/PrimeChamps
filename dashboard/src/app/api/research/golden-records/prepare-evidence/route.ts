@@ -89,7 +89,8 @@ function replayableDeepDiscoveryCandidates(value: unknown, recordIds: string[]) 
   const raw = value as Record<string, unknown>;
   const candidates = Object.fromEntries(recordIds.map((recordId) => {
     const items = Array.isArray(raw[recordId]) ? raw[recordId] as unknown[] : [];
-    return [recordId, items.slice(0, 4).flatMap((item): HistoricalSearchCandidate[] => {
+    return [recordId, items.slice(0, EVIDENCE_PREPARATION_LIMITS.archiveUrlsPerRecord)
+      .flatMap((item): HistoricalSearchCandidate[] => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const candidate = item as Record<string, unknown>;
       const url = typeof candidate.url === "string" ? candidate.url.slice(0, 2_000) : "";
@@ -103,7 +104,7 @@ function replayableDeepDiscoveryCandidates(value: unknown, recordIds: string[]) 
           ? candidate.position
           : undefined,
       }];
-    })];
+      })];
   }));
   return Object.values(candidates).some((items) => items.length > 0) ? candidates : undefined;
 }
