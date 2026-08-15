@@ -653,6 +653,16 @@ test("scoring checkpoint forks preserve researcher scores and discard only audit
   assert.match(route, /body\.action === "fork_from_scoring"/);
 });
 
+test("research artifact activation archives the prior rubric version before activating v5", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  const artifactSetup = workflow.slice(
+    workflow.indexOf("async function ensureResearchV2Artifacts"),
+    workflow.indexOf("function evidenceSourceType")
+  );
+  assert.match(artifactSetup, /\.neq\("version", 5\)/);
+  assert.doesNotMatch(artifactSetup, /\.neq\("version", 4\)/);
+});
+
 test("paid enrichment gives fresh discovery priority without discarding memory", () => {
   const selected = selectBalancedResearchCandidates([
     ...Array.from({ length: 8 }, (_, index) => ({ id: `memory-${index}`, discovery_lane: "memory" as const })),

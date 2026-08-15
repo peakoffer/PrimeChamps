@@ -685,7 +685,7 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     .eq("organization_id", input.organizationId)
     .eq("rubric_key", "onlyfans_fit_achievability_confidence")
     .eq("status", "active")
-    .neq("version", 4);
+    .neq("version", 5);
   if (rubricArchiveError) throw rubricArchiveError;
   const { data: rubric, error: rubricError } = await supabase.from("research_rubric_versions").upsert({
     organization_id: input.organizationId,
