@@ -14,7 +14,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-grounded-deep-signal-recovery-v11";
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-deferred-rate-limit-replay-v14";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 

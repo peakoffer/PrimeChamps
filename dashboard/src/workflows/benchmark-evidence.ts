@@ -1294,16 +1294,11 @@ export async function prepareBenchmarkEvidenceWorkflow(input: EvidencePreparatio
       const candidates = (discovery.candidatesByRecord[record.id] || [])
         .slice(0, EVIDENCE_PREPARATION_LIMITS.archiveUrlsPerRecord);
       for (const candidate of candidates) {
-        let archiveResult: Awaited<ReturnType<typeof retrieveArchivedEvidenceCandidate>> | null = null;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          archiveResult = await retrieveArchivedEvidenceCandidate({
-            record,
-            candidate,
-            commonCrawlCollections,
-          });
-          if (!archiveResult.rateLimited) break;
-          if (attempt < 1) await sleep("20s");
-        }
+        const archiveResult = await retrieveArchivedEvidenceCandidate({
+          record,
+          candidate,
+          commonCrawlCollections,
+        });
         if (archiveResult?.rateLimited) {
           deferredCandidates.push({ recordId: record.id, url: candidate.url });
           await sleep("5s");

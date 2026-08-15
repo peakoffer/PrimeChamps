@@ -2942,7 +2942,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(workflow, /"use step"/);
   assert.match(workflow, /discoverHistoricalEvidence\.maxRetries = 0/);
   assert.match(workflow, /retrieveArchivedEvidenceCandidate\.maxRetries = 0/);
-  assert.match(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
+  assert.doesNotMatch(workflow, /if \(attempt < 1\) await sleep\("20s"\)/);
   assert.doesNotMatch(workflow, /skipWayback/);
   assert.match(workflow, /rateLimited: waybackRateLimited && !commonCrawl\.evidence/);
   assert.match(workflow, /retrieveWaybackTimegateEvidenceCandidate/);
@@ -2950,7 +2950,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.doesNotMatch(workflow, /if \(candidates\.length\) break/);
   assert.match(workflow, /Common Crawl is an optional free fallback/);
   assert.match(workflow, /loadCommonCrawlCollections\.maxRetries = 0/);
-  assert.match(workflow, /deferredCandidates\.push/);
+  assert.match(workflow, /deferredCandidates\.push\(\{ recordId: record\.id, url: candidate\.url \}\)/);
   assert.match(workflow, /phase: "archive_cooldown"/);
   assert.match(workflow, /replay will reuse paid discovery/);
   assert.match(workflow, /readApifyRunDatasetWithUsage/);
