@@ -85,6 +85,10 @@ const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
   ],
   Football: ["association football", "footballer", "women's football", "womens football", "soccer"],
   "Football / Soccer": ["association football", "footballer", "football player", "women's football", "womens football", "soccer"],
+  "Formula racing (F2000)": [
+    "formula woman", "formula women", "formula x", "formula 3", "f2000", "formula racing",
+    "racing driver", "motorsport", "automobilismo", "pilota automobilistica",
+  ],
   "Jet Ski / Aquabike": ["jet ski", "jetski", "aquabike", "personal watercraft"],
   "MMA / LFA": ["mixed martial arts", "mma", "ufc", "lfa", "legacy fighting alliance"],
   "Motorcycle Road Racing": [

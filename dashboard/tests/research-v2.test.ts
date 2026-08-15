@@ -199,6 +199,13 @@ test("historical motorcycle racing accepts explicit Spanish motorcycle evidence"
     ),
     true,
   );
+  assert.equal(
+    benchmarkSourceSupportsSport(
+      "Formula racing (F2000)",
+      "Sara Fruncillo will race in the Formula Women Nations Cup before moving to F2000.",
+    ),
+    true,
+  );
 });
 
 test("surfing evidence accepts explicit Spanish and French athlete terms", () => {
@@ -3269,7 +3276,7 @@ test("direct dated articles admit only tightly timestamped, attributable pre-cut
   const saraServerShellMetadata = { ...saraMetadata, url: saraServerShellUrl };
   const saraServerShell = extractPreparedDatedArticleEvidence({
     record: {
-      ...record, id: "golden-sara-shell", athlete_name: "Sara Fruncillo", sport: "Motorsports",
+      ...record, id: "golden-sara-shell", athlete_name: "Sara Fruncillo", sport: "Formula racing (F2000)",
       evidence_cutoff_at: "2025-12-10T23:59:59Z",
     },
     candidate: {
