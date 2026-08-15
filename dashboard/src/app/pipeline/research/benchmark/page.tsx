@@ -1263,6 +1263,23 @@ export default function ResearchBenchmarkPage() {
           </div>
         </div>
 
+        {evidenceSummary.readyFit < 8 && evidenceSummary.readyNotFit >= 8 && (
+          <div className="mb-6 flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-zinc-100">Benchmark blocked by historical evidence coverage</p>
+              <p className="mt-1 max-w-4xl text-zinc-500">
+                The negative side is ready, but only {evidenceSummary.readyFit} positive evidence packets pass every point-in-time gate. Broad provider searches are paused; recover the exact missing dated inputs from Dylan&apos;s emails and attachments instead.
+              </p>
+            </div>
+            <Link
+              href="/api/research/golden-records?format=evidence-gap-csv"
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+            >
+              <Download className="h-4 w-4" /> Download 8 evidence gaps
+            </Link>
+          </div>
+        )}
+
         {latestEvidenceRun && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-500">
             <span>Latest evidence run: <strong className="font-medium text-zinc-300">{titleize(latestEvidenceRun.status)}</strong> · {latestEvidenceRun.records_ready}/{latestEvidenceRun.records_processed} packets ready · {latestEvidenceRun.safe_claim_count} safe claims</span>

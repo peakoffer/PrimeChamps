@@ -20,6 +20,7 @@ import {
   type BenchmarkGoldenCase,
 } from "@/lib/research/benchmark-runner-support";
 import { loadBenchmarkEvidenceRows } from "@/lib/research/benchmark-evidence-storage";
+import { buildBenchmarkEvidenceGapRow, rankBenchmarkEvidenceGaps } from "@/lib/research/benchmark-evidence-gap";
 
 const CSV_COLUMNS = [
   "athlete_name",
@@ -145,6 +146,51 @@ export async function GET(request: NextRequest) {
     });
     const evidenceByRecord = new Map(evidenceEntries.map((entry) => [entry.record.id, entry]));
     const evidenceSummary = summarizeBenchmarkEvidenceReadiness(evidenceEntries);
+    if (format === "evidence-gap-csv") {
+      if (user.role !== "owner" && user.role !== "admin") {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const gapRows = rankBenchmarkEvidenceGaps(evidenceEntries
+        .filter((entry) => entry.fitLabel === "fit" && entry.record.benchmark_split === "excluded")
+        .map((entry) => buildBenchmarkEvidenceGapRow(entry))
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)));
+      const columns = [
+        "priority",
+        "record_id",
+        "athlete_name",
+        "sport",
+        "evidence_cutoff_at",
+        "missing_gates",
+        "exact_evidence_needed",
+        "accepted_source_types",
+        "safe_claims_already",
+        "independent_sources_already",
+        "recovery_rule",
+      ];
+      const csv = [
+        columns.join(","),
+        ...gapRows.map((row, index) => [
+          index + 1,
+          row.recordId,
+          row.athleteName,
+          row.sport,
+          row.evidenceCutoffAt,
+          row.missingGates.join("; "),
+          row.requestedEvidence.join(" "),
+          row.acceptedSourceTypes,
+          row.safeClaimsAlready,
+          row.independentSourcesAlready,
+          "Recover inputs only. Do not change Dylan's authoritative label or outcome. Do not use current or post-cutoff facts, estimates, or inferred values.",
+        ].map(csvCell).join(",")),
+      ].join("\n");
+      return new NextResponse(`${csv}\n`, {
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": "attachment; filename=onlyfans-fresh-positive-evidence-gaps.csv",
+          "cache-control": "private, no-store",
+        },
+      });
+    }
     return NextResponse.json({
       records: filteredRecords.map((record) => {
         const evidence = evidenceByRecord.get(String(record.id));
