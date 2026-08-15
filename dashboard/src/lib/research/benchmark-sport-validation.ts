@@ -46,7 +46,10 @@ const SPORT_TERMS: Partial<Record<BenchmarkSport, string[]>> = {
   Freediving: ["freediving", "freediver"], Golf: ["golf", "golfer"], Gymnastics: ["gymnastics", "gymnast"],
   Hockey: ["hockey"], "Jet Ski": ["jet ski", "jetski"], Kitesurfing: ["kitesurfing", "kiteboarding"],
   MMA: ["mixed martial arts", "mma", "ufc"], Motocross: ["motocross"],
-  "Motorcycle Racing": ["motorcycle racing", "moto gp", "motogp", "superbike"],
+  "Motorcycle Racing": [
+    "motorcycle racing", "motorcycle racer", "motorbike racing", "road racing",
+    "worldwcr", "superbike", "moto gp", "motogp",
+  ],
   Motorsports: ["motorsport", "racing driver"], "Mountain Biking": ["mountain bike", "mountain biking", "downhill rider"],
   Padel: ["padel"], Pickleball: ["pickleball"], Powerlifting: ["powerlifting", "powerlifter"],
   Rugby: ["rugby"], Running: ["running", "runner", "ultrarunner", "ultra runner"],

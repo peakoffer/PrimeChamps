@@ -128,6 +128,13 @@ import {
   wikimediaSearchApiUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
 
+test("historical motorcycle racing accepts road-racing and WorldWCR evidence", () => {
+  assert.equal(benchmarkSourceSupportsSport(
+    "Motorcycle racing",
+    "Tayla Relph is an Australian road racing athlete competing in WorldWCR."
+  ), true);
+});
+
 test("official commission tables resolve DOB only from a dated exact-athlete regulator row", () => {
   const california = extractOfficialCommissionAdultEvidence({
     athleteName: "Crystal Pittman",
