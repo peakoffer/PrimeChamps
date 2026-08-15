@@ -165,6 +165,10 @@ const DETAIL_CATEGORY_CONFIGURATION = {
   "Known Commercial or Economic Information": { claimType: "commercial_achievability_signal", material: true },
 } as const;
 
+export const HISTORICAL_EVIDENCE_DETAIL_CATEGORIES = Object.freeze(
+  Object.keys(DETAIL_CATEGORY_CONFIGURATION) as Array<keyof typeof DETAIL_CATEGORY_CONFIGURATION>
+);
+
 /**
  * Converts the workbook's row-level evidence ledger into independently dated
  * claims. Outcome/fit fields never enter this path. A mailbox age statement is

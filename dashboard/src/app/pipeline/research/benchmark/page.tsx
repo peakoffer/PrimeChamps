@@ -1095,6 +1095,55 @@ export default function ResearchBenchmarkPage() {
     }
   };
 
+  const importEvidenceIntake = async (file: File) => {
+    setWorking(true);
+    setMessage("");
+    try {
+      const csvRows = parseCsv(await file.text());
+      const completedRows = csvRows.filter((row) =>
+        row.record_id && (row.extracted_value || row.supporting_excerpt || row.source_date)
+      ).map((row) => ({
+        recordId: row.record_id,
+        claimCategory: row.claim_category,
+        instagramHandle: row.instagram_handle || null,
+        tiktokHandle: row.tiktok_handle || null,
+        extractedValue: row.extracted_value,
+        sourceDate: row.source_date,
+        sourceEmailSubject: row.source_email_subject,
+        sourceDocumentReference: row.source_document_reference,
+        supportingExcerpt: row.supporting_excerpt,
+        beforeDecisionCutoff: /^yes$/i.test(row.before_decision_cutoff || "") ? "Yes"
+          : /^no$/i.test(row.before_decision_cutoff || "") ? "No" : row.before_decision_cutoff,
+        identityMatchConfidence: /^(high|medium|low)$/i.test(row.identity_match_confidence || "")
+          ? row.identity_match_confidence.slice(0, 1).toUpperCase() + row.identity_match_confidence.slice(1).toLowerCase()
+          : row.identity_match_confidence,
+        notes: row.notes || null,
+      }));
+      if (!completedRows.length) throw new Error("Complete at least one evidence row before importing the worksheet");
+      const response = await fetch("/api/research/golden-records/evidence-intake", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rows: completedRows }),
+      });
+      const payload = await response.json() as {
+        error?: string;
+        rowsProcessed?: number;
+        eligibleClaims?: number;
+        discoveryHints?: number;
+        excludedClaims?: number;
+      };
+      if (!response.ok) throw new Error(payload.error || "Evidence import failed");
+      setMessage(
+        `Imported ${payload.rowsProcessed || 0} dated evidence row${payload.rowsProcessed === 1 ? "" : "s"}: ${payload.eligibleClaims || 0} scoring-eligible, ${payload.discoveryHints || 0} age discovery hint${payload.discoveryHints === 1 ? "" : "s"}, ${payload.excludedClaims || 0} safely excluded. No scoring or outreach ran.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Evidence import failed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const selectedLocked = Boolean(selected?.held_out_locked_at && !selected?.held_out_revealed_at);
   const fitJudgmentLocked = selected?.label_order_fit_before_outcome === true;
   const selectedCanLockFit = Boolean(selected
@@ -1287,12 +1336,28 @@ export default function ResearchBenchmarkPage() {
                 The negative side is ready, but only {evidenceSummary.readyFit} positive evidence packets pass every point-in-time gate. Broad provider searches are paused; recover the exact missing dated inputs from Dylan&apos;s emails and attachments instead.
               </p>
             </div>
-            <Link
-              href="/api/research/golden-records?format=evidence-gap-csv"
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
-            >
-              <Download className="h-4 w-4" /> Download 8 evidence gaps
-            </Link>
+            <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+              <Link
+                href="/api/research/golden-records?format=evidence-gap-csv"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+              >
+                <Download className="h-4 w-4" /> Evidence gaps
+              </Link>
+              <Link
+                href="/api/research/golden-records?format=evidence-intake-csv"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+              >
+                <Download className="h-4 w-4" /> Dated evidence worksheet
+              </Link>
+              <label className={`inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-950 ${working ? "pointer-events-none opacity-40" : "cursor-pointer hover:bg-white"}`}>
+                <Upload className="h-4 w-4" /> Import evidence
+                <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importEvidenceIntake(file);
+                  event.currentTarget.value = "";
+                }} />
+              </label>
+            </div>
           </div>
         )}
 

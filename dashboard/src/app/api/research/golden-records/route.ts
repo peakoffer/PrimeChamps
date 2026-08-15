@@ -21,6 +21,10 @@ import {
 } from "@/lib/research/benchmark-runner-support";
 import { loadBenchmarkEvidenceRows } from "@/lib/research/benchmark-evidence-storage";
 import { buildBenchmarkEvidenceGapRow, rankBenchmarkEvidenceGaps } from "@/lib/research/benchmark-evidence-gap";
+import {
+  BENCHMARK_EVIDENCE_INTAKE_COLUMNS,
+  buildBenchmarkEvidenceIntakeTemplateRows,
+} from "@/lib/research/benchmark-evidence-intake";
 
 const CSV_COLUMNS = [
   "athlete_name",
@@ -146,7 +150,7 @@ export async function GET(request: NextRequest) {
     });
     const evidenceByRecord = new Map(evidenceEntries.map((entry) => [entry.record.id, entry]));
     const evidenceSummary = summarizeBenchmarkEvidenceReadiness(evidenceEntries);
-    if (format === "evidence-gap-csv") {
+    if (format === "evidence-gap-csv" || format === "evidence-intake-csv") {
       if (user.role !== "owner" && user.role !== "admin") {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
@@ -154,6 +158,37 @@ export async function GET(request: NextRequest) {
         .filter((entry) => entry.fitLabel === "fit" && entry.record.benchmark_split === "excluded")
         .map((entry) => buildBenchmarkEvidenceGapRow(entry))
         .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)));
+      if (format === "evidence-intake-csv") {
+        const intakeRows = buildBenchmarkEvidenceIntakeTemplateRows(gapRows);
+        const csv = [
+          BENCHMARK_EVIDENCE_INTAKE_COLUMNS.join(","),
+          ...intakeRows.map((row) => [
+            row.recordId,
+            row.athleteName,
+            row.sport,
+            row.evidenceCutoffAt,
+            row.neededGate,
+            row.claimCategory,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            row.notes,
+          ].map(csvCell).join(",")),
+        ].join("\n");
+        return new NextResponse(`${csv}\n`, {
+          headers: {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": "attachment; filename=onlyfans-dated-evidence-intake.csv",
+            "cache-control": "private, no-store",
+          },
+        });
+      }
       const columns = [
         "priority",
         "record_id",
