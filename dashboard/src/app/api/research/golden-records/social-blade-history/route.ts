@@ -23,7 +23,10 @@ export const maxDuration = 300;
 const MAX_PILOT_RECORDS = 5;
 const MAX_PILOT_CREDITS = 10;
 const MAX_OFFICIAL_PILOT_ATTEMPTS = 5;
-const MAX_OFFICIAL_RECOVERY_ATTEMPTS = 16;
+// The first sixteen checkpointed lookups proved the exact-handle paid lane.
+// The funded second tranche remains one-profile-at-a-time and can authorize at
+// most eight more attempts before another explicit audit.
+const MAX_OFFICIAL_RECOVERY_ATTEMPTS = 24;
 const APIFY_PUBLIC_HISTORY_ACTOR = process.env.APIFY_SOCIAL_BLADE_ACTOR?.trim() || "solidcode/socialblade-scraper";
 const APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0.5;
 const APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2;
@@ -542,7 +545,7 @@ export async function POST(request: NextRequest) {
     if (officialHistoryStats.attempts >= officialAttemptLimit) {
       return NextResponse.json({
         error: officialValidationPassed
-          ? "The verified paid-history recovery is closed after sixteen checkpointed attempts. Audit readiness before authorizing more spend."
+          ? "The verified paid-history recovery is closed after twenty-four checkpointed attempts. Audit readiness before authorizing more spend."
           : "The paid history pilot is closed after five checkpointed attempts because five exact matches were not proven.",
         attempts: officialHistoryStats.attempts,
       }, { status: 409 });

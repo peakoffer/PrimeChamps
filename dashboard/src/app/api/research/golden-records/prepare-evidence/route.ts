@@ -155,10 +155,18 @@ async function unresolvedRecordsForBaseline(input: {
     fitLabel: record.fit_label as "fit" | "not_fit",
     ready: readiness.ready,
   })));
-  return entries.filter(({ record, readiness }) => !input.baselineCompleted.has(record.id)
+  return entries.filter(({ record, readiness }) => {
+    const creatorOnlyBlocker = readiness.reasons.length === 1
+      && readiness.reasons[0] === "fit record lacks both audience and creator-behavior evidence";
+    // Baseline biography/identity discovery is the wrong paid lane for a
+    // packet whose only remaining gap is social/creator evidence. Leave those
+    // cases to the narrower signal-recovery plan instead of replaying broad
+    // searches after an extraction-version bump.
+    return !input.baselineCompleted.has(record.id)
       && !readiness.ready
-      && deficits[record.fit_label as "fit" | "not_fit"] > 0
-    )
+      && !creatorOnlyBlocker
+      && deficits[record.fit_label as "fit" | "not_fit"] > 0;
+  })
     .sort((left, right) => deficits[right.record.fit_label as "fit" | "not_fit"]
       - deficits[left.record.fit_label as "fit" | "not_fit"]
       || left.readiness.reasons.length - right.readiness.reasons.length

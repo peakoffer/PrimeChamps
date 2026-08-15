@@ -468,10 +468,13 @@ export default function ResearchBenchmarkPage() {
     const processed = new Set(interruptedExcludedSignalRun.checkpoint?.processed_record_ids || []);
     // A newer completed recovery may have closed records left unfinished by
     // this older failed run. Never resurrect those stale IDs in the resume CTA.
-    return interruptedExcludedSignalRun.record_ids.filter((recordId) =>
-      !processed.has(recordId) && !completedExcludedSignalRecordIdSet.has(recordId)
-    );
-  }, [completedExcludedSignalRecordIdSet, interruptedExcludedSignalRun]);
+    return interruptedExcludedSignalRun.record_ids.filter((recordId) => {
+      const record = records.find((candidate) => candidate.id === recordId);
+      return !processed.has(recordId)
+        && !completedExcludedSignalRecordIdSet.has(recordId)
+        && record?.evidence_blockers.includes("fit record lacks both audience and creator-behavior evidence");
+    });
+  }, [completedExcludedSignalRecordIdSet, interruptedExcludedSignalRun, records]);
   const archiveCoolingDown = (interruptedExcludedSignalRun?.retry_after_seconds || 0) > 0
     && interruptedExcludedSignalRun?.archive_fallback_available !== true;
   const excludedSignalRecoveryRecords = useMemo(() => records

@@ -2550,6 +2550,16 @@ test("age evidence revalidation preserves athlete profiles without inheriting an
   });
   assert.equal(mondo.attributableAge?.parsed.age, 24);
 
+  const frenchAgeBeforeName = validatePreparedAgeEvidenceForSource({
+    athleteName: "Estelle Poret",
+    title: "Estelle Poret, championne lyonnaise de jet-ski",
+    domain: "lyonfemmes.com",
+    observedAt: new Date("2023-09-28T20:24:58Z"),
+    text: "Estelle Poret, championne lyonnaise de jet-ski. A 26 ans, Estelle Poret porte une double casquette, entrepreneuse et sportive de haut-niveau.",
+  });
+  assert.equal(frenchAgeBeforeName.attributableAge?.parsed.age, 26);
+  assert.equal(frenchAgeBeforeName.attributableAge?.parsed.precision, "stated_age");
+
   const sibling = validatePreparedAgeEvidenceForSource({
     athleteName: "Gisele Thompson",
     title: "Gisele Thompson forges her own path",
@@ -2725,6 +2735,11 @@ test("historical signal recovery uses a known cutoff-safe Instagram handle witho
 test("generated material signals require explicit athlete-relevant language", () => {
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "Skip to main content Instagram YouTube"), false);
   assert.equal(preparedEvidenceSignalSupported("audience_signal", "The athlete is a content creator with 120,000 followers."), true);
+  assert.match(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Paula Novotna",
+    claimType: "audience_signal",
+    sourceExcerpt: "Paula Novotna shared the production with her profile, which gathers around 150,000 fans worldwide.",
+  }) || "", /150,000 fans/);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "Navigation Rankings Record Book"), false);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "She won the national championship."), true);
   assert.equal(preparedEvidenceSignalSupported("athletic_momentum", "The athlete is listed as a pro team rider."), true);
@@ -2864,6 +2879,8 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /No active locked, unrevealed benchmark cohort exists/);
   assert.match(route, /activeCohortVersion/);
   assert.match(route, /requestedIds\.map\(\(recordId\) => eligibleById\.get\(recordId\)\)/);
+  assert.match(route, /creatorOnlyBlocker/);
+  assert.match(route, /Leave those[\s\S]+narrower signal-recovery plan/);
   assert.match(route, /\.contains\("stratification_tags", \["dylan_outcome_ground_truth"\]\)/);
   assert.match(benchmarkPage, /Recover fresh positives/);
   assert.match(benchmarkPage, /benchmarkSplit: "excluded"/);
@@ -2887,7 +2904,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0\.5/);
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2/);
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_PILOT_ATTEMPTS = 5/);
-  assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_RECOVERY_ATTEMPTS = 16/);
+  assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_RECOVERY_ATTEMPTS = 24/);
   assert.match(socialBladeHistoryRoute, /officialValidationPassed/);
   assert.match(socialBladeHistoryRoute, /officialHistoryStats\.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS/);
   assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);
@@ -2899,7 +2916,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /error\?\.code === "23505"/);
   assert.match(socialBladeHistoryRoute, /candidates\.filter\(\(candidate\) => !candidate\.officialHistoryAttempted\)\.slice\(0, 1\)/);
   assert.match(socialBladeHistoryRoute, /body\.recordId !== candidates\[0\]\.id/);
-  assert.match(socialBladeHistoryRoute, /The verified paid-history recovery is closed after sixteen checkpointed attempts/);
+  assert.match(socialBladeHistoryRoute, /The verified paid-history recovery is closed after twenty-four checkpointed attempts/);
   assert.match(socialBladeHistoryRoute, /credits_remaining_after_request/);
   assert.match(socialBladeHistoryRoute, /creditsRemaining/);
   assert.doesNotMatch(socialBladeHistoryRoute, /maxRecords\?: number/);

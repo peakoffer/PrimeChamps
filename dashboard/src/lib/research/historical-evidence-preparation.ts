@@ -13,7 +13,7 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-official-profile-alias-extraction-v12";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-localized-age-and-audience-extraction-v13";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -1161,6 +1161,28 @@ export function validatePreparedAgeEvidenceForSource(input: {
   const normalizedTitle = normalizeEvidenceText(input.title || "");
   const athleteCenteredPage = Boolean(normalizedName && normalizedTitle.includes(normalizedName));
   if (!athleteCenteredPage) return { attributableAge: null, officialCompactBirthDate: null };
+  const escapedFullName = input.athleteName.trim().split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+");
+  const localizedAgeBeforeName = input.text.match(new RegExp(
+    `\\b(?:a|à)\\s+(\\d{1,2})\\s+ans\\s*,?\\s*${escapedFullName}\\b`,
+    "i"
+  ));
+  const localizedAgeBeforeNameValue = Number(localizedAgeBeforeName?.[1]);
+  if (localizedAgeBeforeName && localizedAgeBeforeName.index !== undefined
+    && Number.isFinite(localizedAgeBeforeNameValue)
+    && localizedAgeBeforeNameValue >= 10 && localizedAgeBeforeNameValue <= 80) {
+    return {
+      attributableAge: {
+        parsed: { age: localizedAgeBeforeNameValue, birthYear: null, precision: "stated_age" as const },
+        evidence: input.text.slice(
+          Math.max(0, localizedAgeBeforeName.index - 180),
+          Math.min(input.text.length, localizedAgeBeforeName.index + localizedAgeBeforeName[0].length + 320),
+        ).trim(),
+      },
+      officialCompactBirthDate: null,
+    };
+  }
   const parentheticalBirthDate = extractAthleteCenteredParentheticalBirthDate(input.athleteName, input.text);
   if (parentheticalBirthDate) {
     return { attributableAge: null, officialCompactBirthDate: parentheticalBirthDate };
@@ -1209,7 +1231,7 @@ export function validatePreparedAgeEvidenceForSource(input: {
 
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
   athletic_momentum: /(?:^|[^\p{L}\p{N}])(?:ranked|ranking|champion(?:ne)?|finalist(?:e)?|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|classement|class[ée]e?|termin[ée]e?|m[ée]daill[ée]e?|victoire|vainqueur|gagn[ée]e?|qualifi[ée]e?|campe[óo]n|campeona|campe[ãa]|finalista|medallista|medalhista|gan[óo]|venceu|vit[óo]ria|clasific[óo]|classifica[çc][ãa]o|qualificou|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)(?=$|[^\p{L}\p{N}])/iu,
-  audience_signal: /\b(?:followers|subscribers?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
+  audience_signal: /\b(?:followers|subscribers?|fans|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
   creator_behavior_signal: /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i,
   commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
 };
