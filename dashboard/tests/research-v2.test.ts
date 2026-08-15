@@ -3234,6 +3234,29 @@ test("direct dated articles admit only tightly timestamped, attributable pre-cut
   });
   assert.equal(wrongPersonAudience.rejectionReason, null);
   assert.ok(!wrongPersonAudience.evidence?.claims.some((claim) => claim.claimType === "audience_signal"));
+
+  const saraUrl = "https://sport.example/motori/2024/11/20/sara-fruncillo-intervista";
+  const saraMetadata = {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    url: saraUrl,
+    headline: "Intervista a Sara Fruncillo",
+    datePublished: "2024-11-20T11:20:58+01:00",
+    dateModified: "2024-11-20T11:20:58+01:00",
+  };
+  const sara = extractPreparedDatedArticleEvidence({
+    record: {
+      ...record, id: "golden-sara", athlete_name: "Sara Fruncillo", sport: "Motorsports",
+      evidence_cutoff_at: "2025-12-10T23:59:59Z",
+    },
+    candidate: {
+      query: '"Sara Fruncillo" età motorsport', title: "Intervista a Sara Fruncillo",
+      url: saraUrl, snippet: "Sara Fruncillo è una pilota automobilistica.",
+    },
+    html: `<html><head><link rel="canonical" href="${saraUrl}"><script type="application/ld+json">${JSON.stringify(saraMetadata)}</script></head><body><main><h1>Intervista a Sara Fruncillo</h1><p>Sara Fruncillo ha 25 anni e una grande voglia di emergere nel motorsport.</p></main></body></html>`,
+  });
+  assert.equal(sara.rejectionReason, null);
+  assert.ok(sara.evidence?.claims.some((claim) => claim.claimType === "adult_eligibility"));
 });
 
 test("archived Instagram handles require athlete attribution and reject publisher footer accounts", () => {
