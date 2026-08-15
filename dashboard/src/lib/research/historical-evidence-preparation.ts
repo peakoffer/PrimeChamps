@@ -12,8 +12,8 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-exact-name-authority-age-recovery-v5",
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
-export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-multilingual-audience-signal-recovery-v6";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-audience-attribution-v16";
+export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-15-attributed-audience-creator-recovery-v7";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-multilingual-creator-attribution-v17";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
@@ -1323,7 +1323,7 @@ export function validatePreparedAgeEvidenceForSource(input: {
 const PREPARED_EVIDENCE_SIGNAL_PATTERNS: Record<string, RegExp> = {
   athletic_momentum: /(?:^|[^\p{L}\p{N}])(?:ranked|ranking|champion(?:ne)?|finalist(?:e)?|medalist|medals?|won|wins?|winner|victory|qualif(?:y|ied|ier)|classement|class[ée]e?|termin[ée]e?|m[ée]daill[ée]e?|victoire|vainqueur|gagn[ée]e?|qualifi[ée]e?|campe[óo]n|campeona|campe[ãa]|finalista|medallista|medalhista|gan[óo]|venceu|vit[óo]ria|clasific[óo]|classifica[çc][ãa]o|qualificou|rookie|breakout|signed|drafted|all[- ]america|world cup|national team|ncaa|rising star|future face|professional fight|pro debut|pro team|team rider|active roster)(?=$|[^\p{L}\p{N}])/iu,
   audience_signal: /\b(?:followers?|subscribers?|fans|abonn[ée]s?|seguidores?|seguidoras?|content creator|creator economy|social media following|online audience|influencer|brand ambassador)\b/i,
-  creator_behavior_signal: /\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream)\b/i,
+  creator_behavior_signal: /(?:\b(?:content creator|creator activity|posts?|posting|videos?|vlogs?|youtube|podcast|interview|behind[- ]the[- ]scenes|training content|livestream|live stream|poster|publier|publications?|vid[ée]os?|r[ée]seaux sociaux|publicar|publicaciones?|publica[çc][ãa]o|publica[çc][õo]es|redes sociales|redes sociais)\b|\bpost[ée](?=$|[^\p{L}\p{N}]))/iu,
   commercial_achievability_signal: /\b(?:represented by|signed with (?:an? )?(?:agency|management)|sponsors?|sponsored|sponsorship|brand partnership|endorsement deal|contract with|nil deal|brand deal|pro team|team rider|influencer management|talent agency)\b/i,
 };
 
@@ -1369,7 +1369,9 @@ export function preparedEvidenceSignalExcerptForAthlete(input: {
     // teammate's audience or generic page navigation to inherit the title.
     const firstPersonAudience = input.claimType === "audience_signal"
       && /(?:\b(?:i|me)\b.{0,260}\bmy\s+[\d.,\sKkMm]{0,16}(?:followers?|subscribers?|fans)\b|(?:\bje\b|\bj['’]|\bm['’]|\bmoi\b).{0,260}\bmes\s+[\d.,\sKkMm]{0,16}abonn[ée]s?\b|(?:\byo\b|\bme\b).{0,260}\bmis\s+[\d.,\sKkMm]{0,16}seguidor(?:es|as)?\b|(?:\beu\b|\bme\b).{0,260}\bminh(?:os|as)\s+[\d.,\sKkMm]{0,16}seguidor(?:es|as)?\b)/i.test(segment);
-    if (titleNamesAthlete && firstPersonAudience) {
+    const firstPersonCreator = input.claimType === "creator_behavior_signal"
+      && /(?:\b(?:i|me|my)\b.{0,260}\b(?:post|posting|video|vlog|youtube|podcast|livestream)|(?:\bje\b|\bj['’]|\bmoi\b).{0,260}(?:\b(?:poster|publier|publications?|vid[ée]os?|r[ée]seaux sociaux)\b|\bpost[ée](?=$|[^\p{L}\p{N}]))|(?:\byo\b|\bme\b).{0,260}\b(?:publicar|publicaciones?|videos?|redes sociales)\b|(?:\beu\b|\bme\b).{0,260}\b(?:publicar|publica[çc][ãa]o|publica[çc][õo]es|v[íi]deos?|redes sociais)\b)/iu.test(segment);
+    if (titleNamesAthlete && (firstPersonAudience || firstPersonCreator)) {
       return `${segments[0]} ${segment}`.slice(0, 1_000);
     }
   }
@@ -1639,17 +1641,13 @@ export function buildHistoricalSignalRecoveryQueries(record: Pick<EvidencePrepar
   const handle = typeof record.instagram_handle === "string"
     ? record.instagram_handle.trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "")
     : "";
-  const profileQueries = handle ? [
-    `("@${handle}" OR "${handle}") (followers OR abonnés OR seguidores OR subscribers OR engagement) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
-    `"${record.athlete_name}" (followers OR abonnés OR seguidores OR subscribers OR "social media following" OR influencer) before:${before}`,
-  ] : [
-    `"${record.athlete_name}" "${record.sport}" (Instagram OR "Instagram handle" OR "post shared by") (profile OR followers OR "social media") before:${before}`,
-    `"${record.athlete_name}" "${record.sport}" ("Instagram followers" OR "TikTok followers" OR subscribers OR "social media following" OR influencer) (site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com) before:${before}`,
-  ];
+  const audienceDomains = "(site:socialblade.com OR site:hypeauditor.com OR site:starngage.com OR site:speakrj.com OR site:favikon.com OR site:socialauditor.io OR site:hiveinfluence.io OR site:crevideo.com OR site:influencers.club)";
+  const handleExpression = handle ? `("@${handle}" OR "${handle}")` : "(Instagram OR TikTok OR YouTube)";
   return [
-    ...profileQueries,
-    `"${record.athlete_name}" "${record.sport}" (sponsor OR sponsored OR sponsorship OR ambassador OR endorsement OR "brand partnership" OR "NIL deal") before:${before}`,
-    `"${record.athlete_name}" "${record.sport}" (interview OR podcast OR YouTube OR "behind the scenes" OR "content creator" OR "personal brand" OR represented OR management OR agency OR "business inquiries" OR collaboration) before:${before}`,
+    `"${record.athlete_name}" ${handleExpression} (followers OR subscribers OR engagement) ${audienceDomains} before:${before}`,
+    `"${record.athlete_name}" (followers OR abonnés OR seguidores OR seguidoras OR subscribers OR influencer) before:${before}`,
+    `"${record.athlete_name}" "${record.sport}" (followers OR abonnés OR seguidores OR subscribers OR audience OR influencer OR vlogs) before:${before}`,
+    `"${record.athlete_name}" "${record.sport}" ("content creator" OR vlog OR vlogs OR YouTube OR podcast OR interview OR posting OR posts OR videos OR "réseaux sociaux" OR publicaciones OR publicação OR publicações) before:${before}`,
   ];
 }
 

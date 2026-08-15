@@ -2740,9 +2740,10 @@ test("historical discovery is tightly bounded and deduplicates URLs and domains"
   });
   assert.equal(signalRecovery.length, 4);
   assert.ok(signalRecovery.every((query) => query.includes("before:2024-06-01")));
-  assert.ok(signalRecovery.some((query) => /content creator|followers|personal brand/.test(query)));
-  assert.ok(signalRecovery.some((query) => /socialblade|hypeauditor|favikon/.test(query)));
-  assert.ok(signalRecovery.some((query) => /sponsor|brand partnership/.test(query)));
+  assert.ok(signalRecovery.every((query) => query.startsWith('"Jane Doe"')));
+  assert.ok(signalRecovery.some((query) => /content creator|followers|vlogs/.test(query)));
+  assert.ok(signalRecovery.some((query) => /socialblade|hypeauditor|favikon|socialauditor/.test(query)));
+  assert.ok(signalRecovery.some((query) => /abonnés|seguidores/.test(query)));
   assert.ok(signalRecovery.every((query) => !/onlyfans/i.test(query)), "development signal recovery must not search for the labeled outcome");
   assert.equal(normalizeEvidencePreparationBudget(100), 1);
   assert.equal(normalizeEvidencePreparationBudget(0), 0.5);
@@ -2782,13 +2783,13 @@ test("historical signal recovery uses a known cutoff-safe Instagram handle witho
     instagram_handle: "@example.athlete",
   });
   assert.equal(queries.length, 4);
+  assert.ok(queries.every((query) => query.startsWith('"Example Athlete"')));
   assert.match(queries[0], /"@example\.athlete"/);
   assert.match(queries[0], /site:socialblade\.com/);
-  assert.match(queries[0], /abonnés/);
-  assert.doesNotMatch(queries[0], /"Example Athlete"/);
+  assert.match(queries[0], /site:socialauditor\.io/);
   assert.match(queries[1], /"Example Athlete"/);
   assert.match(queries[1], /abonnés/);
-  assert.match(queries[2], /sponsor/);
+  assert.match(queries[2], /followers/);
   assert.match(queries[3], /content creator/);
 });
 
@@ -2806,6 +2807,20 @@ test("generated material signals require explicit athlete-relevant language", ()
     claimType: "audience_signal",
     sourceExcerpt: "Tessa Thyssen : entretien. Je valorise mes partenaires et ils suivent mes 7 000 abonnés.",
   }) || "", /Tessa Thyssen.*7 000 abonnés/);
+  assert.equal(preparedEvidenceSignalSupported(
+    "creator_behavior_signal",
+    "J’avais posté plus de photos et publié davantage de vidéos sur mes réseaux sociaux.",
+  ), true);
+  assert.match(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Tessa Thyssen",
+    claimType: "creator_behavior_signal",
+    sourceExcerpt: "Tessa Thyssen : entretien. Si j’avais posté plus de photos, mon audience aurait grandi.",
+  }) || "", /Tessa Thyssen.*posté plus de photos/);
+  assert.equal(preparedEvidenceSignalExcerptForAthlete({
+    athleteName: "Tessa Thyssen",
+    claimType: "creator_behavior_signal",
+    sourceExcerpt: "Tessa Thyssen : entretien. Sa coéquipière explique publier des vidéos chaque semaine.",
+  }), null, "a teammate's creator activity must not inherit the athlete title");
   assert.equal(preparedEvidenceSignalExcerptForAthlete({
     athleteName: "Tessa Thyssen",
     claimType: "audience_signal",
