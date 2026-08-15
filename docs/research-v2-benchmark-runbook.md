@@ -118,6 +118,12 @@ The runtime enforces that last rule separately from target coverage. A short or 
 
 ## Current data status (2026-08-15)
 
+### Verified v29 development baseline
+
+Production commit `678b90d` deploys benchmark runner v29 with the application-owned maximum-priority-age ceiling and a mandatory qualified-fit calibration band whenever every deterministic evidence gate passes. The completed 16-case development replay `3cd5a04c-85ce-4f08-9a2c-dda0f61d440b` used `anthropic/claude-sonnet-5` through OpenRouter and cost $1.043. It produced five finalists, all true positives: 100% precision above 80, 93.75% fit/achievability audit-decision accuracy, 100% auditor catch rate, 100% finalist identity, 100% finalist 21+, 100% source verification, 100% point-in-time compliance, 100% finalist audit pass, and zero unsupported claims. Strong-fit recall was 62.5%.
+
+This is a passing development baseline, not a held-out production proof. It replays records from an already revealed historical cohort. Do not run the visible one-time held-out control against that archive. A legitimate release still requires a fresh, locked, unrevealed 8-positive/8-negative cohort; the current fresh evidence blocker is the positive side.
+
 Dylan's 100-case ledger remains the sole commercial ground truth: 44 positive and 56 negative. The current bounded audit loads 1,072 evidence sources and 2,155 claims, retains 1,657 cutoff-safe model claims, and finds 44 evidence-ready packets (17 positive / 27 negative) with 100/100 point-in-time compliance.
 
 Two disjoint benchmark releases are complete and revealed, leaving 32 development, 32 held-out, and 36 excluded records. The newest held-out release `c990033d-38b0-4139-9d27-cd2dbd23bf38` passed identity, 21+, source, unsupported-claim, point-in-time, and audit-accuracy gates, but above-80 precision was 7/8 = 87.5%. The one miss was Murat Kazgan; his later negative outcome depended on inactive OnlyFans use that was absent from the pre-decision evidence packet. All revealed records are archive-only. Never tune against Murat or rerun either revealed held-out set.

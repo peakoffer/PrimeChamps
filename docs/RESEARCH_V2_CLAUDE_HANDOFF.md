@@ -21,6 +21,10 @@ The goal is **not complete**. The production gates are substantially stronger an
 
 This block supersedes older counts later in this document. The older sections remain as an audit trail of how the current state was reached.
 
+- **2026-08-15 verified baseline:** production commit `678b90d` runs benchmark runner v29. Development replay `3cd5a04c-85ce-4f08-9a2c-dda0f61d440b` completed all 16 revealed archive cases with latest Sonnet (`anthropic/claude-sonnet-5`) for $1.043. It returned five finalists with 100% precision, 93.75% audit-decision accuracy, 100% auditor catch, 100% finalist identity/21+/audit pass, 100% source and point-in-time compliance, and zero unsupported claims. Strong-fit recall was 62.5%.
+- v29 fixes two measured failures without using labels or outcomes in prompts: a corroborated birth-date-derived age now triggers the maximum-priority-age ceiling, and `allCoreEvidenceGatesPassed` now selects a mandatory qualified-fit/high band instead of allowing subjective “reasonable reserve” drift. Murat Kazgan is still descriptively overfit, but his corroborated age deterministically caps priority at 69 and the audit pipeline records the false-finalist miss as caught.
+- This is development proof on revealed archive data only. The goal remains incomplete until a fresh 8+8 cohort is locked and run once. Do not reuse or reveal an old held-out archive. The immediate data blocker remains fresh positive cutoff-safe evidence.
+
 - The authoritative 100-case audit currently finds 44 evidence-ready records: 17 positive and 27 negative. It loads 1,072 sources and 2,155 claims, of which 1,657 are cutoff-safe model evidence. Point-in-time compliance is 100/100.
 - Two disjoint 8+8 development / 8+8 held-out cohorts have been completed and revealed. Current assignments are 32 development, 32 held-out, and 36 excluded. Every held-out record is now archive-only and must never be tuned or reused as held-out.
 - The newest full development run `ee02fd30-4b14-4851-95e0-650c35514352` passed the measured gates on 16 cases for about $0.962.
