@@ -78,6 +78,37 @@ export function researchV2CreatorActivitySnapshot(input: {
   };
 }
 
+export function normalizeResearchV2BlindCriticalGaps(input: {
+  criticalGaps?: unknown;
+  identityPassed: boolean;
+  eligibilityPassed: boolean;
+  sourceVerificationPassed: boolean;
+  currentMomentumPassed: boolean;
+  audienceEvidencePassed: boolean;
+  creatorEvidencePassed: boolean;
+  commercialConstraintsComplete: boolean;
+}) {
+  const gaps = Array.isArray(input.criticalGaps)
+    ? input.criticalGaps.filter((gap): gap is string => typeof gap === "string" && Boolean(gap.trim()))
+    : [];
+  return gaps.filter((gap) => {
+    const normalized = gap.toLowerCase();
+    const knownConflict = /\b(?:known|identified|confirmed|documented|explicit)\b.{0,40}\b(?:conflict|prohibit|restriction|exclusive)/i.test(gap);
+    const expectedPrivateUnknown = /\b(?:exact rates?|pricing|private contract|private deal|deal terms?|exclusivity terms?)\b/i.test(gap)
+      && /\b(?:unknown|unavailable|not public|pre-contact|unchecked)\b/i.test(gap)
+      && !knownConflict;
+    if (expectedPrivateUnknown) return false;
+    if (input.identityPassed && /\bidentity\b/.test(normalized) && !/unsupported|contradiction/.test(normalized)) return false;
+    if (input.eligibilityPassed && /(?:\b(?:age|minor|eligibility|birthdate)\b|21\+)/.test(normalized) && !/unsupported|contradiction/.test(normalized)) return false;
+    if (input.sourceVerificationPassed && /\b(?:source|sourcing|corroborat)\b/.test(normalized) && !/unsupported|contradiction/.test(normalized)) return false;
+    if (input.currentMomentumPassed && /\b(?:momentum|result|ranking|roster)\b/.test(normalized) && !/unsupported|contradiction/.test(normalized)) return false;
+    if (input.audienceEvidencePassed && /\b(?:audience|followers?|engagement)\b/.test(normalized) && !/unsupported|contradiction/.test(normalized)) return false;
+    if (input.creatorEvidencePassed && /\b(?:creator|content|podcast|video|vlog|newsletter|series)\b/.test(normalized) && !/unsupported|contradiction/.test(normalized)) return false;
+    if (input.commercialConstraintsComplete && /\b(?:commercial|representation|access|economics|contract|sponsor|exclusiv)\b/.test(normalized) && !knownConflict) return false;
+    return true;
+  });
+}
+
 function bounded(value: number) {
   if (!Number.isFinite(value)) throw new Error("Research V2 scores must be finite numbers");
   return Math.max(0, Math.min(100, Math.round(value * 100) / 100));

@@ -51,6 +51,7 @@ import {
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  normalizeResearchV2BlindCriticalGaps,
   researchV2CommercialAccessSnapshot,
   researchV2CreatorActivitySnapshot,
   researchV2PreAuditEvidenceComplete,
@@ -4053,8 +4054,18 @@ Return pass only if the proposed dimensions are justified and there is no critic
   const unsupportedBlindClaims = Array.isArray(blind.unsupported_claims)
     ? blind.unsupported_claims.filter((claim): claim is string => typeof claim === "string" && Boolean(claim.trim()))
     : [];
+  const normalizedBlindCriticalGaps = normalizeResearchV2BlindCriticalGaps({
+    criticalGaps: blind.critical_gaps,
+    identityPassed: blind.identity_passed,
+    eligibilityPassed: blind.eligibility_passed,
+    sourceVerificationPassed: blind.source_verification_passed,
+    currentMomentumPassed: blind.current_momentum_passed,
+    audienceEvidencePassed: blind.audience_evidence_passed,
+    creatorEvidencePassed: blind.creator_evidence_passed,
+    commercialConstraintsComplete: blind.commercial_constraints_complete,
+  });
   const criticalGaps = Array.from(new Set([
-    ...(Array.isArray(blind.critical_gaps) ? blind.critical_gaps : []),
+    ...normalizedBlindCriticalGaps,
     ...deterministicGaps,
     ...unsupportedBlindClaims.map((claim) => `Unsupported material claim: ${claim}`),
     ...review.findings.filter((finding) => finding.severity === "critical").map((finding) => finding.details),

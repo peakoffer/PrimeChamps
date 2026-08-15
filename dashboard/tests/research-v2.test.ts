@@ -42,6 +42,7 @@ import {
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
   passesResearchV2FinalGate,
+  normalizeResearchV2BlindCriticalGaps,
   researchV2CommercialAccessSnapshot,
   researchV2CreatorActivitySnapshot,
   researchV2PreAuditEvidenceComplete,
@@ -606,6 +607,25 @@ test("creator activity requires a sustained personal or owned-format pattern, no
     })),
   });
   assert.equal(sponsorshipOnly.substantiveCreatorActivity, false);
+});
+
+test("blind audit critical gaps cannot contradict passed gates or treat expected private unknowns as vetoes", () => {
+  const normalized = normalizeResearchV2BlindCriticalGaps({
+    criticalGaps: [
+      "Owned-format creator evidence is corroborated only via a third-party podcast listing.",
+      "Private contract exclusivity terms are unknown pre-contact.",
+      "Exact rates and representation deal terms are unavailable pre-contact.",
+      "A documented sponsorship restriction prohibits adult-platform activity.",
+    ],
+    identityPassed: true,
+    eligibilityPassed: true,
+    sourceVerificationPassed: true,
+    currentMomentumPassed: true,
+    audienceEvidencePassed: true,
+    creatorEvidencePassed: true,
+    commercialConstraintsComplete: true,
+  });
+  assert.deepEqual(normalized, ["A documented sponsorship restriction prohibits adult-platform activity."]);
 });
 
 test("enrichment checkpoint forks discard prior scoring and audit artifacts", () => {
