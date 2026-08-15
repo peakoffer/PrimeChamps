@@ -51,6 +51,12 @@ function normalizeHandle(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/^@/, "").toLowerCase() : "";
 }
 
+function socialBladeCredentials() {
+  const clientId = process.env.SOCIAL_BLADE_CLIENT_ID?.trim();
+  const token = process.env.SOCIAL_BLADE_TOKEN?.trim();
+  return clientId && token ? { clientId, token } : null;
+}
+
 async function buildCandidatePlan(organizationId: string) {
   const admin = createAdminClient();
   const { data: records, error: recordError } = await admin.from("research_golden_records")
@@ -188,7 +194,7 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
     ? []
     : candidates.filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted).slice(0, 1);
   return {
-    configured: Boolean(process.env.SOCIAL_BLADE_CLIENT_ID && process.env.SOCIAL_BLADE_TOKEN),
+    configured: Boolean(socialBladeCredentials()),
     candidateCount: candidates.length,
     pilotRecords: pilot.map((candidate) => ({
       id: candidate.id,
@@ -225,15 +231,14 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
 }
 
 async function fetchSocialBladeHistory(candidate: Candidate) {
-  const clientId = process.env.SOCIAL_BLADE_CLIENT_ID;
-  const token = process.env.SOCIAL_BLADE_TOKEN;
-  if (!clientId || !token) throw new Error("Social Blade credentials are not configured");
+  const credentials = socialBladeCredentials();
+  if (!credentials) throw new Error("Social Blade credentials are not configured");
   const url = new URL("https://matrix.sbapis.com/b/instagram/statistics");
   url.searchParams.set("query", candidate.handle);
   url.searchParams.set("history", candidate.tier);
   url.searchParams.set("allow-stale", "true");
   const response = await fetch(url, {
-    headers: { clientid: clientId, token },
+    headers: { clientid: credentials.clientId, token: credentials.token },
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
   });
@@ -546,7 +551,7 @@ export async function POST(request: NextRequest) {
         outreachMutationsAllowed: false,
       });
     }
-    if (!process.env.SOCIAL_BLADE_CLIENT_ID || !process.env.SOCIAL_BLADE_TOKEN) {
+    if (!socialBladeCredentials()) {
       return NextResponse.json({ error: "Add SOCIAL_BLADE_CLIENT_ID and SOCIAL_BLADE_TOKEN to the server environment first" }, { status: 503 });
     }
     const officialHistoryStats = await countOfficialHistoryAttempts(user.organizationId);
