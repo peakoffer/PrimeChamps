@@ -59,7 +59,7 @@ import {
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v28";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v29";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -1028,6 +1028,7 @@ This thesis defines current business priorities only. It is not evidence about t
 Deterministic evidence precheck (computed only from the frozen dossier; no label or outcome):
 ${JSON.stringify(deterministicPrecheck, null, 2)}
 Treat each passed core evidence gate as present. Do not override a passed audience or creator gate solely because the signal is qualitative, below 50,000, or lacks cross-platform corroboration.
+When allCoreEvidenceGatesPassed is true, you MUST apply the qualified fit/high score band in PRE-OUTREACH CALIBRATION unless you cite a narrowly defined explicit material contradiction from the frozen dossier. Age, career stage, niche sport, general stature, modest reach, and optional missing amplifiers cannot move the candidate into a reserve band.
 
 Evidence:
 ${evidence.map((item) => `[${item.sourceRef}] ${item.title} | ${item.effectiveAt} | ${item.url}\n${item.claim}\n${item.excerpt}`).join("\n\n")}
@@ -1063,6 +1064,7 @@ DETERMINISTIC EVIDENCE PRECHECK (NO LABEL OR OUTCOME)
 ${JSON.stringify(deterministicPrecheck, null, 2)}
 
 Pass only when every material score and claim is supported by the frozen evidence. Material claims are immutable source records selected by E-number; do not call a canonical source claim unsupported merely because you would word it differently or because its authenticated pre-decision source is internal. List every actual unsupported Researcher conclusion in unsupported_material_claims. Correct a usable proposal when evidence supports lower scores. Never raise a Researcher or blind-auditor dimension. Fail wrong identity, missing corroborated 21+ eligibility, unsupported material claims, post-cutoff leakage, or unresolved critical gaps. Do not treat absent OnlyFans/adult-content willingness as a gap or failure; this is a pre-outreach prediction from creator, audience, momentum, and accessibility evidence. Missing representation alone is not automatically critical. Treat every passed deterministic core gate as present; do not override it solely because an audience signal is qualitative, below 50,000, or lacks cross-platform corroboration.
+When allCoreEvidenceGatesPassed is true, both assessments must use the mandatory qualified fit/high band unless an explicit frozen-dossier contradiction allowed by PRE-OUTREACH CALIBRATION is cited. Calling a compliant candidate a reasonable reserve because of age, career stage, niche sport, modest reach, low engagement, recent losses, or optional missing amplifiers is a calibration error, not a defensible interpretation.
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
 All three corrected scores must use the 0-100 numeric scale, never fractions from 0 to 1. If the proposal passes with no actual research-system error, return an empty findings array; never create a finding whose failure_type is "none". Be concise: return no more than five findings, keep each details and proposed_fix field under 30 words, and keep the summary under 60 words.
 Return exactly these keys: verdict, corrected_fit_score, corrected_achievability_score, corrected_confidence_score, unsupported_material_claims, findings, summary. verdict must be pass, corrected, or fail. Each finding must contain exactly failure_type, severity, details, and proposed_fix. Do not rename or add fields. Return the required JSON only.`;

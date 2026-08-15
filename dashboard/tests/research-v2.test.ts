@@ -2264,6 +2264,9 @@ SPORT PRIORITIES:
   assert.ok(prompt.includes("FROZEN BUSINESS THESIS"));
   assert.ok(prompt.includes("Deprioritize mature combat-sports categories"));
   assert.ok(prompt.includes("not evidence about this candidate"));
+  assert.ok(prompt.includes("allCoreEvidenceGatesPassed is true"));
+  assert.ok(prompt.includes("mandatory floors and ceilings"));
+  assert.ok(prompt.includes("Age and general career stature are not such contradictions"));
   assert.ok(!prompt.includes("SECRET OUTCOME"));
   assert.ok(!prompt.includes("gmail:private"));
 });
@@ -2418,7 +2421,7 @@ test("benchmark execution is evaluation-only and cannot mutate outreach or live 
   assert.ok(source.includes("no_outreach: true"));
   assert.ok(source.includes('data_collection: "deny"'));
   assert.ok(source.includes("providerReportedCostMicrousd"));
-  assert.match(source, /research-v2-benchmark-runner-v28/);
+  assert.match(source, /research-v2-benchmark-runner-v29/);
   assert.match(source, /researcherOutputTokens: 3_200/);
   assert.match(source, /blindOutputTokens: 3_000/);
   assert.match(source, /reviewOutputTokens: 2_600/);

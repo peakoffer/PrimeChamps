@@ -36,8 +36,10 @@ export type BenchmarkGoldenCase = {
 };
 
 export const BENCHMARK_PRE_OUTREACH_CALIBRATION = `PRE-OUTREACH CALIBRATION
-- A finalist that clears every core gate should normally land above 80 priority: identity and 21+ are independently corroborated; current athletic relevance is source-backed; a meaningful personal audience and creator behavior are present; the career tier is realistically accessible; and there is no exact, cutoff-dated evidence that an existing OnlyFans profile is inactive or closed.
-- Finalist anchor: when those core dimensions are all present, use fit 86-91, commercial achievability 76-84, and research confidence 82-90. Do not apply this anchor when any core dimension is missing or contradictory.
+- The deterministic allCoreEvidenceGatesPassed field is the scoring-band switch. When it is true, classify the candidate as fit with high achievability and use fit 86-91, commercial achievability 76-84, and research confidence 82-90. These are mandatory floors and ceilings, not suggestions.
+- Do not move an all-core-gates-passed candidate into reserve bands because of age, late career stage, niche sport, modest or qualitative audience, low engagement, recent losses, missing cross-platform reach, missing representation, or missing exact economics. Age is handled by an application-owned priority ceiling after scoring; the other items may be limitations within the qualified band.
+- The qualified band can be overridden only by an explicit cutoff-safe material contradiction in the dossier: wrong identity, under-21 evidence, inactive/closed exact OnlyFans profile, no current athletic relevance, invalid citations, post-cutoff leakage, or dated evidence that the opportunity is commercially unavailable under the frozen thesis. Name the exact contradiction and its E-number; never manufacture one from general career stature.
+- Do not apply the qualified band when allCoreEvidenceGatesPassed is false.
 - Fit 80-85 is a promising reserve, not automatically a finalist, when the evidence is positive but one core dimension is thin, stale, or only indirectly supported.
 - When a required adult-eligibility or audience gate fails, use fit 45-58, commercial achievability 35-44, and confidence 42-58. Strong athletic momentum, a proposed posting cadence, or known economics cannot by themselves replace those missing pre-outreach gates.
 - Performance, training, behind-the-scenes, interview, podcast, and personality-led social content all count as creator behavior; lifestyle content is not required.
@@ -915,6 +917,7 @@ This thesis defines current business priorities only. It is not evidence about t
 DETERMINISTIC EVIDENCE PRECHECK
 ${JSON.stringify(deterministicPrecheck, null, 2)}
 This precheck is computed from the same frozen dossier, contains no label or outcome, and is independently audited. Treat each passed core evidence gate as present. A score may still be lowered for a real contradiction or inaccessible career economics, but not by relabeling a passed gate as missing.
+When allCoreEvidenceGatesPassed is true, the qualified fit/high score band in PRE-OUTREACH CALIBRATION is mandatory unless the frozen evidence contains one of its narrowly defined explicit material contradictions. Age and general career stature are not such contradictions.
 
 SCORING
 - Every score uses the 0-100 numeric scale, never fractions from 0 to 1.
