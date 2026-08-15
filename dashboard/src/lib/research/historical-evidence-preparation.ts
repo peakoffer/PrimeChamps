@@ -13,8 +13,8 @@ export const HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   "2026-08-14-sport-handle-age-recovery-v3",
 ] as const;
 export const HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION = "2026-08-13-exact-handle-signal-recovery-v5";
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-14-jsonld-localized-age-extraction-v11";
-export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-dated-profiles-v12";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-official-profile-alias-extraction-v12";
+export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-official-profile-aliases-v13";
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 
@@ -165,13 +165,19 @@ export function buildOfficialDatedProfileCandidates(record: EvidencePreparationR
   const slug = record.athlete_name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (!slug) return [];
-  return [{
+  // The federation row itself explicitly records Alex as Alexandra
+  // Ianculescu's nickname. Keep that source-backed alias narrow instead of
+  // guessing arbitrary full-name expansions for other candidates.
+  const sourceBackedAliases: Record<string, string[]> = {
+    "alex-ianculescu": ["alexandra-ianculescu"],
+  };
+  return [slug, ...(sourceBackedAliases[slug] || [])].map((profileSlug, position) => ({
     query: "Deterministic official federation profile",
     title: `${record.athlete_name} - International Skating Union`,
-    url: `https://isu-skating.com/speed-skating/skaters/${slug}/`,
+    url: `https://isu-skating.com/speed-skating/skaters/${profileSlug}/`,
     snippet: `Official International Skating Union speed skating profile for ${record.athlete_name}.`,
-    position: 0,
-  }];
+    position,
+  }));
 }
 
 function normalizedUrlForComparison(value: string) {
@@ -823,8 +829,19 @@ export function extractOfficialDatedProfileEvidence(input: {
   const decoded = input.sourceText
     .replace(/\\u0026/gi, "&")
     .replace(/\\"/g, '"');
+  const requestedNameTokens = normalizeEvidenceText(input.athleteName).split(" ").filter(Boolean);
   const nameMatches = Array.from(decoded.matchAll(/"full_name"\s*:\s*"([^"]{2,160})"/g))
-    .filter((match) => normalizeEvidenceText(match[1]) === normalizeEvidenceText(input.athleteName));
+    .filter((match) => {
+      const officialNameTokens = normalizeEvidenceText(match[1]).split(" ").filter(Boolean);
+      if (officialNameTokens.join(" ") === requestedNameTokens.join(" ")) return true;
+      if (match.index === undefined || requestedNameTokens.length < 2 || officialNameTokens.length < 2
+        || requestedNameTokens.at(-1) !== officialNameTokens.at(-1)) return false;
+      const rowStart = Math.max(0, decoded.lastIndexOf('{"skaters_id"', match.index));
+      const rowWindow = decoded.slice(rowStart, Math.min(decoded.length, match.index + 8_000));
+      const nicknames = rowWindow.match(/"nick_names"\s*:\s*"([^"]+)"/)?.[1] || "";
+      const nicknameTokens = new Set(normalizeEvidenceText(nicknames).split(" ").filter(Boolean));
+      return nicknameTokens.has(requestedNameTokens[0]);
+    });
   if (nameMatches.length !== 1 || nameMatches[0].index === undefined) return null;
 
   const anchor = nameMatches[0].index;
@@ -834,6 +851,8 @@ export function extractOfficialDatedProfileEvidence(input: {
   const profileId = window.match(/"skaters_id"\s*:\s*(\d+)/)?.[1] || "";
   const birthDateText = field("date_of_birth");
   const status = field("status");
+  const officialFullName = field("full_name");
+  const nicknames = field("nick_names");
   const createdAt = new Date(field("created_at"));
   const updatedAt = new Date(field("updated_at"));
   const discipline = window.match(/"discipline"\s*:\s*\{\s*"title"\s*:\s*"([^"]+)"/)?.[1]?.trim() || "";
@@ -842,11 +861,23 @@ export function extractOfficialDatedProfileEvidence(input: {
     || createdAt > updatedAt || updatedAt > cutoff
     || !benchmarkSourceSupportsSport(input.sport, discipline)) return null;
 
-  const birthDate = extractBirthDate(`Date of birth: ${birthDateText}`);
+  const compactBirthDate = birthDateText.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  const officialMonths: Record<string, number> = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  };
+  const birthDate = compactBirthDate
+    ? normalizeNumericBirthDate(
+      Number(compactBirthDate[3]),
+      officialMonths[compactBirthDate[2].toLowerCase()],
+      Number(compactBirthDate[1])
+    )
+    : null;
   const ageAtCutoff = birthDate ? ageOnDate(birthDate, input.evidenceCutoffAt) : null;
   if (!birthDate || ageAtCutoff === null || ageAtCutoff < 21 || ageAtCutoff > 80) return null;
   const excerpt = [
-    input.athleteName,
+    `Official profile name: ${officialFullName}`,
+    ...(nicknames ? [`Official profile nicknames: ${nicknames}`] : []),
     `Sport: ${discipline}`,
     `Date of birth: ${birthDateText}`,
     `Profile status: ${status}`,

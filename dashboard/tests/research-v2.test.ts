@@ -375,39 +375,47 @@ test("official WorldWCR entry lists resolve a DOB only from an exact dated rider
 test("official ISU structured profiles are cutoff-safe only when their own update predates the decision", () => {
   const record = {
     id: "alex",
-    athlete_name: "Alexandra Ianculescu",
+    athlete_name: "Alex Ianculescu",
     sport: "Speed skating",
     fit_label: "fit" as const,
     evidence_cutoff_at: "2026-02-11T12:00:00Z",
   };
   assert.equal(
-    buildOfficialDatedProfileCandidates(record)[0]?.url,
+    buildOfficialDatedProfileCandidates(record)[1]?.url,
     "https://isu-skating.com/speed-skating/skaters/alexandra-ianculescu/"
   );
-  const sourceText = `self.__next_f.push([1,"{\\"skaters_id\\":2808,\\"full_name\\":\\"Alexandra Ianculescu\\",\\"date_of_birth\\":\\"21 Oct 1991\\",\\"status\\":\\"Active\\",\\"created_at\\":\\"2024-10-03T07:19:36.000Z\\",\\"updated_at\\":\\"2025-06-18T06:11:04.000Z\\",\\"discipline\\":{\\"title\\":\\"SPEED SKATING\\"}}"]);`;
+  const sourceText = `self.__next_f.push([1,"{\\"skaters_id\\":2808,\\"full_name\\":\\"Alexandra Ianculescu\\",\\"date_of_birth\\":\\"21 Oct 1991\\",\\"status\\":\\"Active\\",\\"created_at\\":\\"2024-10-03T07:19:36.000Z\\",\\"updated_at\\":\\"2025-06-18T06:11:04.000Z\\",\\"nick_names\\":\\"Alex (Twitter profile, 28 Nov 2016)\\",\\"discipline\\":{\\"title\\":\\"SPEED SKATING\\"}}"]);`;
   const evidence = extractOfficialDatedProfileEvidence({
     athleteName: record.athlete_name,
     sport: record.sport,
-    sourceUrl: buildOfficialDatedProfileCandidates(record)[0]!.url,
+    sourceUrl: buildOfficialDatedProfileCandidates(record)[1]!.url,
     sourceText,
     evidenceCutoffAt: record.evidence_cutoff_at,
   });
   assert.equal(evidence?.birthDate, "1991-10-21");
   assert.equal(evidence?.publishedAt, "2025-06-18T06:11:04.000Z");
   assert.match(evidence?.excerpt || "", /Official profile record 2808/);
+  assert.match(evidence?.excerpt || "", /Official profile nicknames: Alex/);
 
   assert.equal(extractOfficialDatedProfileEvidence({
     athleteName: record.athlete_name,
     sport: record.sport,
-    sourceUrl: buildOfficialDatedProfileCandidates(record)[0]!.url,
+    sourceUrl: buildOfficialDatedProfileCandidates(record)[1]!.url,
     sourceText: sourceText.replace("2025-06-18T06:11:04.000Z", "2026-06-18T06:11:04.000Z"),
     evidenceCutoffAt: record.evidence_cutoff_at,
   }), null);
   assert.equal(extractOfficialDatedProfileEvidence({
     athleteName: "Different Athlete",
     sport: record.sport,
-    sourceUrl: buildOfficialDatedProfileCandidates(record)[0]!.url,
+    sourceUrl: buildOfficialDatedProfileCandidates(record)[1]!.url,
     sourceText,
+    evidenceCutoffAt: record.evidence_cutoff_at,
+  }), null);
+  assert.equal(extractOfficialDatedProfileEvidence({
+    athleteName: record.athlete_name,
+    sport: record.sport,
+    sourceUrl: buildOfficialDatedProfileCandidates(record)[1]!.url,
+    sourceText: sourceText.replace(/,\\"nick_names\\":\\"[^\"]+\\"/, ""),
     evidenceCutoffAt: record.evidence_cutoff_at,
   }), null);
 });
