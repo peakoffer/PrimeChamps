@@ -791,7 +791,7 @@ test("source-backed Instagram bio signals improve precheck order without satisfy
   ]);
 });
 
-test("precheck ranking spends enrichment on in-range audiences first", () => {
+test("precheck selection rejects measured out-of-range audiences before paid enrichment", () => {
   const selected = selectBalancedResearchCandidates([
     { id: "below-range", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/one", followerCount: 20_000 } },
     { id: "in-range", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/two", followerCount: 75_000 } },
@@ -801,7 +801,6 @@ test("precheck ranking spends enrichment on in-range audiences first", () => {
   assert.deepEqual(selected.map((candidate) => candidate.id), [
     "in-range",
     "unknown",
-    "below-range",
   ]);
 });
 

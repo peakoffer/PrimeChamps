@@ -30,6 +30,18 @@ export function researchCandidateEnrichmentReadiness(candidate: {
   return score;
 }
 
+export function passesResearchCandidateAudiencePrecheck(candidate: {
+  discovery_precheck?: ResearchCandidatePrecheck;
+}, audience?: { followerMin?: number; followerMax?: number }) {
+  const followers = candidate.discovery_precheck?.followerCount;
+  if (typeof followers !== "number" || !Number.isFinite(followers)) return true;
+  const minimum = Math.max(0, audience?.followerMin ?? 30_000);
+  const maximum = audience?.followerMax && audience.followerMax > 0
+    ? audience.followerMax
+    : Number.POSITIVE_INFINITY;
+  return followers >= minimum && followers <= maximum;
+}
+
 export function selectBalancedResearchCandidates<T extends {
   discovery_lane?: ResearchCandidateLane;
   known_instagram_handle?: string;
@@ -42,7 +54,12 @@ export function selectBalancedResearchCandidates<T extends {
   const boundedLimit = Math.max(0, Math.floor(limit));
   if (boundedLimit === 0) return [];
 
-  const indexed = candidates.map((candidate, index) => ({ candidate, index }));
+  // A measured audience miss is deterministic and should never consume a
+  // paid enrichment slot. Unknown audiences remain eligible so a partial
+  // precheck cannot silently erase a potentially strong candidate.
+  const indexed = candidates
+    .filter((candidate) => passesResearchCandidateAudiencePrecheck(candidate, audience))
+    .map((candidate, index) => ({ candidate, index }));
   const rank = (rows: typeof indexed) => rows
     .sort((left, right) =>
       researchCandidateEnrichmentReadiness(right.candidate, audience) - researchCandidateEnrichmentReadiness(left.candidate, audience)
