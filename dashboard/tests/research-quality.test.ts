@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
-import { buildSportDiscoveryQueries, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
+import {
+  buildCreatorFirstDiscoveryQueries,
+  buildSportDiscoveryQueries,
+  getSportResearchStrategy,
+} from "../src/lib/research/sport-strategy.ts";
 import {
   applyResearchObjectiveScoreGuardrails,
   calculateResearchScore,
@@ -87,6 +91,14 @@ test("volleyball discovery includes distinct pro-transition and creator-NIL sour
   assert.ok(queries.some((query) => /NIL|social media|creator/i.test(query)));
   assert.ok(queries.some((query) => /birth date|player profile/i.test(query)));
   assert.ok(queries.length >= 12);
+});
+
+test("every sport gets a bounded creator-first discovery lane", () => {
+  const queries = buildCreatorFirstDiscoveryQueries("volleyball", 2026);
+  assert.equal(queries.length, 3);
+  assert.ok(queries.every((query) => query.includes("volleyball")));
+  assert.ok(queries.some((query) => /Instagram creator personal brand/.test(query)));
+  assert.ok(queries.some((query) => /social media followers brand partnership/.test(query)));
 });
 
 test("discovery recognizes sourced rookie language but never trusts model context as proof", () => {
@@ -1052,6 +1064,9 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /sourceByUrl\.get\(canonicalResearchUrl\(candidateUrl\)\)/);
   assert.match(workflowSource, /OPENAI_RESEARCH_MODEL \|\| "gpt-5\.6"/);
   assert.match(workflowSource, /Discovery evidence target reached after wave 1/);
+  assert.match(workflowSource, /This is the creator-first discovery lane/);
+  assert.match(workflowSource, /Do not fill this lane with roster-only names/);
+  assert.match(workflowSource, /buildCreatorFirstDiscoveryQueries/);
   assert.match(workflowSource, /Skipping Apify Google discovery supplement/);
   assert.match(workflowSource, /lookupAthleteAgesWithOpenAI/);
   assert.match(workflowSource, /lookupAthleteAgesWithApify/);

@@ -13,6 +13,7 @@ import {
   type ScrapedInstagramPost,
 } from "@/lib/instagram-post-order";
 import {
+  buildCreatorFirstDiscoveryQueries,
   buildSportDiscoveryQueries,
   getSportResearchStrategy,
 } from "@/lib/research/sport-strategy";
@@ -1912,6 +1913,11 @@ async function discoverAthletesFromOpenAIWebSearch({
   const strategy = getSportResearchStrategy(sport);
   const params = recruitingProfile?.parameters || DEFAULT_RECRUITING_PROFILE.parameters;
   const requestedCount = Math.min(Math.max(targetCount, 5), 50);
+  const creatorFirstWave = /wave\s*2|creator-led|personal audiences|nil|social media/i.test(customContext || "");
+  const suggestedQueries = Array.from(new Set([
+    ...selectSportDiscoveryQueries(sport, customContext),
+    ...(creatorFirstWave ? buildCreatorFirstDiscoveryQueries(sport, currentYear) : []),
+  ])).slice(0, 8);
   const prompt = `Research up to ${requestedCount} real, active female professional ${sport} athletes for a source-verified recruiting candidate pool.
 
 SEARCH BRIEF:
@@ -1921,6 +1927,7 @@ Current year: ${currentYear}
 Known leagues and competitions: ${[...sportContext.leagues, ...sportContext.competitions].join(", ") || "research current professional circuits"}
 Discovery angles: ${strategy.discoveryAngles.join("; ")}
 Preferred evidence: ${strategy.authoritativeSources.join("; ")}
+Suggested live searches: ${suggestedQueries.join("; ")}
 
 BUSINESS THESIS:
 ${formatRecruitingProfileForPrompt(recruitingProfile, customContext)}
@@ -1937,6 +1944,9 @@ HARD RULES:
 - Keep the official competition source_url mandatory. If the same bounded search naturally encounters the athlete's exact personal Instagram profile, a public business/agency/contact page, or public evidence of active creator-led content, include those exact URLs too. Do not perform separate per-athlete searches for these optional fields.
 - For instagram_url, business_or_representation_url, and creator_evidence_url, return the exact URL only when it was actually consulted and belongs to this athlete. Return null when unknown. Never guess a handle or URL, and do not reuse the competition source merely to fill a field.
 - These three supplemental URLs are discovery-prioritization hints, not proof of identity, age, fit, or commercial access.
+${creatorFirstWave ? `- This is the creator-first discovery lane. Locate candidates through current creator, NIL, personal-brand, audience, or athlete-marketing sources, then independently verify each candidate with the required official competition source_url.
+- Do not fill this lane with roster-only names. Omit a candidate unless the search also consulted her exact personal Instagram profile, a public business/representation route, or attributable evidence of sustained creator-led content.
+- Favor source-published audiences in the ${params.follower_min.toLocaleString()}-${params.follower_max.toLocaleString()} range, but never invent or estimate a follower count.` : ""}
 
 Return a JSON object matching the schema. Each context must start with the athlete's exact full name and state the specific, dated evidence in one concise sentence. Use the exact consulted source URL and title.`;
 

@@ -245,3 +245,12 @@ export function buildSportDiscoveryQueries(sport: string, year: number) {
     .replaceAll("{year}", String(year))
   );
 }
+
+export function buildCreatorFirstDiscoveryQueries(sport: string, year: number) {
+  const normalized = normalizeSport(sport);
+  return [
+    `women ${normalized} athlete Instagram creator personal brand rising ${year}`,
+    `women ${normalized} athlete social media followers brand partnership breakout ${year}`,
+    `women ${normalized} athlete creator business inquiries Instagram emerging professional ${year}`,
+  ];
+}
