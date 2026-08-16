@@ -692,6 +692,7 @@ test("Instagram-native search isolates batched queries and still requires athlet
       url: "https://www.instagram.com/mimicolyer/",
       fullName: "Mimi Colyer",
       biography: "Professional volleyball athlete",
+      followersCount: 28_398,
       verified: true,
     },
     {
@@ -715,6 +716,7 @@ test("Instagram-native search isolates batched queries and still requires athlet
     results: rows,
   });
   assert.equal(candidates[0]?.handle, "mimicolyer");
+  assert.equal(candidates[0]?.followerCount, 28_398);
   assert.equal(candidates.some((candidate) => candidate.handle === "lexi.rodriguez"), false);
   assert.ok(scoreInstagramProfileIdentity({
     athleteName: "Mimi Colyer",

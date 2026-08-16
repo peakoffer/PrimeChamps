@@ -5,6 +5,7 @@ export type InstagramSearchCandidate = {
   snippet: string;
   searchConfidence: number;
   reasons: string[];
+  followerCount?: number;
 };
 
 export type InstagramNativeProfileSearchResult = {
@@ -16,6 +17,7 @@ export type InstagramNativeProfileSearchResult = {
   businessCategoryName?: string | null;
   externalUrl?: string | null;
   verified?: boolean | null;
+  followersCount?: number | null;
 };
 
 const RESERVED_PATHS = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct", "about"]);
@@ -204,6 +206,7 @@ export function rankInstagramNativeSearchCandidates(input: {
       snippet: profileText,
       searchConfidence: Math.max(0, Math.min(100, confidence)),
       reasons,
+      followerCount: typeof result.followersCount === "number" ? result.followersCount : undefined,
     };
     if ((byHandle.get(handle)?.searchConfidence || -1) < candidate.searchConfidence) {
       byHandle.set(handle, candidate);

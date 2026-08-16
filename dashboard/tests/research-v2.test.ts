@@ -660,6 +660,7 @@ test("durable research phase transitions save payloads atomically", () => {
   assert.match(workflow, /"enriching_instagram", \{[\s\S]*?\}, \{ rawResults: allDiscoveredAthletes \}\)/);
   assert.match(workflow, /"scoring", \{[\s\S]*?\}, \{ scoringDetails: enrichedAthletes \}\)/);
   assert.match(workflow, /"saving_candidates", \{[\s\S]*?scoringDetails: auditedAthletes\.length > 0 \? auditedAthletes : undefined,[\s\S]*?finalResults/);
+  assert.match(workflow, /precheckedEvidenceQualifiedAthletes = hasDiscoveryCheckpoint[\s\S]*?addInstagramPrechecksForEnrichment/);
 });
 
 test("research artifact activation archives the prior rubric version before activating v5", () => {
@@ -777,6 +778,20 @@ test("source-backed Instagram bio signals improve precheck order without satisfy
     "instagram-commercial",
     "instagram-creator",
     "instagram-only",
+  ]);
+});
+
+test("precheck ranking spends enrichment on in-range audiences first", () => {
+  const selected = selectBalancedResearchCandidates([
+    { id: "below-range", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/one", followerCount: 20_000 } },
+    { id: "in-range", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/two", followerCount: 75_000 } },
+    { id: "unknown", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/three" } },
+  ], 3, { followerMin: 30_000, followerMax: 500_000 });
+
+  assert.deepEqual(selected.map((candidate) => candidate.id), [
+    "in-range",
+    "unknown",
+    "below-range",
   ]);
 });
 

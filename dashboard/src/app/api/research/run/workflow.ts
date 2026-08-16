@@ -648,6 +648,11 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
         creatorSignalSourceUrl: typeof rawPrecheck.creatorSignalSourceUrl === "string"
           ? rawPrecheck.creatorSignalSourceUrl
           : undefined,
+        followerCount: typeof rawPrecheck.followerCount === "number"
+          ? rawPrecheck.followerCount
+          : typeof raw.follower_count === "number"
+            ? raw.follower_count
+            : undefined,
       },
       discovery_lane: "memory",
     });
@@ -2686,6 +2691,7 @@ async function addInstagramPrechecksForEnrichment(
           instagramUrl: best.url,
           businessSignalSourceUrl: businessSignal ? best.url : athlete.discovery_precheck?.businessSignalSourceUrl,
           creatorSignalSourceUrl: creatorSignal ? best.url : athlete.discovery_precheck?.creatorSignalSourceUrl,
+          followerCount: best.followerCount,
         },
       };
     });
@@ -5515,6 +5521,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               || athlete.discovery_precheck?.businessSignalSourceUrl,
             creatorSignalSourceUrl: previous?.discovery_precheck?.creatorSignalSourceUrl
               || athlete.discovery_precheck?.creatorSignalSourceUrl,
+            followerCount: previous?.discovery_precheck?.followerCount
+              ?? athlete.discovery_precheck?.followerCount,
           },
         });
       }
@@ -5540,10 +5548,12 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         ?? Math.max(config.resultCount * 4, 30)
     );
     await assertRunNotCancelled(researchLogId);
-    const precheckedEvidenceQualifiedAthletes = await addInstagramPrechecksForEnrichment(
-      evidenceQualifiedAthletes,
-      Math.min(60, enrichmentPoolLimit * 2)
-    );
+    const precheckedEvidenceQualifiedAthletes = hasDiscoveryCheckpoint
+      ? evidenceQualifiedAthletes
+      : await addInstagramPrechecksForEnrichment(
+          evidenceQualifiedAthletes,
+          Math.min(60, enrichmentPoolLimit * 2)
+        );
     const precheckedByKey = new Map(precheckedEvidenceQualifiedAthletes.map((athlete) => [
       researchCandidateKey(athlete.name, athlete.sport),
       athlete,
@@ -5553,7 +5563,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     );
     const discoveredAthletes = selectBalancedResearchCandidates(
       precheckedEvidenceQualifiedAthletes,
-      enrichmentPoolLimit
+      enrichmentPoolLimit,
+      { followerMin: config.followerMin, followerMax: config.followerMax }
     );
     if (allDiscoveredAthletes.length !== evidenceQualifiedAthletes.length) {
       log(`Rejected ${allDiscoveredAthletes.length - evidenceQualifiedAthletes.length} discoveries at the sport/source evidence gate`);
