@@ -126,7 +126,16 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 | Evaluation | Internal Supabase harness and unit/CI regressions first | Smallest debuggable system with no new platform dependency | Braintrust for scaled comparisons; Langfuse for self-hosted tracing; Promptfoo for broader CI matrices |
 | Paid influencer data | No Modash contract now | The annual price is not justified before proving a measured data gap | Revisit with volume and coverage evidence |
 
-## Current production checkpoint — 15 August 2026
+## Current production checkpoint — 15 August 2026 (audience-precheck proof)
+
+- Production `main` includes `4d7ea24`; Vercel deployment `dpl_4eQQoEvnWbK3nwHTwx9DRY1rAmHH` is `READY` on `crm.prime-champs.com`.
+- Evaluation-only volleyball smoke `1fa86349-36f9-4e48-b504-80522dc94e5d` sourced 31 candidates, pre-measured 12 Instagram audiences, admitted six to the enrichment ceiling, enriched/scored four, and returned two independently audited finalists: Devon Newberry 82 (`corrected`) and Emma Halter 82 (`pass`). Camilla Lamina remained 63 and Flormarie Heredia Colon 62. The agent did not pad the requested three.
+- Candidate selection now obtains a bounded Instagram profile-metadata precheck because the live Apify user-search output omitted its advertised follower count. Measured accounts outside the active 30K–500K window are rejected before full enrichment; unknown counts remain eligible under the bounded fallback policy.
+- Durable workflow phase reporting is monotonic. The proof run stored all 31 sourced records and moved exactly through discovery, enrichment, scoring, saving, and completion without phase regression or a duplicate Instagram precheck.
+- The rotated Social Blade credentials authenticated in the audit path and checked two exact handles; the provider reported 66 credits remaining. Neither handle had a qualifying 30-day trend, which remains neutral.
+- The full check passes: typecheck, lint with zero errors (53 existing warnings), 159 unit tests, and the production build. Production readiness is still unproven until fresh development/locked held-out acceptance and cross-sport yield meet the defined thresholds.
+
+## Previous production checkpoint — 15 August 2026
 
 - Production `main` includes `d8fb64a`; Vercel deployment `dpl_8ux9VwnE437iDWG66hpCgKd7k1gW` is `READY` on `crm.prime-champs.com`.
 - Research V2.4 adds deterministic qualified-band calibration only after every identity, two-source 21+, momentum, audience, creator, commercial-access, public-restriction, and claim-support gate passes. The independent audit remains a hard veto and score ceiling.
