@@ -679,7 +679,7 @@ test("scoring checkpoint forks preserve researcher scores and discard only audit
   const route = readFileSync(new URL("../src/app/api/internal/research-evaluations/route.ts", import.meta.url), "utf8");
   assert.match(source, /resetScoredCandidateForReaudit/);
   assert.match(source, /score_stage", "researcher"/);
-  assert.match(source, /phase: "saving_candidates"/);
+  assert.match(source, /phase: "auditing"/);
   assert.match(source, /resumedFrom: "auditing"/);
   assert.match(source, /!key\.startsWith\("audit_"\)/);
   assert.match(route, /body\.action === "fork_from_scoring"/);
@@ -1939,6 +1939,21 @@ test("qualified-band calibration never inflates blind-auditor or review correcti
     commercialAchievability: 74,
     researchConfidence: 81,
   });
+});
+
+test("production audit treats free-form blind limitations as diagnostic rather than deterministic claim failures", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /unsupportedMaterialClaims: claimSample\.unsupported/);
+  assert.match(workflow, /materialClaimsVerified: blind\.source_verification_passed && claimSample\.unsupported === 0/);
+  assert.ok(!workflow.includes("unsupportedMaterialClaims: claimSample.unsupported +"));
+  assert.ok(!workflow.includes("...unsupportedBlindClaims.map((claim) => `Unsupported material claim:"));
+});
+
+test("persistence reuses the completed audit checkpoint instead of auditing candidates twice", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /"scoring",\s+"auditing",\s+"saving_candidates"/);
+  assert.match(workflow, /const scoredAthletes = reachedPhase\("auditing"\)/);
+  assert.match(workflow, /const auditedAthletes = reachedPhase\("saving_candidates"\)\s+\? scoredAthletes\s+: await auditPriorityCandidates/);
 });
 
 test("V2 final gate requires independent audit and every evidence gate", () => {

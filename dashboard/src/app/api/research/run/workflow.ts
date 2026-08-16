@@ -130,6 +130,7 @@ const RESEARCH_PHASE_ORDER = [
   "discovering_candidates",
   "enriching_instagram",
   "scoring",
+  "auditing",
   "saving_candidates",
   "completed",
 ] as const;
@@ -4515,7 +4516,13 @@ CALIBRATION REMINDER:
     !commercialAccess.audienceScaleMeasured ? "Follower and engagement evidence did not establish measurable audience scale" : null,
     !commercialConstraintSearchCompleted ? "Public sponsorship, contract, and content-policy constraint research did not complete" : null,
   ].filter((gap): gap is string => Boolean(gap));
-  const unsupportedBlindClaims = Array.isArray(blind.unsupported_claims)
+  // The blind model's free-form unsupported_claims field is diagnostic, not a
+  // deterministic veto. The model can place stale third-party discrepancies
+  // here even while source_verification_passed is true (for example, an old
+  // follower count beside the verified live profile). Actual material-claim
+  // failures are enforced by source_verification_passed and the application-
+  // controlled sampled re-fetch below.
+  const blindReportedUnsupportedClaims = Array.isArray(blind.unsupported_claims)
     ? blind.unsupported_claims.filter((claim): claim is string => typeof claim === "string" && Boolean(claim.trim()))
     : [];
   const normalizedBlindCriticalGaps = normalizeResearchV2BlindCriticalGaps({
@@ -4544,7 +4551,6 @@ CALIBRATION REMINDER:
   const criticalGaps = Array.from(new Set([
     ...normalizedBlindCriticalGaps,
     ...deterministicGaps,
-    ...unsupportedBlindClaims.map((claim) => `Unsupported material claim: ${claim}`),
     ...normalizedReviewCriticalGaps,
   ]));
   const forcedFailure = !blind.identity_passed
@@ -4597,7 +4603,7 @@ CALIBRATION REMINDER:
       researchConfidence: calibratedReview.researchConfidence,
     },
     hasCriticalGap: forcedFailure,
-    unsupportedMaterialClaims: claimSample.unsupported + unsupportedBlindClaims.length,
+    unsupportedMaterialClaims: claimSample.unsupported,
   });
   const correctedWithObjectiveGuardrails = {
     ...corrected,
@@ -4624,11 +4630,11 @@ CALIBRATION REMINDER:
       details: detail,
       proposed_fix: "Add the missing source-backed evidence to the frozen dossier and re-run scoring and audit.",
     })),
-    ...unsupportedBlindClaims.map((detail) => ({
+    ...blindReportedUnsupportedClaims.map((detail) => ({
       failure_type: "unsupported_claim",
-      severity: "critical" as const,
+      severity: "high" as const,
       details: detail,
-      proposed_fix: "Remove the claim or replace it with a directly supported source and excerpt.",
+      proposed_fix: "Reconcile the diagnostic discrepancy or remove the stale source; it becomes critical only if source verification or the sampled re-fetch fails.",
     })),
     ...claimSample.failures.map((detail) => ({
       failure_type: "source_retrieval_failure",
@@ -4658,7 +4664,7 @@ CALIBRATION REMINDER:
       && commercialAccess.actionableContactRoute
       && commercialAccess.audienceScaleMeasured
       && commercialConstraintSearchCompleted,
-    materialClaimsVerified: blind.source_verification_passed && claimSample.unsupported === 0 && (blind.unsupported_claims?.length || 0) === 0,
+    materialClaimsVerified: blind.source_verification_passed && claimSample.unsupported === 0,
     auditorVerdict: verdict,
     criticalGapCount: criticalGaps.length,
   });
@@ -4682,7 +4688,7 @@ CALIBRATION REMINDER:
       ...independentResults.map((item) => ({ url: item.url, claim: item.snippet, sourceExcerpt: item.snippet })),
     ]),
     assessment: { blind, review, claimSample, deterministicEvidence, socialBladeAudience, calibratedBlind, calibratedReview },
-    unsourced_claim_count: claimSample.unsupported + (blind.unsupported_claims?.length || 0),
+    unsourced_claim_count: claimSample.unsupported,
     critical_gap_count: criticalGaps.length,
     is_final: passesFinal,
     supersedes_score_id: athlete.research_score_id,
@@ -4755,7 +4761,7 @@ CALIBRATION REMINDER:
     audit_verdict: verdict,
     audit_summary: review.summary,
     audit_critical_gap_count: criticalGaps.length,
-    audit_material_claims_verified: blind.source_verification_passed && claimSample.unsupported === 0 && (blind.unsupported_claims?.length || 0) === 0,
+    audit_material_claims_verified: blind.source_verification_passed && claimSample.unsupported === 0,
     audit_current_momentum_verified: deterministicEvidence.currentMomentum && blind.current_momentum_passed,
     audit_meaningful_audience_verified: deterministicEvidence.meaningfulAudience && blind.audience_evidence_passed,
     audit_creator_potential_verified: deterministicEvidence.creatorPotential && blind.creator_evidence_passed,
@@ -5929,7 +5935,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             && typeof value.research_confidence_score === "number";
         })
       : [];
-    const scoredAthletes = reachedPhase("saving_candidates")
+    const scoredAthletes = reachedPhase("auditing")
       && checkpointedScores.length > 0
       ? checkpointedScores
       : await scoreAthletes(enrichedAthletes, scoringModel, config, input, {
@@ -5937,7 +5943,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         discovered: discoveredAthletes.length,
         enriched: enrichedAthletes.length,
       });
-    if (reachedPhase("saving_candidates") && scoredAthletes.length > 0) {
+    if (reachedPhase("auditing") && scoredAthletes.length > 0) {
       log(`Resuming from scoring checkpoint with ${scoredAthletes.length} finalists`);
     }
 
@@ -5945,12 +5951,18 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // candidate then receives an independent blind audit before it can become
     // a finalist. The Auditor sees the Researcher's score only after completing
     // its own evidence review, so it cannot simply ratify the proposal.
-    const auditedAthletes = await auditPriorityCandidates(
-      input,
-      scoredAthletes,
-      scoringModel,
-      config.evaluationBudget?.maxAuditCandidates
-    );
+    // The scoring step already persisted the complete audited candidates at
+    // saving_candidates. The following persistence step must reuse that
+    // checkpoint instead of buying a second blind/review audit and allowing a
+    // second stochastic verdict to overwrite the first.
+    const auditedAthletes = reachedPhase("saving_candidates")
+      ? scoredAthletes
+      : await auditPriorityCandidates(
+          input,
+          scoredAthletes,
+          scoringModel,
+          config.evaluationBudget?.maxAuditCandidates
+        );
 
     // Never pad a run with weak candidates just to hit a requested count. The
     // deterministic V1 gates and the independent V2 audit both have veto power.

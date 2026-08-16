@@ -328,7 +328,7 @@ export async function forkResearchEvaluationFromScoring(sourceRunId: string) {
     profile_version_id: source.profile_version_id,
     research_depth: source.research_depth || "extended",
     status: "queued",
-    phase: "saving_candidates",
+    phase: "auditing",
     heartbeat_at: new Date().toISOString(),
     config_used: resumedConfig,
     is_evaluation: true,
@@ -348,7 +348,7 @@ export async function forkResearchEvaluationFromScoring(sourceRunId: string) {
       audited: 0,
       returned: 0,
       added: 0,
-      phase: "saving_candidates",
+      phase: "auditing",
     },
   }).select("id").single();
   if (insertError || !forked) throw insertError || new Error("Could not create evaluation audit fork");
