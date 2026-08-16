@@ -370,6 +370,11 @@ async function updateResearchProgress(
     held?: number;
     blocked?: number;
     duplicates?: number;
+  },
+  checkpoint?: {
+    rawResults?: unknown[];
+    scoringDetails?: unknown[];
+    finalResults?: unknown[];
   }
 ) {
   if (!researchLogId) return;
@@ -391,6 +396,9 @@ async function updateResearchProgress(
       phase,
       phase_history: nextHistory,
       stats: { ...stats, phase },
+      ...(checkpoint?.rawResults !== undefined ? { raw_results: checkpoint.rawResults } : {}),
+      ...(checkpoint?.scoringDetails !== undefined ? { scoring_details: checkpoint.scoringDetails } : {}),
+      ...(checkpoint?.finalResults !== undefined ? { final_results: checkpoint.finalResults } : {}),
     })
     .eq("id", researchLogId)
     .eq("status", "running");
@@ -5557,11 +5565,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       scored: 0,
       returned: 0,
       added: 0,
-    });
-    await supabase
-      .from("research_logs")
-      .update({ raw_results: allDiscoveredAthletes })
-      .eq("id", researchLogId);
+    }, { rawResults: allDiscoveredAthletes });
     await assertRunNotCancelled(researchLogId);
 
     if (discoveredAthletes.length === 0) {
@@ -5624,11 +5628,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       scored: 0,
       returned: 0,
       added: 0,
-    });
-    await supabase
-      .from("research_logs")
-      .update({ scoring_details: enrichedAthletes })
-      .eq("id", researchLogId);
+    }, { scoringDetails: enrichedAthletes });
     await assertRunNotCancelled(researchLogId);
 
     if (enrichedAthletes.length === 0) {
@@ -5765,18 +5765,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       scored: auditedAthletes.length,
       returned: finalResults.length,
       added: 0,
+    }, {
+      // Keep the durable enrichment checkpoint when every provider call
+      // fails. That allows a fixed deployment to re-score the same paid
+      // identity/profile work instead of buying discovery and enrichment
+      // again. A non-empty scored set replaces the checkpoint as usual.
+      scoringDetails: auditedAthletes.length > 0 ? auditedAthletes : undefined,
+      finalResults,
     });
-    await supabase
-      .from("research_logs")
-      .update({
-        // Keep the durable enrichment checkpoint when every provider call
-        // fails. That allows a fixed deployment to re-score the same paid
-        // identity/profile work instead of buying discovery and enrichment
-        // again. A non-empty scored set replaces the checkpoint as usual.
-        ...(auditedAthletes.length > 0 ? { scoring_details: auditedAthletes } : {}),
-        final_results: finalResults,
-      })
-      .eq("id", researchLogId);
     await assertRunNotCancelled(researchLogId);
 
     if (input.targetPhase === "scoring") {

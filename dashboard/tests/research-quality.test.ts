@@ -1004,7 +1004,9 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /persistPartialScoringCheckpoint/);
   assert.match(workflowSource, /Resuming.*candidate scores from durable batch checkpoints/);
   assert.match(workflowSource, /checkpointedScores\.length > 0/);
-  assert.match(workflowSource, /auditedAthletes\.length > 0 \? \{ scoring_details: auditedAthletes \} : \{\}/);
+  assert.match(workflowSource, /scoringDetails: auditedAthletes\.length > 0 \? auditedAthletes : undefined/);
+  assert.match(workflowSource, /\}, \{ rawResults: allDiscoveredAthletes \}\)/);
+  assert.match(workflowSource, /\}, \{ scoringDetails: enrichedAthletes \}\)/);
   assert.match(workflowSource, /Apify Google Search candidate dossier/);
   assert.match(workflowSource, /findInstagramCandidatesBatch/);
   assert.match(workflowSource, /Skipping already-checkpointed.*step/);

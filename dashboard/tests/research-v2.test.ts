@@ -654,6 +654,14 @@ test("scoring checkpoint forks preserve researcher scores and discard only audit
   assert.match(route, /body\.action === "fork_from_scoring"/);
 });
 
+test("durable research phase transitions save payloads atomically", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /checkpoint\?: \{[\s\S]*?rawResults\?: unknown\[\][\s\S]*?scoringDetails\?: unknown\[\][\s\S]*?finalResults\?: unknown\[\]/);
+  assert.match(workflow, /"enriching_instagram", \{[\s\S]*?\}, \{ rawResults: allDiscoveredAthletes \}\)/);
+  assert.match(workflow, /"scoring", \{[\s\S]*?\}, \{ scoringDetails: enrichedAthletes \}\)/);
+  assert.match(workflow, /"saving_candidates", \{[\s\S]*?scoringDetails: auditedAthletes\.length > 0 \? auditedAthletes : undefined,[\s\S]*?finalResults/);
+});
+
 test("research artifact activation archives the prior rubric version before activating v5", () => {
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
   const artifactSetup = workflow.slice(
