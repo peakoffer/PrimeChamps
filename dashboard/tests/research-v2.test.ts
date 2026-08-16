@@ -661,6 +661,16 @@ test("durable research phase transitions save payloads atomically", () => {
   assert.match(workflow, /"scoring", \{[\s\S]*?\}, \{ scoringDetails: enrichedAthletes \}\)/);
   assert.match(workflow, /"saving_candidates", \{[\s\S]*?scoringDetails: auditedAthletes\.length > 0 \? auditedAthletes : undefined,[\s\S]*?finalResults/);
   assert.match(workflow, /precheckedEvidenceQualifiedAthletes = hasDiscoveryCheckpoint[\s\S]*?addInstagramPrechecksForEnrichment/);
+  assert.match(workflow, /isRegressiveReplay[\s\S]*?nextPhase = isRegressiveReplay \? currentPhase : phase/);
+  assert.match(workflow, /nextStats = isRegressiveReplay[\s\S]*?current\?\.stats/);
+  assert.match(workflow, /updateResearchProgress\(researchLogId, "completed"/);
+  assert.match(workflow, /raw_results: allDiscoveredAthletes/);
+});
+
+test("research precheck measures audience before selecting the paid enrichment pool", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /Apify discovery profile precheck measured/);
+  assert.match(workflow, /"apify\/instagram-profile-scraper"[\s\S]*?profile\?\.followersCount/);
 });
 
 test("research artifact activation archives the prior rubric version before activating v5", () => {

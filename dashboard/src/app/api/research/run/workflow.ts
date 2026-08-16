@@ -119,6 +119,16 @@ const PROVIDER_TIMEOUT_MS = 45_000;
 const PREFETCH_INSTAGRAM_PHOTOS = process.env.RESEARCH_PREFETCH_PHOTOS === "true";
 let perplexityDisabledReason: string | null = null;
 
+const RESEARCH_PHASE_ORDER = [
+  "queued",
+  "loading_context",
+  "discovering_candidates",
+  "enriching_instagram",
+  "scoring",
+  "saving_candidates",
+  "completed",
+] as const;
+
 const RESEARCH_SCORE_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -380,22 +390,32 @@ async function updateResearchProgress(
   if (!researchLogId) return;
   const { data: current } = await supabase
     .from("research_logs")
-    .select("phase_history")
+    .select("phase,phase_history,stats")
     .eq("id", researchLogId)
     .eq("status", "running")
     .maybeSingle();
   const history = Array.isArray(current?.phase_history) ? current.phase_history : [];
+  const currentPhase = typeof current?.phase === "string" ? current.phase : "queued";
+  const currentRank = RESEARCH_PHASE_ORDER.indexOf(currentPhase as typeof RESEARCH_PHASE_ORDER[number]);
+  const requestedRank = RESEARCH_PHASE_ORDER.indexOf(phase as typeof RESEARCH_PHASE_ORDER[number]);
+  const isRegressiveReplay = currentRank >= 0 && requestedRank >= 0 && requestedRank < currentRank;
+  const nextPhase = isRegressiveReplay ? currentPhase : phase;
   const lastEntry = history.at(-1);
-  const nextHistory = lastEntry && typeof lastEntry === "object" && (lastEntry as { phase?: unknown }).phase === phase
+  const nextHistory = isRegressiveReplay
     ? history
-    : [...history, { phase, at: new Date().toISOString(), stats }];
+    : lastEntry && typeof lastEntry === "object" && (lastEntry as { phase?: unknown }).phase === nextPhase
+    ? history
+    : [...history, { phase: nextPhase, at: new Date().toISOString(), stats }];
+  const nextStats = isRegressiveReplay && current?.stats && typeof current.stats === "object"
+    ? current.stats
+    : { ...stats, phase: nextPhase };
   const { error } = await supabase
     .from("research_logs")
     .update({
       heartbeat_at: new Date().toISOString(),
-      phase,
+      phase: nextPhase,
       phase_history: nextHistory,
-      stats: { ...stats, phase },
+      stats: nextStats,
       ...(checkpoint?.rawResults !== undefined ? { raw_results: checkpoint.rawResults } : {}),
       ...(checkpoint?.scoringDetails !== undefined ? { scoring_details: checkpoint.scoringDetails } : {}),
       ...(checkpoint?.finalResults !== undefined ? { final_results: checkpoint.finalResults } : {}),
@@ -2657,7 +2677,6 @@ async function addInstagramPrechecksForEnrichment(
 ) {
   if (!APIFY_API_KEY || athletes.length === 0 || maximumSubjects <= 0) return athletes;
   const subjects = athletes
-    .filter((athlete) => !athlete.known_instagram_handle && !athlete.discovery_precheck?.instagramUrl)
     .map((athlete, index) => ({ athlete, index }))
     .sort((left, right) =>
       Number(left.athlete.discovery_lane === "memory") - Number(right.athlete.discovery_lane === "memory")
@@ -2667,38 +2686,91 @@ async function addInstagramPrechecksForEnrichment(
     .slice(0, maximumSubjects);
   if (subjects.length === 0) return athletes;
 
+  const unresolvedSubjects = subjects.filter((athlete) =>
+    !athlete.known_instagram_handle && !athlete.discovery_precheck?.instagramUrl
+  );
+  const bestByKey = new Map<string, InstagramSearchCandidate>();
   try {
-    log(`Prechecking ${subjects.length} discovery candidates with bounded Apify Instagram user search`);
-    const resolution = await searchInstagramIdentitiesWithApify(subjects, { searchLimit: 3 });
-    const bestByKey = new Map(subjects.flatMap((athlete) => {
-      const best = resolution.candidatesByName.get(athlete.name.trim().toLowerCase())?.[0];
-      return best ? [[researchCandidateKey(athlete.name, athlete.sport), best] as const] : [];
-    }));
-    log(`Apify discovery precheck found ${bestByKey.size}/${subjects.length} attributable Instagram hints`, {
-      actor: resolution.actor,
-      rows: resolution.rows,
-      maximumRows: resolution.maximumRows,
-    });
-    return athletes.map((athlete) => {
-      const best = bestByKey.get(researchCandidateKey(athlete.name, athlete.sport));
-      if (!best) return athlete;
-      const businessSignal = /\b(?:business|management|manager|managed|agency|agent|booking|bookings|contact|inquiries|inquiry|representation|represented)\b|\bemail\b|mailto:/i.test(best.snippet);
-      const creatorSignal = /\b(?:creator|content creator|youtube|youtuber|tiktok|podcast|podcaster|vlog|vlogger|newsletter|storefront|shop|founder|brand partner|brand ambassador|ambassador)\b/i.test(best.snippet);
-      return {
-        ...athlete,
-        discovery_precheck: {
-          ...athlete.discovery_precheck,
-          instagramUrl: best.url,
-          businessSignalSourceUrl: businessSignal ? best.url : athlete.discovery_precheck?.businessSignalSourceUrl,
-          creatorSignalSourceUrl: creatorSignal ? best.url : athlete.discovery_precheck?.creatorSignalSourceUrl,
-          followerCount: best.followerCount,
-        },
-      };
-    });
+    if (unresolvedSubjects.length > 0) {
+      log(`Prechecking ${unresolvedSubjects.length} discovery candidates with bounded Apify Instagram user search`);
+      const resolution = await searchInstagramIdentitiesWithApify(unresolvedSubjects, { searchLimit: 3 });
+      for (const athlete of unresolvedSubjects) {
+        const best = resolution.candidatesByName.get(athlete.name.trim().toLowerCase())?.[0];
+        if (best) bestByKey.set(researchCandidateKey(athlete.name, athlete.sport), best);
+      }
+      log(`Apify discovery precheck found ${bestByKey.size}/${unresolvedSubjects.length} attributable Instagram hints`, {
+        actor: resolution.actor,
+        rows: resolution.rows,
+        maximumRows: resolution.maximumRows,
+      });
+    }
   } catch (error) {
-    log(`Apify discovery precheck failed safely: ${describeError(error)}`);
-    return athletes;
+    log(`Apify discovery identity precheck failed safely: ${describeError(error)}`);
   }
+
+  const handleByKey = new Map(subjects.flatMap((athlete) => {
+    const key = researchCandidateKey(athlete.name, athlete.sport);
+    const best = bestByKey.get(key);
+    const handle = athlete.known_instagram_handle
+      || instagramHandleFromUrl(athlete.discovery_precheck?.instagramUrl || "")
+      || best?.handle;
+    return handle ? [[key, handle.toLowerCase()] as const] : [];
+  }));
+  const usernames = Array.from(new Set(handleByKey.values()));
+  const profileByHandle = new Map<string, ApifyInstagramProfile>();
+  if (usernames.length > 0) {
+    try {
+      const profiles = await runApifyActor<ApifyInstagramProfile>(
+        "apify/instagram-profile-scraper",
+        { usernames },
+        { datasetLimit: usernames.length, timeoutMs: 180_000 }
+      );
+      for (const profile of profiles) {
+        if (profile.username) profileByHandle.set(profile.username.toLowerCase(), profile);
+      }
+      log(`Apify discovery profile precheck measured ${Array.from(profileByHandle.values()).filter((profile) => typeof profile.followersCount === "number").length}/${usernames.length} candidate audiences`, {
+        actor: "apify/instagram-profile-scraper",
+        profiles: profiles.length,
+      });
+    } catch (error) {
+      log(`Apify discovery profile precheck failed safely: ${describeError(error)}`);
+    }
+  }
+
+  return athletes.map((athlete) => {
+    const key = researchCandidateKey(athlete.name, athlete.sport);
+    const best = bestByKey.get(key);
+    const handle = handleByKey.get(key);
+    const profile = handle ? profileByHandle.get(handle) : undefined;
+    if (!best && !profile) return athlete;
+    const instagramUrl = best?.url
+      || athlete.discovery_precheck?.instagramUrl
+      || (handle ? `https://www.instagram.com/${handle}/` : undefined);
+    const profileText = [
+      best?.snippet,
+      profile?.biography,
+      profile?.externalUrl,
+      ...(profile?.externalUrls || []).flatMap((item) => [item.title, item.url]),
+    ].filter(Boolean).join(" ");
+    const businessSignal = /\b(?:business|management|manager|managed|agency|agent|booking|bookings|contact|inquiries|inquiry|representation|represented)\b|\bemail\b|mailto:/i.test(profileText);
+    const creatorSignal = /\b(?:creator|content creator|youtube|youtuber|tiktok|podcast|podcaster|vlog|vlogger|newsletter|storefront|shop|founder|brand partner|brand ambassador|ambassador)\b/i.test(profileText);
+    return {
+      ...athlete,
+      discovery_precheck: {
+        ...athlete.discovery_precheck,
+        instagramUrl,
+        businessSignalSourceUrl: businessSignal && instagramUrl
+          ? instagramUrl
+          : athlete.discovery_precheck?.businessSignalSourceUrl,
+        creatorSignalSourceUrl: creatorSignal && instagramUrl
+          ? instagramUrl
+          : athlete.discovery_precheck?.creatorSignalSourceUrl,
+        followerCount: typeof profile?.followersCount === "number"
+          ? profile.followersCount
+          : best?.followerCount,
+      },
+    };
+  });
 }
 
 async function findInstagramCandidatesBatch(athletes: DiscoveredAthlete[]) {
@@ -5332,17 +5404,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       };
     }
 
-    const phaseOrder = [
-      "queued",
-      "loading_context",
-      "discovering_candidates",
-      "enriching_instagram",
-      "scoring",
-      "saving_candidates",
-      "completed",
-    ];
     const checkpointPhase = typeof checkpoint.phase === "string" ? checkpoint.phase : "queued";
-    const reachedPhase = (phase: string) => phaseOrder.indexOf(checkpointPhase) >= phaseOrder.indexOf(phase);
+    const reachedPhase = (phase: string) => RESEARCH_PHASE_ORDER.indexOf(
+      checkpointPhase as typeof RESEARCH_PHASE_ORDER[number]
+    ) >= RESEARCH_PHASE_ORDER.indexOf(phase as typeof RESEARCH_PHASE_ORDER[number]);
 
     // Durable steps are retried independently. If a later step has already
     // checkpointed its input, an earlier retried step must be a no-op instead
@@ -6165,6 +6230,17 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // Update the research log with final results
     if (researchLogId) {
       try {
+        await updateResearchProgress(researchLogId, "completed", {
+          sourced: allDiscoveredAthletes.length,
+          discovered: discoveredAthletes.length,
+          enriched: enrichedAthletes.length,
+          scored: auditedAthletes.length,
+          returned: finalResults.length,
+          added: addedCount,
+          held: heldCount,
+          blocked: blockedCount,
+          duplicates: duplicateCount,
+        });
         await supabase.from("research_logs").update({
           status: "completed",
           phase: "completed",
@@ -6196,7 +6272,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               { step: "Persistence", provider: "Supabase", purpose: "Store the run, evidence, and pipeline disposition" },
             ],
           },
-          raw_results: discoveredAthletes,
+          raw_results: allDiscoveredAthletes,
           scoring_details: auditedAthletes.map(a => ({
             name: a.name,
             handle: a.instagram_handle,
@@ -6264,8 +6340,9 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               google_identity_fallback_candidate_cap: discoveredAthletes.length,
               google_dossier_fallback_active: APIFY_GOOGLE_DOSSIER_FALLBACK,
               google_dossier_fallback_candidate_cap: APIFY_GOOGLE_DOSSIER_FALLBACK ? enrichedAthletes.length : 0,
+              instagram_precheck_profile_cap: Math.min(60, enrichmentPoolLimit * 2),
               instagram_profiles: enrichedAthletes.length,
-              note: "Apify identity uses live Instagram user search followed by a separate profile scrape. Counts are operational caps; billed cost depends on the active Actor pricing plan.",
+              note: "Apify identity uses live Instagram user search, a bounded audience/profile precheck, and finalist profile verification. Counts are operational caps; billed cost depends on the active Actor pricing plan.",
             },
             anthropic: {
               scored_candidates: auditedAthletes.length,
