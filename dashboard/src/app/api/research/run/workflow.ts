@@ -1887,8 +1887,8 @@ HARD RULES:
 - Exclude youth, junior, U21, U19, team-only accounts, adjacent sports (${strategy.excludedTerms.join(", ") || "none"}), and anyone whose professional identity is ambiguous.
 - Never infer adult-content interest from appearance, clothing, identity, gender expression, or sexuality. The thesis affects commercial ranking only, never factual evidence.
 - Historical OnlyFans outcomes are labels for offline evaluation only and are not available to this research request.
-- Keep the official competition source_url mandatory. Separately search for the athlete's exact personal Instagram profile, a public business/agency/contact page, and public evidence of active creator-led content (for example a personal YouTube, TikTok, podcast, newsletter, storefront, or brand-collaboration page).
-- For instagram_url, business_or_representation_url, and creator_evidence_url, return the exact URL only when you actually consulted it and it belongs to this athlete. Return null when unknown. Never guess a handle or URL, and do not reuse the competition source merely to fill a field.
+- Keep the official competition source_url mandatory. If the same bounded search naturally encounters the athlete's exact personal Instagram profile, a public business/agency/contact page, or public evidence of active creator-led content, include those exact URLs too. Do not perform separate per-athlete searches for these optional fields.
+- For instagram_url, business_or_representation_url, and creator_evidence_url, return the exact URL only when it was actually consulted and belongs to this athlete. Return null when unknown. Never guess a handle or URL, and do not reuse the competition source merely to fill a field.
 - These three supplemental URLs are discovery-prioritization hints, not proof of identity, age, fit, or commercial access.
 
 Return a JSON object matching the schema. Each context must start with the athlete's exact full name and state the specific, dated evidence in one concise sentence. Use the exact consulted source URL and title.`;
@@ -1903,10 +1903,10 @@ Return a JSON object matching the schema. Each context must start with the athle
       },
       body: JSON.stringify({
         model: OPENAI_RESEARCH_MODEL,
-        reasoning: { effort: "medium" },
+        reasoning: { effort: "low" },
         tools: [{
           type: "web_search",
-          search_context_size: "high",
+          search_context_size: "medium",
           external_web_access: true,
           filters: {
             blocked_domains: ["wikipedia.org", "reddit.com", "quora.com", "fandom.com"],
@@ -1915,7 +1915,7 @@ Return a JSON object matching the schema. Each context must start with the athle
         tool_choice: "required",
         include: ["web_search_call.action.sources"],
         input: prompt,
-        max_output_tokens: 12_000,
+        max_output_tokens: 8_000,
         store: false,
         text: {
           format: {
@@ -2626,6 +2626,51 @@ async function findInstagramCandidatesWithApifySearch(athletes: DiscoveredAthlet
   }
 
   return byCandidateKey;
+}
+
+async function addInstagramPrechecksForEnrichment(
+  athletes: DiscoveredAthlete[],
+  maximumSubjects: number
+) {
+  if (!APIFY_API_KEY || athletes.length === 0 || maximumSubjects <= 0) return athletes;
+  const subjects = athletes
+    .filter((athlete) => !athlete.known_instagram_handle && !athlete.discovery_precheck?.instagramUrl)
+    .map((athlete, index) => ({ athlete, index }))
+    .sort((left, right) =>
+      Number(left.athlete.discovery_lane === "memory") - Number(right.athlete.discovery_lane === "memory")
+        || left.index - right.index
+    )
+    .map(({ athlete }) => athlete)
+    .slice(0, maximumSubjects);
+  if (subjects.length === 0) return athletes;
+
+  try {
+    log(`Prechecking ${subjects.length} discovery candidates with bounded Apify Instagram user search`);
+    const resolution = await searchInstagramIdentitiesWithApify(subjects, { searchLimit: 3 });
+    const bestByKey = new Map(subjects.flatMap((athlete) => {
+      const best = resolution.candidatesByName.get(athlete.name.trim().toLowerCase())?.[0];
+      return best ? [[researchCandidateKey(athlete.name, athlete.sport), best] as const] : [];
+    }));
+    log(`Apify discovery precheck found ${bestByKey.size}/${subjects.length} attributable Instagram hints`, {
+      actor: resolution.actor,
+      rows: resolution.rows,
+      maximumRows: resolution.maximumRows,
+    });
+    return athletes.map((athlete) => {
+      const best = bestByKey.get(researchCandidateKey(athlete.name, athlete.sport));
+      if (!best) return athlete;
+      return {
+        ...athlete,
+        discovery_precheck: {
+          ...athlete.discovery_precheck,
+          instagramUrl: best.url,
+        },
+      };
+    });
+  } catch (error) {
+    log(`Apify discovery precheck failed safely: ${describeError(error)}`);
+    return athletes;
+  }
 }
 
 async function findInstagramCandidatesBatch(athletes: DiscoveredAthlete[]) {
@@ -5468,8 +5513,20 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       config.evaluationBudget?.enrichmentPoolLimit
         ?? Math.max(config.resultCount * 4, 30)
     );
-    const discoveredAthletes = selectBalancedResearchCandidates(
+    await assertRunNotCancelled(researchLogId);
+    const precheckedEvidenceQualifiedAthletes = await addInstagramPrechecksForEnrichment(
       evidenceQualifiedAthletes,
+      Math.min(60, enrichmentPoolLimit * 2)
+    );
+    const precheckedByKey = new Map(precheckedEvidenceQualifiedAthletes.map((athlete) => [
+      researchCandidateKey(athlete.name, athlete.sport),
+      athlete,
+    ]));
+    allDiscoveredAthletes = allDiscoveredAthletes.map((athlete) =>
+      precheckedByKey.get(researchCandidateKey(athlete.name, athlete.sport)) || athlete
+    );
+    const discoveredAthletes = selectBalancedResearchCandidates(
+      precheckedEvidenceQualifiedAthletes,
       enrichmentPoolLimit
     );
     if (allDiscoveredAthletes.length !== evidenceQualifiedAthletes.length) {
