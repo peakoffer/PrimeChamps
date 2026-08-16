@@ -55,3 +55,14 @@ export function normalizeResearchEvaluationProfile(value: unknown): ResearchEval
 export function getResearchEvaluationBudget(value: unknown): ResearchEvaluationBudget {
   return { ...EVALUATION_BUDGETS[normalizeResearchEvaluationProfile(value)] };
 }
+
+export function getResearchDiscoveryEvidenceTarget(budget: ResearchEvaluationBudget) {
+  // Sport-qualified names substantially outnumber audience/identity-qualified
+  // profiles. Overdraw the cheap discovery pool before deciding whether an
+  // allowed second wave is unnecessary; the paid enrichment ceiling remains
+  // unchanged and measured audience misses are removed before that spend.
+  return Math.min(60, Math.max(
+    budget.discoveryCandidatesPerWave,
+    budget.enrichmentPoolLimit * 2
+  ));
+}

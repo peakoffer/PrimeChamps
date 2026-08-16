@@ -60,6 +60,7 @@ import {
   type HistoricalBenchmarkRecord,
 } from "../src/lib/research/historical-benchmark.ts";
 import {
+  getResearchDiscoveryEvidenceTarget,
   getResearchEvaluationBudget,
   normalizeResearchEvaluationProfile,
 } from "../src/lib/research/evaluation-budget.ts";
@@ -553,6 +554,9 @@ test("evaluation profiles default to a genuinely bounded smoke budget", () => {
     maxAuditCandidates: 3,
   });
   assert.ok(smoke.enrichmentPoolLimit < getResearchEvaluationBudget("development").enrichmentPoolLimit);
+  assert.equal(getResearchDiscoveryEvidenceTarget(smoke), 12);
+  assert.equal(getResearchDiscoveryEvidenceTarget(getResearchEvaluationBudget("development")), 60);
+  assert.equal(getResearchDiscoveryEvidenceTarget(getResearchEvaluationBudget("release")), 60);
 });
 
 test("Anthropic structured-output retries expand truncated scoring and audit budgets", () => {

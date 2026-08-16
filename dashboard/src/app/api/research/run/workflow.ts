@@ -31,7 +31,10 @@ import {
   type InstagramSearchCandidate,
 } from "@/lib/research/instagram-identity";
 import { searchInstagramIdentitiesWithApify } from "@/lib/research/apify-instagram-identity";
-import type { ResearchEvaluationBudget } from "@/lib/research/evaluation-budget";
+import {
+  getResearchDiscoveryEvidenceTarget,
+  type ResearchEvaluationBudget,
+} from "@/lib/research/evaluation-budget";
 import {
   selectBalancedResearchCandidates,
   type ResearchCandidateLane,
@@ -5483,7 +5486,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       if (candidateMemory.length > 0) log(`Revalidating ${candidateMemory.length} strong-fit candidates from quality memory`);
       const evaluationBudget = config.evaluationBudget;
       const desiredEvidencePool = evaluationBudget
-        ? evaluationBudget.discoveryCandidatesPerWave
+        ? getResearchDiscoveryEvidenceTarget(evaluationBudget)
         : Math.min(60, Math.max(config.resultCount * 3, 30));
       const discoveryWaveTarget = evaluationBudget
         ? evaluationBudget.discoveryCandidatesPerWave
