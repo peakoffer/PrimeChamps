@@ -99,6 +99,11 @@ export function independentSourcePublishesInstagramHandle(input: {
   ).test(sourceText);
 }
 
+export function hasIndependentInstagramHandleEvidence(candidate: InstagramSearchCandidate) {
+  return candidate.reasons.includes("named source publishes Instagram handle")
+    || candidate.reasons.includes("named athlete source corroborates profile ownership");
+}
+
 function instagramHandlesFromText(value: string) {
   const handles = new Set<string>();
   for (const match of value.matchAll(/instagram(?:\s+(?:handle|username|profile))?\s*[:\-]?(?:\s*@|\s+@?)([a-z0-9_.]{3,30})\b/ig)) {
@@ -374,15 +379,14 @@ export function evaluateCorroboratedInstagramIdentity(input: {
     || /\b(?:athlet\w*|player\w*|olympian|surfer|fighter|gymnast|rider|driver|swimmer|golfer|wrestler|boxer|skater|cyclist|runner|diver|rower)\b/i.test(profileText);
   const organizationalOrFanRisk = /\b(?:team|league|federation|association|academy|club)\b/i.test(input.profile.fullName)
     || /\b(?:fan\s?page|fan account|updates account|supporters)\b/i.test(profileText);
-  const independentHandleSource = input.searchCandidate.reasons.includes("named source publishes Instagram handle")
-    || input.searchCandidate.reasons.includes("named athlete source corroborates profile ownership");
+  const independentHandleSource = hasIndependentInstagramHandleEvidence(input.searchCandidate);
   const exactNativeSearchResult = input.searchCandidate.reasons.includes("live Instagram user search returned this profile")
     && input.searchCandidate.searchConfidence >= 60;
   const externallyCorroboratedHandle = independentHandleSource
     && (exactProfileName || exactNameHandle)
     && !organizationalOrFanRisk;
   const verifiedPlatformIdentity = input.profile.verified === true
-    && exactProfileName
+    && (exactProfileName || exactNameHandle)
     && (profileHasSportSignal || exactNativeSearchResult)
     && input.externalSportIdentityVerified
     && !organizationalOrFanRisk;

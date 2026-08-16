@@ -24,6 +24,7 @@ import {
 import {
   buildInstagramHandleGuesses,
   evaluateCorroboratedInstagramIdentity,
+  hasIndependentInstagramHandleEvidence,
   independentSourcePublishesInstagramHandle,
   instagramHandleFromUrl,
   rankInstagramSearchCandidates,
@@ -2786,6 +2787,36 @@ async function findInstagramCandidatesBatch(athletes: DiscoveredAthlete[]) {
       ? await findInstagramCandidatesWithOpenAI(athletes)
       : await findInstagramCandidatesWithApifySearch(athletes);
   for (const [candidateKey, candidates] of groundedCandidates) byCandidateKey.set(candidateKey, candidates);
+
+  // Native Instagram search is useful for finding live same-name profiles, but
+  // an unverified profile is not independent proof that it belongs to the
+  // athlete. Give only those weakly sourced identities one bounded grounded
+  // web pass before profile scraping. This improves recall without lowering
+  // the two-signal finalist gate or searching every discovery candidate.
+  const identitiesNeedingIndependentSource = athletes.filter((athlete) => {
+    const candidates = byCandidateKey.get(researchCandidateKey(athlete.name, athlete.sport)) || [];
+    return !candidates.some(hasIndependentInstagramHandleEvidence);
+  }).slice(0, 10);
+  if (RESEARCH_IDENTITY_PROVIDER === "apify" && identitiesNeedingIndependentSource.length > 0) {
+    const sourceBackedCandidates = OPENAI_API_KEY
+      ? await findInstagramCandidatesWithOpenAI(identitiesNeedingIndependentSource)
+      : OPENROUTER_API_KEY
+        ? await findInstagramCandidatesWithOpenRouter(identitiesNeedingIndependentSource)
+        : new Map<string, InstagramSearchCandidate[]>();
+    for (const athlete of identitiesNeedingIndependentSource) {
+      const candidateKey = researchCandidateKey(athlete.name, athlete.sport);
+      const grounded = sourceBackedCandidates.get(candidateKey) || [];
+      const existing = byCandidateKey.get(candidateKey) || [];
+      const merged = [...grounded, ...existing].filter((candidate, index, all) =>
+        all.findIndex((other) => other.handle === candidate.handle) === index
+      ).slice(0, 3);
+      if (merged.length > 0) byCandidateKey.set(candidateKey, merged);
+    }
+    log(`Grounded identity pass supplied independent handle evidence for ${identitiesNeedingIndependentSource.filter((athlete) =>
+      (byCandidateKey.get(researchCandidateKey(athlete.name, athlete.sport)) || [])
+        .some(hasIndependentInstagramHandleEvidence)
+    ).length}/${identitiesNeedingIndependentSource.length} weakly sourced identities`);
+  }
   const unresolvedAthletes = athletes.filter((athlete) =>
     !byCandidateKey.has(researchCandidateKey(athlete.name, athlete.sport))
   );

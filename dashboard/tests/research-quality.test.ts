@@ -14,6 +14,7 @@ import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.
 import {
   buildInstagramHandleGuesses,
   evaluateCorroboratedInstagramIdentity,
+  hasIndependentInstagramHandleEvidence,
   independentSourcePublishesInstagramHandle,
   instagramHandleFromUrl,
   rankInstagramNativeSearchCandidates,
@@ -591,6 +592,21 @@ test("Instagram finalist identity requires two independent exact-person signals"
     externalSportIdentityVerified: true,
   });
   assert.equal(independentlyPublishedHandle.passed, true);
+  assert.equal(hasIndependentInstagramHandleEvidence(independentlyPublishedHandle.passed ? {
+    handle: "brookemosher9",
+    url: "https://www.instagram.com/brookemosher9/",
+    title: "Brooke Mosher",
+    snippet: "Volleyball setter",
+    searchConfidence: 95,
+    reasons: ["named source publishes Instagram handle"],
+  } : {
+    handle: "",
+    url: "",
+    title: "",
+    snippet: "",
+    searchConfidence: 0,
+    reasons: [],
+  }), true);
 
   const verifiedPlatformIdentity = evaluateCorroboratedInstagramIdentity({
     athleteName: "Alyssa Solomon",
@@ -607,6 +623,22 @@ test("Instagram finalist identity requires two independent exact-person signals"
     externalSportIdentityVerified: true,
   });
   assert.equal(verifiedPlatformIdentity.passed, true);
+
+  const verifiedExactHandleWithDecoratedDisplayName = evaluateCorroboratedInstagramIdentity({
+    athleteName: "Anastasia Cekulaev",
+    sport: "volleyball",
+    searchCandidate: {
+      handle: "anastasia.cekulaev",
+      url: "https://www.instagram.com/anastasia.cekulaev/",
+      title: "Anastasia Cekulaev",
+      snippet: "Volleyball athlete",
+      searchConfidence: 45,
+      reasons: ["deterministic exact-name handle guess; profile sport evidence required"],
+    },
+    profile: { fullName: "Anastasia Cekulaev 🇩🇪", bio: "Professional volleyball player", verified: true },
+    externalSportIdentityVerified: true,
+  });
+  assert.equal(verifiedExactHandleWithDecoratedDisplayName.passed, true);
 
   const verifiedExactNativeIdentityWithoutSportBio = evaluateCorroboratedInstagramIdentity({
     athleteName: "Devon Newberry",
@@ -1028,6 +1060,8 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /source_linked_age_batch_call_cap/);
   assert.match(workflowSource, /APIFY_GOOGLE_DOSSIER_FALLBACK/);
   assert.match(workflowSource, /findInstagramCandidatesWithOpenAI/);
+  assert.match(workflowSource, /identitiesNeedingIndependentSource/);
+  assert.match(workflowSource, /Grounded identity pass supplied independent handle evidence/);
   assert.match(workflowSource, /named source publishes Instagram handle/);
   assert.match(workflowSource, /OpenAI resolved.*attributable Instagram identities/);
   assert.match(workflowSource, /google\/gemini-3\.7-flash/);

@@ -128,6 +128,13 @@ Failure classes are stored explicitly: wrong entity, stale information, point-in
 
 ## Current production checkpoint — 15 August 2026 (audience-precheck proof)
 
+### 16 August 2026 fresh-identity checkpoint
+
+- The first full development pass after audience prechecking returned two genuine 82-point finalists from nine enriched candidates. Increasing discovery to 60 then produced six new in-range or unmeasured identities, but none had enough independent evidence linking the athlete to the located Instagram handle.
+- This is now treated as an identity-retrieval problem, not a reason to lower the gate. Native Instagram search locates candidate profiles cheaply; only the at-most-ten weakly sourced identities in each enrichment batch receive one bounded grounded OpenAI handle-verification pass before profile scraping.
+- A verified exact-name handle with a live sport/athlete profile signal and external athlete/sport proof now satisfies the same two-signal rule even when the display name has harmless decoration. Unverified same-name accounts still require an independent athlete, team, NIL, roster, agency, or comparable source that publishes the handle.
+- Do not run another full development scoring pass until a fresh identity probe shows that this sequence resolves genuinely new candidates. Production readiness remains unproven.
+
 - Production `main` includes `4d7ea24`; Vercel deployment `dpl_4eQQoEvnWbK3nwHTwx9DRY1rAmHH` is `READY` on `crm.prime-champs.com`.
 - Evaluation-only volleyball smoke `1fa86349-36f9-4e48-b504-80522dc94e5d` sourced 31 candidates, pre-measured 12 Instagram audiences, admitted six to the enrichment ceiling, enriched/scored four, and returned two independently audited finalists: Devon Newberry 82 (`corrected`) and Emma Halter 82 (`pass`). Camilla Lamina remained 63 and Flormarie Heredia Colon 62. The agent did not pad the requested three.
 - Candidate selection now obtains a bounded Instagram profile-metadata precheck because the live Apify user-search output omitted its advertised follower count. Measured accounts outside the active 30K–500K window are rejected before full enrichment; unknown counts remain eligible under the bounded fallback policy.
