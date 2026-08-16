@@ -630,6 +630,12 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
         creatorEvidenceUrl: typeof rawPrecheck.creatorEvidenceUrl === "string"
           ? rawPrecheck.creatorEvidenceUrl
           : undefined,
+        businessSignalSourceUrl: typeof rawPrecheck.businessSignalSourceUrl === "string"
+          ? rawPrecheck.businessSignalSourceUrl
+          : undefined,
+        creatorSignalSourceUrl: typeof rawPrecheck.creatorSignalSourceUrl === "string"
+          ? rawPrecheck.creatorSignalSourceUrl
+          : undefined,
       },
       discovery_lane: "memory",
     });
@@ -2659,11 +2665,15 @@ async function addInstagramPrechecksForEnrichment(
     return athletes.map((athlete) => {
       const best = bestByKey.get(researchCandidateKey(athlete.name, athlete.sport));
       if (!best) return athlete;
+      const businessSignal = /\b(?:business|management|manager|managed|agency|agent|booking|bookings|contact|inquiries|inquiry|representation|represented)\b|\bemail\b|mailto:/i.test(best.snippet);
+      const creatorSignal = /\b(?:creator|content creator|youtube|youtuber|tiktok|podcast|podcaster|vlog|vlogger|newsletter|storefront|shop|founder|brand partner|brand ambassador|ambassador)\b/i.test(best.snippet);
       return {
         ...athlete,
         discovery_precheck: {
           ...athlete.discovery_precheck,
           instagramUrl: best.url,
+          businessSignalSourceUrl: businessSignal ? best.url : athlete.discovery_precheck?.businessSignalSourceUrl,
+          creatorSignalSourceUrl: creatorSignal ? best.url : athlete.discovery_precheck?.creatorSignalSourceUrl,
         },
       };
     });
@@ -5489,6 +5499,10 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               || athlete.discovery_precheck?.businessOrRepresentationUrl,
             creatorEvidenceUrl: previous?.discovery_precheck?.creatorEvidenceUrl
               || athlete.discovery_precheck?.creatorEvidenceUrl,
+            businessSignalSourceUrl: previous?.discovery_precheck?.businessSignalSourceUrl
+              || athlete.discovery_precheck?.businessSignalSourceUrl,
+            creatorSignalSourceUrl: previous?.discovery_precheck?.creatorSignalSourceUrl
+              || athlete.discovery_precheck?.creatorSignalSourceUrl,
           },
         });
       }

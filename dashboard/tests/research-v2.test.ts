@@ -745,6 +745,20 @@ test("readiness order survives when a candidate lane cannot fill its quota", () 
   ]);
 });
 
+test("source-backed Instagram bio signals improve precheck order without satisfying final gates", () => {
+  const selected = selectBalancedResearchCandidates([
+    { id: "instagram-only", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/one" } },
+    { id: "instagram-creator", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/two", creatorSignalSourceUrl: "https://instagram.com/two" } },
+    { id: "instagram-commercial", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/three", businessSignalSourceUrl: "https://instagram.com/three" } },
+  ], 3);
+
+  assert.deepEqual(selected.map((candidate) => candidate.id), [
+    "instagram-commercial",
+    "instagram-creator",
+    "instagram-only",
+  ]);
+});
+
 const HISTORICAL_CASE: HistoricalBenchmarkRecord = {
   athleteName: "Example Athlete",
   decisionDate: "2026-05-03",

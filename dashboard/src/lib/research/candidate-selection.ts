@@ -4,6 +4,8 @@ export type ResearchCandidatePrecheck = {
   instagramUrl?: string;
   businessOrRepresentationUrl?: string;
   creatorEvidenceUrl?: string;
+  businessSignalSourceUrl?: string;
+  creatorSignalSourceUrl?: string;
 };
 
 export function researchCandidateEnrichmentReadiness(candidate: {
@@ -12,8 +14,10 @@ export function researchCandidateEnrichmentReadiness(candidate: {
 }) {
   let score = 0;
   if (candidate.known_instagram_handle || candidate.discovery_precheck?.instagramUrl) score += 6;
-  if (candidate.discovery_precheck?.businessOrRepresentationUrl) score += 4;
-  if (candidate.discovery_precheck?.creatorEvidenceUrl) score += 3;
+  if (candidate.discovery_precheck?.businessOrRepresentationUrl
+    || candidate.discovery_precheck?.businessSignalSourceUrl) score += 4;
+  if (candidate.discovery_precheck?.creatorEvidenceUrl
+    || candidate.discovery_precheck?.creatorSignalSourceUrl) score += 3;
   return score;
 }
 
