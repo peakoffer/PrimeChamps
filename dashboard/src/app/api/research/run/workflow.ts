@@ -35,6 +35,7 @@ import type { ResearchEvaluationBudget } from "@/lib/research/evaluation-budget"
 import {
   selectBalancedResearchCandidates,
   type ResearchCandidateLane,
+  type ResearchCandidatePrecheck,
 } from "@/lib/research/candidate-selection";
 import { auditResearchResults, RESEARCH_PRIORITY_THRESHOLD } from "@/lib/research/run-audit";
 import {
@@ -267,8 +268,20 @@ const RESEARCH_DISCOVERY_OUTPUT_SCHEMA = {
           source: { type: "string" },
           source_url: { type: "string" },
           source_title: { type: "string" },
+          instagram_url: { type: ["string", "null"] },
+          business_or_representation_url: { type: ["string", "null"] },
+          creator_evidence_url: { type: ["string", "null"] },
         },
-        required: ["name", "context", "source", "source_url", "source_title"],
+        required: [
+          "name",
+          "context",
+          "source",
+          "source_url",
+          "source_title",
+          "instagram_url",
+          "business_or_representation_url",
+          "creator_evidence_url",
+        ],
         additionalProperties: false,
       },
     },
@@ -489,6 +502,7 @@ interface DiscoveredAthlete {
   }>;
   discovery_verification?: DiscoveryQuality;
   known_instagram_handle?: string;
+  discovery_precheck?: ResearchCandidatePrecheck;
   discovery_lane?: ResearchCandidateLane;
 }
 
@@ -594,6 +608,9 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
       && Date.now() - Date.parse(row.updated_at) <= 7 * 86_400_000;
     if (!previouslyStrong && !recentUnscoredDiscovery) return [];
     const evidence = (Array.isArray(row.source_evidence) ? row.source_evidence : raw.evidence) as DiscoveredAthlete["evidence"];
+    const rawPrecheck = raw.discovery_precheck && typeof raw.discovery_precheck === "object"
+      ? raw.discovery_precheck as Record<string, unknown>
+      : {};
     const candidate = verifyDiscoveredAthlete({
       name: typeof raw.name === "string" ? raw.name : row.name,
       sport: typeof raw.sport === "string" ? raw.sport : row.sport,
@@ -605,6 +622,15 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
         && typeof row.instagram_handle === "string"
         ? row.instagram_handle
         : undefined,
+      discovery_precheck: {
+        instagramUrl: typeof rawPrecheck.instagramUrl === "string" ? rawPrecheck.instagramUrl : undefined,
+        businessOrRepresentationUrl: typeof rawPrecheck.businessOrRepresentationUrl === "string"
+          ? rawPrecheck.businessOrRepresentationUrl
+          : undefined,
+        creatorEvidenceUrl: typeof rawPrecheck.creatorEvidenceUrl === "string"
+          ? rawPrecheck.creatorEvidenceUrl
+          : undefined,
+      },
       discovery_lane: "memory",
     });
     return candidate.discovery_verification?.passed === true ? [candidate] : [];
@@ -1785,6 +1811,33 @@ function canonicalResearchUrl(value: string) {
   }
 }
 
+function validatedDiscoveryPrecheck(
+  candidate: Record<string, unknown>,
+  consultedSources: Map<string, { url?: string; title?: string }>
+) {
+  const primaryUrl = typeof candidate.source_url === "string"
+    ? canonicalResearchUrl(candidate.source_url)
+    : "";
+  const consultedUrl = (field: string) => {
+    const value = candidate[field];
+    if (typeof value !== "string" || !value.startsWith("http")) return undefined;
+    const canonicalUrl = canonicalResearchUrl(value);
+    if (canonicalUrl === primaryUrl) return undefined;
+    return consultedSources.get(canonicalUrl)?.url;
+  };
+  const instagramUrl = consultedUrl("instagram_url");
+  const instagramHandle = instagramUrl ? instagramHandleFromUrl(instagramUrl) || undefined : undefined;
+  const discoveryPrecheck: ResearchCandidatePrecheck = {
+    instagramUrl: instagramHandle ? instagramUrl : undefined,
+    businessOrRepresentationUrl: consultedUrl("business_or_representation_url"),
+    creatorEvidenceUrl: consultedUrl("creator_evidence_url"),
+  };
+  return {
+    instagramHandle,
+    discoveryPrecheck: Object.values(discoveryPrecheck).some(Boolean) ? discoveryPrecheck : undefined,
+  };
+}
+
 function parseStructuredJsonObject<T>(value: string): T {
   const match = value.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("Structured model output did not contain a JSON object");
@@ -1834,6 +1887,9 @@ HARD RULES:
 - Exclude youth, junior, U21, U19, team-only accounts, adjacent sports (${strategy.excludedTerms.join(", ") || "none"}), and anyone whose professional identity is ambiguous.
 - Never infer adult-content interest from appearance, clothing, identity, gender expression, or sexuality. The thesis affects commercial ranking only, never factual evidence.
 - Historical OnlyFans outcomes are labels for offline evaluation only and are not available to this research request.
+- Keep the official competition source_url mandatory. Separately search for the athlete's exact personal Instagram profile, a public business/agency/contact page, and public evidence of active creator-led content (for example a personal YouTube, TikTok, podcast, newsletter, storefront, or brand-collaboration page).
+- For instagram_url, business_or_representation_url, and creator_evidence_url, return the exact URL only when you actually consulted it and it belongs to this athlete. Return null when unknown. Never guess a handle or URL, and do not reuse the competition source merely to fill a field.
+- These three supplemental URLs are discovery-prioritization hints, not proof of identity, age, fit, or commercial access.
 
 Return a JSON object matching the schema. Each context must start with the athlete's exact full name and state the specific, dated evidence in one concise sentence. Use the exact consulted source URL and title.`;
 
@@ -1920,6 +1976,7 @@ Return a JSON object matching the schema. Each context must start with the athle
       const candidateUrl = typeof candidate.source_url === "string" ? candidate.source_url.trim() : "";
       const source = sourceByUrl.get(canonicalResearchUrl(candidateUrl));
       if (!name || !source?.url) return [];
+      const precheck = validatedDiscoveryPrecheck(candidate, sourceByUrl);
       const context = typeof candidate.context === "string"
         ? candidate.context.trim()
         : `${name} has current professional ${sport} competition evidence.`;
@@ -1935,10 +1992,15 @@ Return a JSON object matching the schema. Each context must start with the athle
           provider: `OpenAI ${OPENAI_RESEARCH_MODEL} web search`,
           sourceExcerpt: [source.title, context].filter(Boolean).join(" — "),
         }],
+        known_instagram_handle: precheck.instagramHandle,
+        discovery_precheck: precheck.discoveryPrecheck,
       })];
     });
     log(`OpenAI web search returned ${verified.length}/${candidates.length} citation-bound candidates`, {
       sources: sourceByUrl.size,
+      instagramPrechecks: verified.filter((candidate) => candidate.known_instagram_handle).length,
+      businessPrechecks: verified.filter((candidate) => candidate.discovery_precheck?.businessOrRepresentationUrl).length,
+      creatorPrechecks: verified.filter((candidate) => candidate.discovery_precheck?.creatorEvidenceUrl).length,
       inputTokens: data.usage?.input_tokens || 0,
       outputTokens: data.usage?.output_tokens || 0,
     });
@@ -2058,6 +2120,8 @@ ${sourceText}
 
 The context must be one concise sentence of at most 200 characters that starts with the athlete's exact full name and states the specific, dated professional evidence. Do not return youth, junior, U21, U19, or known-under-21 candidates.
 
+For instagram_url, business_or_representation_url, and creator_evidence_url, copy an exact URL from SOURCES only when that supplied result clearly belongs to the athlete and matches the requested field. Otherwise return null. Never invent or reconstruct a URL.
+
 Return one JSON object matching the requested schema. Put the rows in the "candidates" array.`;
 
     const extraction = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
@@ -2092,7 +2156,7 @@ Return one JSON object matching the requested schema. Put the rows in the "candi
     }
     const parsedPayload = JSON.parse(content) as { candidates?: Array<Record<string, unknown>> };
     const parsed = Array.isArray(parsedPayload.candidates) ? parsedPayload.candidates : [];
-    const sourceByUrl = new Map(sources.map((source) => [source.url as string, source]));
+    const sourceByUrl = new Map(sources.map((source) => [canonicalResearchUrl(source.url as string), source]));
     return parsed.flatMap((candidate) => {
       const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
       const url = typeof candidate.source_url === "string" ? candidate.source_url : "";
@@ -2100,7 +2164,8 @@ Return one JSON object matching the requested schema. Put the rows in the "candi
       const context = typeof candidate.context === "string"
         ? candidate.context
         : `Current professional ${sport} evidence`;
-      const sourceResult = sourceByUrl.get(url);
+      const sourceResult = sourceByUrl.get(canonicalResearchUrl(url));
+      const precheck = validatedDiscoveryPrecheck(candidate, sourceByUrl);
       return [verifyDiscoveredAthlete({
         name,
         sport,
@@ -2113,6 +2178,8 @@ Return one JSON object matching the requested schema. Put the rows in the "candi
           provider: "Perplexity Search + Anthropic extraction",
           sourceExcerpt: sourceResult?.snippet || sourceResult?.title || "",
         }],
+        known_instagram_handle: precheck.instagramHandle,
+        discovery_precheck: precheck.discoveryPrecheck,
       })];
     });
   } catch (error) {
@@ -2167,6 +2234,8 @@ ${formatRecruitingProfileForPrompt(recruitingProfile, customContext)}
 SOURCES:
 ${sourceText}
 
+For instagram_url, business_or_representation_url, and creator_evidence_url, copy an exact URL from SOURCES only when that supplied result clearly belongs to the athlete and matches the requested field. Otherwise return null. Never invent or reconstruct a URL.
+
 Return one JSON object matching the requested schema. The context must start with the athlete's exact full name. Put all rows in the "candidates" array.`;
 
   try {
@@ -2201,12 +2270,13 @@ Return one JSON object matching the requested schema. The context must start wit
     const payload = JSON.parse(content) as { candidates?: Array<Record<string, unknown>> };
     const parsed = Array.isArray(payload.candidates) ? payload.candidates : [];
     const allowedUrls = new Set(uniqueSources.map((source) => source.url));
-    const sourceByUrl = new Map(uniqueSources.map((source) => [source.url, source]));
+    const sourceByUrl = new Map(uniqueSources.map((source) => [canonicalResearchUrl(source.url), source]));
     return parsed.flatMap((candidate) => {
       const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
       const url = typeof candidate.source_url === "string" ? candidate.source_url : "";
       if (!name || !allowedUrls.has(url)) return [];
-      return [{
+      const precheck = validatedDiscoveryPrecheck(candidate, sourceByUrl);
+      return [verifyDiscoveredAthlete({
         name,
         sport,
         context: typeof candidate.context === "string" ? candidate.context : "Professional competition evidence",
@@ -2216,9 +2286,11 @@ Return one JSON object matching the requested schema. The context must start wit
           title: typeof candidate.source_title === "string" ? candidate.source_title : undefined,
           claim: typeof candidate.context === "string" ? candidate.context : `Professional ${sport} athlete`,
           provider: "Apify Google Search + Anthropic extraction",
-          sourceExcerpt: sourceByUrl.get(url)?.snippet || sourceByUrl.get(url)?.title || "",
+          sourceExcerpt: sourceByUrl.get(canonicalResearchUrl(url))?.snippet || sourceByUrl.get(canonicalResearchUrl(url))?.title || "",
         }],
-      }];
+        known_instagram_handle: precheck.instagramHandle,
+        discovery_precheck: precheck.discoveryPrecheck,
+      })];
     });
   } catch (error) {
     log(`Apify discovery extraction failed: ${error}`);
@@ -5365,6 +5437,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         mergedDiscoveries.set(key, {
           ...preferred,
           known_instagram_handle: previous?.known_instagram_handle || athlete.known_instagram_handle,
+          discovery_precheck: {
+            instagramUrl: previous?.discovery_precheck?.instagramUrl
+              || athlete.discovery_precheck?.instagramUrl,
+            businessOrRepresentationUrl: previous?.discovery_precheck?.businessOrRepresentationUrl
+              || athlete.discovery_precheck?.businessOrRepresentationUrl,
+            creatorEvidenceUrl: previous?.discovery_precheck?.creatorEvidenceUrl
+              || athlete.discovery_precheck?.creatorEvidenceUrl,
+          },
         });
       }
       allDiscoveredAthletes = Array.from(mergedDiscoveries.values()).map(verifyDiscoveredAthlete);

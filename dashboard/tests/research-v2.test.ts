@@ -711,6 +711,40 @@ test("paid enrichment gives fresh discovery priority without discarding memory",
   ]);
 });
 
+test("paid enrichment ranks source-backed identity and commercial hints within each lane", () => {
+  const selected = selectBalancedResearchCandidates([
+    { id: "fresh-unhinted", discovery_lane: "fresh" as const },
+    { id: "fresh-business", discovery_lane: "fresh" as const, discovery_precheck: { businessOrRepresentationUrl: "https://agency.example/athlete" } },
+    { id: "fresh-instagram", discovery_lane: "fresh" as const, known_instagram_handle: "athlete" },
+    { id: "fresh-creator", discovery_lane: "fresh" as const, discovery_precheck: { creatorEvidenceUrl: "https://youtube.example/athlete" } },
+    { id: "memory-unhinted", discovery_lane: "memory" as const },
+    { id: "memory-instagram", discovery_lane: "memory" as const, known_instagram_handle: "remembered" },
+  ], 5);
+
+  assert.deepEqual(selected.map((candidate) => candidate.id), [
+    "fresh-instagram",
+    "fresh-business",
+    "fresh-creator",
+    "fresh-unhinted",
+    "memory-instagram",
+  ]);
+});
+
+test("readiness order survives when a candidate lane cannot fill its quota", () => {
+  const selected = selectBalancedResearchCandidates([
+    { id: "fresh-only", discovery_lane: "fresh" as const },
+    { id: "memory-unhinted", discovery_lane: "memory" as const },
+    { id: "memory-creator", discovery_lane: "memory" as const, discovery_precheck: { creatorEvidenceUrl: "https://creator.example" } },
+    { id: "memory-instagram", discovery_lane: "memory" as const, known_instagram_handle: "athlete" },
+  ], 3);
+
+  assert.deepEqual(selected.map((candidate) => candidate.id), [
+    "fresh-only",
+    "memory-instagram",
+    "memory-creator",
+  ]);
+});
+
 const HISTORICAL_CASE: HistoricalBenchmarkRecord = {
   athleteName: "Example Athlete",
   decisionDate: "2026-05-03",
