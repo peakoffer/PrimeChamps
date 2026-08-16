@@ -22,6 +22,27 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
 ] as const;
 export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-italian-appositive-age-v25";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-per-candidate-archive-v21";
+export const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
+
+export function archiveRateLimitRetryAfterSeconds(input: {
+  errorMessage?: string | null;
+  checkpointPhase?: unknown;
+  createdAt?: string | null;
+  nowMs?: number;
+  cooldownMs?: number;
+}) {
+  const createdAt = Date.parse(input.createdAt || "");
+  const errorMessage = input.errorMessage || "";
+  const deferredByArchiveProvider = input.checkpointPhase === "archive_cooldown"
+    || /archive candidates were deferred after bounded provider rate limits/i.test(errorMessage)
+    || /internet archive.*rate limit/i.test(errorMessage);
+  if (!deferredByArchiveProvider || !Number.isFinite(createdAt)) return 0;
+  const cooldownMs = Number.isFinite(input.cooldownMs)
+    ? Math.max(0, Number(input.cooldownMs))
+    : ARCHIVE_RATE_LIMIT_COOLDOWN_MS;
+  const nowMs = Number.isFinite(input.nowMs) ? Number(input.nowMs) : Date.now();
+  return Math.max(0, Math.ceil((cooldownMs - (nowMs - createdAt)) / 1_000));
+}
 
 export type HistoricalEvidencePreparationMode = "baseline" | "age_recovery" | "signal_recovery";
 

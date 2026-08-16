@@ -4,6 +4,7 @@ import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { freshBenchmarkLabelDeficits, selectActiveBenchmarkCohort } from "@/lib/research/v2";
 import {
+  archiveRateLimitRetryAfterSeconds,
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_AGE_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS,
@@ -57,12 +58,13 @@ type EvidencePreparationRunRow = {
   created_at?: string;
 };
 
-const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
-
-function archiveRateLimitRetryAfterSeconds(run: Pick<EvidencePreparationRunRow, "error_message" | "created_at">) {
-  const createdAt = run.created_at ? Date.parse(run.created_at) : Number.NaN;
-  if (!/internet archive.*rate limit/i.test(run.error_message || "") || !Number.isFinite(createdAt)) return 0;
-  return Math.max(0, Math.ceil((ARCHIVE_RATE_LIMIT_COOLDOWN_MS - (Date.now() - createdAt)) / 1_000));
+function preparationRunArchiveRetryAfterSeconds(run: EvidencePreparationRunRow) {
+  const checkpoint = run.checkpoint as Record<string, unknown> | null | undefined;
+  return archiveRateLimitRetryAfterSeconds({
+    errorMessage: run.error_message,
+    checkpointPhase: checkpoint?.phase,
+    createdAt: run.created_at,
+  });
 }
 
 type SignalRecoverySplit = "excluded" | "development" | "held_out";
@@ -345,7 +347,7 @@ export async function GET() {
       scoringTokensSpentByPreparation: 0,
       runs: (runs || []).map((run) => ({
         ...run,
-        retry_after_seconds: archiveRateLimitRetryAfterSeconds(run),
+        retry_after_seconds: preparationRunArchiveRetryAfterSeconds(run),
         archive_fallback_available: true,
       })),
     }, { headers: { "cache-control": "private, no-store" } });
@@ -505,11 +507,32 @@ export async function POST(request: NextRequest) {
         scoringTokensSpent: 0,
       }, { status: 409 });
     }
+    const recordIds = selected.map((record) => record.id);
+    const queryPlanVersion = historicalEvidenceQueryPlanVersion(preparationMode);
+    const selectedRecordIds = new Set(recordIds);
+    const retryAfterSeconds = runRows.reduce((maximum, run) => {
+      const checkpoint = run.checkpoint as Record<string, unknown> | null | undefined;
+      if (checkpoint?.query_plan_version !== queryPlanVersion
+        || !Array.isArray(run.record_ids)
+        || !run.record_ids.some((recordId) => typeof recordId === "string" && selectedRecordIds.has(recordId))) {
+        return maximum;
+      }
+      return Math.max(maximum, preparationRunArchiveRetryAfterSeconds(run));
+    }, 0);
+    if (retryAfterSeconds > 0) {
+      return NextResponse.json({
+        error: "Archive providers are cooling down after a bounded rate limit. Saved discovery will be reused after the cooldown; no provider call was started.",
+        retryAfterSeconds,
+        records: recordIds.length,
+        scoringTokensSpent: 0,
+      }, {
+        status: 429,
+        headers: { "retry-after": String(retryAfterSeconds) },
+      });
+    }
     if (!process.env.APIFY_API_KEY?.trim()) {
       return NextResponse.json({ error: "APIFY_API_KEY is not configured; no provider call was started." }, { status: 503 });
     }
-    const recordIds = selected.map((record) => record.id);
-    const queryPlanVersion = historicalEvidenceQueryPlanVersion(preparationMode);
     const reusableRun = (recentRuns || []).find((run) => {
       const checkpoint = run.checkpoint as Record<string, unknown> | null | undefined;
       const summary = run.summary as Record<string, unknown> | null | undefined;

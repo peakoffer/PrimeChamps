@@ -117,6 +117,7 @@ import {
 } from "../src/lib/research/social-blade-history.ts";
 import { convertOnlyFansHistoricalWorkbookExtraction } from "../src/lib/research/historical-workbook-converter.ts";
 import {
+  archiveRateLimitRetryAfterSeconds,
   buildOfficialDatedProfileCandidates,
   buildStoredPreparedEvidenceReplayCandidates,
   buildHistoricalAgeRecoveryQueries,
@@ -161,6 +162,29 @@ import {
   wikimediaRevisionApiUrl,
   wikimediaSearchApiUrl,
 } from "../src/lib/research/historical-evidence-preparation.ts";
+
+test("archive cooldown recognizes the durable workflow deferral and expires exactly", () => {
+  const createdAt = "2026-08-15T21:28:02.000Z";
+  const fiveHoursLater = Date.parse(createdAt) + 5 * 60 * 60 * 1_000;
+  assert.equal(archiveRateLimitRetryAfterSeconds({
+    errorMessage: "Some archive candidates were deferred after bounded provider rate limits; replay will reuse paid discovery.",
+    checkpointPhase: "archive_cooldown",
+    createdAt,
+    nowMs: fiveHoursLater,
+  }), 3_600);
+  assert.equal(archiveRateLimitRetryAfterSeconds({
+    errorMessage: "Some archive candidates were deferred after bounded provider rate limits; replay will reuse paid discovery.",
+    checkpointPhase: "archive_cooldown",
+    createdAt,
+    nowMs: fiveHoursLater + 60 * 60 * 1_000,
+  }), 0);
+  assert.equal(archiveRateLimitRetryAfterSeconds({
+    errorMessage: "Unrelated failure",
+    checkpointPhase: "failed",
+    createdAt,
+    nowMs: fiveHoursLater,
+  }), 0);
+});
 
 test("historical motorcycle racing accepts road-racing and WorldWCR evidence", () => {
   assert.equal(benchmarkSourceSupportsSport(
@@ -4285,9 +4309,10 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(route, /run\.status === "cancelled"/);
   assert.match(route, /historicalDiscoveryReplayCoverageMatches\(\{/);
   assert.match(route, /reusableSummary\?\.providerRunId/);
-  assert.match(route, /ARCHIVE_RATE_LIMIT_COOLDOWN_MS/);
+  assert.match(route, /archiveRateLimitRetryAfterSeconds/);
   assert.match(route, /archive_fallback_available: true/);
-  assert.doesNotMatch(route, /status: 429, headers: \{ "retry-after"/);
+  assert.match(route, /status: 429/);
+  assert.match(route, /headers: \{ "retry-after": String\(retryAfterSeconds\) \}/);
   assert.match(route, /completedRecordIds/);
   assert.match(route, /requiredArchiveProviderVersion/);
   assert.match(route, /archiveProviderReplay/);
