@@ -4381,6 +4381,8 @@ CALIBRATION REMINDER:
       concerns: athlete.concerns,
       daysBetweenSnapshots: athlete.momentum_metrics?.days_between_snapshots,
       hasQualifiedAudienceTrend: Boolean(socialBladeAudience.trend),
+      onlyFansAbsenceIsNeutral: athlete.onlyfans_platform_check_completed === true
+        && athlete.onlyfans_profile_exact_match !== true,
     }),
     score: correctedWithObjectiveGuardrails.priority,
     onlyfans_fit_score: corrected.onlyfansFit,

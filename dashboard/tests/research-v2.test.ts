@@ -672,11 +672,23 @@ test("a sub-30-day follower snapshot cannot survive as a negative finalist conce
     ],
     daysBetweenSnapshots: 4,
     hasQualifiedAudienceTrend: false,
-  }), ["No exact OnlyFans profile was found; absence is neutral."]);
+    onlyFansAbsenceIsNeutral: true,
+  }), []);
+  assert.deepEqual(removeNeutralShortWindowGrowthConcerns({
+    concerns: [
+      "Follower count is below the active thesis range.",
+      "Audience history is a baseline snapshot only; no verified growth trend is available.",
+      "OnlyFans exact-match check returned not_found (neutral) but adds no positive evidence.",
+    ],
+    daysBetweenSnapshots: 4,
+    hasQualifiedAudienceTrend: false,
+    onlyFansAbsenceIsNeutral: true,
+  }), ["Follower count is below the active thesis range."]);
   assert.deepEqual(removeNeutralShortWindowGrowthConcerns({
     concerns: ["Follower growth declined over the measured period."],
     daysBetweenSnapshots: 45,
     hasQualifiedAudienceTrend: true,
+    onlyFansAbsenceIsNeutral: false,
   }), ["Follower growth declined over the measured period."]);
 });
 

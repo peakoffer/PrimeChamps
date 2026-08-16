@@ -196,16 +196,21 @@ export function removeNeutralShortWindowGrowthConcerns(input: {
   concerns: string[] | undefined;
   daysBetweenSnapshots: number | undefined;
   hasQualifiedAudienceTrend: boolean;
+  onlyFansAbsenceIsNeutral?: boolean;
 }) {
   const concerns = input.concerns || [];
-  if (input.hasQualifiedAudienceTrend || !input.daysBetweenSnapshots || input.daysBetweenSnapshots >= 30) {
-    return concerns;
-  }
   return concerns.filter((concern) => {
     const normalized = concern.toLowerCase();
-    const referencesAudienceGrowth = /follower|audience|growth|viral/.test(normalized);
-    const treatsItAsNegative = /flat|declin|negative|down|stagn|no current|no growth|lack of growth/.test(normalized);
-    return !(referencesAudienceGrowth && treatsItAsNegative);
+    const shortWindow = !input.hasQualifiedAudienceTrend
+      && Boolean(input.daysBetweenSnapshots)
+      && (input.daysBetweenSnapshots || 0) < 30;
+    const referencesAudienceTrend = /growth|trend|flat|declin|stagn|viral/.test(normalized)
+      && /follower|audience|growth|trend|viral/.test(normalized);
+    if (shortWindow && referencesAudienceTrend) return false;
+    const neutralOnlyFansAbsence = input.onlyFansAbsenceIsNeutral === true
+      && /onlyfans/.test(normalized)
+      && /not[ _-]?found|no exact|no profile|absence|neutral/.test(normalized);
+    return !neutralOnlyFansAbsence;
   });
 }
 
