@@ -590,7 +590,7 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
     .select("name,sport,raw_candidate,source_evidence,score,identity_confidence,instagram_handle,is_minor,gate_results,updated_at")
     .eq("organization_id", input.organizationId)
     .ilike("sport", sport)
-    .or("score.gte.70,score.is.null")
+    .or("score.gte.80,score.is.null")
     .order("updated_at", { ascending: false })
     .limit(80);
   if (error) {
@@ -603,22 +603,26 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
     const raw = row.raw_candidate && typeof row.raw_candidate === "object"
       ? row.raw_candidate as Record<string, unknown>
       : {};
+    const rawPrecheck = raw.discovery_precheck && typeof raw.discovery_precheck === "object"
+      ? raw.discovery_precheck as Record<string, unknown>
+      : {};
     const previousSportEvidence = row.gate_results && typeof row.gate_results === "object"
       ? (row.gate_results as { sport_evidence?: { passed?: boolean } }).sport_evidence
       : undefined;
     if (previousSportEvidence?.passed !== true) return [];
     const previousScore = Number(row.score);
     const previouslyStrong = Number.isFinite(previousScore)
-      && previousScore >= 70
-      && raw.objective_fit === "strong";
+      && previousScore >= 80
+      && (raw.objective_fit === "strong"
+        || raw.audit_verdict === "pass"
+        || raw.audit_verdict === "corrected");
     const recentUnscoredDiscovery = row.score === null
       && typeof row.updated_at === "string"
-      && Date.now() - Date.parse(row.updated_at) <= 7 * 86_400_000;
+      && Date.now() - Date.parse(row.updated_at) <= 7 * 86_400_000
+      && (typeof rawPrecheck.instagramUrl === "string"
+        || typeof raw.known_instagram_handle === "string");
     if (!previouslyStrong && !recentUnscoredDiscovery) return [];
     const evidence = (Array.isArray(row.source_evidence) ? row.source_evidence : raw.evidence) as DiscoveredAthlete["evidence"];
-    const rawPrecheck = raw.discovery_precheck && typeof raw.discovery_precheck === "object"
-      ? raw.discovery_precheck as Record<string, unknown>
-      : {};
     const candidate = verifyDiscoveredAthlete({
       name: typeof raw.name === "string" ? raw.name : row.name,
       sport: typeof raw.sport === "string" ? raw.sport : row.sport,

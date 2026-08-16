@@ -719,6 +719,19 @@ test("paid enrichment gives fresh discovery priority without discarding memory",
   ]);
 });
 
+test("candidate memory excludes weak scores and raw discoveries without identity hints", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  const memoryLoader = workflow.slice(
+    workflow.indexOf("async function loadReusableCandidateMemory"),
+    workflow.indexOf("interface ScoredAthlete")
+  );
+  assert.match(memoryLoader, /\.or\("score\.gte\.80,score\.is\.null"\)/);
+  assert.match(memoryLoader, /previousScore >= 80/);
+  assert.match(memoryLoader, /raw\.audit_verdict === "corrected"/);
+  assert.match(memoryLoader, /typeof rawPrecheck\.instagramUrl === "string"/);
+  assert.match(memoryLoader, /typeof raw\.known_instagram_handle === "string"/);
+});
+
 test("paid enrichment ranks source-backed identity and commercial hints within each lane", () => {
   const selected = selectBalancedResearchCandidates([
     { id: "fresh-unhinted", discovery_lane: "fresh" as const },
