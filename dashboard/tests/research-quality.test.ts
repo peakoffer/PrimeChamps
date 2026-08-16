@@ -818,6 +818,34 @@ test("run audit never pads a short list with an unqualified candidate", () => {
   assert.equal(short.returnedCount, 9);
 });
 
+test("an independently audited V2 finalist is not vetoed by a stale subjective objective-fit label", () => {
+  const result = auditResearchResults({
+    requestedSport: "volleyball",
+    requestedCount: 1,
+    candidates: [{
+      name: "Audited Athlete",
+      sport: "volleyball",
+      instagram_handle: "audited_athlete",
+      score: 82,
+      age: 24,
+      age_verified: true,
+      age_source: "https://example.com/age",
+      is_private: false,
+      account_active: true,
+      identity_confidence: 90,
+      discovery_verification: { passed: true },
+      evidence: [{ url: "https://example.com/momentum" }],
+      career_stage: "emerging",
+      objective_fit: "possible",
+      audit_verdict: "corrected",
+      audit_critical_gap_count: 0,
+      audit_material_claims_verified: true,
+    }],
+  });
+  assert.equal(result.qualifiedCount, 1);
+  assert.equal(result.candidates[0].passed, true);
+});
+
 test("weighted research score is deterministic and rejects incomplete dimensions", () => {
   const breakdown = parseResearchScoreBreakdown({
     momentum: 60,

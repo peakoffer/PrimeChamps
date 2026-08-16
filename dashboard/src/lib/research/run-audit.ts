@@ -15,6 +15,9 @@ export type AuditableResearchCandidate = {
   evidence?: Array<{ url?: string }>;
   career_stage?: string;
   objective_fit?: string;
+  audit_verdict?: string;
+  audit_critical_gap_count?: number;
+  audit_material_claims_verified?: boolean;
 };
 
 export function auditResearchResults(input: {
@@ -39,7 +42,12 @@ export function auditResearchResults(input: {
     }
     if ((candidate.score || 0) < RESEARCH_PRIORITY_THRESHOLD) failures.push("score below 80");
     if (candidate.career_stage === "veteran") failures.push("veteran profile");
-    if (candidate.objective_fit !== "strong") failures.push("objective fit is not strong");
+    const independentlyAuditedV2 = ["pass", "corrected"].includes(candidate.audit_verdict || "")
+      && candidate.audit_critical_gap_count === 0
+      && candidate.audit_material_claims_verified === true;
+    if (!independentlyAuditedV2 && candidate.objective_fit !== "strong") {
+      failures.push("objective fit is not strong");
+    }
     return {
       name: candidate.name,
       instagramHandle: candidate.instagram_handle || null,
