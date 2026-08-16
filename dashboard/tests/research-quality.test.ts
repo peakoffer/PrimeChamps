@@ -195,6 +195,37 @@ test("surfing evidence rejects wakesurfing and accepts a named WSL competitor", 
   assert.ok(inventedAttribution.reasons.some((reason) => reason.includes("does not clearly name")));
 });
 
+test("motorcycle racing recognizes WorldWCR evidence and rejects adjacent car racing", () => {
+  const worldWcr = evaluateDiscoveryEvidence({
+    name: "Beatriz Neila",
+    sport: "motorcycle racing",
+    context: "Beatriz Neila won a WorldWCR race.",
+    evidence: [{
+      url: "https://www.worldsbk.com/en/news/2026/beatriz-neila-worldwcr-win",
+      title: "Beatriz Neila victorious in WorldWCR",
+      claim: "Beatriz Neila won WorldWCR Race 2 and remains a championship contender.",
+      provider: "search",
+    }],
+  });
+  assert.equal(worldWcr.passed, true);
+  assert.equal(worldWcr.sportMatched, true);
+  assert.equal(worldWcr.authoritativeSource, true);
+
+  const carRacer = evaluateDiscoveryEvidence({
+    name: "Example Driver",
+    sport: "motorcycle racing",
+    context: "Example Driver competes in car racing.",
+    evidence: [{
+      url: "https://example.com/example-driver",
+      title: "Example Driver car racing profile",
+      claim: "Example Driver is a professional automobile racing driver.",
+      provider: "search",
+    }],
+  });
+  assert.equal(carRacer.passed, false);
+  assert.ok(carRacer.reasons.some((reason) => reason.includes("excluded adjacent activity")));
+});
+
 test("discovery rejects a source-explicit under-21 athlete before paid enrichment", () => {
   const candidate = evaluateDiscoveryEvidence({
     name: "Young Athlete",

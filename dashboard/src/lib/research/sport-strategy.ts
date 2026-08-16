@@ -146,6 +146,22 @@ const STRATEGIES: Record<SportArchetype, Omit<SportResearchStrategy, "archetype"
 };
 
 const SPORT_OVERRIDES: Record<string, Partial<Omit<SportResearchStrategy, "archetype">>> = {
+  "motorcycle racing": {
+    canonicalTerms: [
+      "motorcycle racing", "motorbike racing", "road racing", "motorcycle racer",
+      "motorcycle rider", "worldwcr", "worldssp", "worldsbk", "motogp", "superbike",
+    ],
+    excludedTerms: ["car racing", "automobile racing", "sim racing"],
+    authoritativeDomains: [
+      "worldsbk.com", "motogp.com", "fim-moto.com", "fimwomen.com", ...BASE_DOMAINS,
+    ],
+    queryTemplates: [
+      "women motorcycle racing WorldWCR rising riders standings {year}",
+      "site:worldsbk.com WorldWCR women rider results {year}",
+      "women motorcycle road racing emerging rider podium {year}",
+      "women motorcycle racer creator personal brand Instagram {year}",
+    ],
+  },
   surfing: {
     canonicalTerms: ["surfing", "surfer", "world surf league", "wsl", "international surfing association", "isa surfing"],
     excludedTerms: ["wake surf", "wakesurf", "wakeboarding", "wake board", "competitive wake surf", "cwsa"],
