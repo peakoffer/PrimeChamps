@@ -17,9 +17,11 @@ export type ResearchV2EvidenceSource = {
 };
 
 export function researchV2CommercialAccessSnapshot(input: {
+  athleteName?: string | null;
   bio?: string | null;
   followerCount?: number | null;
   engagementRate?: number | null;
+  publicRouteUrls?: Array<string | null | undefined> | null;
 }) {
   const bio = input.bio?.trim() || "";
   const emails = Array.from(new Set(bio.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || []));
@@ -27,7 +29,28 @@ export function researchV2CommercialAccessSnapshot(input: {
   const taggedAccounts = businessLanguage
     ? Array.from(new Set(bio.match(/@[a-z0-9._]+/gi) || []))
     : [];
-  const actionableContactRoute = emails.length > 0 || taggedAccounts.length > 0;
+  const athleteTokens = (input.athleteName || "").toLowerCase().replace(/[^a-z0-9]+/g, " ")
+    .split(" ").filter((token) => token.length >= 3);
+  const verifiedPublicRoutes = Array.from(new Set((input.publicRouteUrls || []).flatMap((value) => {
+    if (!value) return [];
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:") return [];
+      const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+      const pathname = url.pathname.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+      const knownBookingProfile = (
+        hostname === "opendorse.com" && /^\/profile\//.test(url.pathname)
+      ) || (
+        hostname === "bookingagentinfo.com" && /^\/celebrity\//.test(url.pathname)
+      );
+      const attributablePath = athleteTokens.length >= 2
+        && athleteTokens.every((token) => pathname.includes(token));
+      return knownBookingProfile && attributablePath ? [url.toString()] : [];
+    } catch {
+      return [];
+    }
+  })));
+  const actionableContactRoute = emails.length > 0 || taggedAccounts.length > 0 || verifiedPublicRoutes.length > 0;
   const audienceScaleMeasured = typeof input.followerCount === "number"
     && input.followerCount > 0
     && typeof input.engagementRate === "number"
@@ -38,6 +61,7 @@ export function researchV2CommercialAccessSnapshot(input: {
     signals: [
       ...emails.map((email) => `public business email: ${email}`),
       ...taggedAccounts.map((handle) => `public business/representation account: ${handle}`),
+      ...verifiedPublicRoutes.map((url) => `verified public booking/representation profile: ${url}`),
       ...(audienceScaleMeasured
         ? [`verified audience baseline: ${input.followerCount} followers at ${input.engagementRate}% engagement`]
         : []),

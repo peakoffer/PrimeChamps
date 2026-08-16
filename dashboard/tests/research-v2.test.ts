@@ -562,7 +562,7 @@ test("evaluation profiles default to a genuinely bounded smoke budget", () => {
 test("Anthropic structured-output retries expand truncated scoring and audit budgets", () => {
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
   assert.match(workflow, /const maxTokens = attempt === 1 \? 2_400 : 4_800/);
-  assert.match(workflow, /const maxTokens = attempt === 1 \? 1_800 : 3_600/);
+  assert.match(workflow, /const maxTokens = attempt === 1 \? 3_600 : 7_200/);
   assert.equal((workflow.match(/attempt === 1 \? 75_000 : 120_000/g) || []).length, 2);
   assert.match(workflow, /stop_reason\?: string/);
   assert.match(workflow, /stop=\$\{payload\.stop_reason \|\| "unknown"\}/);
@@ -586,6 +586,33 @@ test("top-of-funnel commercial readiness requires a public route and measured au
     engagementRate: 8.67,
   });
   assert.equal(represented.actionableContactRoute, true);
+
+  const bookingProfile = researchV2CommercialAccessSnapshot({
+    athleteName: "Brooke Nuneviller",
+    bio: "Pro volleyball athlete",
+    followerCount: 171_224,
+    engagementRate: 4.8,
+    publicRouteUrls: ["https://bookingagentinfo.com/celebrity/brooke-nuneviller/"],
+  });
+  assert.equal(bookingProfile.actionableContactRoute, true);
+
+  const genericDirectory = researchV2CommercialAccessSnapshot({
+    athleteName: "Anna DeBeer",
+    bio: "Pro volleyball athlete",
+    followerCount: 55_763,
+    engagementRate: 4.62,
+    publicRouteUrls: ["https://www.modash.io/find-influencers/kentucky/united-states/louisville"],
+  });
+  assert.equal(genericDirectory.actionableContactRoute, false);
+
+  const wrongPerson = researchV2CommercialAccessSnapshot({
+    athleteName: "Brooke Nuneviller",
+    bio: "Pro volleyball athlete",
+    followerCount: 171_224,
+    engagementRate: 4.8,
+    publicRouteUrls: ["https://bookingagentinfo.com/celebrity/alex-nuneviller/"],
+  });
+  assert.equal(wrongPerson.actionableContactRoute, false);
 
   const personalOnly = researchV2CommercialAccessSnapshot({
     bio: "Athlete | coffee | travel",
@@ -669,6 +696,19 @@ test("durable research phase transitions save payloads atomically", () => {
   assert.match(workflow, /nextStats = isRegressiveReplay[\s\S]*?current\?\.stats/);
   assert.match(workflow, /updateResearchProgress\(researchLogId, "completed"/);
   assert.match(workflow, /raw_results: allDiscoveredAthletes/);
+});
+
+test("research cancellation is checked between paid scoring and audit batches", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /for \(let index = 0; index < pendingAthletes\.length; index \+= scoringBatchSize\) \{\s+await assertRunNotCancelled\(input\.researchLogId\);/);
+  assert.match(workflow, /for \(let index = 0; index < priorityCandidates\.length; index \+= 5\) \{\s+await assertRunNotCancelled\(input\.researchLogId\);/);
+});
+
+test("targeted age corroboration carries the first provider source into grounded search", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /existing age-source domains to corroborate, not duplicate/);
+  assert.match(workflow, /\.\.\.\(apifyAge\?\.researchEvidence \|\| \[\]\)/);
+  assert.match(workflow, /const ageResults = \[\s+\.\.\.existingAgeResults,/);
 });
 
 test("research precheck measures audience before selecting the paid enrichment pool", () => {
@@ -4297,10 +4337,11 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_SNAPSHOT_AGE_DAYS = 90/);
   assert.match(socialBladeHistoryRoute, /OFFICIAL_HISTORY_PLAN_VERSION = "max90-v2"/);
   assert.match(socialBladeHistoryRoute, /validate"\) === "connection"/);
-  assert.match(socialBladeHistoryRoute, /No recently paid Social Blade profile is available for a zero-credit connection check/);
+  assert.match(socialBladeHistoryRoute, /No recently paid Social Blade profile is available for a bounded connection check/);
   assert.match(socialBladeHistoryRoute, /outreachMutationsAllowed: false/);
-  assert.match(benchmarkPage, /Check Social Blade/);
-  assert.match(benchmarkPage, /charged \$\{payload\.chargedCredits \?\? "unknown"\} credits/);
+  assert.match(benchmarkPage, /Validate Social Blade \(may use credits\)/);
+  assert.match(benchmarkPage, /does not expose the per-request charge/);
+  assert.match(socialBladeHistoryRoute, /chargeAttributionAvailable: false/);
   assert.match(socialBladeHistoryRoute, /officialValidationPassed/);
   assert.match(socialBladeHistoryRoute, /officialHistoryStats\.matched >= MAX_OFFICIAL_PILOT_ATTEMPTS/);
   assert.match(socialBladeHistoryRoute, /officialHistoryAttemptedRecordIds/);

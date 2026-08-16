@@ -265,7 +265,7 @@ async function checkSocialBladeConnection(organizationId: string) {
   }
   const admin = createAdminClient();
   const { data: cachedSource, error } = await admin.from("research_evidence_sources")
-    .select("canonical_url,retrieved_at,metadata")
+    .select("canonical_url,retrieved_at")
     .eq("organization_id", organizationId)
     .eq("provider", "social_blade_instagram_history")
     .eq("retrieval_status", "retrieved")
@@ -276,7 +276,7 @@ async function checkSocialBladeConnection(organizationId: string) {
     .maybeSingle();
   if (error) throw error;
   if (!cachedSource?.canonical_url) {
-    throw new Error("No recently paid Social Blade profile is available for a zero-credit connection check");
+    throw new Error("No recently paid Social Blade profile is available for a bounded connection check");
   }
   const url = new URL(cachedSource.canonical_url);
   if (url.origin !== "https://matrix.sbapis.com" || url.pathname !== "/b/instagram/statistics") {
@@ -291,21 +291,17 @@ async function checkSocialBladeConnection(organizationId: string) {
   if (!response.ok || payload.status?.success !== true) {
     throw new Error(payload.status?.error || `Social Blade connection check failed (${response.status})`);
   }
-  const metadata = cachedSource.metadata && typeof cachedSource.metadata === "object"
-    ? cachedSource.metadata as Record<string, unknown>
-    : {};
-  const creditsBefore = typeof metadata.credits_remaining_after_request === "number"
-    ? metadata.credits_remaining_after_request
-    : null;
   const creditsAfter = typeof payload.info?.credits?.available === "number"
     ? payload.info.credits.available
     : null;
   return {
     authenticated: true,
     cachedProfileReused: true,
-    chargedCredits: creditsBefore !== null && creditsAfter !== null
-      ? Math.max(0, creditsBefore - creditsAfter)
-      : null,
+    // Social Blade returns the current balance, but not the charge attributable
+    // to this request. Comparing it with an older evidence row incorrectly
+    // assigns intervening audit usage to the connection check.
+    chargedCredits: null,
+    chargeAttributionAvailable: false,
     creditsRemaining: creditsAfter,
     scoringTokensSpent: 0,
     outreachMutationsAllowed: false,

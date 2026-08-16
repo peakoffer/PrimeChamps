@@ -851,12 +851,12 @@ export default function ResearchBenchmarkPage() {
 
   const validateSocialBladeConnection = async () => {
     setWorking(true);
-    setMessage("Validating Social Blade with a recently paid profile that remains inside its free cache window…");
+    setMessage("Validating Social Blade with a recently paid profile. The provider may charge its normal lookup credits…");
     try {
       const response = await fetch("/api/research/golden-records/social-blade-history?validate=connection", { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Social Blade connection check failed");
-      setMessage(`Social Blade authenticated successfully. Reused a cached profile and charged ${payload.chargedCredits ?? "unknown"} credits${typeof payload.creditsRemaining === "number" ? `; ${payload.creditsRemaining} credits remain` : ""}.`);
+      setMessage(`Social Blade authenticated successfully. Reused a cached profile${typeof payload.creditsRemaining === "number" ? `; ${payload.creditsRemaining} credits remain` : ""}. Social Blade does not expose the per-request charge in this response, so the CRM does not attribute earlier audit usage to this check.`);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Social Blade connection check failed");
@@ -1256,7 +1256,7 @@ export default function ResearchBenchmarkPage() {
               onClick={() => void validateSocialBladeConnection()}
               className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
             >
-              Check Social Blade
+              Validate Social Blade (may use credits)
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.apifyConfigured || socialBladePlan.apifyPilotRecords.length === 0}

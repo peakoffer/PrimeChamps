@@ -1943,7 +1943,7 @@ HARD RULES:
 - Historical OnlyFans outcomes are labels for offline evaluation only and are not available to this research request.
 - Keep the official competition source_url mandatory. If the same bounded search naturally encounters the athlete's exact personal Instagram profile, a public business/agency/contact page, or public evidence of active creator-led content, include those exact URLs too. Do not perform separate per-athlete searches for these optional fields.
 - For instagram_url, business_or_representation_url, and creator_evidence_url, return the exact URL only when it was actually consulted and belongs to this athlete. Return null when unknown. Never guess a handle or URL, and do not reuse the competition source merely to fill a field.
-- These three supplemental URLs are discovery-prioritization hints, not proof of identity, age, fit, or commercial access.
+- These supplemental URLs are discovery-prioritization hints, not proof of identity, age, or fit. An exact-name profile on a deterministically approved public booking/representation platform may later satisfy only the commercial-access route gate after application validation; generic directories never do.
 ${creatorFirstWave ? `- This is the creator-first discovery lane. Locate candidates through current creator, NIL, personal-brand, audience, or athlete-marketing sources, then independently verify each candidate with the required official competition source_url.
 - Do not fill this lane with roster-only names. Omit a candidate unless the search also consulted her exact personal Instagram profile, a public business/representation route, or attributable evidence of sustained creator-led content.
 - Favor source-published audiences in the ${params.follower_min.toLocaleString()}-${params.follower_max.toLocaleString()} range, but never invent or estimate a follower count.` : ""}
@@ -3484,7 +3484,12 @@ async function lookupAthleteAgesWithOpenAI(athletes: EnrichedAthlete[]) {
     const evidence = (athlete.evidence || []).slice(0, 2)
       .map((item) => `${item.title || item.url || "source"}: ${item.claim}`)
       .join(" | ");
-    return `- ${athlete.name} — ${athlete.sport}${evidence ? ` — ${evidence}` : ""}`;
+    const knownAgeSources = (athlete.evidence || [])
+      .filter((item) => /\b(?:age source|date of birth|birth date|born|birthday|\bage\s+\d{2}\b)\b/i.test(`${item.title || ""} ${item.claim || ""} ${item.sourceExcerpt || ""}`))
+      .slice(0, 3)
+      .map((item) => item.url)
+      .filter((url): url is string => Boolean(url));
+    return `- ${athlete.name} — ${athlete.sport}${evidence ? ` — ${evidence}` : ""}${knownAgeSources.length ? ` — existing age-source domains to corroborate, not duplicate: ${knownAgeSources.join(", ")}` : ""}`;
   }).join("\n");
 
   try {
@@ -3591,7 +3596,15 @@ Return only the strict JSON object.`,
     }
     for (const athlete of athletes) {
       const key = researchCandidateKey(athlete.name, athlete.sport);
-      const ageResults = recordsByAthlete.get(key) || [];
+      const existingAgeResults: AthleteAgeSearchResult[] = (athlete.evidence || []).flatMap((item) => item.url ? [{
+        title: item.title,
+        snippet: item.sourceExcerpt || item.claim,
+        link: item.url,
+      }] : []);
+      const ageResults = [
+        ...existingAgeResults,
+        ...(recordsByAthlete.get(key) || []),
+      ];
       const verifiedAge = selectVerifiedAthleteAge(
         athlete.name,
         ageResults,
@@ -3866,6 +3879,7 @@ async function scoreAthletes(
   // pool inside one durable step more reliably.
   const scoringBatchSize = 5;
   for (let index = 0; index < pendingAthletes.length; index += scoringBatchSize) {
+    await assertRunNotCancelled(input.researchLogId);
     if (consumedInputTokens >= maxInputTokens || consumedOutputTokens >= maxOutputTokens) {
       log("Researcher token budget reached; stopping before the next scoring batch", {
         consumedInputTokens,
@@ -3881,7 +3895,16 @@ async function scoreAthletes(
     const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(
       batch.filter((athlete) =>
         apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))?.corroborated !== true
-      )
+      ).map((athlete) => {
+        const apifyAge = apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport));
+        return {
+          ...athlete,
+          evidence: [
+            ...(athlete.evidence || []),
+            ...(apifyAge?.researchEvidence || []),
+          ],
+        };
+      })
     );
     const batchScores = await Promise.all(batch.map(async (athlete) => {
       // Verify age before semantic scoring. Otherwise Claude is asked to score
@@ -4356,9 +4379,11 @@ async function auditPriorityCandidate(
   const claimSample = await refetchMaterialClaimSample(athlete);
   const socialBladeAudience = await lookupSocialBladeAuditSignal(athlete);
   const commercialAccess = researchV2CommercialAccessSnapshot({
+    athleteName: athlete.name,
     bio: athlete.bio,
     followerCount: athlete.follower_count,
     engagementRate: athlete.engagement_rate,
+    publicRouteUrls: [athlete.discovery_precheck?.businessOrRepresentationUrl],
   });
   const creatorActivity = researchV2CreatorActivitySnapshot({ posts: athlete.latest_posts });
   const blindPrompt = `You are the independent blind auditor for a Prime Champs athlete research candidate.
@@ -4856,6 +4881,7 @@ async function auditPriorityCandidates(
     .slice(0, Math.max(0, maxAuditCandidates));
   const audited: ScoredAthlete[] = [];
   for (let index = 0; index < priorityCandidates.length; index += 5) {
+    await assertRunNotCancelled(input.researchLogId);
     const batch = priorityCandidates.slice(index, index + 5);
     const results = await Promise.all(batch.map(async (athlete) => {
       try {
@@ -5111,7 +5137,11 @@ Respond with ONLY valid JSON:
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     const scoreRequestStartedAt = Date.now();
-    const maxTokens = attempt === 1 ? 1_800 : 3_600;
+    // Latest Sonnet can consume a material part of max_tokens before emitting
+    // the compact structured payload. Production traces showed one valid
+    // dossier exhausting both the old 1,800 and 3,600 ceilings. Keep two
+    // attempts, but give the strict-schema response enough bounded headroom.
+    const maxTokens = attempt === 1 ? 3_600 : 7_200;
     const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
