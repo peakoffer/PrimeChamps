@@ -711,6 +711,17 @@ test("targeted age corroboration carries the first provider source into grounded
   assert.match(workflow, /const ageResults = \[\s+\.\.\.existingAgeResults,/);
 });
 
+test("an isolated scoring failure preserves its paid enrichment dossier for replay", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  const failureStart = workflow.indexOf("Rejected ${athlete.name} after an isolated scoring failure");
+  const failureEnd = workflow.indexOf("return null;", failureStart);
+  const failurePath = workflow.slice(failureStart, failureEnd);
+  assert.ok(failureStart >= 0 && failureEnd > failureStart);
+  assert.match(failurePath, /raw_candidate: athleteForScoring/);
+  assert.match(failurePath, /source_evidence: athleteForScoring\.evidence/);
+  assert.match(failurePath, /instagram_handle: athleteForScoring\.instagram_handle/);
+});
+
 test("research precheck measures audience before selecting the paid enrichment pool", () => {
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
   assert.match(workflow, /Apify discovery profile precheck measured/);
@@ -1914,6 +1925,20 @@ test("qualified-band calibration cannot repair a missing evidence gate", () => {
     allCoreEvidenceGatesPassed: completeExceptAge,
   }), original);
   assert.ok(buildResearchV2Score(original).priority < 80);
+});
+
+test("qualified-band calibration never inflates blind-auditor or review corrections", () => {
+  assert.deepEqual(calibrateResearchV2QualifiedBand({
+    onlyfansFit: 82,
+    commercialAchievability: 74,
+    researchConfidence: 81,
+    allCoreEvidenceGatesPassed: true,
+    allowUpwardCalibration: false,
+  }), {
+    onlyfansFit: 82,
+    commercialAchievability: 74,
+    researchConfidence: 81,
+  });
 });
 
 test("V2 final gate requires independent audit and every evidence gate", () => {

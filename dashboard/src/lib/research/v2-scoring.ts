@@ -201,8 +201,9 @@ export function calibrateResearchV2QualifiedBand(input: {
   commercialAchievability: number;
   researchConfidence: number;
   allCoreEvidenceGatesPassed: boolean;
+  allowUpwardCalibration?: boolean;
 }) {
-  if (!input.allCoreEvidenceGatesPassed) {
+  if (!input.allCoreEvidenceGatesPassed || input.allowUpwardCalibration === false) {
     return {
       onlyfansFit: bounded(input.onlyfansFit),
       commercialAchievability: bounded(input.commercialAchievability),

@@ -3969,6 +3969,21 @@ async function scoreAthletes(
         const message = error instanceof Error ? error.message : "Scoring provider failed";
         log(`  Rejected ${athlete.name} after an isolated scoring failure: ${message}`);
         await supabase.from("research_candidates").update({
+          // Preserve the paid enrichment/eligibility dossier even when the
+          // model response fails. Enrichment-checkpoint forks can then retry
+          // this exact candidate instead of silently dropping it or buying
+          // discovery and Instagram data again.
+          raw_candidate: athleteForScoring,
+          source_evidence: athleteForScoring.evidence || [],
+          identity_status: (athleteForScoring.identity_confidence || 0) >= 70
+            && athleteForScoring.identity_corroborated === true ? "verified" : "probable",
+          identity_confidence: athleteForScoring.identity_confidence || 0,
+          instagram_handle: athleteForScoring.instagram_handle || null,
+          follower_count: athleteForScoring.follower_count || null,
+          engagement_rate: athleteForScoring.engagement_rate ?? null,
+          age: athleteForScoring.age || null,
+          age_verified: athleteForScoring.age_verified === true,
+          age_source: athleteForScoring.age_source || null,
           disposition: "rejected",
           disposition_reason: `Scoring failed after retry: ${message}`.slice(0, 500),
           gate_results: {
@@ -4556,12 +4571,14 @@ CALIBRATION REMINDER:
     commercialAchievability: blind.independent_achievability_score,
     researchConfidence: blind.independent_confidence_score,
     allCoreEvidenceGatesPassed: auditCoreEvidencePassed,
+    allowUpwardCalibration: false,
   });
   const calibratedReview = calibrateResearchV2QualifiedBand({
     onlyfansFit: review.corrected_fit_score,
     commercialAchievability: review.corrected_achievability_score,
     researchConfidence: review.corrected_confidence_score,
     allCoreEvidenceGatesPassed: auditCoreEvidencePassed && review.verdict !== "fail",
+    allowUpwardCalibration: false,
   });
   const corrected = buildAuditorConstrainedResearchV2Score({
     researcher: {
