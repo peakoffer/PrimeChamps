@@ -64,7 +64,7 @@ function explicitLegacyCareer(text: string) {
 }
 
 function hasCompetitiveAthleteSignal(text: string) {
-  return /\b(?:athlet\w*|player\w*|competitor\w*|roster|rank(?:ed|ing|ings)?|result\w*|champion\w*|finalist\w*|medali?st\w*|contract\w*|draft(?:ed|\s+pick)?|select(?:ed|ion)|rookie\w*|all[-\s]?america\w*|award\w*|sign(?:ed|ing)|team|tour|league|fighter\w*|surfer\w*|gymnast\w*|driver\w*|rider\w*|swimmer\w*|golfer\w*|wrestler\w*|boxer\w*|skater\w*|cyclist\w*|runner\w*|diver\w*|rower\w*)\b/i.test(text);
+  return /\b(?:athlet\w*|player\w*|competitor\w*|roster|rank(?:ed|ing|ings)?|result\w*|champion\w*|finalist\w*|medali?st\w*|podium\w*|contract\w*|draft(?:ed|\s+pick)?|select(?:ed|ion)|rookie\w*|all[-\s]?america\w*|award\w*|sign(?:ed|ing)|team|tour|league|fighter\w*|surfer\w*|gymnast\w*|driver\w*|rider\w*|swimmer\w*|golfer\w*|wrestler\w*|boxer\w*|skater\w*|cyclist\w*|runner\w*|diver\w*|rower\w*)\b/i.test(text);
 }
 
 function conflictsWithFemaleCompetitionCategory(text: string) {

@@ -224,6 +224,20 @@ test("motorcycle racing recognizes WorldWCR evidence and rejects adjacent car ra
   });
   assert.equal(carRacer.passed, false);
   assert.ok(carRacer.reasons.some((reason) => reason.includes("excluded adjacent activity")));
+
+  const podium = evaluateDiscoveryEvidence({
+    name: "Lucie Boudesseul",
+    sport: "motorcycle racing",
+    context: "Lucie Boudesseul competes in WorldWCR.",
+    evidence: [{
+      url: "https://www.worldsbk.com/en/news/2026/lucie-boudesseul-podium",
+      title: "Lucie Boudesseul returns to the WorldWCR podium",
+      claim: "Lucie Boudesseul secured her third career WorldWCR podium at Assen.",
+      provider: "search",
+    }],
+  });
+  assert.equal(podium.passed, true);
+  assert.equal(podium.competitiveAthlete, true);
 });
 
 test("discovery rejects a source-explicit under-21 athlete before paid enrichment", () => {
@@ -329,6 +343,20 @@ test("age evidence prefers exact dates and treats year-only ages conservatively"
   ), null);
   assert.equal(isCredibleAgeSourceUrl("https://usavolleyball.org/story/2026-/"), false);
   assert.equal(isCredibleAgeSourceUrl("https://cev.eu/player/kendall-kipp"), true);
+});
+
+test("age evidence attributes a current age immediately before the requested surname", () => {
+  const result = parseAgeEvidenceForAthlete(
+    "Sawyer Lindblad",
+    "Sawyer Lindblad won the 2026 event. A 15-year-old, Zebrowski, placed second. Now, the 20-year-old, Lindblad, adds a first CT victory."
+  );
+  assert.equal(result?.parsed.age, 20);
+  assert.equal(result?.parsed.precision, "stated_age");
+
+  assert.equal(parseAgeEvidenceForAthlete(
+    "Sawyer Lindblad",
+    "Sawyer Lindblad won the event against the 15-year-old, Zebrowski."
+  ), null);
 });
 
 test("verified age selection requires authoritative evidence or independent corroboration", () => {

@@ -3450,9 +3450,22 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
     }));
 
     for (const athlete of athletes) {
+      // Discovery may already contain a dated, attributable age statement.
+      // Combine it with the Google batch instead of discarding it and paying
+      // a second provider to rediscover the same first source.
+      const existingAgeResults: AthleteAgeSearchResult[] = (athlete.evidence || []).flatMap((item) =>
+        item.url?.startsWith("http") ? [{
+          title: item.title,
+          snippet: item.sourceExcerpt || item.claim,
+          link: item.url,
+        }] : []
+      );
+      const existingProviderByUrl = new Map((athlete.evidence || []).flatMap((item) =>
+        item.url?.startsWith("http") ? [[canonicalResearchUrl(item.url), item.provider] as const] : []
+      ));
       const verifiedAge = selectVerifiedAthleteAge(
         athlete.name,
-        results,
+        [...existingAgeResults, ...results],
         trustedAgeDomainsForSport(athlete.sport)
       );
       if (!verifiedAge) continue;
@@ -3462,7 +3475,8 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
           url: ageSource.source,
           title: `${athlete.name} age source ${index + 1}`,
           claim: `${athlete.name}: ${ageSource.evidence}`.slice(0, 1_400),
-          provider: "Apify Google Search age batch",
+          provider: existingProviderByUrl.get(canonicalResearchUrl(ageSource.source))
+            || "Apify Google Search age batch",
           sourceExcerpt: ageSource.evidence,
         })),
       });
@@ -3486,7 +3500,7 @@ async function lookupAthleteAgesWithOpenAI(athletes: EnrichedAthlete[]) {
       .map((item) => `${item.title || item.url || "source"}: ${item.claim}`)
       .join(" | ");
     const knownAgeSources = (athlete.evidence || [])
-      .filter((item) => /\b(?:age source|date of birth|birth date|born|birthday|\bage\s+\d{2}\b)\b/i.test(`${item.title || ""} ${item.claim || ""} ${item.sourceExcerpt || ""}`))
+      .filter((item) => /\b(?:age source|date of birth|birth date|born|birthday|age\s+\d{2}|\d{1,2}[-\s]+year[-\s]+old)\b/i.test(`${item.title || ""} ${item.claim || ""} ${item.sourceExcerpt || ""}`))
       .slice(0, 3)
       .map((item) => item.url)
       .filter((url): url is string => Boolean(url));

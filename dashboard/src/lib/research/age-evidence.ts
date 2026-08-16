@@ -196,6 +196,29 @@ export function parseAgeEvidenceForAthlete(
       };
     }
   }
+
+  // Race and event reports commonly use an age immediately before a surname,
+  // for example "the 20-year-old, Lindblad". Keep this fallback anchored to
+  // the requested surname and require the athlete's full name elsewhere in
+  // the same provider excerpt so another competitor's nearby age cannot be
+  // inherited.
+  if (nameTokens.every((token) => normalizedText.includes(token))) {
+    const ageBeforeSurname = new RegExp(
+      `\\b(\\d{1,2})\\s+year\\s+old\\s+${surname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+      "g"
+    );
+    for (const match of normalizedText.matchAll(ageBeforeSurname)) {
+      const age = Number(match[1]);
+      if (age < 10 || age > 80) continue;
+      const matchIndex = match.index || 0;
+      const precedingContext = normalizedText.slice(Math.max(0, matchIndex - 100), matchIndex);
+      if (/\b(?:when|while)\b[^.]{0,60}$|\b(?:began|started|joined|turned pro)\b[^.]{0,60}$/.test(precedingContext)) continue;
+      return {
+        parsed: { age, birthYear: null, precision: "stated_age" as const },
+        evidence: text.slice(Math.max(0, matchIndex - 120), Math.min(text.length, matchIndex + match[0].length + 120)).trim(),
+      };
+    }
+  }
   return null;
 }
 
