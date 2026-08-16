@@ -206,7 +206,10 @@ export function removeNeutralShortWindowGrowthConcerns(input: {
       && (input.daysBetweenSnapshots || 0) < 30;
     const referencesAudienceTrend = /growth|trend|flat|declin|stagn|viral/.test(normalized)
       && /follower|audience|growth|trend|viral/.test(normalized);
-    if (shortWindow && referencesAudienceTrend) return false;
+    const neutralMissingTrend = !input.hasQualifiedAudienceTrend
+      && referencesAudienceTrend
+      && /baseline|no verified|not verified|unavailable|not available|insufficient|short[- ]window/.test(normalized);
+    if ((shortWindow && referencesAudienceTrend) || neutralMissingTrend) return false;
     const neutralOnlyFansAbsence = input.onlyFansAbsenceIsNeutral === true
       && /onlyfans/.test(normalized)
       && /not[ _-]?found|no exact|no profile|absence|neutral/.test(normalized);

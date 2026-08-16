@@ -685,6 +685,14 @@ test("a sub-30-day follower snapshot cannot survive as a negative finalist conce
     onlyFansAbsenceIsNeutral: true,
   }), ["Follower count is below the active thesis range."]);
   assert.deepEqual(removeNeutralShortWindowGrowthConcerns({
+    concerns: [
+      "Instagram audience is below the active thesis range.",
+      "Audience history is a baseline snapshot only; no verified growth trend available.",
+    ],
+    daysBetweenSnapshots: undefined,
+    hasQualifiedAudienceTrend: false,
+  }), ["Instagram audience is below the active thesis range."]);
+  assert.deepEqual(removeNeutralShortWindowGrowthConcerns({
     concerns: ["Follower growth declined over the measured period."],
     daysBetweenSnapshots: 45,
     hasQualifiedAudienceTrend: true,
