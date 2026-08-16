@@ -1062,6 +1062,9 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /findInstagramCandidatesWithOpenAI/);
   assert.match(workflowSource, /identitiesNeedingIndependentSource/);
   assert.match(workflowSource, /Grounded identity pass supplied independent handle evidence/);
+  assert.match(workflowSource, /bounded discovery precheck anchored this exact handle/);
+  assert.match(workflowSource, /grounded[\s\S]*filter\(\(candidate\) => !anchoredHandle \|\| candidate\.handle === anchoredHandle\)/);
+  assert.match(workflowSource, /outside the target range, skipping before scoring/);
   assert.match(workflowSource, /named source publishes Instagram handle/);
   assert.match(workflowSource, /OpenAI resolved.*attributable Instagram identities/);
   assert.match(workflowSource, /google\/gemini-3\.7-flash/);

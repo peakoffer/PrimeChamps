@@ -2788,6 +2788,32 @@ async function findInstagramCandidatesBatch(athletes: DiscoveredAthlete[]) {
       : await findInstagramCandidatesWithApifySearch(athletes);
   for (const [candidateKey, candidates] of groundedCandidates) byCandidateKey.set(candidateKey, candidates);
 
+  // The audience precheck already loaded a live profile for this exact handle.
+  // Keep that handle stable across a workflow replay: same-name web results may
+  // describe a different athlete and must never silently replace the measured
+  // profile. A grounded source can strengthen this anchor only when it names
+  // the same handle.
+  for (const athlete of athletes) {
+    const anchoredHandle = instagramHandleFromUrl(athlete.discovery_precheck?.instagramUrl || "");
+    if (!anchoredHandle) continue;
+    const candidateKey = researchCandidateKey(athlete.name, athlete.sport);
+    const matchingCandidates = (byCandidateKey.get(candidateKey) || [])
+      .filter((candidate) => candidate.handle === anchoredHandle);
+    byCandidateKey.set(candidateKey, [{
+      handle: anchoredHandle,
+      url: `https://www.instagram.com/${anchoredHandle}/`,
+      title: matchingCandidates[0]?.title || `${athlete.name} (@${anchoredHandle})`,
+      snippet: matchingCandidates[0]?.snippet || `${athlete.name} ${athlete.sport} profile measured during discovery precheck`,
+      searchConfidence: Math.max(60, ...matchingCandidates.map((candidate) => candidate.searchConfidence)),
+      reasons: Array.from(new Set([
+        "live Instagram user search returned this profile",
+        "bounded discovery precheck anchored this exact handle",
+        ...matchingCandidates.flatMap((candidate) => candidate.reasons),
+      ])),
+      followerCount: athlete.discovery_precheck?.followerCount,
+    }]);
+  }
+
   // Native Instagram search is useful for finding live same-name profiles, but
   // an unverified profile is not independent proof that it belongs to the
   // athlete. Give only those weakly sourced identities one bounded grounded
@@ -2805,11 +2831,25 @@ async function findInstagramCandidatesBatch(athletes: DiscoveredAthlete[]) {
         : new Map<string, InstagramSearchCandidate[]>();
     for (const athlete of identitiesNeedingIndependentSource) {
       const candidateKey = researchCandidateKey(athlete.name, athlete.sport);
-      const grounded = sourceBackedCandidates.get(candidateKey) || [];
+      const anchoredHandle = instagramHandleFromUrl(athlete.discovery_precheck?.instagramUrl || "");
+      const grounded = (sourceBackedCandidates.get(candidateKey) || [])
+        .filter((candidate) => !anchoredHandle || candidate.handle === anchoredHandle);
       const existing = byCandidateKey.get(candidateKey) || [];
-      const merged = [...grounded, ...existing].filter((candidate, index, all) =>
-        all.findIndex((other) => other.handle === candidate.handle) === index
-      ).slice(0, 3);
+      const mergedByHandle = new Map<string, InstagramSearchCandidate>();
+      for (const candidate of [...existing, ...grounded]) {
+        const previous = mergedByHandle.get(candidate.handle);
+        mergedByHandle.set(candidate.handle, previous ? {
+          ...previous,
+          title: candidate.title || previous.title,
+          snippet: candidate.snippet || previous.snippet,
+          searchConfidence: Math.max(previous.searchConfidence, candidate.searchConfidence),
+          reasons: Array.from(new Set([...previous.reasons, ...candidate.reasons])),
+          followerCount: previous.followerCount ?? candidate.followerCount,
+        } : candidate);
+      }
+      const merged = Array.from(mergedByHandle.values())
+        .sort((left, right) => right.searchConfidence - left.searchConfidence)
+        .slice(0, 3);
       if (merged.length > 0) byCandidateKey.set(candidateKey, merged);
     }
     log(`Grounded identity pass supplied independent handle evidence for ${identitiesNeedingIndependentSource.filter((athlete) =>
@@ -3219,7 +3259,27 @@ async function enrichAthletesWithInstagram(
         const effectiveMin = config.followerMin || 0;
 
         const audienceInRange = profile.followers >= effectiveMin && profile.followers <= effectiveMax;
-        if (!audienceInRange) log(`  @${handle} has ${profile.followers.toLocaleString()} followers outside the target range; retaining for scored accessibility review`);
+        if (!audienceInRange) {
+          log(`  @${handle} has ${profile.followers.toLocaleString()} followers outside the target range, skipping before scoring`);
+          await supabase.from("research_candidates").update({
+            identity_status: "verified",
+            identity_confidence: identity.confidence,
+            instagram_handle: handle,
+            follower_count: profile.followers,
+            disposition: "rejected",
+            disposition_reason: `Instagram audience ${profile.followers.toLocaleString()} is outside the configured ${effectiveMin.toLocaleString()}–${effectiveMax.toLocaleString()} range`,
+            gate_results: {
+              sport_evidence: athlete.discovery_verification,
+              identity_resolved: true,
+              identity_reasons: identity.reasons,
+              identity_corroborated: true,
+              identity_corroboration_reasons: corroboratedIdentity.reasons,
+              public_account: !profile.isPrivate,
+              audience_in_range: false,
+            },
+          }).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
+          return null;
+        }
 
         // Skip private accounts
         if (profile.isPrivate) {
