@@ -4,9 +4,11 @@ import { gunzipSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import {
   commonCrawlIndexUrl,
+  extractDatedSocialAnalyticsAudienceEvidence,
   extractCommonCrawlWarcBody,
   extractOfficialCommissionAdultEvidence,
   extractOfficialUniversityMediaGuideEvidence,
+  extractOfficialVolleyballWorldEventProfileEvidence,
   extractPreparedArchivedAliasAdultEvidence,
   extractPreparedArchivedEvidence,
   extractPreparedDatedPodcastAliasAdultEvidence,
@@ -299,6 +301,157 @@ async function retrieveDirectOfficialUniversityMediaGuideEvidence() {
   };
 }
 
+async function retrieveDirectOfficialVolleyballWorldEventProfileEvidence() {
+  if (requiredClaim !== "adult_eligibility") return null;
+  const response = await fetch(canonicalUrl, {
+    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!response?.ok || !/html|xhtml/i.test(response.headers.get("content-type") || "")) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 2_000_000) return null;
+  const html = new TextDecoder().decode(bytes);
+  const evidence = extractOfficialVolleyballWorldEventProfileEvidence({
+    athleteName: record.athlete_name,
+    sport: record.sport,
+    sourceUrl: canonicalUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: record.evidence_cutoff_at,
+  });
+  if (!evidence) return null;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  const captureTimestamp = evidence.publishedAt.replace(/[-:T.Z]/g, "").slice(0, 14);
+  return {
+    item: {
+      canonicalUrl,
+      archivedUrl: canonicalUrl,
+      domain: evidence.domain,
+      title: candidate.title,
+      publishedAt: evidence.publishedAt,
+      historicalAsOf: evidence.publishedAt,
+      contentHash,
+      captureTimestamp,
+      publicationDateMethod: "official_event_path_start_date_and_statistics_row",
+      searchQuery: candidate.query,
+      searchSnippet: candidate.snippet,
+      archiveProvider: "official_dated_profile" as const,
+      providerRequestId: `sha256:${contentHash}`,
+      claims: [{
+        claimType: "sport_identity" as const,
+        claimText: `${record.athlete_name} is identified as a ${record.sport} athlete by this official Volleyball World event profile.`,
+        structuredValue: {
+          athlete_name: record.athlete_name,
+          sport: record.sport,
+          official_player_id: evidence.playerId,
+        },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      }, {
+        claimType: "candidate_evidence" as const,
+        claimText: evidence.excerpt,
+        structuredValue: {
+          evidence_kind: "official_event_scoped_player_profile",
+          official_player_id: evidence.playerId,
+        },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      }, {
+        claimType: "adult_eligibility" as const,
+        claimText: `${record.athlete_name} has an official Volleyball World birth date of ${evidence.birthDate}.`,
+        structuredValue: {
+          birth_date: evidence.birthDate,
+          birth_year: Number(evidence.birthDate.slice(0, 4)),
+          precision: "birth_date",
+          verification_method: "official_event_scoped_player_profile",
+        },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      }],
+    },
+    content: bytes,
+  };
+}
+
+async function retrieveDirectDatedAnalyticsEvidence() {
+  if (requiredClaim !== "audience_signal" && requiredClaim !== "creator_behavior_signal") return null;
+  const response = await fetch(canonicalUrl, {
+    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!response?.ok || !/html|xhtml/i.test(response.headers.get("content-type") || "")) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 2_000_000) return null;
+  const html = new TextDecoder().decode(bytes);
+  const evidence = extractDatedSocialAnalyticsAudienceEvidence({
+    athleteName: record.athlete_name,
+    sport: record.sport,
+    sourceUrl: canonicalUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: record.evidence_cutoff_at,
+  });
+  if (!evidence) return null;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  const claims: PreparedArchivedEvidence["claims"] = [{
+    claimType: "audience_signal",
+    claimText: `${record.athlete_name}'s @${evidence.handle} Instagram account had ${evidence.followersCount.toLocaleString("en-US")} followers in the dated analytics snapshot.`,
+    structuredValue: {
+      platform: "instagram",
+      handle: evidence.handle,
+      followers_count: evidence.followersCount,
+      snapshot_type: "dated_third_party_analytics",
+    },
+    sourceExcerpt: evidence.excerpt,
+    effectiveAt: evidence.publishedAt,
+    extractionConfidence: 95,
+    material: true,
+  }];
+  if (evidence.postsCount !== null && evidence.postsCount > 0) {
+    claims.push({
+      claimType: "creator_behavior_signal",
+      claimText: `${record.athlete_name}'s dated Instagram analytics snapshot listed ${evidence.postsCount.toLocaleString("en-US")} uploads.`,
+      structuredValue: {
+        platform: "instagram",
+        handle: evidence.handle,
+        posts_count: evidence.postsCount,
+        engagement_rate_percent: evidence.engagementRate,
+        snapshot_type: "dated_third_party_analytics",
+      },
+      sourceExcerpt: evidence.excerpt,
+      effectiveAt: evidence.publishedAt,
+      extractionConfidence: 95,
+      material: true,
+    });
+  }
+  if (!claims.some((claim) => claim.claimType === requiredClaim)) return null;
+  return {
+    item: {
+      canonicalUrl,
+      archivedUrl: canonicalUrl,
+      domain: evidence.domain,
+      title: candidate.title,
+      publishedAt: evidence.publishedAt,
+      historicalAsOf: evidence.publishedAt,
+      contentHash,
+      captureTimestamp: evidence.publishedAt.replace(/[-:T.Z]/g, "").slice(0, 14),
+      publicationDateMethod: "explicit_data_updated_field",
+      searchQuery: candidate.query,
+      searchSnippet: candidate.snippet,
+      archiveProvider: "direct_dated_analytics" as const,
+      providerRequestId: `sha256:${contentHash}`,
+      claims,
+    },
+    content: bytes,
+  };
+}
+
 async function retrieveCommonCrawlEvidence() {
   const collectionsResponse = await fetch("https://index.commoncrawl.org/collinfo.json", {
     headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
@@ -423,6 +576,8 @@ async function retrieveWikimediaRevisionEvidence() {
 
 let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveDirectOfficialCommissionPdfEvidence();
 if (!recovered) recovered = await retrieveDirectOfficialUniversityMediaGuideEvidence();
+if (!recovered) recovered = await retrieveDirectOfficialVolleyballWorldEventProfileEvidence();
+if (!recovered) recovered = await retrieveDirectDatedAnalyticsEvidence();
 if (!recovered) recovered = await retrieveDirectDatedPodcastAliasEvidence()
   .then((value) => value ? { item: value.item, content: value.html } : null);
 if (!recovered) recovered = await retrieveDirectDatedArticleEvidence()
@@ -492,7 +647,8 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   title: item.title,
   publisher: item.domain,
   source_type: item.archiveProvider === "direct_dated_article" ? "news"
-    : item.archiveProvider === "direct_dated_podcast" ? "interview" : "archive",
+    : item.archiveProvider === "direct_dated_podcast" ? "interview"
+      : item.archiveProvider === "direct_dated_analytics" ? "social" : "archive",
   provider: item.archiveProvider || "internet_archive_wayback",
   provider_request_id: item.providerRequestId || item.captureTimestamp,
   published_at: item.publishedAt,
@@ -508,7 +664,9 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
       ? "operator_supplied_cutoff_safe_dated_article"
       : item.archiveProvider === "direct_dated_podcast"
         ? "operator_supplied_cutoff_safe_dated_podcast_transcript"
-      : "operator_supplied_authoritative_archive_source",
+        : item.archiveProvider === "direct_dated_analytics"
+          ? "operator_supplied_cutoff_safe_dated_social_analytics"
+          : "operator_supplied_authoritative_archive_source",
     capture_timestamp: item.captureTimestamp,
     verification: `shared_exact_name_sport_${requiredClaim}_and_cutoff_extractor`,
     evaluation_only: true,

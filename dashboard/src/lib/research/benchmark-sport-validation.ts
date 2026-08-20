@@ -48,7 +48,7 @@ const SPORT_TERMS: Partial<Record<BenchmarkSport, string[]>> = {
   MMA: ["mixed martial arts", "mma", "ufc"], Motocross: ["motocross"],
   "Motorcycle Racing": [
     "motorcycle racing", "motorcycle racer", "motorbike racing", "road racing",
-    "worldwcr", "superbike", "moto gp", "motogp",
+    "worldwcr", "superbike", "moto gp", "motogp", "motoe", "moto e",
   ],
   Motorsports: ["motorsport", "racing driver"], "Mountain Biking": ["mountain bike", "mountain biking", "downhill rider"],
   Padel: ["padel"], Pickleball: ["pickleball"], Powerlifting: ["powerlifting", "powerlifter"],
@@ -93,12 +93,13 @@ const HISTORICAL_SPORT_TERMS: Record<string, string[]> = {
   "MMA / LFA": ["mixed martial arts", "mma", "ufc", "lfa", "legacy fighting alliance"],
   "Motorcycle Road Racing": [
     "motorcycle road racing", "motorcycle racer", "motorbike racing", "road racer",
-    "superbike", "motogp", "moto gp", "isle of man tt", "worldwcr", "motociclismo",
+    "superbike", "motogp", "moto gp", "motoe", "moto e", "isle of man tt", "worldwcr", "motociclismo",
     "mundial femenino de velocidad", "carreras de motos",
   ],
   Motorsports: [
     "motorsport", "racing driver", "motorcycle racing", "motorcycle racer", "motorbike racing",
     "road racer", "superbike", "motogp", "moto gp", "worldwcr", "motociclismo",
+    "motoe", "moto e",
     "mundial femenino de velocidad", "carreras de motos", "formula woman", "formula women",
     "formula x", "formula 3", "f2000", "formula racing", "automobilismo", "pilota automobilistica",
   ],

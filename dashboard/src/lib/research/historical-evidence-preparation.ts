@@ -20,7 +20,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-corroborated-alias-age-v30";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-event-profile-audience-v31";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-per-candidate-archive-v21";
 export const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 
@@ -162,6 +162,20 @@ export type OfficialCompetitionEntryAdultEvidence = OfficialCommissionAdultEvide
 
 export type OfficialUniversityMediaGuideEvidence = OfficialCommissionAdultEvidence;
 
+export type OfficialVolleyballWorldEventProfileEvidence = OfficialCommissionAdultEvidence & {
+  playerId: string;
+};
+
+export type DatedSocialAnalyticsAudienceEvidence = {
+  domain: string;
+  handle: string;
+  followersCount: number;
+  postsCount: number | null;
+  engagementRate: number | null;
+  excerpt: string;
+  publishedAt: string;
+};
+
 export type OfficialDatedProfileEvidence = OfficialCommissionAdultEvidence & {
   profileId: string;
   status: string;
@@ -190,7 +204,7 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
-  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article" | "direct_dated_podcast";
+  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article" | "direct_dated_podcast" | "direct_dated_analytics";
   providerRequestId?: string;
 };
 
@@ -1077,6 +1091,178 @@ export function extractOfficialUniversityMediaGuideEvidence(input: {
     domain: benchmarkSourceDomain(input.sourceUrl),
     excerpt: `${header}\n${personal[0]}`.trim().slice(0, 1_000),
     publishedAt: publishedAt.toISOString(),
+  };
+}
+
+/**
+ * Extract an exact DOB from an official Volleyball World event-scoped player
+ * page. A generic mutable player profile is not accepted. The URL, canonical
+ * link, Beach Pro Tour season, structured event start date, exact player H1,
+ * adjacent birth-date field, and a dated statistics row must all agree. This
+ * makes the evidence attributable to a specific completed competition before
+ * the benchmark cutoff instead of treating a current profile as historical.
+ */
+export function extractOfficialVolleyballWorldEventProfileEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceHtml: string;
+  evidenceCutoffAt: string;
+}): OfficialVolleyballWorldEventProfileEvidence | null {
+  let url: URL;
+  try { url = new URL(input.sourceUrl); } catch { return null; }
+  if (url.hostname.toLowerCase() !== "en.volleyballworld.com") return null;
+  const path = url.pathname.match(
+    /^\/beachvolleyball\/competitions\/beach-pro-tour\/(20\d{2})\/(?:challenge|elite16|futures)\/[a-z0-9-]+\/players\/(\d+)\/?$/i,
+  );
+  if (!path) return null;
+  const season = Number(path[1]);
+  const playerId = path[2];
+  const canonicalTag = Array.from(input.sourceHtml.matchAll(/<link\b[^>]*>/gi), (match) => match[0])
+    .find((tag) => /\brel=(?:["']canonical["']|canonical)(?:\s|\/?>)/i.test(tag));
+  const canonicalHrefMatch = canonicalTag?.match(/\bhref=(?:["']([^"']+)["']|([^\s>]+))/i);
+  const canonicalHref = canonicalHrefMatch?.[1] || canonicalHrefMatch?.[2];
+  if (!canonicalHref) return null;
+  let canonical: URL;
+  try { canonical = new URL(canonicalHref); } catch { return null; }
+  if (canonical.hostname.toLowerCase() !== url.hostname.toLowerCase()
+    || canonical.pathname.replace(/\/$/, "") !== url.pathname.replace(/\/$/, "")) return null;
+
+  const eventDateText = input.sourceHtml.match(/"competition_start_date"\s*:\s*"(\d{2}\/\d{2}\/20\d{2})"/i)?.[1];
+  const eventName = input.sourceHtml.match(/"competition_event_name"\s*:\s*"([^"]{3,180})"/i)?.[1] || "";
+  const sportName = input.sourceHtml.match(/"sport"\s*:\s*"([^"]{3,80})"/i)?.[1] || "";
+  const eventParts = eventDateText?.match(/^(\d{2})\/(\d{2})\/(20\d{2})$/);
+  if (!eventParts || Number(eventParts[3]) !== season || !new RegExp(`\\b${season}\\b`).test(eventName)
+    || normalizeEvidenceText(sportName) !== "beach volleyball"
+    || !benchmarkSourceSupportsSport(input.sport, sportName)) return null;
+  const publishedAt = new Date(Date.UTC(Number(eventParts[3]), Number(eventParts[2]) - 1, Number(eventParts[1])));
+  const cutoff = new Date(input.evidenceCutoffAt);
+  if (!Number.isFinite(publishedAt.getTime()) || !Number.isFinite(cutoff.getTime()) || publishedAt > cutoff) return null;
+
+  const escapedName = input.athleteName.trim().split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+");
+  const playerHeading = new RegExp(`<h1\\b[^>]*class=["']?[^>"']*\\bvbw-player-name\\b[^>]*>\\s*${escapedName}\\s*<\\/h1>`, "i");
+  const headings = input.sourceHtml.match(new RegExp(playerHeading.source, "gi")) || [];
+  if (headings.length !== 1) return null;
+  const headingIndex = input.sourceHtml.search(playerHeading);
+  const playerWindow = input.sourceHtml.slice(headingIndex, headingIndex + 4_000);
+  const birthText = playerWindow.match(
+    /<div\b[^>]*class=["']?[^>"']*\bvbw-player-bio-head\b[^>]*>\s*Birth date\s*<\/div>\s*<div\b[^>]*class=["']?[^>"']*\bvbw-player-bio-text\b[^>]*>\s*(\d{2}\/\d{2}\/\d{4})\s*<\/div>/i,
+  )?.[1];
+  const birthParts = birthText?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const birthDate = birthParts
+    ? normalizeNumericBirthDate(Number(birthParts[3]), Number(birthParts[2]), Number(birthParts[1]))
+    : null;
+  const ageAtEvent = birthDate ? ageOnDate(birthDate, publishedAt.toISOString()) : null;
+  if (!birthDate || ageAtEvent === null || ageAtEvent < 21 || ageAtEvent > 80) return null;
+  const escapedEventDate = eventDateText!.replace(/\//g, "\\/");
+  if (!new RegExp(`<td\\b[^>]*class=["'][^"']*\\bmatchdate\\b[^"']*["'][^>]*>\\s*${escapedEventDate}\\b`, "i")
+    .test(input.sourceHtml)) return null;
+
+  return {
+    birthDate,
+    domain: "volleyballworld.com",
+    excerpt: [
+      `Official event profile: ${input.athleteName}`,
+      `Sport: ${sportName}`,
+      `Event: ${eventName}`,
+      `Event start and statistics date: ${eventDateText}`,
+      `Birth date: ${birthText}`,
+      `Official player record: ${playerId}`,
+    ].join("\n"),
+    publishedAt: publishedAt.toISOString(),
+    playerId,
+  };
+}
+
+function parseDatedSocialMetric(value: string) {
+  const match = value.trim().replace(/,/g, "").match(/^(\d+(?:\.\d+)?)\s*([KMB])?$/i);
+  if (!match) return null;
+  const multiplier = match[2]?.toUpperCase() === "K" ? 1_000
+    : match[2]?.toUpperCase() === "M" ? 1_000_000
+      : match[2]?.toUpperCase() === "B" ? 1_000_000_000 : 1;
+  const parsed = Number(match[1]) * multiplier;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+}
+
+/**
+ * Extract a point-in-time Instagram audience snapshot from SPEAKRJ only when
+ * its exact report path, profile description, handle, athlete/sport text,
+ * explicit Data Updated date, and adjacent header metrics agree. Projection
+ * rows are deliberately ignored; only the dated report-header snapshot is
+ * returned.
+ */
+export function extractDatedSocialAnalyticsAudienceEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceHtml: string;
+  evidenceCutoffAt: string;
+}): DatedSocialAnalyticsAudienceEvidence | null {
+  let url: URL;
+  try { url = new URL(input.sourceUrl); } catch { return null; }
+  if (!new Set(["speakrj.com", "www.speakrj.com"]).has(url.hostname.toLowerCase())) return null;
+  const path = url.pathname.match(/^\/audit\/report\/([a-z0-9._-]{2,40})\/instagram\/future-projections\/?$/i);
+  if (!path) return null;
+  const handle = path[1].toLowerCase();
+  const description = input.sourceHtml.match(/<meta\b[^>]*\bname=["']description["'][^>]*\bcontent=["']([^"']+)["'][^>]*>/i)?.[1]
+    || input.sourceHtml.match(/<meta\b[^>]*\bcontent=["']([^"']+)["'][^>]*\bname=["']description["'][^>]*>/i)?.[1]
+    || "";
+  const nameTokens = normalizeEvidenceText(input.athleteName).split(" ").filter((token) => token.length > 1);
+  const normalizedDescription = normalizeEvidenceText(decodeHtmlEntities(description));
+  if (nameTokens.length < 2 || !nameTokens.every((token) => ` ${normalizedDescription} `.includes(` ${token} `))
+    || !new RegExp(`@${handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(description)) return null;
+
+  const updatedText = input.sourceHtml.match(
+    /itemprop=["']dateModified["'][^>]*>\s*Data Updated:\s*([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,\s+20\d{2})\s*</i,
+  )?.[1];
+  const normalizedUpdatedText = updatedText?.replace(/(\d{1,2})(?:st|nd|rd|th)/i, "$1") || "";
+  const updatedParts = normalizedUpdatedText.match(/^([A-Za-z]+)\s+(\d{1,2}),\s+(20\d{2})$/);
+  const month = updatedParts ? ({
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+  } as Record<string, number>)[updatedParts[1].toLowerCase()] : null;
+  const updatedAt = updatedParts && month
+    ? new Date(Date.UTC(Number(updatedParts[3]), month - 1, Number(updatedParts[2])))
+    : new Date(Number.NaN);
+  const cutoff = new Date(input.evidenceCutoffAt);
+  if (!updatedText || !Number.isFinite(updatedAt.getTime()) || !Number.isFinite(cutoff.getTime()) || updatedAt > cutoff) return null;
+
+  const headerMetric = (label: string) => input.sourceHtml.match(new RegExp(
+    `${label}\\s*<p\\b[^>]*class=["'][^"']*\\breport-header-number\\b[^"']*["'][^>]*>\\s*(?:<a\\b[^>]*>)?\\s*([\\d,.]+\\s*[KMB]?)`,
+    "i",
+  ))?.[1] || "";
+  const followersCount = parseDatedSocialMetric(headerMetric("Followers"));
+  const postsCount = parseDatedSocialMetric(headerMetric("Uploads"));
+  const engagementText = headerMetric("Engagement");
+  const engagementRate = engagementText ? Number(engagementText.replace(/%$/, "")) : null;
+  if (followersCount === null || followersCount < 100 || followersCount > 1_000_000_000
+    || (engagementRate !== null && (!Number.isFinite(engagementRate) || engagementRate < 0 || engagementRate > 100))) return null;
+
+  const sourceText = archivedHtmlToText(input.sourceHtml);
+  if (!benchmarkSourceSupportsSport(input.sport, sourceText.slice(0, 30_000))) return null;
+  const updatedIndex = sourceText.indexOf("Data Updated:");
+  const athleteIndex = sourceText.slice(0, updatedIndex).toLocaleLowerCase("en-US")
+    .lastIndexOf(input.athleteName.toLocaleLowerCase("en-US"));
+  const start = athleteIndex >= 0 ? athleteIndex : Math.max(0, updatedIndex - 450);
+  const reportHeader = sourceText.slice(updatedIndex, updatedIndex + 2_000).match(
+    /Data Updated:[\s\S]{0,500}?Followers\s+[\d,.]+\s*[KMB]?[\s\S]{0,250}?Uploads\s+[\d,.]+\s*[KMB]?[\s\S]{0,250}?Engagement\s+[\d.]+%/i,
+  );
+  if (!reportHeader || reportHeader.index === undefined) return null;
+  const end = updatedIndex + reportHeader.index + reportHeader[0].length;
+  const excerpt = sourceText.slice(start, end)
+    .replace(/\s+/g, " ").trim();
+  if (!excerpt || !excerpt.includes(updatedText) || !excerpt.includes(headerMetric("Followers").trim())
+    || !nameTokens.every((token) => ` ${normalizeEvidenceText(excerpt)} `.includes(` ${token} `))) return null;
+  return {
+    domain: "speakrj.com",
+    handle,
+    followersCount,
+    postsCount,
+    engagementRate,
+    excerpt: excerpt.slice(0, 4_000),
+    publishedAt: updatedAt.toISOString(),
   };
 }
 

@@ -149,7 +149,7 @@ const SPORT_OVERRIDES: Record<string, Partial<Omit<SportResearchStrategy, "arche
   "motorcycle racing": {
     canonicalTerms: [
       "motorcycle racing", "motorbike racing", "road racing", "motorcycle racer",
-      "motorcycle rider", "worldwcr", "worldssp", "worldsbk", "motogp", "superbike",
+      "motorcycle rider", "worldwcr", "worldssp", "worldsbk", "motogp", "motoe", "moto e", "superbike",
     ],
     excludedTerms: ["car racing", "automobile racing", "sim racing"],
     authoritativeDomains: [

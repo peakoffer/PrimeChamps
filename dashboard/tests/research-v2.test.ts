@@ -126,9 +126,11 @@ import {
   canonicalHistoricalArchiveUrl,
   commonCrawlIndexUrl,
   dedupeHistoricalSearchCandidates,
+  extractDatedSocialAnalyticsAudienceEvidence,
   extractCommonCrawlWarcBody,
   extractOfficialCompetitionEntryAdultEvidence,
   extractOfficialUniversityMediaGuideEvidence,
+  extractOfficialVolleyballWorldEventProfileEvidence,
   extractOfficialCommissionAdultEvidence,
   extractOfficialDatedProfileEvidence,
   extractPublishedAt,
@@ -588,6 +590,109 @@ test("official university media guides resolve a DOB only inside the exact athle
     sourceUrl: "https://seminoles.com/documents/download/2023/6/21/2020-Beach-Volleybal-Media-Guide-2.pdf",
     sourceText: source.replace("PERSONAL: Born on April 22, 1999", "PERSONAL: teammate born on April 22, 1999"),
     evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  }), null);
+});
+
+test("official Volleyball World event profiles bind DOB to an exact pre-cutoff player and dated event", () => {
+  const sourceUrl = "https://en.volleyballworld.com/beachvolleyball/competitions/beach-pro-tour/2025/challenge/veracruz-mex/players/201238";
+  const html = [
+    `<link href=${sourceUrl} rel=canonical />`,
+    `<script>window.dataLayer?.push({"page":{"sport":"Beach Volleyball","competition_event_name":"Challenge - Veracruz, MEX - 2025","competition_start_date":"01/10/2025"}});</script>`,
+    `<h1 class=vbw-player-name>Avery Poppinga</h1>`,
+    `<div class=vbw-player-bio-head>Birth date</div><div class=vbw-player-bio-text>22/04/1999</div>`,
+    `<table><td class="vbw-o-table__cell matchdate" data-sort=1>01/10/2025</td></table>`,
+  ].join("");
+  const accepted = extractOfficialVolleyballWorldEventProfileEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  });
+  assert.equal(accepted?.birthDate, "1999-04-22");
+  assert.equal(accepted?.publishedAt, "2025-10-01T00:00:00.000Z");
+  assert.equal(accepted?.playerId, "201238");
+  assert.equal(extractOfficialVolleyballWorldEventProfileEvidence({
+    athleteName: "Different Athlete",
+    sport: "Beach volleyball",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  }), null);
+  assert.equal(extractOfficialVolleyballWorldEventProfileEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2025-09-30T23:59:59Z",
+  }), null);
+  assert.equal(extractOfficialVolleyballWorldEventProfileEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl: "https://en.volleyballworld.com/players/201238",
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  }), null);
+  assert.equal(extractOfficialVolleyballWorldEventProfileEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl,
+    sourceHtml: html.replace("<td class=\"vbw-o-table__cell matchdate\" data-sort=1>01/10/2025</td>", ""),
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  }), null);
+});
+
+test("dated social analytics accepts only exact pre-cutoff report-header metrics", () => {
+  const sourceUrl = "https://www.speakrj.com/audit/report/ericgranado/instagram/future-projections";
+  const html = [
+    `<meta name="description" content="Track Instagram Future Projections of Eric Granado (@ericgranado).">`,
+    `<h1>Eric Granado</h1><small>MotoE rider @ericgranado</small>`,
+    `<small itemprop="dateModified">Data Updated: May 9th, 2022</small>`,
+    `<div>Followers <p class="report-header-number"><a>159.5K</a></p></div>`,
+    `<div>Uploads <p class="report-header-number"><a>2,209</a></p></div>`,
+    `<div>Engagement <p class="report-header-number"><a>5%</a></p></div>`,
+    `<div>Future projection for 2027: 999.9M followers</div>`,
+  ].join("");
+  const accepted = extractDatedSocialAnalyticsAudienceEvidence({
+    athleteName: "Eric Granado",
+    sport: "Motorcycle racing",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-04-30T12:00:00Z",
+  });
+  assert.equal(accepted?.handle, "ericgranado");
+  assert.equal(accepted?.followersCount, 159_500);
+  assert.equal(accepted?.postsCount, 2_209);
+  assert.equal(accepted?.engagementRate, 5);
+  assert.equal(accepted?.publishedAt, "2022-05-09T00:00:00.000Z");
+  assert.doesNotMatch(accepted?.excerpt || "", /2027|999\.9M/);
+  assert.equal(extractDatedSocialAnalyticsAudienceEvidence({
+    athleteName: "Different Athlete",
+    sport: "Motorcycle racing",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-04-30T12:00:00Z",
+  }), null);
+  assert.equal(extractDatedSocialAnalyticsAudienceEvidence({
+    athleteName: "Eric Granado",
+    sport: "Motorcycle racing",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2022-05-08T23:59:59Z",
+  }), null);
+  assert.equal(extractDatedSocialAnalyticsAudienceEvidence({
+    athleteName: "Eric Granado",
+    sport: "Motorcycle racing",
+    sourceUrl: sourceUrl.replace("ericgranado", "otherhandle"),
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-04-30T12:00:00Z",
+  }), null);
+  assert.equal(extractDatedSocialAnalyticsAudienceEvidence({
+    athleteName: "Eric Granado",
+    sport: "Motorcycle racing",
+    sourceUrl,
+    sourceHtml: html.replace(`itemprop="dateModified"`, `data-field="projection"`),
+    evidenceCutoffAt: "2026-04-30T12:00:00Z",
   }), null);
 });
 
