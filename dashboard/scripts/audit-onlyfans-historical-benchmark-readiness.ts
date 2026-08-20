@@ -3,6 +3,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import { ONLYFANS_HISTORICAL_DATASET } from "../src/lib/research/historical-benchmark.ts";
+import { ONLYFANS_NEW_GROUND_TRUTH_DATASET } from "../src/lib/research/new-ground-truth-intake.ts";
 import {
   benchmarkOnlyFansPlatformActivityGate,
   benchmarkEvidenceFreezeReadiness,
@@ -20,13 +21,19 @@ const serviceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERV
 if (!supabaseUrl || !serviceKey) throw new Error("Supabase server credentials are not configured");
 
 const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+const datasetArgument = process.argv.find((argument) => argument.startsWith("--dataset="))?.split("=")[1];
+const dataset = datasetArgument === "new" ? ONLYFANS_NEW_GROUND_TRUTH_DATASET
+  : datasetArgument || ONLYFANS_HISTORICAL_DATASET;
 const { data: recordsData, error: recordsError } = await admin.from("research_golden_records")
   .select("id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags")
-  .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
+  .contains("stratification_tags", [dataset])
   .order("athlete_name");
 if (recordsError) throw recordsError;
 const records = (recordsData || []) as Array<BenchmarkGoldenCase & { fit_label: "fit" | "not_fit" }>;
-if (records.length !== 100) throw new Error(`Expected 100 historical records, received ${records.length}`);
+if (dataset === ONLYFANS_HISTORICAL_DATASET && records.length !== 100) {
+  throw new Error(`Expected 100 historical records, received ${records.length}`);
+}
+if (records.length < 1) throw new Error(`No records found for dataset ${dataset}`);
 const recordIds = records.map((record) => record.id);
 const recordIdChunks = Array.from({ length: Math.ceil(recordIds.length / 20) }, (_, index) =>
   recordIds.slice(index * 20, (index + 1) * 20)
@@ -137,7 +144,7 @@ const platformActivitySummary = (subset: typeof entries) => {
   };
 };
 console.log(JSON.stringify({
-  dataset: ONLYFANS_HISTORICAL_DATASET,
+  dataset,
   ...summary,
   sourcesLoaded: sources.length,
   claimsLoaded: claims.length,

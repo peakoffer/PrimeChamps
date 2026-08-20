@@ -11,6 +11,7 @@
     "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "import:historical-benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/import-onlyfans-historical-benchmark.ts",
+    "import:new-ground-truth": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/import-onlyfans-new-ground-truth.ts",
     "convert:historical-workbook": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/convert-onlyfans-historical-workbook-extraction.ts",
     "audit:benchmark-age-evidence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/audit-benchmark-age-evidence.ts",
     "audit:historical-benchmark": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/audit-onlyfans-historical-benchmark-readiness.ts",

@@ -147,11 +147,13 @@ function exactDate(value: string | null | undefined, label: string) {
 
 const DETAIL_CATEGORY_CONFIGURATION = {
   "Sport": { claimType: "sport_identity", material: false },
+  "Exact Athlete Identity": { claimType: "athlete_profile", material: false },
   "Instagram Handle at Decision": { claimType: "athlete_profile", material: false, platform: "instagram" },
   "TikTok Handle at Decision": { claimType: "athlete_profile", material: false, platform: "tiktok" },
   "Instagram Followers at Decision": { claimType: "audience_signal", material: true, platform: "instagram" },
   "Instagram Engagement Rate at Decision": { claimType: "social_engagement_signal", material: true, platform: "instagram" },
   "Average Likes or Average Engagement at Decision": { claimType: "social_engagement_signal", material: true, platform: "instagram" },
+  "Audience Reach or Views at Decision": { claimType: "audience_signal", material: true },
   "Creator Activity at Decision": { claimType: "creator_behavior_signal", material: true },
   "Posting Frequency at Decision": { claimType: "creator_behavior_signal", material: true },
   "OnlyFans Platform Activity at Decision": { claimType: "onlyfans_platform_activity_signal", material: true },
