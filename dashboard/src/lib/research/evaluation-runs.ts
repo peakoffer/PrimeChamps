@@ -9,6 +9,7 @@ import {
   getResearchEvaluationBudget,
   type ResearchEvaluationProfile,
 } from "@/lib/research/evaluation-budget";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 
 export function normalizeEvaluationSports(values: unknown[]) {
   return Array.from(new Set(values
@@ -116,8 +117,11 @@ export async function launchResearchEvaluations(input: {
   marketOverride?: string;
   evaluationProfile?: ResearchEvaluationProfile;
 }) {
-  const missingVariables = ["OPENAI_API_KEY", "APIFY_API_KEY", "ANTHROPIC_API_KEY"]
-    .filter((name) => !process.env[name]);
+  const missingVariables = [
+    !process.env.OPENAI_API_KEY ? "OPENAI_API_KEY" : null,
+    !inspectApifyCredentials(process.env.APIFY_API_KEY).usable ? "APIFY_API_KEY" : null,
+    !process.env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : null,
+  ].filter((name): name is string => Boolean(name));
   if (missingVariables.length > 0) {
     throw new Error(`Research evaluation is missing: ${missingVariables.join(", ")}`);
   }

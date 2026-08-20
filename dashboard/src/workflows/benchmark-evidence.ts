@@ -1,6 +1,7 @@
 import { FatalError, RetryableError, sleep } from "workflow";
 import { readApifyRunDatasetWithUsage, runApifyActorWithUsage } from "@/lib/apify";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 import {
   EVIDENCE_PREPARATION_LIMITS,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
@@ -436,7 +437,10 @@ function validatePreparationRecord(
 async function discoverHistoricalEvidence(input: EvidencePreparationWorkflowInput): Promise<DiscoveryBatch> {
   "use step";
 
-  if (!process.env.APIFY_API_KEY?.trim()) throw new FatalError("APIFY_API_KEY is not configured");
+  const apifyCredentialStatus = inspectApifyCredentials(process.env.APIFY_API_KEY);
+  if (!apifyCredentialStatus.usable) {
+    throw new FatalError(apifyCredentialStatus.validationError || "APIFY_API_KEY is not configured");
+  }
   if (!Number.isFinite(input.maxApifyChargeUsd)
     || input.maxApifyChargeUsd < EVIDENCE_PREPARATION_LIMITS.minimumMaxApifyChargeUsd
     || input.maxApifyChargeUsd > EVIDENCE_PREPARATION_LIMITS.maximumMaxApifyChargeUsd) {

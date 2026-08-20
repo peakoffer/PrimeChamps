@@ -116,6 +116,15 @@ type SocialBladeHistoryPlan = {
   officialPilotExhausted: boolean;
   officialValidationPassed: boolean;
   apifyConfigured: boolean;
+  apifyCredentialStatus: {
+    variablePresent: boolean;
+    hasValue: boolean;
+    hasExpectedPrefix: boolean;
+    plausibleLength: boolean;
+    maskedPlaceholderDetected: boolean;
+    usable: boolean;
+    validationError: string | null;
+  };
   apifyPilotRecords: Array<{
     id: string;
     athleteName: string;
@@ -150,6 +159,15 @@ const INITIAL_SOCIAL_BLADE_PLAN: SocialBladeHistoryPlan = {
   officialPilotExhausted: false,
   officialValidationPassed: false,
   apifyConfigured: false,
+  apifyCredentialStatus: {
+    variablePresent: false,
+    hasValue: false,
+    hasExpectedPrefix: false,
+    plausibleLength: false,
+    maskedPlaceholderDetected: false,
+    usable: false,
+    validationError: "APIFY_API_KEY is not configured",
+  },
   apifyPilotRecords: [],
   apifyPilotMaximumChargeUsd: 0.5,
   apifyPilotAttemptCount: 0,
@@ -1262,7 +1280,7 @@ export default function ResearchBenchmarkPage() {
               disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.apifyConfigured || socialBladePlan.apifyPilotRecords.length === 0}
               onClick={() => void runApifySocialBladePilot()}
               title={!socialBladePlan.apifyConfigured
-                ? "APIFY_API_KEY is required"
+                ? socialBladePlan.apifyCredentialStatus.validationError || "A valid APIFY_API_KEY is required"
                 : socialBladePlan.apifyPilotExhausted
                   ? "Two bounded no-match runs proved the public Actor does not return usable dated Instagram history"
                 : socialBladePlan.apifyPilotRecords.length === 0
@@ -1327,6 +1345,21 @@ export default function ResearchBenchmarkPage() {
             </button>
           </div>
         </div>
+
+        {!loading && (!socialBladePlan.credentialStatus.usable || !socialBladePlan.apifyCredentialStatus.usable) && (
+          <div role="status" className="mb-6 rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3">
+            <p className="text-sm font-medium text-red-100">Historical audience providers need attention</p>
+            <div className="mt-2 grid gap-1 text-xs leading-5 text-red-200/70">
+              {!socialBladePlan.credentialStatus.usable && (
+                <p><strong className="font-medium text-red-100">Social Blade:</strong> {socialBladePlan.credentialStatus.validationError}</p>
+              )}
+              {!socialBladePlan.apifyCredentialStatus.usable && (
+                <p><strong className="font-medium text-red-100">Apify:</strong> {socialBladePlan.apifyCredentialStatus.validationError}</p>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">Lookup controls stay disabled. No provider request or credit charge will start until the credentials pass validation.</p>
+          </div>
+        )}
 
         {evidenceSummary.readyFit < 8 && evidenceSummary.readyNotFit >= 8 && (
           <div className="mb-6 flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300 sm:flex-row sm:items-center sm:justify-between">

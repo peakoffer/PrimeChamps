@@ -102,6 +102,7 @@ import {
   type BenchmarkGoldenCase,
 } from "../src/lib/research/benchmark-runner-support.ts";
 import { selectOnlyFansPlatformSignal } from "../src/lib/research/onlyfans-platform-signal.ts";
+import { inspectApifyCredentials } from "../src/lib/provider-credential-validation.ts";
 import {
   prepareHistoricalEvidenceDetails,
   prepareHistoricalSocialSnapshot,
@@ -1328,6 +1329,24 @@ test("existing Apify Instagram history becomes evidence only for exact pre-cutof
     evidenceCutoffAt: "2026-05-03T12:00:00.000Z", capturedAt: "2026-04-20T10:00:00.000Z",
     profile: { username: "different.person", followersCount: 120_000 },
   }), null);
+});
+
+test("Apify credentials fail closed before HTTP when missing, masked, or malformed", () => {
+  assert.deepEqual(inspectApifyCredentials(undefined), {
+    variablePresent: false,
+    hasValue: false,
+    hasExpectedPrefix: false,
+    plausibleLength: false,
+    maskedPlaceholderDetected: false,
+    usable: false,
+    validationError: "APIFY_API_KEY is missing",
+  });
+  assert.equal(inspectApifyCredentials("•••••••••••").usable, false);
+  assert.equal(inspectApifyCredentials("short-placeholder").validationError,
+    "APIFY_API_KEY must be a personal API token beginning with apify_api_");
+  assert.equal(inspectApifyCredentials("apify_api_short").validationError,
+    "APIFY_API_KEY is too short to be a valid personal API token");
+  assert.equal(inspectApifyCredentials(`apify_api_${"a".repeat(32)}`).usable, true);
 });
 
 test("Social Blade recovery uses the cheapest sufficient tier and only exact, recent pre-cutoff rows", () => {

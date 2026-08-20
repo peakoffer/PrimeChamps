@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runApifyActorWithUsage } from "@/lib/apify";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 import {
   diagnoseSocialBladeInstagramResponse,
   fetchSocialBladeInstagramHistory,
@@ -207,6 +208,7 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
   const apifyPilot = apifyPilotExhausted
     ? []
     : candidates.filter((candidate) => candidate.ageDays <= 30 && !candidate.apifyPublicAttempted).slice(0, 1);
+  const apifyCredentialStatus = inspectApifyCredentials(process.env.APIFY_API_KEY);
   return {
     configured: Boolean(socialBladeCredentials()),
     credentialStatus: socialBladeCredentialStatus(),
@@ -227,7 +229,8 @@ function publicPlan(candidates: Candidate[], apifyPublicAttemptCount: number, of
     officialPilotAttemptLimit: officialAttemptLimit,
     officialPilotExhausted,
     officialValidationPassed,
-    apifyConfigured: Boolean(process.env.APIFY_API_KEY),
+    apifyConfigured: apifyCredentialStatus.usable,
+    apifyCredentialStatus,
     apifyPilotRecords: apifyPilot.map((candidate) => ({
       id: candidate.id,
       athleteName: candidate.athleteName,
@@ -420,8 +423,12 @@ export async function POST(request: NextRequest) {
       confirmedMaximumCredits?: number;
     };
     if (body.provider === "apify_public_31_day") {
-      if (!process.env.APIFY_API_KEY?.trim()) {
-        return NextResponse.json({ error: "APIFY_API_KEY is not configured; no Actor run was started" }, { status: 503 });
+      const apifyCredentialStatus = inspectApifyCredentials(process.env.APIFY_API_KEY);
+      if (!apifyCredentialStatus.usable) {
+        return NextResponse.json({
+          error: `${apifyCredentialStatus.validationError || "APIFY_API_KEY is not configured"}; no Actor run was started`,
+          apifyCredentialStatus,
+        }, { status: 503 });
       }
       if (Number(body.confirmedMaximumChargeUsd) !== APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD) {
         return NextResponse.json({

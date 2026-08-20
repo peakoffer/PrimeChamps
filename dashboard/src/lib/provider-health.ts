@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { User } from "@/lib/auth";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+import { inspectSocialBladeCredentials } from "@/lib/research/social-blade-history";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   ProviderCategory,
@@ -74,6 +76,16 @@ const providerDefinitions: ProviderDefinition[] = [
     required: ["APIFY_API_KEY"],
     note: "Google and TikTok-handle discovery use maintained Apify actors. OnlyFans checks use the lower-cost username actor first, then a confidence-gated social reverse lookup, strict Discovery matching, and an Apify Google fallback. Result counts and charges are capped; SerpApi is not used.",
     nextAction: "Add a valid Apify API token beginning with apify_api_, then run one low-volume Google research check.",
+  },
+  {
+    id: "historical-audience",
+    name: "Historical audience",
+    category: "research",
+    description: "Retrieves exact-handle, dated Instagram audience snapshots for point-in-time benchmark evidence.",
+    capabilities: ["Historical followers", "Historical engagement", "Point-in-time audience gates"],
+    required: ["SOCIAL_BLADE_CLIENT_ID", "SOCIAL_BLADE_TOKEN"],
+    note: "The client ID and token are separate Social Blade Business API credentials. Presence alone is not enough; copied masks and identical values fail closed before a paid request.",
+    nextAction: "Add the real, distinct Social Blade client ID and token in Vercel Production, redeploy, then validate one checkpointed profile with an explicit credit ceiling.",
   },
   {
     id: "agent-server",
@@ -192,10 +204,24 @@ function hasEnvironmentVariable(name: string) {
   const value = process.env[name]?.trim();
   if (!value) return false;
 
+  if (name === "APIFY_API_KEY") return inspectApifyCredentials(process.env.APIFY_API_KEY).usable;
+
   const expectedPrefix = credentialPrefixes[name];
   return expectedPrefix
     ? value.startsWith(expectedPrefix) && value.length >= expectedPrefix.length + 16
     : true;
+}
+
+function credentialIssuesForProvider(definition: ProviderDefinition) {
+  if (definition.id !== "historical-audience") return [];
+  const status = inspectSocialBladeCredentials({
+    clientId: process.env.SOCIAL_BLADE_CLIENT_ID,
+    token: process.env.SOCIAL_BLADE_TOKEN,
+  });
+  if (status.usable) return [];
+  if (!status.clientIdHasValue) return ["SOCIAL_BLADE_CLIENT_ID"];
+  if (!status.tokenHasValue) return ["SOCIAL_BLADE_TOKEN"];
+  return ["valid, distinct SOCIAL_BLADE_CLIENT_ID and SOCIAL_BLADE_TOKEN values"];
 }
 
 function calculateStatus(
@@ -388,7 +414,11 @@ export async function getProviderHealth(user: User): Promise<Omit<ProviderHealth
       definition.anyOf?.length && !definition.anyOf.some(hasEnvironmentVariable)
         ? [`one of: ${definition.anyOf.join(", ")}`]
         : [];
-    const allMissingVariables = [...missingVariables, ...missingAnyOf];
+    const allMissingVariables = Array.from(new Set([
+      ...missingVariables,
+      ...missingAnyOf,
+      ...credentialIssuesForProvider(definition),
+    ]));
     const connectedAccounts = definition.accountProvider
       ? counts.get(definition.accountProvider) || 0
       : 0;

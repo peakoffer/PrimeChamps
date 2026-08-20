@@ -26,6 +26,7 @@ import {
   type BenchmarkGoldenCase,
 } from "@/lib/research/benchmark-runner-support";
 import { loadBenchmarkEvidenceRows } from "@/lib/research/benchmark-evidence-storage";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 
 export const maxDuration = 60;
 
@@ -530,8 +531,12 @@ export async function POST(request: NextRequest) {
         headers: { "retry-after": String(retryAfterSeconds) },
       });
     }
-    if (!process.env.APIFY_API_KEY?.trim()) {
-      return NextResponse.json({ error: "APIFY_API_KEY is not configured; no provider call was started." }, { status: 503 });
+    const apifyCredentialStatus = inspectApifyCredentials(process.env.APIFY_API_KEY);
+    if (!apifyCredentialStatus.usable) {
+      return NextResponse.json({
+        error: `${apifyCredentialStatus.validationError || "APIFY_API_KEY is not configured"}; no provider call was started.`,
+        apifyCredentialStatus,
+      }, { status: 503 });
     }
     const reusableRun = (recentRuns || []).find((run) => {
       const checkpoint = run.checkpoint as Record<string, unknown> | null | undefined;

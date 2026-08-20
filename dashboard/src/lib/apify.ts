@@ -1,5 +1,7 @@
 import "server-only";
 
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_RUN_TIMEOUT_MS = 90_000;
@@ -182,10 +184,9 @@ function cleanText(value: unknown) {
 }
 
 function getApiKey() {
-  const apiKey = process.env.APIFY_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("APIFY_API_KEY is not configured");
-  }
+  const status = inspectApifyCredentials(process.env.APIFY_API_KEY);
+  if (!status.usable) throw new Error(status.validationError || "APIFY_API_KEY is not configured");
+  const apiKey = process.env.APIFY_API_KEY!.trim();
   return apiKey;
 }
 

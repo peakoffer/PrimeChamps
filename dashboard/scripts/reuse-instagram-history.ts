@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { prepareHistoricalInstagramSnapshot } from "../src/lib/research/historical-instagram-history.ts";
+import { inspectApifyCredentials } from "../src/lib/provider-credential-validation.ts";
 
 type ApifyActorRunHistory = {
   id: string;
@@ -66,7 +67,10 @@ const serviceKey = process.env.SUPABASE_SECRET_KEY
   || process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!supabaseUrl || !serviceKey) throw new Error("Supabase server credentials are not configured");
 const apifyToken = (process.env.APIFY_API_KEY || process.env.APIFY_TOKEN || "").trim();
-if (!apifyToken) throw new Error("Apify credentials are not configured");
+const apifyCredentialStatus = inspectApifyCredentials(apifyToken || undefined);
+if (!apifyCredentialStatus.usable) {
+  throw new Error(apifyCredentialStatus.validationError || "Apify credentials are not configured");
+}
 const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
 
 async function apifyGet<T>(path: string) {

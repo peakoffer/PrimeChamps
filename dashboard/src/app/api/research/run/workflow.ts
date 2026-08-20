@@ -97,8 +97,10 @@ import {
   estimateBenchmarkCostMicrousd,
   sonnetPriceSnapshot,
 } from "@/lib/research/benchmark-runner-support";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 
-const APIFY_API_KEY = process.env.APIFY_API_KEY;
+const APIFY_CREDENTIAL_STATUS = inspectApifyCredentials(process.env.APIFY_API_KEY);
+const APIFY_API_KEY = APIFY_CREDENTIAL_STATUS.usable ? process.env.APIFY_API_KEY!.trim() : undefined;
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;

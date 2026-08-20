@@ -16,15 +16,17 @@ import {
   runResearchWorkflow,
   type ResearchConfig,
 } from "./workflow";
+import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 
 export const maxDuration = 300;
 
 const supabase = createAdminClient();
 
 function getMissingResearchVariables() {
+  const apifyCredentialStatus = inspectApifyCredentials(process.env.APIFY_API_KEY);
   return [
     !process.env.OPENAI_API_KEY ? "OPENAI_API_KEY" : null,
-    !process.env.APIFY_API_KEY ? "APIFY_API_KEY" : null,
+    !apifyCredentialStatus.usable ? "APIFY_API_KEY" : null,
     !process.env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : null,
   ].filter((value): value is string => Boolean(value));
 }
