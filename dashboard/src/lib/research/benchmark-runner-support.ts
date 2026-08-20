@@ -2,6 +2,7 @@ import {
   preparedEvidenceSignalExcerptForAthlete,
   preparedMomentumEffectiveAt,
 } from "./historical-evidence-preparation.ts";
+import { benchmarkSourceSupportsSport } from "./benchmark-sport-validation.ts";
 
 export const BENCHMARK_OUTCOME_PROVIDERS = new Set([
   "gmail_mailbox_benchmark",
@@ -351,9 +352,7 @@ function evidenceNamesAthlete(name: string, evidence: LeakageSafeBenchmarkEviden
 }
 
 function evidenceSupportsSport(sport: string, evidence: LeakageSafeBenchmarkEvidence) {
-  const sportTokens = normalizedTokens(sport).filter((token) => token.length > 2);
-  const content = new Set(normalizedTokens(`${evidence.claim} ${evidence.excerpt}`));
-  return sportTokens.length > 0 && sportTokens.every((token) => content.has(token));
+  return benchmarkSourceSupportsSport(sport, `${evidence.title} ${evidence.claim} ${evidence.excerpt}`);
 }
 
 export function benchmarkIdentityGate(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {

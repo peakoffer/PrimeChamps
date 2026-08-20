@@ -161,13 +161,18 @@ function benchmarkCanonicalSourceSupportsSport(sport: BenchmarkSport, sourceText
 export function benchmarkSourceSupportsSport(sport: string, sourceText: string) {
   const normalized = normalizeBenchmarkIdentity(sourceText);
   const normalizedSport = normalizeBenchmarkIdentity(sport);
+  const baseSport = normalizeBenchmarkIdentity(sport.replace(/\([^)]*\)/g, " "));
   const historicalTerms = Object.entries(HISTORICAL_SPORT_TERMS)
-    .find(([label]) => normalizeBenchmarkIdentity(label) === normalizedSport)?.[1];
-  const canonicalTerms = Object.entries(SPORT_TERMS)
-    .find(([label]) => normalizeBenchmarkIdentity(label) === normalizedSport)?.[1];
+    .find(([label]) => [normalizedSport, baseSport].includes(normalizeBenchmarkIdentity(label)))?.[1];
+  const canonicalEntries = Object.entries(SPORT_TERMS);
+  const canonicalTerms = canonicalEntries
+    .find(([label]) => [normalizedSport, baseSport].includes(normalizeBenchmarkIdentity(label)))?.[1]
+    || canonicalEntries.find(([, aliases]) => aliases.some((alias) =>
+      normalizeBenchmarkIdentity(alias) === baseSport
+    ))?.[1];
   const terms = historicalTerms
     || canonicalTerms
-    || [sport];
+    || [baseSport || sport];
   return terms.some((term) => normalized.includes(normalizeBenchmarkIdentity(term)));
 }
 

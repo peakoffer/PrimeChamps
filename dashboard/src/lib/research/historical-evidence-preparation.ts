@@ -20,7 +20,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-15-italian-appositive-age-v25";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-descriptive-sport-aliases-v26";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-per-candidate-archive-v21";
 export const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 

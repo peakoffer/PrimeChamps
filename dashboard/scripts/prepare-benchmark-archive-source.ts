@@ -20,7 +20,6 @@ import {
   type HistoricalSearchCandidate,
   type PreparedArchivedEvidence,
 } from "../src/lib/research/historical-evidence-preparation.ts";
-import { ONLYFANS_HISTORICAL_DATASET } from "../src/lib/research/historical-benchmark.ts";
 
 config({ path: ".env.local", quiet: true });
 
@@ -54,10 +53,10 @@ const admin = createClient(supabaseUrl, serviceKey, {
 const { data: matches, error: recordError } = await admin.from("research_golden_records")
   .select("id,organization_id,athlete_name,sport,fit_label,evidence_cutoff_at,stratification_tags")
   .ilike("athlete_name", athleteName)
-  .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
+  .contains("stratification_tags", ["dylan_outcome_ground_truth"])
   .limit(3);
 if (recordError) throw recordError;
-if (matches?.length !== 1) throw new Error(`Expected one Dylan benchmark record for ${athleteName}; found ${matches?.length || 0}`);
+if (matches?.length !== 1) throw new Error(`Expected one Dylan outcome-ground-truth record for ${athleteName}; found ${matches?.length || 0}`);
 const record = matches[0];
 if (record.fit_label !== "fit" && record.fit_label !== "not_fit") throw new Error("Benchmark record has no binary fit label");
 

@@ -193,6 +193,48 @@ test("historical motorcycle racing accepts road-racing and WorldWCR evidence", (
   ), true);
 });
 
+test("descriptive intake sport labels resolve to canonical athlete evidence", () => {
+  const examples = [
+    ["Mixed martial arts (UFC)", "Dennis Buzukja is a UFC mixed martial arts fighter."],
+    ["Mountain biking (freeride/downhill)", "Lewis Buchanan is a professional downhill mountain bike rider."],
+    ["Boxing (cruiserweight)", "Sheena Bathory is a cruiserweight boxer."],
+  ] as const;
+  for (const [sport, source] of examples) {
+    assert.equal(benchmarkSourceSupportsSport(sport, source), true, sport);
+  }
+  assert.equal(
+    benchmarkSourceSupportsSport("Mountain biking (freeride/downhill)", "Lewis Buchanan plays professional tennis."),
+    false,
+  );
+});
+
+test("benchmark identity gate uses canonical sport aliases for descriptive intake labels", () => {
+  const record = {
+    ...BENCHMARK_CASE,
+    athlete_name: "Dennis Buzukja",
+    sport: "Mixed martial arts (UFC)",
+  };
+  const identityEvidence = ["ufc.com", "espn.com"].map((domain, index) => ({
+    sourceId: `identity-${index}`,
+    claimId: `identity-claim-${index}`,
+    sourceRef: `E${index + 1}`,
+    url: `https://${domain}/dennis-buzukja`,
+    domain,
+    title: "Dennis Buzukja athlete profile",
+    claimType: "sport_identity",
+    claim: "Dennis Buzukja is a UFC fighter.",
+    excerpt: "Dennis Buzukja competes professionally in the UFC.",
+    effectiveAt: "2026-01-01T00:00:00.000Z",
+    independenceGroup: domain,
+    material: true,
+    structuredValue: {},
+  }));
+  assert.deepEqual(benchmarkIdentityGate(record, identityEvidence), {
+    passed: true,
+    independentSources: 2,
+  });
+});
+
 test("benchmark identity matching folds non-decomposing Latin letters", () => {
   assert.equal(
     benchmarkSourceNamesAthlete(
