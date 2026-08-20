@@ -8,7 +8,6 @@ import {
 import { requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { prepareHistoricalInstagramSnapshot } from "@/lib/research/historical-instagram-history";
-import { ONLYFANS_HISTORICAL_DATASET } from "@/lib/research/historical-benchmark";
 
 export const maxDuration = 300;
 
@@ -39,7 +38,7 @@ export async function POST() {
       .eq("organization_id", user.organizationId)
       .eq("benchmark_split", "excluded")
       .eq("fit_label", "fit")
-      .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
+      .contains("stratification_tags", ["dylan_outcome_ground_truth"])
       .not("evidence_cutoff_at", "is", null);
     if (recordError) throw recordError;
     const recordIds = (records || []).map((record) => record.id);

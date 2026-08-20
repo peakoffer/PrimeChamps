@@ -133,6 +133,7 @@ const MODEL_EVIDENCE_CAPS: Record<string, number> = {
   creator_behavior_signal: 2,
   onlyfans_platform_activity_signal: 2,
   commercial_achievability_signal: 2,
+  athlete_profile: 2,
   candidate_evidence: 2,
 };
 
@@ -351,6 +352,42 @@ function evidenceNamesAthlete(name: string, evidence: LeakageSafeBenchmarkEviden
   return nameTokens.length >= 2 && nameTokens.every((token) => content.has(token));
 }
 
+function normalizedNameKey(value: string) {
+  return normalizedTokens(value).filter((token) => token.length > 1).join(" ");
+}
+
+function verifiedAliasNames(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
+  const canonicalKey = normalizedNameKey(record.athlete_name);
+  const groupsByAlias = new Map<string, Set<string>>();
+  for (const item of evidence) {
+    const value = item.structuredValue;
+    if (item.claimType !== "athlete_profile" || value.profile_type !== "verified_alias") continue;
+    const canonicalName = typeof value.canonical_name === "string" ? value.canonical_name : "";
+    const alias = typeof value.alias === "string" ? value.alias : "";
+    const aliasKey = normalizedNameKey(alias);
+    if (!aliasKey || normalizedNameKey(canonicalName) !== canonicalKey || aliasKey === canonicalKey) continue;
+    const excerpt = normalizedNameKey(item.excerpt);
+    const relation = /\b(?:also known as|better known as|known (?:to fans )?as|ring name|stage name|real name|legal name|birth name|alias|nickname|artist name|zapasnicke jmeno|muveszneven|vlastnim jmenem)\b/i;
+    if (!excerpt.includes(canonicalKey) || !excerpt.includes(aliasKey) || !relation.test(item.excerpt)) continue;
+    const groups = groupsByAlias.get(aliasKey) || new Set<string>();
+    groups.add(item.independenceGroup);
+    groupsByAlias.set(aliasKey, groups);
+  }
+  return new Set([...groupsByAlias.entries()]
+    .filter(([, groups]) => groups.size >= 2)
+    .map(([alias]) => alias));
+}
+
+function evidenceNamesAthleteOrVerifiedAlias(
+  record: BenchmarkGoldenCase,
+  evidenceItem: LeakageSafeBenchmarkEvidence,
+  aliases: Set<string>,
+) {
+  if (evidenceNamesAthlete(record.athlete_name, evidenceItem)) return true;
+  const content = normalizedNameKey(`${evidenceItem.title} ${evidenceItem.claim} ${evidenceItem.excerpt}`);
+  return [...aliases].some((alias) => content.includes(alias));
+}
+
 function evidenceSupportsSport(sport: string, evidence: LeakageSafeBenchmarkEvidence) {
   return benchmarkSourceSupportsSport(sport, `${evidence.title} ${evidence.claim} ${evidence.excerpt}`);
 }
@@ -455,9 +492,10 @@ function adultAgeFactsAgree(left: AdultAgeFact, right: AdultAgeFact) {
 
 export function benchmarkAdultEligibilityGate(record: BenchmarkGoldenCase, evidence: LeakageSafeBenchmarkEvidence[]) {
   if (!record.evidence_cutoff_at) return { passed: false, independentSources: 0 };
+  const aliases = verifiedAliasNames(record, evidence);
   const eligible = evidence.filter((item) =>
     /(age|birth|date_of_birth|dob|eligibility)/.test(item.claimType)
-    && evidenceNamesAthlete(record.athlete_name, item)
+    && evidenceNamesAthleteOrVerifiedAlias(record, item, aliases)
     && supportedAdultAge(item, record.evidence_cutoff_at!)
   );
   const groups = new Set(eligible.map((item) => item.independenceGroup));
@@ -503,9 +541,10 @@ export function benchmarkCorroboratedAgeAtCutoff(
   evidence: LeakageSafeBenchmarkEvidence[]
 ) {
   if (!record.evidence_cutoff_at) return null;
+  const aliases = verifiedAliasNames(record, evidence);
   const ageFacts = evidence
     .filter((item) => /(age|birth|date_of_birth|dob|eligibility)/.test(item.claimType)
-      && evidenceNamesAthlete(record.athlete_name, item)
+      && evidenceNamesAthleteOrVerifiedAlias(record, item, aliases)
       && supportedAdultAge(item, record.evidence_cutoff_at!))
     .map((item) => ({
       fact: adultAgeFact(item),

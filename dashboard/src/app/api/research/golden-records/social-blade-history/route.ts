@@ -14,7 +14,6 @@ import {
   type SocialBladeInstagramResponse,
   type SocialBladeInstagramResponseDiagnostics,
 } from "@/lib/research/social-blade-history";
-import { ONLYFANS_HISTORICAL_DATASET } from "@/lib/research/historical-benchmark";
 import {
   benchmarkEvidenceFreezeReadiness,
   selectLeakageSafeBenchmarkEvidence,
@@ -79,7 +78,7 @@ async function buildCandidatePlan(organizationId: string) {
     .eq("organization_id", organizationId)
     .eq("benchmark_split", "excluded")
     .eq("fit_label", "fit")
-    .contains("stratification_tags", [ONLYFANS_HISTORICAL_DATASET])
+    .contains("stratification_tags", ["dylan_outcome_ground_truth"])
     .not("evidence_cutoff_at", "is", null);
   if (recordError) throw recordError;
   const recordIds = (records || []).map((record) => record.id);

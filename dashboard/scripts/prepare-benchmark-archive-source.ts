@@ -6,9 +6,14 @@ import {
   commonCrawlIndexUrl,
   extractCommonCrawlWarcBody,
   extractOfficialCommissionAdultEvidence,
+  extractOfficialUniversityMediaGuideEvidence,
+  extractPreparedArchivedAliasAdultEvidence,
   extractPreparedArchivedEvidence,
+  extractPreparedDatedPodcastAliasAdultEvidence,
   extractPreparedDatedArticleEvidence,
   extractPreparedArchivedPdfEvidence,
+  extractPreparedVerifiedAliasClaim,
+  archivedHtmlToText,
   selectCommonCrawlCapture,
   selectCommonCrawlCollections,
   selectWikimediaRevisionCapture,
@@ -30,6 +35,7 @@ function argument(name: string) {
 
 const athleteName = argument("athlete");
 const canonicalUrl = argument("url");
+const alias = argument("alias");
 const requiredClaim = argument("required-claim") || "adult_eligibility";
 if (!new Set([
   "sport_identity", "adult_eligibility", "athlete_profile", "athletic_momentum", "audience_signal",
@@ -59,6 +65,27 @@ if (recordError) throw recordError;
 if (matches?.length !== 1) throw new Error(`Expected one Dylan outcome-ground-truth record for ${athleteName}; found ${matches?.length || 0}`);
 const record = matches[0];
 if (record.fit_label !== "fit" && record.fit_label !== "not_fit") throw new Error("Benchmark record has no binary fit label");
+
+if (alias && requiredClaim === "adult_eligibility") {
+  const { data: aliasClaims, error: aliasError } = await admin.from("research_evidence_claims")
+    .select("structured_value,source_excerpt,effective_at,independence_group")
+    .eq("organization_id", record.organization_id)
+    .eq("golden_record_id", record.id)
+    .eq("claim_type", "athlete_profile")
+    .eq("eligible_for_scoring", true)
+    .eq("support_status", "supported")
+    .lte("effective_at", record.evidence_cutoff_at);
+  if (aliasError) throw aliasError;
+  const aliasKey = alias.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const canonicalKey = record.athlete_name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const groups = new Set((aliasClaims || []).filter((claim) => {
+    const value = claim.structured_value as Record<string, unknown> | null;
+    const storedAlias = String(value?.alias || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+    const storedCanonical = String(value?.canonical_name || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+    return value?.profile_type === "verified_alias" && storedAlias === aliasKey && storedCanonical === canonicalKey;
+  }).map((claim) => claim.independence_group).filter(Boolean));
+  if (groups.size < 2) throw new Error("Alias-based age recovery requires two independent cutoff-safe alias bridges first");
+}
 
 const candidate: HistoricalSearchCandidate = {
   query: `operator supplied authoritative archive source for ${record.athlete_name}`,
@@ -92,6 +119,27 @@ async function retrieveDirectDatedArticleEvidence() {
       contentHash,
       providerRequestId: `sha256:${contentHash}`,
     },
+    html,
+  };
+}
+
+async function retrieveDirectDatedPodcastAliasEvidence() {
+  if (requiredClaim !== "adult_eligibility") return null;
+  const ageSubject = alias || record.athlete_name;
+  const response = await fetch(canonicalUrl, {
+    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!response?.ok || !/html|xhtml/i.test(response.headers.get("content-type") || "")) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 2_000_000) return null;
+  const html = new TextDecoder().decode(bytes).slice(0, 1_000_000);
+  const prepared = extractPreparedDatedPodcastAliasAdultEvidence({ record, candidate, alias: ageSubject, html });
+  if (!hasRequiredClaim(prepared.evidence)) return null;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  return {
+    item: { ...prepared.evidence!, contentHash, providerRequestId: `sha256:${contentHash}` },
     html,
   };
 }
@@ -173,6 +221,84 @@ async function retrieveDirectOfficialCommissionPdfEvidence() {
   };
 }
 
+async function retrieveDirectOfficialUniversityMediaGuideEvidence() {
+  if (!canonicalUrl.toLowerCase().endsWith(".pdf")) return null;
+  const response = await fetch(canonicalUrl, {
+    headers: { Accept: "application/pdf", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(45_000),
+  }).catch(() => null);
+  if (!response?.ok || !/pdf/i.test(response.headers.get("content-type") || "")) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  // Official university media guides are image-heavy even when the verified
+  // text is small. Keep a separate bounded ceiling for this operator-only
+  // path; generic archived PDFs retain the much smaller shared limit.
+  if (!bytes.length || bytes.length > 40_000_000) return null;
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(bytes, { maxImageSize: 16_777_216 });
+  if (!pdf.numPages || pdf.numPages > 120) return null;
+  const extracted = await extractText(pdf, { mergePages: true });
+  const sourceText = String(extracted.text || "").slice(0, 600_000);
+  const evidence = extractOfficialUniversityMediaGuideEvidence({
+    athleteName: record.athlete_name,
+    sport: record.sport,
+    sourceUrl: canonicalUrl,
+    sourceText,
+    evidenceCutoffAt: record.evidence_cutoff_at,
+  });
+  if (!evidence || requiredClaim !== "adult_eligibility") return null;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  const captureTimestamp = evidence.publishedAt.replace(/[-:T.Z]/g, "").slice(0, 14);
+  return {
+    item: {
+      canonicalUrl,
+      archivedUrl: canonicalUrl,
+      domain: evidence.domain,
+      title: candidate.title,
+      publishedAt: evidence.publishedAt,
+      historicalAsOf: evidence.publishedAt,
+      contentHash,
+      captureTimestamp,
+      publicationDateMethod: "official_university_upload_path_and_athlete_bio",
+      searchQuery: candidate.query,
+      searchSnippet: candidate.snippet,
+      archiveProvider: "official_dated_profile" as const,
+      providerRequestId: `sha256:${contentHash}`,
+      claims: [{
+        claimType: "sport_identity" as const,
+        claimText: `${record.athlete_name} is identified as a ${record.sport} athlete by this official university media guide.`,
+        structuredValue: { athlete_name: record.athlete_name, sport: record.sport },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      }, {
+        claimType: "candidate_evidence" as const,
+        claimText: evidence.excerpt,
+        structuredValue: { evidence_kind: "official_university_media_guide" },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      }, {
+        claimType: "adult_eligibility" as const,
+        claimText: `${record.athlete_name} has an official university birth date of ${evidence.birthDate}.`,
+        structuredValue: {
+          birth_date: evidence.birthDate,
+          birth_year: Number(evidence.birthDate.slice(0, 4)),
+          precision: "birth_date",
+          verification_method: "official_university_media_guide",
+        },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 100,
+        material: true,
+      }],
+    },
+    content: bytes,
+  };
+}
+
 async function retrieveCommonCrawlEvidence() {
   const collectionsResponse = await fetch("https://index.commoncrawl.org/collinfo.json", {
     headers: { Accept: "application/json", "User-Agent": "PrimeChampsResearch/1.0 evidence-audit" },
@@ -216,7 +342,7 @@ async function retrieveCommonCrawlEvidence() {
     }
     const html = extractCommonCrawlWarcBody(decompressed)?.slice(0, 360_000);
     if (!html) continue;
-    const prepared = extractPreparedArchivedEvidence({
+    let prepared = extractPreparedArchivedEvidence({
       record, candidate,
       capture: {
         timestamp: capture.timestamp,
@@ -229,6 +355,21 @@ async function retrieveCommonCrawlEvidence() {
       },
       html,
     });
+    if (!hasRequiredClaim(prepared.evidence) && alias && requiredClaim === "adult_eligibility") {
+      prepared = extractPreparedArchivedAliasAdultEvidence({
+        record, candidate, alias,
+        capture: {
+          timestamp: capture.timestamp,
+          capturedAt: capture.capturedAt,
+          originalUrl: capture.originalUrl,
+          statusCode: capture.statusCode,
+          digest: capture.digest,
+          mimeType: capture.mimeType,
+          archivedUrl: `${capture.warcUrl}#offset=${capture.offset}&length=${capture.length}`,
+        },
+        html,
+      });
+    }
     if (hasRequiredClaim(prepared.evidence)) {
       return {
         item: {
@@ -281,6 +422,9 @@ async function retrieveWikimediaRevisionEvidence() {
 }
 
 let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveDirectOfficialCommissionPdfEvidence();
+if (!recovered) recovered = await retrieveDirectOfficialUniversityMediaGuideEvidence();
+if (!recovered) recovered = await retrieveDirectDatedPodcastAliasEvidence()
+  .then((value) => value ? { item: value.item, content: value.html } : null);
 if (!recovered) recovered = await retrieveDirectDatedArticleEvidence()
   .then((value) => value ? { item: value.item, content: value.html } : null);
 if (!recovered) recovered = await retrieveWikimediaRevisionEvidence()
@@ -307,7 +451,10 @@ if (!recovered) {
         if (hasRequiredClaim(prepared.evidence)) recovered = { item: prepared.evidence!, content: bytes };
       } else {
         const html = (await archiveResponse.text()).slice(0, 360_000);
-        const prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
+        let prepared = extractPreparedArchivedEvidence({ record, candidate, capture, html });
+        if (!hasRequiredClaim(prepared.evidence) && alias && requiredClaim === "adult_eligibility") {
+          prepared = extractPreparedArchivedAliasAdultEvidence({ record, candidate, capture, alias, html });
+        }
         if (hasRequiredClaim(prepared.evidence)) recovered = { item: prepared.evidence!, content: html };
       }
     }
@@ -320,6 +467,21 @@ if (!recovered) {
 if (!recovered) throw new Error(`No cutoff-safe dated article, Wikimedia, Wayback, or Common Crawl source contained the required ${requiredClaim} evidence`);
 
 const { item, content } = recovered;
+if (alias && typeof content === "string" && requiredClaim !== "adult_eligibility") {
+  const aliasClaim = extractPreparedVerifiedAliasClaim({
+    canonicalName: record.athlete_name,
+    alias,
+    sourceText: archivedHtmlToText(content),
+    effectiveAt: item.publishedAt || item.historicalAsOf,
+  });
+  if (!aliasClaim) throw new Error("The recovered source does not contain a bounded explicit alias relationship");
+  // The evidence schema stores at most one claim of each type per source.
+  // Prefer the identity-critical alias bridge over a social handle discovered
+  // from the same page; exact handles remain recoverable from other sources.
+  item.claims.splice(0, item.claims.length,
+    ...item.claims.filter((claim) => claim.claimType !== "athlete_profile"));
+  item.claims.push(aliasClaim);
+}
 const verifiedAt = new Date().toISOString();
 const { data: source, error: sourceError } = await admin.from("research_evidence_sources").upsert({
   organization_id: record.organization_id,
@@ -329,7 +491,8 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   domain: item.domain,
   title: item.title,
   publisher: item.domain,
-  source_type: item.archiveProvider === "direct_dated_article" ? "news" : "archive",
+  source_type: item.archiveProvider === "direct_dated_article" ? "news"
+    : item.archiveProvider === "direct_dated_podcast" ? "interview" : "archive",
   provider: item.archiveProvider || "internet_archive_wayback",
   provider_request_id: item.providerRequestId || item.captureTimestamp,
   published_at: item.publishedAt,
@@ -343,6 +506,8 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   metadata: {
     preparation_method: item.archiveProvider === "direct_dated_article"
       ? "operator_supplied_cutoff_safe_dated_article"
+      : item.archiveProvider === "direct_dated_podcast"
+        ? "operator_supplied_cutoff_safe_dated_podcast_transcript"
       : "operator_supplied_authoritative_archive_source",
     capture_timestamp: item.captureTimestamp,
     verification: `shared_exact_name_sport_${requiredClaim}_and_cutoff_extractor`,

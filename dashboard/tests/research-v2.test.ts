@@ -128,13 +128,17 @@ import {
   dedupeHistoricalSearchCandidates,
   extractCommonCrawlWarcBody,
   extractOfficialCompetitionEntryAdultEvidence,
+  extractOfficialUniversityMediaGuideEvidence,
   extractOfficialCommissionAdultEvidence,
   extractOfficialDatedProfileEvidence,
   extractPublishedAt,
   extractWikimediaExternalProfileCandidates,
   extractAttributedInstagramHandle,
+  extractPreparedArchivedAliasAdultEvidence,
   extractPreparedArchivedEvidence,
   extractPreparedDatedArticleEvidence,
+  extractPreparedDatedPodcastAliasAdultEvidence,
+  extractPreparedVerifiedAliasClaim,
   groundedHistoricalSignalDiscoveryCandidates,
   HISTORICAL_ARCHIVE_PROVIDER_VERSION,
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
@@ -552,6 +556,62 @@ test("official WorldWCR entry lists resolve a DOB only from an exact dated rider
     publishedAt: "2024-09-20",
     evidenceCutoffAt: "2026-02-11T12:00:00Z",
   }), null);
+});
+
+test("official university media guides resolve a DOB only inside the exact athlete bio", () => {
+  const source = [
+    "2020 BEACH VOLLEYBALL | FLORIDA STATE UNIVERSITY",
+    "41 • avery poppinga",
+    "Redshirt Sophomore • Austin, Texas",
+    "SOPHOMORE (2019): finished with a 15-7 record.",
+    "PERSONAL: Born on April 22, 1999 … daughter of Brian and Karrie Poppinga.",
+  ].join("\n");
+  const accepted = extractOfficialUniversityMediaGuideEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl: "https://seminoles.com/documents/download/2023/6/21/2020-Beach-Volleybal-Media-Guide-2.pdf",
+    sourceText: source,
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  });
+  assert.equal(accepted?.birthDate, "1999-04-22");
+  assert.equal(accepted?.publishedAt, "2023-06-21T00:00:00.000Z");
+  assert.equal(extractOfficialUniversityMediaGuideEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl: "https://seminoles.com/documents/download/2023/6/21/2020-Beach-Volleybal-Media-Guide-2.pdf",
+    sourceText: source.replace("41 • avery poppinga", "41 Avery Poppinga"),
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  }), null);
+  assert.equal(extractOfficialUniversityMediaGuideEvidence({
+    athleteName: "Avery Poppinga",
+    sport: "Beach volleyball",
+    sourceUrl: "https://seminoles.com/documents/download/2023/6/21/2020-Beach-Volleybal-Media-Guide-2.pdf",
+    sourceText: source.replace("PERSONAL: Born on April 22, 1999", "PERSONAL: teammate born on April 22, 1999"),
+    evidenceCutoffAt: "2026-04-27T12:00:00Z",
+  }), null);
+});
+
+test("archived competition tables require an exact named birth-and-age row", () => {
+  const source = [
+    "2010 UCI Mountain Bike World Championships – Men's downhill",
+    "! rank !! race nr !! name !! nat !! birth !! age !! speed",
+    "| 3 || 3 || [[Lewis Buchanan]] || GBR || 27.09.1993 || 17 || 60.294",
+  ].join("\n");
+  const accepted = validatePreparedAgeEvidenceForSource({
+    athleteName: "Lewis Buchanan",
+    title: "2010 UCI Mountain Bike World Championships – Men's downhill",
+    domain: "wikipedia.org",
+    observedAt: new Date("2025-09-12T04:49:35.000Z"),
+    text: source,
+  });
+  assert.equal(accepted.officialCompactBirthDate?.birthDate, "1993-09-27");
+  assert.equal(validatePreparedAgeEvidenceForSource({
+    athleteName: "Lewis Buchanan",
+    title: "2010 UCI Mountain Bike World Championships – Men's downhill",
+    domain: "wikipedia.org",
+    observedAt: new Date("2025-09-12T04:49:35.000Z"),
+    text: source.replace("!! birth !! age", "!! finish !! gap"),
+  }).officialCompactBirthDate, null);
 });
 
 test("official ISU structured profiles are cutoff-safe only when their own update predates the decision", () => {
@@ -3182,6 +3242,16 @@ test("archived CMS date-created fields preserve the article date instead of the 
   });
 });
 
+test("archived editorial weekday dates preserve the stated article observation date", () => {
+  assert.deepEqual(extractPublishedAt(
+    '<p class="byline">Issue 72 / Mon 14th Nov, 2022</p>',
+    "2026-04-30T12:00:00Z",
+  ), {
+    publishedAt: "2022-11-14T00:00:00.000Z",
+    method: "visible.weekday_ordinal",
+  });
+});
+
 test("stored cutoff-safe evidence is replayed exactly once after an extraction upgrade", () => {
   const record = {
     id: "record-1",
@@ -3564,6 +3634,38 @@ test("archived evidence extraction requires exact identity and sport and preserv
   const immutableAge = immutableArticleAge.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
   assert.equal(immutableAge?.effectiveAt, "2018-11-26T14:53:17.000Z");
 
+  const immutableEditorialIssueAge = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Lewis Buchanan", sport: "Mountain biking (freeride/downhill)", evidence_cutoff_at: "2026-04-30T12:00:00Z" },
+    candidate: {
+      ...candidate,
+      title: "Lewis Buchanan - Ballsy and Versatile",
+      url: "https://www.imbikemag.com/articles/issue72/lewis-buchanan-ballsy-and-versatile/",
+    },
+    capture: {
+      ...capture,
+      capturedAt: "2026-03-11T09:55:08.000Z",
+      originalUrl: "https://www.imbikemag.com/articles/issue72/lewis-buchanan-ballsy-and-versatile/",
+    },
+    html: '<html><head><title>Lewis Buchanan - Ballsy and Versatile</title></head><body><main>Issue 72 / Mon 14th Nov, 2022. My name is Lewis Buchanan, I am 29 years old and a Professional mountain bike rider from Scotland.</main></body></html>',
+  });
+  const editorialAge = immutableEditorialIssueAge.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(editorialAge?.structuredValue.precision, "stated_age");
+  assert.equal(editorialAge?.effectiveAt, "2022-11-14T00:00:00.000Z");
+  assert.equal(editorialAge?.structuredValue.age_as_of, "2022-11-14T00:00:00.000Z");
+
+  const mutableProfileWithVisibleDate = extractPreparedArchivedEvidence({
+    record: { ...record, athlete_name: "Lewis Buchanan", sport: "Mountain biking (freeride/downhill)", evidence_cutoff_at: "2026-04-30T12:00:00Z" },
+    candidate: {
+      ...candidate,
+      title: "Lewis Buchanan rider profile",
+      url: "https://profiles.example/lewis-buchanan",
+    },
+    capture: { ...capture, capturedAt: "2026-03-11T09:55:08.000Z", originalUrl: "https://profiles.example/lewis-buchanan" },
+    html: '<html><head><title>Lewis Buchanan rider profile</title></head><body><main>Mon 14th Nov, 2022. My name is Lewis Buchanan, I am 29 years old and a Professional mountain bike rider from Scotland.</main></body></html>',
+  });
+  const mutableProfileAge = mutableProfileWithVisibleDate.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(mutableProfileAge?.effectiveAt, "2026-03-11T09:55:08.000Z");
+
   const wrongPerson = extractPreparedArchivedEvidence({
     record,
     candidate,
@@ -3806,6 +3908,127 @@ test("direct dated articles admit only tightly timestamped, attributable pre-cut
     "Sara Fruncillo gareggia in Formula X. La collega Maria Rossi, 26 anni, sarà presente.",
     new Date("2024-07-10T12:00:00Z"),
   ), null);
+});
+
+test("ring-name age evidence requires two explicit independent alias bridges", () => {
+  const baseSelection = selectLeakageSafeBenchmarkEvidence({
+    record: BENCHMARK_CASE,
+    sources: BENCHMARK_SOURCES.filter((source) => source.id !== "future" && source.id !== "outcome"),
+    claims: BENCHMARK_CLAIMS.filter((claim) => claim.id !== "future-claim" && claim.id !== "outcome-claim"),
+  });
+  const base = baseSelection.evidence[0];
+  const record = {
+    ...BENCHMARK_CASE,
+    athlete_name: "Sheena Bathory",
+    sport: "Boxing (cruiserweight)",
+    evidence_cutoff_at: "2026-06-24T12:00:00.000Z",
+  };
+  const bridge = (domain: string, id: string) => ({
+    ...base,
+    sourceId: id,
+    claimId: `${id}-claim`,
+    sourceRef: id,
+    domain,
+    independenceGroup: domain,
+    title: "Franciska Szabo boxing profile",
+    claimType: "athlete_profile",
+    claim: "Sheena Bathory is explicitly identified as the same person as Franciska Szabo.",
+    excerpt: "Franciska Szabo known to fans as Sheena Bathory competes in boxing.",
+    effectiveAt: "2026-06-12T00:00:00.000Z",
+    structuredValue: {
+      profile_type: "verified_alias",
+      canonical_name: "Sheena Bathory",
+      alias: "Franciska Szabo",
+    },
+  });
+  const age = (domain: string, id: string, effectiveAt: string) => ({
+    ...base,
+    sourceId: id,
+    claimId: `${id}-claim`,
+    sourceRef: id,
+    domain,
+    independenceGroup: domain,
+    title: "Franciska Szabo profile",
+    claimType: "adult_eligibility",
+    claim: "Franciska Szabo is 34 years old.",
+    excerpt: "Franciska Szabo. Age: 34 years.",
+    effectiveAt,
+    structuredValue: { subject_name: "Franciska Szabo", age: 34, precision: "stated_age" },
+  });
+  const ages = [
+    age("podscan.fm", "age-podcast", "2025-12-10T00:41:40.000Z"),
+    age("ijf.org", "age-ijf", "2026-05-19T01:20:21.000Z"),
+  ];
+  assert.deepEqual(benchmarkAdultEligibilityGate(record, [
+    bridge("kaocko.cz", "alias-a"),
+    bridge("global-networker.com", "alias-b"),
+    ...ages,
+  ]), { passed: true, independentSources: 2 });
+  assert.equal(benchmarkAdultEligibilityGate(record, [bridge("kaocko.cz", "alias-a"), ...ages]).passed, false);
+});
+
+test("alias extraction rejects co-occurrence and accepts explicit identity relationships", () => {
+  const accepted = extractPreparedVerifiedAliasClaim({
+    canonicalName: "Sheena Bathory",
+    alias: "Franciska Szabo",
+    sourceText: "Hungarian fighter Franciska Szabo, known to fans as Sheena Bathory, made her boxing debut.",
+    effectiveAt: "2026-06-15T00:00:00.000Z",
+  });
+  assert.equal(accepted?.structuredValue.profile_type, "verified_alias");
+  assert.equal(extractPreparedVerifiedAliasClaim({
+    canonicalName: "Sheena Bathory",
+    alias: "Franciska Szabo",
+    sourceText: "Sheena Bathory fought on the card after Franciska Szabo was mentioned in another result.",
+    effectiveAt: "2026-06-15T00:00:00.000Z",
+  }), null);
+});
+
+test("dated podcast and archived legal-name profiles emit age-only alias evidence", () => {
+  const record = {
+    id: "sheena",
+    athlete_name: "Sheena Bathory",
+    sport: "Boxing (cruiserweight)",
+    fit_label: "fit" as const,
+    evidence_cutoff_at: "2026-06-24T12:00:00.000Z",
+  };
+  const podcastUrl = "https://podcast.example/episodes/sheena-bathory";
+  const podcast = extractPreparedDatedPodcastAliasAdultEvidence({
+    record,
+    alias: "Sheena Bathory",
+    candidate: { query: "Sheena Bathory age", title: "Sheena Bathory interview", url: podcastUrl, snippet: "" },
+    html: `<html><head><link rel="canonical" href="${podcastUrl}"><script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "PodcastEpisode",
+      url: podcastUrl,
+      name: "Power Slap Champ Sheena Bathory",
+      datePublished: "2025-12-10T00:41:40Z",
+    })}</script></head><body><p>I'm Sheena Bathory from Hungary. I'm 34 years old and a black belt in judo.</p></body></html>`,
+  });
+  assert.equal(podcast.rejectionReason, null);
+  assert.equal(podcast.evidence?.archiveProvider, "direct_dated_podcast");
+  assert.equal(podcast.evidence?.claims[0].structuredValue.age, 34);
+
+  const archived = extractPreparedArchivedAliasAdultEvidence({
+    record,
+    alias: "Franciska Szabo",
+    candidate: {
+      query: "Franciska Szabo age", title: "Franciska SZABO / IJF.org",
+      url: "https://www.ijf.org/judoka/344/overview", snippet: "",
+    },
+    capture: {
+      timestamp: "20260519012021",
+      capturedAt: "2026-05-19T01:20:21.000Z",
+      originalUrl: "https://www.ijf.org/judoka/344/overview",
+      statusCode: "200",
+      digest: "digest",
+      mimeType: "text/html",
+      archivedUrl: "https://web.archive.org/web/20260519012021id_/https://www.ijf.org/judoka/344/overview",
+    },
+    html: "<html><title>Franciska SZABO / IJF.org</title><body><main>Judo athlete SZABO Franciska. Age: 34 years. Hungary. Latest Results.</main></body></html>",
+  });
+  assert.equal(archived.rejectionReason, null);
+  assert.equal(archived.evidence?.claims[0].structuredValue.subject_name, "Franciska Szabo");
+  assert.equal(archived.evidence?.claims[0].structuredValue.age, 34);
 });
 
 test("archived Instagram handles require athlete attribution and reject publisher footer accounts", () => {
@@ -4275,6 +4498,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   const route = readFileSync(new URL("../src/app/api/research/golden-records/prepare-evidence/route.ts", import.meta.url), "utf8");
   const instagramHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/reuse-instagram-history/route.ts", import.meta.url), "utf8");
   const socialBladeHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/social-blade-history/route.ts", import.meta.url), "utf8");
+  const instagramHistoryScript = readFileSync(new URL("../scripts/reuse-instagram-history.ts", import.meta.url), "utf8");
   const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
   const socialBladeAttemptMigration = readFileSync(new URL("../../supabase/migrations/20260813213119_lock_social_blade_paid_attempts.sql", import.meta.url), "utf8");
@@ -4433,10 +4657,16 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   assert.match(instagramHistoryRoute, /new_actor_run_started: false/);
   assert.match(instagramHistoryRoute, /providerSpendUsd: 0/);
   assert.match(instagramHistoryRoute, /outreachMutationsAllowed: false/);
-  assert.match(instagramHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
-  assert.match(instagramHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
-  assert.match(socialBladeHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
-  assert.match(socialBladeHistoryRoute, /\.contains\("stratification_tags", \[ONLYFANS_HISTORICAL_DATASET\]\)/);
+  assert.doesNotMatch(instagramHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
+  assert.match(instagramHistoryRoute, /\.contains\("stratification_tags", \["dylan_outcome_ground_truth"\]\)/);
+  assert.doesNotMatch(socialBladeHistoryRoute, /ONLYFANS_HISTORICAL_DATASET/);
+  assert.match(socialBladeHistoryRoute, /\.contains\("stratification_tags", \["dylan_outcome_ground_truth"\]\)/);
+  assert.match(instagramHistoryScript, /\.contains\("stratification_tags", \["dylan_outcome_ground_truth"\]\)/);
+  assert.match(instagramHistoryScript, /listSavedActorRuns/);
+  assert.match(instagramHistoryScript, /readSavedDataset/);
+  assert.doesNotMatch(instagramHistoryScript, /startApifyActor|callApifyActor|runApifyActor/);
+  assert.match(instagramHistoryScript, /new_actor_run_started: false/);
+  assert.match(instagramHistoryScript, /providerSpendUsd: 0/);
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_MAX_CHARGE_USD = 0\.5/);
   assert.match(socialBladeHistoryRoute, /APIFY_PUBLIC_HISTORY_FAILURE_LIMIT = 2/);
   assert.match(socialBladeHistoryRoute, /MAX_OFFICIAL_PILOT_ATTEMPTS = 5/);

@@ -20,7 +20,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-descriptive-sport-aliases-v26";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-corroborated-alias-age-v30";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-per-candidate-archive-v21";
 export const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 
@@ -160,6 +160,8 @@ export type OfficialCommissionAdultEvidence = {
 
 export type OfficialCompetitionEntryAdultEvidence = OfficialCommissionAdultEvidence;
 
+export type OfficialUniversityMediaGuideEvidence = OfficialCommissionAdultEvidence;
+
 export type OfficialDatedProfileEvidence = OfficialCommissionAdultEvidence & {
   profileId: string;
   status: string;
@@ -188,7 +190,7 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
-  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article";
+  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article" | "direct_dated_podcast";
   providerRequestId?: string;
 };
 
@@ -786,6 +788,12 @@ function decodeHtmlEntities(value: string) {
   const named: Record<string, string> = {
     amp: "&", apos: "'", quot: '"', lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—",
     rsquo: "’", lsquo: "‘", laquo: "«", raquo: "»",
+    aacute: "á", eacute: "é", iacute: "í", oacute: "ó", uacute: "ú", yacute: "ý",
+    agrave: "à", egrave: "è", igrave: "ì", ograve: "ò", ugrave: "ù",
+    acirc: "â", ecirc: "ê", icirc: "î", ocirc: "ô", ucirc: "û",
+    auml: "ä", euml: "ë", iuml: "ï", ouml: "ö", uuml: "ü",
+    scaron: "š", ccaron: "č", rcaron: "ř", zcaron: "ž", ncaron: "ň", tcaron: "ť",
+    uring: "ů", odblac: "ő", udblac: "ű",
   };
   return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
     if (entity.startsWith("#x")) {
@@ -840,6 +848,69 @@ export function archivedHtmlToText(html: string) {
     .replace(/\n\s*\n+/g, "\n")
     .trim()
     .slice(0, EVIDENCE_PREPARATION_LIMITS.archiveBodyCharacters);
+}
+
+function foldedNamePattern(value: string) {
+  const tokens = normalizeEvidenceText(value).split(/\s+/).filter((token) => token.length > 1);
+  return tokens.length >= 2
+    ? new RegExp(`\\b${tokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+")}\\b`, "g")
+    : null;
+}
+
+/**
+ * Produces an explicit alias bridge only when one bounded source passage names
+ * both identities and describes the relationship. Mere co-occurrence is not
+ * enough: this prevents a fight card containing two different people from
+ * silently merging their evidence.
+ */
+export function extractPreparedVerifiedAliasClaim(input: {
+  canonicalName: string;
+  alias: string;
+  sourceText: string;
+  effectiveAt: string;
+}): PreparedEvidenceClaim | null {
+  const canonical = normalizeEvidenceText(input.canonicalName);
+  const alias = normalizeEvidenceText(input.alias);
+  if (!canonical || !alias || canonical === alias) return null;
+  // Some publisher JSON-LD double-encodes localized prose (for example
+  // `&amp;aacute;`). Decode twice before folding so an explicit translated
+  // alias label remains recognizable without loosening the relation rule.
+  const folded = normalizeEvidenceText(decodeHtmlEntities(decodeHtmlEntities(input.sourceText)));
+  const canonicalPattern = foldedNamePattern(input.canonicalName);
+  const aliasPattern = foldedNamePattern(input.alias);
+  if (!canonicalPattern || !aliasPattern) return null;
+  const canonicalMatches = Array.from(folded.matchAll(canonicalPattern), (match) => match.index || 0);
+  const aliasMatches = Array.from(folded.matchAll(aliasPattern), (match) => match.index || 0);
+  const relation = /\b(?:also known as|better known as|known (?:to fans )?as|ring name|stage name|real name|legal name|birth name|alias|nickname|artist name|zapasnicke jmeno|muveszneven|vlastnim jmenem)\b/i;
+  let bridge: { start: number; end: number } | null = null;
+  for (const canonicalIndex of canonicalMatches) {
+    for (const aliasIndex of aliasMatches) {
+      const start = Math.max(0, Math.min(canonicalIndex, aliasIndex) - 120);
+      const end = Math.min(folded.length, Math.max(canonicalIndex + canonical.length, aliasIndex + alias.length) + 120);
+      if (end - start <= 520 && relation.test(folded.slice(start, end))) {
+        bridge = { start, end };
+        break;
+      }
+    }
+    if (bridge) break;
+  }
+  if (!bridge) return null;
+  // The normalized excerpt is intentionally bounded and deterministic. It is
+  // source text with punctuation/diacritics folded, not a synthesized claim.
+  const excerpt = folded.slice(bridge.start, bridge.end).replace(/\s+/g, " ").trim();
+  return {
+    claimType: "athlete_profile",
+    claimText: `${input.canonicalName} is explicitly identified as the same person as ${input.alias}.`,
+    structuredValue: {
+      profile_type: "verified_alias",
+      canonical_name: input.canonicalName,
+      alias: input.alias,
+    },
+    sourceExcerpt: excerpt,
+    effectiveAt: input.effectiveAt,
+    extractionConfidence: 98,
+    material: true,
+  };
 }
 
 function trustedAthleticCommissionDocumentDomain(value: string) {
@@ -957,6 +1028,54 @@ export function extractOfficialCommissionAdultEvidence(input: {
     birthDate: winner.birthDate,
     domain: benchmarkSourceDomain(input.sourceUrl),
     excerpt: winner.excerpt,
+    publishedAt: publishedAt.toISOString(),
+  };
+}
+
+/**
+ * Extract an exact DOB from a dated official university media guide. This is
+ * intentionally limited to Florida State beach-volleyball guides: the upload
+ * date must be encoded in the official URL, the document must identify the
+ * sport and season, and the DOB must occur inside the exact athlete's numbered
+ * biography section after a PERSONAL label. Roster and teammate rows do not
+ * qualify.
+ */
+export function extractOfficialUniversityMediaGuideEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceText: string;
+  evidenceCutoffAt: string;
+}): OfficialUniversityMediaGuideEvidence | null {
+  let url: URL;
+  try { url = new URL(input.sourceUrl); } catch { return null; }
+  if (url.hostname.toLowerCase() !== "seminoles.com") return null;
+  const upload = url.pathname.match(/\/documents\/download\/(20\d{2})\/(\d{1,2})\/(\d{1,2})\//i);
+  if (!upload || !/beach[^/]*volleybal/i.test(url.pathname)) return null;
+  const publishedAt = new Date(Date.UTC(Number(upload[1]), Number(upload[2]) - 1, Number(upload[3])));
+  const cutoff = new Date(input.evidenceCutoffAt);
+  if (!Number.isFinite(publishedAt.getTime()) || !Number.isFinite(cutoff.getTime()) || publishedAt > cutoff) return null;
+  if (!benchmarkSourceSupportsSport(input.sport, input.sourceText.slice(0, 2_500))) return null;
+
+  const escapedName = input.athleteName.trim().split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+");
+  const section = input.sourceText.match(new RegExp(
+    `(?:^|\\n)\\s*\\d{1,3}\\s*[•·]\\s*${escapedName}\\b[\\s\\S]{0,3500}`,
+    "i",
+  ))?.[0];
+  if (!section) return null;
+  const personal = section.match(/\bPERSONAL\s*:\s*Born on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\b/i);
+  if (!personal) return null;
+  const birthDate = extractBirthDate(personal[0]);
+  if (!birthDate) return null;
+  const age = ageOnDate(birthDate, publishedAt.toISOString());
+  if (age === null || age < 21 || age > 80) return null;
+  const header = section.split(/\r?\n/).find((line) => new RegExp(`\\b${escapedName}\\b`, "i").test(line)) || "";
+  return {
+    birthDate,
+    domain: benchmarkSourceDomain(input.sourceUrl),
+    excerpt: `${header}\n${personal[0]}`.trim().slice(0, 1_000),
     publishedAt: publishedAt.toISOString(),
   };
 }
@@ -1204,14 +1323,22 @@ export function extractPublishedAt(html: string, evidenceCutoffAt: string) {
     ["meta.datePublished", /<meta\b[^>]*(?:property|name|itemprop)=["'](?:datePublished|date_published|pubdate)["'][^>]*content=["']([^"']+)["'][^>]*>/i],
     ["time.datetime", /<time\b[^>]*datetime=["']([^"']+)["'][^>]*>/i],
     ["semantic.itemDateCreated", /<div\b[^>]*class=["'][^"']*\bitemDateCreated\b[^"']*["'][^>]*>([\s\S]{0,500}?)<\/div>/i],
+    ["visible.weekday_ordinal", /\b((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+,?\s+20\d{2})\b/i],
   ];
   for (const [method, pattern] of patterns) {
     const value = html.match(pattern)?.[1];
     const normalizedValue = value && method.startsWith("semantic.")
       ? archivedHtmlToText(value)
-      : decodeHtmlEntities(value || "");
+      : method === "visible.weekday_ordinal"
+        ? decodeHtmlEntities(value || "").replace(/(\d{1,2})(?:st|nd|rd|th)\b/i, "$1")
+        : decodeHtmlEntities(value || "");
     const publishedAt = normalizedValue
-      ? validHistoricalDate(method.startsWith("semantic.") ? `${normalizedValue} UTC` : normalizedValue, cutoff)
+      ? validHistoricalDate(
+        method.startsWith("semantic.") || method === "visible.weekday_ordinal"
+          ? `${normalizedValue} UTC`
+          : normalizedValue,
+        cutoff,
+      )
       : null;
     if (publishedAt) return { publishedAt, method };
   }
@@ -1259,7 +1386,7 @@ function jsonLdObjects(value: unknown): Record<string, unknown>[] {
   return [record, ...Object.values(record).flatMap(jsonLdObjects)];
 }
 
-function directArticleJsonLd(html: string) {
+function directStructuredJsonLd(html: string) {
   const objects: Record<string, unknown>[] = [];
   for (const match of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
@@ -1269,7 +1396,11 @@ function directArticleJsonLd(html: string) {
       // block must not hide a later, valid NewsArticle block.
     }
   }
-  return objects.filter((item) => {
+  return objects;
+}
+
+function directArticleJsonLd(html: string) {
+  return directStructuredJsonLd(html).filter((item) => {
     const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
     return types.some((type) => /^(?:News)?Article$/i.test(String(type || "")));
   });
@@ -1348,6 +1479,92 @@ export function extractPreparedDatedArticleEvidence(input: {
       ...prepared.evidence,
       archiveProvider: "direct_dated_article",
       providerRequestId: timestamp,
+    },
+    rejectionReason: null,
+  };
+}
+
+/**
+ * A podcast transcript can provide immutable publication-time age evidence
+ * even when the athlete competes under a ring name. Admission is deliberately
+ * narrow: exact canonical URL, PodcastEpisode JSON-LD, pre-cutoff publication,
+ * exact alias in the episode title, and a first-person name + age statement in
+ * one bounded transcript passage. It emits age evidence only.
+ */
+export function extractPreparedDatedPodcastAliasAdultEvidence(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+  alias: string;
+  html: string;
+}): { evidence: PreparedArchivedEvidence | null; rejectionReason: string | null } {
+  const requestedUrl = comparablePublicArticleUrl(input.candidate.url);
+  if (!requestedUrl) return { evidence: null, rejectionReason: "dated_podcast_url_is_not_public_http" };
+  const canonicalUrl = comparablePublicArticleUrl(directArticleCanonicalUrl(input.html));
+  if (!canonicalUrl) return { evidence: null, rejectionReason: "dated_podcast_missing_canonical_url" };
+  if (canonicalUrl !== requestedUrl) return { evidence: null, rejectionReason: "dated_podcast_canonical_url_mismatch" };
+  const cutoff = Date.parse(input.record.evidence_cutoff_at);
+  if (!Number.isFinite(cutoff)) return { evidence: null, rejectionReason: "dated_podcast_invalid_cutoff" };
+  const aliasKey = normalizeEvidenceText(input.alias);
+  const episode = directStructuredJsonLd(input.html).find((item) => {
+    const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
+    if (!types.some((type) => /^PodcastEpisode$/i.test(String(type || "")))) return false;
+    const published = Date.parse(typeof item.datePublished === "string" ? item.datePublished : "");
+    const name = normalizeEvidenceText(String(item.name || item.headline || ""));
+    const structuredUrls = directArticleStructuredUrls(item).map(comparablePublicArticleUrl).filter(Boolean);
+    return Number.isFinite(published) && published >= Date.UTC(1990, 0, 1) && published <= cutoff
+      && name.includes(aliasKey)
+      && (structuredUrls.length === 0 || structuredUrls.includes(canonicalUrl));
+  });
+  if (!episode) return { evidence: null, rejectionReason: "dated_podcast_missing_cutoff_safe_episode_metadata" };
+  const text = archivedHtmlToText(input.html);
+  const aliasPattern = input.alias.trim().split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  const transcript = text.match(new RegExp(
+    `\\bI(?:['’]|\\s+)?m\\s+${aliasPattern}\\b[\\s\\S]{0,220}?\\bI(?:['’]|\\s+)?m\\s+(\\d{1,2})\\s+years?\\s+old\\b`,
+    "i",
+  ));
+  const age = Number(transcript?.[1]);
+  if (!transcript || !Number.isInteger(age) || age < 21 || age > 80) {
+    return { evidence: null, rejectionReason: "dated_podcast_missing_first_person_alias_age_statement" };
+  }
+  const publishedAt = new Date(Date.parse(String(episode.datePublished))).toISOString();
+  const domain = benchmarkSourceDomain(canonicalUrl);
+  if (!domain) return { evidence: null, rejectionReason: "invalid_source_domain" };
+  const timestamp = publishedAt.replace(/[-:T.Z]/g, "").slice(0, 14);
+  const sourceExcerpt = transcript[0].replace(/\s+/g, " ").trim().slice(0, 700);
+  const identityBasis = normalizeEvidenceText(input.alias) === normalizeEvidenceText(input.record.athlete_name)
+    ? "exact_name" : "corroborated_alias";
+  return {
+    evidence: {
+      canonicalUrl,
+      archivedUrl: canonicalUrl,
+      domain,
+      title: String(episode.name || input.candidate.title).slice(0, 300),
+      publishedAt,
+      historicalAsOf: publishedAt,
+      contentHash: null,
+      captureTimestamp: timestamp,
+      publicationDateMethod: "jsonld.PodcastEpisode.datePublished_and_first_person_transcript",
+      searchQuery: input.candidate.query,
+      searchSnippet: input.candidate.snippet.slice(0, 700),
+      archiveProvider: "direct_dated_podcast",
+      providerRequestId: timestamp,
+      claims: [{
+        claimType: "adult_eligibility",
+        claimText: `${input.alias} states that they are ${age} years old in this dated podcast episode.`,
+        structuredValue: {
+          subject_name: input.alias,
+          canonical_name: input.record.athlete_name,
+          identity_basis: identityBasis,
+          age,
+          precision: "stated_age",
+          age_as_of: publishedAt,
+        },
+        sourceExcerpt,
+        effectiveAt: publishedAt,
+        extractionConfidence: 99,
+        material: true,
+      }],
     },
     rejectionReason: null,
   };
@@ -1516,6 +1733,38 @@ function extractAthleteCenteredParentheticalBirthDate(name: string, text: string
   return birthDate ? { birthDate, evidence: parenthetical[0].slice(0, 500) } : null;
 }
 
+function extractNamedCompetitionTableBirthDate(name: string, text: string, title: string) {
+  const escapedName = name.trim().split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s+");
+  const row = text.match(new RegExp(
+    `(?:^|\\n)[^\\n]{0,120}\\b${escapedName}\\b[^\\n]{0,120}`,
+    "i",
+  ))?.[0];
+  if (!row) return null;
+  const beforeRow = text.slice(0, Math.max(0, text.indexOf(row)));
+  const header = beforeRow.split(/\r?\n/).slice(-12).find((line) =>
+    /\b(?:name|rider|athlete)\b/i.test(line)
+    && /\b(?:birth|date of birth|dob)\b/i.test(line)
+    && /\bage\b/i.test(line)
+  );
+  if (!header) return null;
+  const dateMatch = row.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/);
+  if (!dateMatch || Number(dateMatch[1]) <= 12) return null;
+  const birthDate = normalizeNumericBirthDate(
+    Number(dateMatch[3]), Number(dateMatch[2]), Number(dateMatch[1]),
+  );
+  if (!birthDate) return null;
+  const afterDate = row.slice((dateMatch.index || 0) + dateMatch[0].length);
+  const statedAge = Number(afterDate.match(/(?:\|\||\|)\s*(\d{1,2})\s*(?:\|\||\|)/)?.[1]);
+  const eventYear = Number(`${title}\n${text.slice(0, 500)}`.match(/\b(20\d{2})\b/)?.[1]);
+  if (!Number.isInteger(statedAge) || statedAge < 10 || statedAge > 80
+    || !Number.isInteger(eventYear)) return null;
+  const calculatedAge = ageOnDate(birthDate, `${eventYear}-12-31T23:59:59.000Z`);
+  if (calculatedAge === null || Math.abs(calculatedAge - statedAge) > 1) return null;
+  return { birthDate, evidence: `${header}\n${row}`.trim().slice(0, 1_000) };
+}
+
 export function validatePreparedAgeEvidenceForSource(input: {
   athleteName: string;
   text: string;
@@ -1532,6 +1781,13 @@ export function validatePreparedAgeEvidenceForSource(input: {
     ? null
     : extractOfficialCompactBirthDate(input.athleteName, input.text, input.domain);
   if (attributableAge || officialCompactBirthDate) return { attributableAge, officialCompactBirthDate };
+
+  const competitionTableBirthDate = extractNamedCompetitionTableBirthDate(
+    input.athleteName, input.text, input.title || "",
+  );
+  if (competitionTableBirthDate) {
+    return { attributableAge: null, officialCompactBirthDate: competitionTableBirthDate };
+  }
 
   const normalizedName = normalizeEvidenceText(input.athleteName);
   const normalizedTitle = normalizeEvidenceText(input.title || "");
@@ -1814,7 +2070,25 @@ export function extractPreparedArchivedEvidence(input: {
       && modifiedAt >= publishedTimestamp && modifiedAt - publishedTimestamp <= 7 * 24 * 60 * 60 * 1_000;
     const immutableDatedNewsArticle = Boolean(publication.publishedAt && articleSchema
       && (articleBodyInSchema || newsWasNotLaterRewritten));
-    const ageEffectiveAt = attributableAge?.parsed.precision === "stated_age" && !immutableDatedNewsArticle
+    // Some magazine issue pages predate complete NewsArticle JSON-LD. Treat a
+    // stated age as publication-time evidence only for the narrow immutable
+    // shape we can independently replay: an exact athlete-titled issue URL,
+    // a visible issue number and publication date, and a first-person age
+    // statement. Ordinary profiles with an old visible date remain capture-
+    // dated so a mutable age field cannot manufacture a DOB contradiction.
+    const normalizedTitle = normalizeEvidenceText(title);
+    const exactAthleteTitled = Boolean(normalizedName && normalizedTitle.includes(normalizedName));
+    const immutableDatedEditorialIssue = Boolean(
+      publication.publishedAt
+      && publication.method === "visible.weekday_ordinal"
+      && exactAthleteTitled
+      && /\/articles\/issue\d+\//i.test(candidate.url)
+      && /\bIssue\s+\d+\b/i.test(attributable)
+      && attributableAge?.parsed.precision === "stated_age"
+      && /\bI\s+am\s+(?:just\s+)?\d{1,2}\s+years?\s+old\b/i.test(attributableAge.evidence)
+    );
+    const ageEffectiveAt = attributableAge?.parsed.precision === "stated_age"
+      && !immutableDatedNewsArticle && !immutableDatedEditorialIssue
       ? capture.capturedAt
       : effectiveAt;
     claims.push({
@@ -1913,6 +2187,103 @@ export function extractPreparedArchivedEvidence(input: {
       searchQuery: candidate.query,
       searchSnippet: candidate.snippet.slice(0, 700),
       claims,
+    },
+    rejectionReason: null,
+  };
+}
+
+/**
+ * Extracts age-only evidence from an archived profile published under a
+ * separately corroborated legal/ring name. The caller must verify the alias
+ * bridge independently; this extractor only proves that the archived source
+ * names the supplied alias and attributes a valid age fact to it.
+ */
+export function extractPreparedArchivedAliasAdultEvidence(input: {
+  record: EvidencePreparationRecord;
+  candidate: HistoricalSearchCandidate;
+  capture: WaybackCapture;
+  alias: string;
+  html: string;
+}): { evidence: PreparedArchivedEvidence | null; rejectionReason: string | null } {
+  const cutoff = Date.parse(input.record.evidence_cutoff_at);
+  if (!Number.isFinite(cutoff) || Date.parse(input.capture.capturedAt) > cutoff) {
+    return { evidence: null, rejectionReason: "archive_capture_after_cutoff" };
+  }
+  const text = archivedHtmlToText(input.html);
+  const title = extractTitle(input.html, input.candidate.title, input.alias);
+  const aliasKey = normalizeEvidenceText(input.alias);
+  if (!aliasKey || !normalizeEvidenceText(title).includes(aliasKey)
+    || !benchmarkSourceNamesAthlete(input.alias, `${title}\n${text}`)) {
+    return { evidence: null, rejectionReason: "archived_page_does_not_name_exact_alias" };
+  }
+  const domain = benchmarkSourceDomain(input.candidate.url);
+  if (!domain) return { evidence: null, rejectionReason: "invalid_source_domain" };
+  const attributable = `${title}\n${text}`;
+  const validatedAge = validatePreparedAgeEvidenceForSource({
+    athleteName: input.alias,
+    text: attributable,
+    domain,
+    title,
+    observedAt: new Date(input.capture.capturedAt),
+  });
+  let attributableAge = validatedAge.attributableAge;
+  const officialCompactBirthDate = validatedAge.officialCompactBirthDate;
+  if (!attributableAge && !officialCompactBirthDate) {
+    const aliasTokens = input.alias.trim().split(/\s+/)
+      .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const forward = aliasTokens.join("\\s+");
+    const reverse = [...aliasTokens].reverse().join("\\s+");
+    const profileAge = attributable.match(new RegExp(
+      `\\b(?:${forward}|${reverse})\\b[\\s\\S]{0,180}?\\bAge\\s*[:\\-]?\\s*(\\d{1,2})\\s*(?:years?)?\\b`,
+      "i",
+    ));
+    const age = Number(profileAge?.[1]);
+    if (profileAge && Number.isInteger(age) && age >= 21 && age <= 80) {
+      attributableAge = {
+        parsed: { age, birthYear: null, precision: "stated_age" as const },
+        evidence: profileAge[0].replace(/\s+/g, " ").trim().slice(0, 700),
+      };
+    }
+  }
+  if (!attributableAge && !officialCompactBirthDate) {
+    return { evidence: null, rejectionReason: "archived_alias_profile_has_no_attributable_age" };
+  }
+  const ageExcerpt = (attributableAge?.evidence || officialCompactBirthDate?.evidence || "").slice(0, 1_000);
+  const birthDate = officialCompactBirthDate?.birthDate
+    || (attributableAge?.parsed.precision === "birth_date" ? extractBirthDate(ageExcerpt) : null);
+  const effectiveAt = input.capture.capturedAt;
+  return {
+    evidence: {
+      canonicalUrl: input.candidate.url,
+      archivedUrl: input.capture.archivedUrl,
+      domain,
+      title,
+      publishedAt: null,
+      historicalAsOf: input.capture.capturedAt,
+      contentHash: input.capture.digest,
+      captureTimestamp: input.capture.timestamp,
+      publicationDateMethod: "archive_capture_and_corroborated_alias",
+      searchQuery: input.candidate.query,
+      searchSnippet: input.candidate.snippet.slice(0, 700),
+      claims: [{
+        claimType: "adult_eligibility",
+        claimText: birthDate
+          ? `${input.alias} has a public birth date of ${birthDate}.`
+          : `${input.alias} has attributable public age evidence in this archived source.`,
+        structuredValue: {
+          subject_name: input.alias,
+          canonical_name: input.record.athlete_name,
+          identity_basis: "corroborated_alias",
+          ...(birthDate ? { birth_date: birthDate, birth_year: Number(birthDate.slice(0, 4)) } : {}),
+          age: attributableAge?.parsed.age,
+          precision: birthDate ? "birth_date" : attributableAge?.parsed.precision,
+          age_as_of: effectiveAt,
+        },
+        sourceExcerpt: ageExcerpt,
+        effectiveAt,
+        extractionConfidence: birthDate ? 99 : 96,
+        material: true,
+      }],
     },
     rejectionReason: null,
   };

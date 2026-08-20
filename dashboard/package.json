@@ -20,6 +20,8 @@
     "plan:historical-benchmark-recovery": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/audit-onlyfans-historical-benchmark-readiness.ts --recovery-plan --limit=20",
     "prepare:benchmark-archive-source": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/prepare-benchmark-archive-source.ts",
     "prepare:benchmark-competition-entry": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/prepare-benchmark-competition-entry.ts",
+    "recover:social-blade-history": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/recover-social-blade-history.ts",
+    "reuse:instagram-history": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/reuse-instagram-history.ts",
     "check": "npm run typecheck && npm run lint && npm run test:unit && npm run build"
   },
   "dependencies": {
