@@ -390,6 +390,19 @@ test("verified age selection requires authoritative evidence or independent corr
   assert.equal(corroborated?.corroborated, true);
   assert.equal(corroborated?.corroboratingSources.length, 2);
 
+  const recentBirthday = selectVerifiedAthleteAge("Sawyer Lindblad", [{
+    title: "Sawyer Lindblad wins Rio Pro",
+    snippet: "Sawyer Lindblad won in June 2026. The 20-year-old, Lindblad, moved to No. 4.",
+    link: "https://sports-news.example/sawyer-lindblad-rio",
+  }, {
+    title: "Sawyer Lindblad biography",
+    snippet: "Sawyer Lindblad (born August 13, 2005) is an American surfer.",
+    link: "https://surf-profile.example/sawyer-lindblad",
+  }], [], new Date("2026-08-20T12:00:00.000Z"));
+  assert.equal(recentBirthday?.corroborated, true);
+  assert.equal(recentBirthday?.precision, "birth_date");
+  assert.equal(recentBirthday?.age, 21, "the exact DOB must outrank a consistent pre-birthday stated age");
+
   const conflictingTrusted = selectVerifiedAthleteAge("Lexi Rodriguez", [{
     title: "Lexi Rodriguez - Player profile",
     snippet: "Lexi Rodriguez (born March 12, 2003) is an American volleyball player.",

@@ -192,6 +192,7 @@ const SPORT_OPTIONS = [
   { value: "martial-arts", label: "Martial Arts" },
   { value: "mma", label: "MMA / UFC" },
   { value: "motocross", label: "Motocross" },
+  { value: "motorcycle racing", label: "Motorcycle Racing" },
   { value: "motorsports", label: "Motorsports" },
   { value: "olympic", label: "Olympic Sports" },
   { value: "pickleball", label: "Pickleball" },

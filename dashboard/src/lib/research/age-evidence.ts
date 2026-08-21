@@ -287,7 +287,8 @@ function agesAgree(left: VerifiedAthleteAge, right: VerifiedAthleteAge) {
 export function selectVerifiedAthleteAge(
   athleteName: string,
   results: AthleteAgeSearchResult[],
-  trustedDomains: string[]
+  trustedDomains: string[],
+  now = new Date()
 ): VerifiedAthleteAge | null {
   const normalizedName = athleteName.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const nameTokens = normalizedName.split(" ").filter((token) => token.length > 1);
@@ -310,7 +311,7 @@ export function selectVerifiedAthleteAge(
   for (const result of results) {
     const text = `${result.title || ""} ${result.snippet || ""}`;
     if (!matchesAthleteName(text)) continue;
-    const attributableAge = parseAgeEvidenceForAthlete(athleteName, text);
+    const attributableAge = parseAgeEvidenceForAthlete(athleteName, text, now);
     const source = result.link || "";
     if (!attributableAge || !source.startsWith("https://")) continue;
     const parsedAge = attributableAge.parsed;
@@ -334,7 +335,20 @@ export function selectVerifiedAthleteAge(
         .map((other) => [other.hostname, other] as const)
     ).values());
     if (independentMatches.length < 2) continue;
-    const primary = independentMatches.find((match) => match.trusted) || candidate;
+    // When a dated stated-age article and an exact birth date differ by one
+    // around a recent birthday, they corroborate rather than conflict. Use
+    // the most precise evidence for the current numeric age so an older
+    // article cannot override a DOB that has already matured past 21.
+    const precisionRank: Record<ParsedAgeEvidence["precision"], number> = {
+      birth_date: 3,
+      stated_age: 2,
+      birth_year: 1,
+    };
+    const primary = [...independentMatches].sort((left, right) =>
+      precisionRank[right.precision] - precisionRank[left.precision]
+      || Number(right.trusted) - Number(left.trusted)
+      || right.age - left.age
+    )[0] || candidate;
     return {
       age: primary.age,
       birthYear: primary.birthYear,
