@@ -1257,7 +1257,7 @@ export default function ResearchBenchmarkPage() {
                 event.currentTarget.value = "";
               }} />
             </label>
-            <button disabled={working || evidenceSummary.readyFit < 8 || evidenceSummary.readyNotFit < 8 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.development.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+            <button disabled={working || evidenceSummary.readyFit < 8 || evidenceSummary.readyNotFit < 8 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.heldOut.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
               {evidenceSummary.readyFit >= 16 && evidenceSummary.readyNotFit >= 16
                 ? "Freeze full benchmark cohort"
                 : "Freeze 8 + 8 challenge set"}

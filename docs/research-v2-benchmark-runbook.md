@@ -116,7 +116,7 @@ No metric is considered passed when its denominator is zero. Fewer than ten reco
 
 The runtime enforces that last rule separately from target coverage. A short or empty qualified list is a valid no-padding result; `targetMet` and `shortfall` report coverage without marking an unsafe candidate as a quality pass.
 
-## Current data status (2026-08-15)
+## Current data status (2026-08-20)
 
 ### Verified v29 development baseline
 
@@ -126,9 +126,11 @@ This is a passing development baseline, not a held-out production proof. It repl
 
 ### Authoritative live recovery checkpoint
 
-The production benchmark UI currently exposes 28 fresh, labeled, never-scored records: nine positive and 19 negative. Eight negatives and four positives are evidence-ready, so the fresh 8+8 challenge cannot be frozen yet. Within Dylan's new eight-signed-athlete cohort, all eight pass identity, corroborated 21+, momentum, and creator behavior, but only four have cutoff-safe audience evidence. These live counts supersede the older recovery counts retained below as chronology.
+The production benchmark UI currently exposes 36 fresh, labeled, never-scored records: 17 positive and 19 negative. Eight positives and ten negatives are evidence-ready, so the fresh balanced 8+8 challenge quota is met. Dylan's new eight-signed-athlete cohort supplies seven ready positives; Daryn Harris supplies the eighth after strict independent adult-evidence recovery. These live counts supersede the older recovery counts retained below as chronology.
 
-The 2026-08-20 production env audit found the currently deployed `APIFY_API_KEY` malformed (11 characters and no `apify_api_` prefix), while `SOCIAL_BLADE_CLIENT_ID` and `SOCIAL_BLADE_TOKEN` contain the same 11-character value. The code therefore refuses both providers before a request or credit charge. Apify inspection is shared by research launch, durable evidence recovery, provider health, and command-line recovery; malformed, masked, or implausibly short tokens never reach HTTP. The Golden benchmark page shows the exact secret-free validation error and leaves its paid controls disabled. Replace Apify with a real API token and configure the two distinct Social Blade values, then redeploy. Never print the values. After correction, reuse saved Apify datasets first with `npm run reuse:instagram-history -- --athlete="Name"`; it starts zero Actors and records zero provider spend. Use `npm run recover:social-blade-history -- --athlete="Name" --confirm-credits=N` only as the explicit one-profile paid fallback. Existing exhausted historical handles still must not be retried merely to spend credits.
+Do not infer a credential defect from a Vercel environment pull. Sensitive Environment Variable values cannot be read after creation, and local pulls/runs may redact or omit them. Production runtime health checks plus successful exact-handle Social Blade history calls proved that Apify and Social Blade are usable. Dennis Buzukja, Mike Kimbel, and Chloé Paquet gained qualifying cutoff-safe audience evidence; Avery Poppinga produced no usable historical match. The bounded sequence ended with 57 Social Blade credits reported. Continue to reuse saved Apify datasets first with `npm run reuse:instagram-history -- --athlete="Name"`, and use `npm run recover:social-blade-history -- --athlete="Name" --confirm-credits=N` only as an explicit one-profile paid fallback. Never print secret values or retry exhausted handles merely to spend credits.
+
+Daryn's second independent adult source is a completed January 23, 2026 Tapology Boxing bout that reports his side-scoped age at fight as 26. The extractor requires the exact canonical bout, completed status, matching sport, pre-cutoff date, exact athlete/fighter ID and correct comparison-table side; it fails closed for upcoming/post-cutoff/wrong-sport/wrong-canonical/opponent-age inputs. The import was $0 and created one public adult-evidence claim only—no scoring or outreach mutation.
 
 Extraction v30 handles ring/legal-name cases without weakening identity. Two independent, cutoff-safe sources must explicitly bridge the canonical athlete name and alias before legal-name age evidence can count. Sheena Bathory now passes through two independent boxing alias bridges plus two agreeing age sources under the canonical/legal identities. One bridge, mere co-occurrence, or conflicting age facts fails closed.
 

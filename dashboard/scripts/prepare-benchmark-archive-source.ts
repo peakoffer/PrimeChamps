@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -9,6 +10,7 @@ import {
   extractOfficialCommissionAdultEvidence,
   extractOfficialUniversityMediaGuideEvidence,
   extractOfficialVolleyballWorldEventProfileEvidence,
+  extractTapologyCompletedBoutAdultEvidence,
   extractPreparedArchivedAliasAdultEvidence,
   extractPreparedArchivedEvidence,
   extractPreparedDatedPodcastAliasAdultEvidence,
@@ -38,6 +40,7 @@ function argument(name: string) {
 const athleteName = argument("athlete");
 const canonicalUrl = argument("url");
 const alias = argument("alias");
+const htmlFile = argument("html-file");
 const requiredClaim = argument("required-claim") || "adult_eligibility";
 if (!new Set([
   "sport_identity", "adult_eligibility", "athlete_profile", "athletic_momentum", "audience_signal",
@@ -122,6 +125,60 @@ async function retrieveDirectDatedArticleEvidence() {
       providerRequestId: `sha256:${contentHash}`,
     },
     html,
+  };
+}
+
+async function retrieveOperatorSuppliedCompletedBoutEvidence() {
+  if (!htmlFile || requiredClaim !== "adult_eligibility") return null;
+  const bytes = new Uint8Array(await readFile(htmlFile));
+  if (!bytes.length || bytes.length > 2_000_000) {
+    throw new Error("--html-file must contain between 1 byte and 2 MB of public HTML");
+  }
+  const html = new TextDecoder().decode(bytes);
+  const evidence = extractTapologyCompletedBoutAdultEvidence({
+    athleteName: record.athlete_name,
+    sport: record.sport,
+    sourceUrl: canonicalUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: record.evidence_cutoff_at,
+  });
+  if (!evidence) {
+    throw new Error("The supplied HTML did not pass the completed-bout identity, side, sport, date, cutoff, and age checks");
+  }
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  return {
+    item: {
+      canonicalUrl,
+      archivedUrl: canonicalUrl,
+      domain: evidence.domain,
+      title: argument("title") || `${record.athlete_name} completed ${record.sport} bout`,
+      publishedAt: evidence.publishedAt,
+      historicalAsOf: evidence.publishedAt,
+      contentHash,
+      captureTimestamp: evidence.publishedAt.replace(/[-:T.Z]/g, "").slice(0, 14),
+      publicationDateMethod: "completed_tapology_bout_date_and_side_scoped_age",
+      searchQuery: candidate.query,
+      searchSnippet: candidate.snippet,
+      archiveProvider: "direct_dated_event" as const,
+      providerRequestId: `sha256:${contentHash}`,
+      claims: [{
+        claimType: "adult_eligibility" as const,
+        claimText: `${record.athlete_name} was ${evidence.ageAtFight} at this completed ${record.sport} bout.`,
+        structuredValue: {
+          age: evidence.ageAtFight,
+          precision: "stated_age",
+          age_as_of: evidence.publishedAt,
+          verification_method: "tapology_completed_bout_side_scoped_age",
+          tapology_bout_id: evidence.boutId,
+          tapology_fighter_id: evidence.fighterId,
+        },
+        sourceExcerpt: evidence.excerpt,
+        effectiveAt: evidence.publishedAt,
+        extractionConfidence: 97,
+        material: true,
+      }],
+    },
+    content: bytes,
   };
 }
 
@@ -574,7 +631,8 @@ async function retrieveWikimediaRevisionEvidence() {
   };
 }
 
-let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveDirectOfficialCommissionPdfEvidence();
+let recovered: { item: PreparedArchivedEvidence; content: string | Uint8Array } | null = await retrieveOperatorSuppliedCompletedBoutEvidence();
+if (!recovered) recovered = await retrieveDirectOfficialCommissionPdfEvidence();
 if (!recovered) recovered = await retrieveDirectOfficialUniversityMediaGuideEvidence();
 if (!recovered) recovered = await retrieveDirectOfficialVolleyballWorldEventProfileEvidence();
 if (!recovered) recovered = await retrieveDirectDatedAnalyticsEvidence();
@@ -648,7 +706,8 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
   publisher: item.domain,
   source_type: item.archiveProvider === "direct_dated_article" ? "news"
     : item.archiveProvider === "direct_dated_podcast" ? "interview"
-      : item.archiveProvider === "direct_dated_analytics" ? "social" : "archive",
+      : item.archiveProvider === "direct_dated_analytics" ? "social"
+        : item.archiveProvider === "direct_dated_event" ? "competition" : "archive",
   provider: item.archiveProvider || "internet_archive_wayback",
   provider_request_id: item.providerRequestId || item.captureTimestamp,
   published_at: item.publishedAt,
@@ -666,7 +725,9 @@ const { data: source, error: sourceError } = await admin.from("research_evidence
         ? "operator_supplied_cutoff_safe_dated_podcast_transcript"
         : item.archiveProvider === "direct_dated_analytics"
           ? "operator_supplied_cutoff_safe_dated_social_analytics"
-          : "operator_supplied_authoritative_archive_source",
+          : item.archiveProvider === "direct_dated_event"
+            ? "operator_supplied_cutoff_safe_completed_sports_event"
+            : "operator_supplied_authoritative_archive_source",
     capture_timestamp: item.captureTimestamp,
     verification: `shared_exact_name_sport_${requiredClaim}_and_cutoff_extractor`,
     evaluation_only: true,

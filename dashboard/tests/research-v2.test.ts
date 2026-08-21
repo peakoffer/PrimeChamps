@@ -132,6 +132,7 @@ import {
   extractOfficialCompetitionEntryAdultEvidence,
   extractOfficialUniversityMediaGuideEvidence,
   extractOfficialVolleyballWorldEventProfileEvidence,
+  extractTapologyCompletedBoutAdultEvidence,
   extractOfficialCommissionAdultEvidence,
   extractOfficialDatedProfileEvidence,
   extractPublishedAt,
@@ -641,6 +642,91 @@ test("official Volleyball World event profiles bind DOB to an exact pre-cutoff p
     sourceHtml: html.replace("<td class=\"vbw-o-table__cell matchdate\" data-sort=1>01/10/2025</td>", ""),
     evidenceCutoffAt: "2026-04-27T12:00:00Z",
   }), null);
+});
+
+test("completed Tapology bouts bind the athlete to the age on the same comparison-table side", () => {
+  const sourceUrl = "https://www.tapology.com/fightcenter/bouts/1092185-brandrisk-promotions-12-ximena-vazquez-vs-daryn-calm-down-harris";
+  const html = [
+    `<html><head><title>Ximena Vazquez vs. Daryn Harris II | Boxing Bout | Tapology</title><link href="${sourceUrl}" rel="canonical"></head><body>`,
+    `<div id="boutPageHeader"><span>Completed Boxing Bout</span><span>January 23, 2026</span></div>`,
+    `<div id="boutMatchup"><div><a href="/fightcenter/fighters/512195-daryn-harris">Daryn Harris</a><a href="/fightcenter/fighters/512195-daryn-harris">Daryn</a></div><div>vs.</div><div><a href="/fightcenter/fighters/492647-ximena-vaszuez">Ximena Vazquez</a><a href="/fightcenter/fighters/492647-ximena-vaszuez">Ximena</a></div></div>`,
+    `<table id="boutComparisonTable"><tr><td>26 years, 1 month, 4 weeks, 2 days</td><td>26<br><span>+1 month, 4 wks, 2 days</span></td><td></td><td>Age at Fight</td><td></td><td>20 years, 5 months, 2 weeks, 5 days</td><td>20<br><span>+5 mos, 2 wks, 5 days</span></td></tr></table>`,
+    `<h3>Bout Information</h3><h2>Ximena Vazquez vs. Daryn Harris II</h2><p>Daryn Harris defeated Ximena Vazquez in a completed professional exhibition boxing bout.</p><ul><li><span>Date:</span> <span>Friday 01.23.2026 at 07:00 PM ET</span></li><li><span>Sport:</span> <span>Boxing</span></li><li><span>Event Links:</span></li></ul>`,
+    `</body></html>`,
+  ].join("");
+  const accepted = extractTapologyCompletedBoutAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+  });
+  assert.equal(accepted?.ageAtFight, 26);
+  assert.equal(accepted?.fighterId, "512195");
+  assert.equal(accepted?.boutId, "1092185");
+  assert.equal(accepted?.publishedAt, "2026-01-23T00:00:00.000Z");
+  assert.match(accepted?.excerpt || "", /Daryn Harris age at fight: 26 years/);
+
+  assert.equal(extractTapologyCompletedBoutAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl,
+    sourceHtml: html.replace("Completed Boxing Bout", "Upcoming Boxing Bout"),
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+  }), null, "upcoming bouts are not immutable completed-event evidence");
+  assert.equal(extractTapologyCompletedBoutAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-01-22T23:59:59Z",
+  }), null, "post-cutoff events are rejected");
+  assert.equal(extractTapologyCompletedBoutAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "MMA",
+    sourceUrl,
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+  }), null, "the requested sport must match the completed event");
+  assert.equal(extractTapologyCompletedBoutAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl,
+    sourceHtml: html.replace("26 years, 1 month, 4 weeks, 2 days", "20 years, 5 months, 2 weeks, 5 days").replace("26<br>", "20<br>"),
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+  }), null, "the opponent's adult age cannot be inherited by the athlete");
+  assert.equal(extractTapologyCompletedBoutAdultEvidence({
+    athleteName: "Daryn Harris",
+    sport: "Boxing",
+    sourceUrl: sourceUrl.replace("1092185", "9999999"),
+    sourceHtml: html,
+    evidenceCutoffAt: "2026-05-11T12:00:00Z",
+  }), null, "the canonical bout must match the requested URL");
+
+  const prepared = extractPreparedArchivedEvidence({
+    record: {
+      id: "golden-daryn",
+      athlete_name: "Daryn Harris",
+      sport: "Boxing",
+      fit_label: "fit",
+      evidence_cutoff_at: "2026-05-11T12:00:00Z",
+    },
+    candidate: { query: "saved Tapology bout", title: "Daryn Harris completed bout", url: sourceUrl, snippet: "" },
+    capture: {
+      timestamp: "20260201000000",
+      capturedAt: "2026-02-01T00:00:00.000Z",
+      originalUrl: sourceUrl,
+      statusCode: "200",
+      digest: "tapology-test",
+      mimeType: "text/html",
+      archivedUrl: `https://web.archive.org/web/20260201000000id_/${sourceUrl}`,
+    },
+    html,
+  });
+  const ageClaim = prepared.evidence?.claims.find((claim) => claim.claimType === "adult_eligibility");
+  assert.equal(ageClaim?.structuredValue.age, 26);
+  assert.equal(ageClaim?.structuredValue.verification_method, "tapology_completed_bout_side_scoped_age");
+  assert.equal(ageClaim?.effectiveAt, "2026-01-23T00:00:00.000Z");
 });
 
 test("dated social analytics accepts only exact pre-cutoff report-header metrics", () => {
@@ -1853,6 +1939,21 @@ test("active benchmark cohort ignores revealed archives and fails closed on conf
   assert.equal(conflict.cohortVersion, null);
   assert.equal(conflict.conflict, true);
   assert.deepEqual(conflict.activeVersions, ["active-v3", "active-v2"]);
+});
+
+test("benchmark workbench allows a fresh freeze beside a revealed development replay", () => {
+  const page = readFileSync(
+    new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    page,
+    /benchmarkReadiness\.activeCohortConflict \|\| Boolean\(benchmarkReadiness\.heldOut\.cohortVersion\)/
+  );
+  assert.doesNotMatch(
+    page,
+    /activeCohortConflict \|\| Boolean\(benchmarkReadiness\.development\.cohortVersion\)/
+  );
 });
 
 test("a minimum viable balanced cohort locks eight cases per label", () => {

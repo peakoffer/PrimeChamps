@@ -20,7 +20,7 @@ export const HISTORICAL_SIGNAL_RECOVERY_REUSABLE_QUERY_PLAN_VERSIONS = [
   HISTORICAL_SIGNAL_RECOVERY_QUERY_PLAN_VERSION,
   "2026-08-15-gate-aware-positive-recovery-v14",
 ] as const;
-export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-event-profile-audience-v31";
+export const HISTORICAL_EVIDENCE_EXTRACTION_VERSION = "2026-08-20-tapology-completed-bout-v32";
 export const HISTORICAL_ARCHIVE_PROVIDER_VERSION = "2026-08-15-per-candidate-archive-v21";
 export const ARCHIVE_RATE_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 
@@ -166,6 +166,15 @@ export type OfficialVolleyballWorldEventProfileEvidence = OfficialCommissionAdul
   playerId: string;
 };
 
+export type TapologyCompletedBoutAdultEvidence = {
+  ageAtFight: number;
+  boutId: string;
+  domain: string;
+  excerpt: string;
+  fighterId: string;
+  publishedAt: string;
+};
+
 export type DatedSocialAnalyticsAudienceEvidence = {
   domain: string;
   handle: string;
@@ -204,7 +213,7 @@ export type PreparedArchivedEvidence = {
   searchQuery: string;
   searchSnippet: string;
   claims: PreparedEvidenceClaim[];
-  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article" | "direct_dated_podcast" | "direct_dated_analytics";
+  archiveProvider?: "internet_archive_wayback" | "common_crawl" | "wikimedia_revision" | "official_dated_profile" | "direct_dated_article" | "direct_dated_podcast" | "direct_dated_analytics" | "direct_dated_event";
   providerRequestId?: string;
 };
 
@@ -1173,6 +1182,134 @@ export function extractOfficialVolleyballWorldEventProfileEvidence(input: {
     ].join("\n"),
     publishedAt: publishedAt.toISOString(),
     playerId,
+  };
+}
+
+function historicalHtmlSliceBetweenIds(html: string, startId: string, endId: string) {
+  const start = new RegExp(`\\bid=["']${startId}["']`, "i").exec(html);
+  const end = new RegExp(`\\bid=["']${endId}["']`, "i").exec(html);
+  if (!start || !end || end.index <= start.index) return "";
+  const startTag = html.lastIndexOf("<", start.index);
+  const endTag = html.lastIndexOf("<", end.index);
+  return startTag >= 0 && endTag > startTag ? html.slice(startTag, endTag) : "";
+}
+
+function tapologyCompletedBoutDate(value: string) {
+  const match = value.match(
+    /\bDate:\s*(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+(\d{2})\.(\d{2})\.(20\d{2})\b/i,
+  );
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date.toISOString()
+    : null;
+}
+
+/**
+ * Extracts a side-scoped stated age from one completed Tapology bout page.
+ * Tapology comparison tables contain two athletes and two ages, so ordinary
+ * nearby-text parsing is unsafe. Admission therefore binds the exact canonical
+ * bout URL, completed status, event date, requested sport, two unique fighter
+ * IDs, athlete side, the center `Age at Fight` label, and the age value on that
+ * same side. Current fighter profiles and upcoming bouts are rejected.
+ */
+export function extractTapologyCompletedBoutAdultEvidence(input: {
+  athleteName: string;
+  sport: string;
+  sourceUrl: string;
+  sourceHtml: string;
+  evidenceCutoffAt: string;
+}): TapologyCompletedBoutAdultEvidence | null {
+  const requestedUrl = comparablePublicArticleUrl(input.sourceUrl);
+  const canonicalUrl = comparablePublicArticleUrl(directArticleCanonicalUrl(input.sourceHtml));
+  if (!requestedUrl || !canonicalUrl || requestedUrl !== canonicalUrl) return null;
+  let url: URL;
+  try { url = new URL(canonicalUrl); } catch { return null; }
+  if (!new Set(["tapology.com", "www.tapology.com"]).has(url.hostname.toLowerCase())) return null;
+  const path = url.pathname.match(/^\/fightcenter\/bouts\/(\d+)-[a-z0-9-]+$/i);
+  if (!path) return null;
+
+  const headerHtml = historicalHtmlSliceBetweenIds(input.sourceHtml, "boutPageHeader", "boutMatchup");
+  const headerText = archivedHtmlToText(headerHtml).replace(/\s+/g, " ").trim();
+  const completedSport = headerText.match(/\bCompleted\s+([A-Za-z][A-Za-z /&-]{1,40}?)\s+Bout\b/i)?.[1] || "";
+  if (!completedSport || !benchmarkSourceSupportsSport(input.sport, completedSport)) return null;
+
+  const pageText = archivedHtmlToText(input.sourceHtml).replace(/\s+/g, " ").trim();
+  const publishedAt = tapologyCompletedBoutDate(pageText);
+  const cutoff = Date.parse(input.evidenceCutoffAt);
+  if (!publishedAt || !Number.isFinite(cutoff) || Date.parse(publishedAt) > cutoff) return null;
+  const sportLabel = pageText.match(/\bSport:\s*([A-Za-z][A-Za-z /&-]{1,40}?)(?=\s+(?:Event Links:|Event Discussion|Update|View|$))/i)?.[1]
+    || pageText.match(/\bSport:\s*([A-Za-z][A-Za-z /&-]{1,40})\b/i)?.[1]
+    || "";
+  if (!sportLabel || !benchmarkSourceSupportsSport(input.sport, sportLabel)) return null;
+
+  const matchupHtml = historicalHtmlSliceBetweenIds(input.sourceHtml, "boutMatchup", "boutComparisonTable");
+  const fighters = new Map<string, string[]>();
+  for (const anchor of matchupHtml.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)) {
+    const href = htmlAttribute(anchor[0], "href");
+    const fighter = href.match(/^\/fightcenter\/fighters\/(\d+)-[a-z0-9-]+$/i);
+    if (!fighter) continue;
+    const name = archivedHtmlToText(anchor[0]).replace(/\s+/g, " ").trim();
+    if (!name) continue;
+    const names = fighters.get(fighter[1]) || [];
+    if (!names.includes(name)) names.push(name);
+    fighters.set(fighter[1], names);
+  }
+  const fighterEntries = [...fighters.entries()];
+  if (fighterEntries.length !== 2) return null;
+  const athleteKey = normalizeEvidenceText(input.athleteName);
+  const athleteSide = fighterEntries.findIndex(([, names]) =>
+    names.some((name) => normalizeEvidenceText(name) === athleteKey),
+  );
+  if (athleteSide < 0) return null;
+
+  const comparison = input.sourceHtml.match(
+    /<table\b[^>]*\bid=["']boutComparisonTable["'][^>]*>([\s\S]*?)<\/table>/i,
+  )?.[1];
+  if (!comparison) return null;
+  let ageAtFight: number | null = null;
+  let ageValue = "";
+  for (const row of comparison.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const cells = Array.from(row[1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi), (cell) =>
+      archivedHtmlToText(cell[1]).replace(/\s+/g, " ").trim(),
+    );
+    const labelIndex = cells.findIndex((cell) => normalizeEvidenceText(cell) === "age at fight");
+    if (labelIndex < 0) continue;
+    const sideCells = athleteSide === 0 ? cells.slice(0, labelIndex) : cells.slice(labelIndex + 1);
+    const ages = new Map<number, string>();
+    for (const cell of sideCells) {
+      const parsed = Number(cell.match(/^(\d{1,2})(?:\s+years?)?\b/i)?.[1]);
+      if (Number.isInteger(parsed) && parsed >= 18 && parsed <= 80) {
+        const prior = ages.get(parsed) || "";
+        if (cell.length > prior.length) ages.set(parsed, cell);
+      }
+    }
+    if (ages.size !== 1) return null;
+    [ageAtFight, ageValue] = [...ages.entries()][0];
+    break;
+  }
+  if (ageAtFight === null || ageAtFight < 21) return null;
+
+  const athleteFighterId = fighterEntries[athleteSide][0];
+  const opponentNames = fighterEntries[athleteSide === 0 ? 1 : 0][1];
+  const opponentName = opponentNames.find((name) => normalizeEvidenceText(name).split(" ").length >= 2)
+    || opponentNames[0];
+  return {
+    ageAtFight,
+    boutId: path[1],
+    domain: "tapology.com",
+    excerpt: [
+      `Completed ${completedSport} Bout`,
+      `${input.athleteName} (Tapology fighter ${athleteFighterId}) vs. ${opponentName}`,
+      `Event date: ${publishedAt.slice(0, 10)}`,
+      `Sport: ${sportLabel.trim()}`,
+      `${input.athleteName} age at fight: ${ageValue}`,
+    ].join("\n"),
+    fighterId: athleteFighterId,
+    publishedAt,
   };
 }
 
@@ -2232,14 +2369,39 @@ export function extractPreparedArchivedEvidence(input: {
       material: true,
     },
   ];
-  const { attributableAge, officialCompactBirthDate } = validatePreparedAgeEvidenceForSource({
+  const tapologyBoutAge = extractTapologyCompletedBoutAdultEvidence({
     athleteName: record.athlete_name,
-    text: attributable,
-    domain,
-    title,
-    observedAt: new Date(capture.capturedAt),
+    sport: record.sport,
+    sourceUrl: candidate.url,
+    sourceHtml: input.html,
+    evidenceCutoffAt: record.evidence_cutoff_at,
   });
-  if (attributableAge || officialCompactBirthDate) {
+  if (tapologyBoutAge) {
+    claims.push({
+      claimType: "adult_eligibility",
+      claimText: `${record.athlete_name} was ${tapologyBoutAge.ageAtFight} at this completed ${record.sport} bout.`,
+      structuredValue: {
+        age: tapologyBoutAge.ageAtFight,
+        precision: "stated_age",
+        age_as_of: tapologyBoutAge.publishedAt,
+        verification_method: "tapology_completed_bout_side_scoped_age",
+        tapology_bout_id: tapologyBoutAge.boutId,
+        tapology_fighter_id: tapologyBoutAge.fighterId,
+      },
+      sourceExcerpt: tapologyBoutAge.excerpt,
+      effectiveAt: tapologyBoutAge.publishedAt,
+      extractionConfidence: 97,
+      material: true,
+    });
+  } else {
+    const { attributableAge, officialCompactBirthDate } = validatePreparedAgeEvidenceForSource({
+      athleteName: record.athlete_name,
+      text: attributable,
+      domain,
+      title,
+      observedAt: new Date(capture.capturedAt),
+    });
+    if (attributableAge || officialCompactBirthDate) {
     const ageExcerpt = (attributableAge?.evidence || officialCompactBirthDate?.evidence || "").slice(0, 1_000);
     const birthDate = officialCompactBirthDate?.birthDate
       || (attributableAge?.parsed.precision === "birth_date" ? extractBirthDate(ageExcerpt) : null);
@@ -2277,7 +2439,7 @@ export function extractPreparedArchivedEvidence(input: {
       && !immutableDatedNewsArticle && !immutableDatedEditorialIssue
       ? capture.capturedAt
       : effectiveAt;
-    claims.push({
+      claims.push({
       claimType: "adult_eligibility",
       claimText: birthDate
         ? `${record.athlete_name} has a public birth date of ${birthDate}.`
@@ -2295,7 +2457,8 @@ export function extractPreparedArchivedEvidence(input: {
       effectiveAt: ageEffectiveAt,
       extractionConfidence: birthDate ? 99 : attributableAge?.parsed.precision === "stated_age" ? 94 : 90,
       material: true,
-    });
+      });
+    }
   }
   const instagramProfile = extractAttributedInstagramHandle({
     athleteName: record.athlete_name,
