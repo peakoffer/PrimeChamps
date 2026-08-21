@@ -59,7 +59,8 @@ import {
 type AdminClient = ReturnType<typeof createAdminClient>;
 type BenchmarkSplit = "development" | "held_out";
 
-const RUNNER_VERSION = "research-v2-benchmark-runner-v29";
+const RUNNER_VERSION = "research-v2-benchmark-runner-v30";
+const LEGACY_RESUMABLE_RUNNER_VERSION = "research-v2-benchmark-runner-v29";
 const MAX_CASES_PER_RUN = 100;
 const DEFAULT_CASES_PER_RUN = 5;
 const DEFAULT_COST_LIMIT_MICROUSD = 1_000_000;
@@ -70,6 +71,7 @@ const BENCHMARK_CALL_LIMITS = {
   blindOutputTokens: 3_000,
   reviewOutputTokens: 2_600,
 } as const;
+const INPUT_TOKEN_LIMIT_PER_CASE = 50_000;
 const BENCHMARK_GOLDEN_RECORD_SELECT = "id,athlete_name,sport,decision_at,evidence_cutoff_at,fit_label,achievability_label,benchmark_split,benchmark_cohort_version,point_in_time_reliability,label_order_fit_before_outcome,held_out_locked_at,held_out_revealed_at,stratification_tags";
 
 const RESEARCHER_SCHEMA = {
@@ -962,7 +964,12 @@ export async function startBenchmarkRun(input: {
     model_release_created_at: releaseCreatedAt,
     pricing,
     no_outreach: true,
-    input_token_limit: selected.length * 30_000,
+    // Real measured usage includes the Researcher plus two independent audit
+    // calls. The old 30K/case envelope stopped a healthy four-case replay at
+    // 104K actual input tokens after three completed cases. Cost admission is
+    // still independently enforced before every call by the stricter stored
+    // microusd ceiling.
+    input_token_limit: selected.length * INPUT_TOKEN_LIMIT_PER_CASE,
     output_token_limit: selected.length * (
       BENCHMARK_CALL_LIMITS.researcherOutputTokens
       + BENCHMARK_CALL_LIMITS.blindOutputTokens
@@ -1603,7 +1610,7 @@ export async function resumeBenchmarkRun(input: { organizationId: string; runId:
   const run = rawRun as RunRow;
   if (run.status === "completed") return { runId: run.id, completed: true, alreadyCompleted: true };
   if (run.status === "cancelled") throw new Error("Cancelled benchmark runs cannot be resumed");
-  if (run.metrics.runner_version !== RUNNER_VERSION
+  if (![RUNNER_VERSION, LEGACY_RESUMABLE_RUNNER_VERSION].includes(run.metrics.runner_version)
     || !Array.isArray(run.metrics.case_ids)
     || !run.metrics.call_limits
     || !Number.isFinite(run.metrics.call_limits.researcherOutputTokens)
@@ -1638,6 +1645,24 @@ export async function resumeBenchmarkRun(input: { organizationId: string; runId:
     if (!recovered) throw new Error("This benchmark checkpoint was claimed by another worker");
     run.status = "failed";
     run.metrics = { ...run.metrics, lease_id: null, lease_expires_at: null, last_error: "Recovered an expired execution lease" };
+  }
+  if (run.metrics.runner_version === LEGACY_RESUMABLE_RUNNER_VERSION
+    && run.metrics.input_token_limit === run.metrics.case_ids.length * 30_000) {
+    const upgradedMetrics: RunCheckpoint = {
+      ...run.metrics,
+      runner_version: RUNNER_VERSION,
+      input_token_limit: run.metrics.case_ids.length * INPUT_TOKEN_LIMIT_PER_CASE,
+      last_error: null,
+    };
+    const { data: upgraded, error: upgradeError } = await admin.from("research_benchmark_runs").update({ metrics: upgradedMetrics })
+      .eq("id", run.id)
+      .eq("organization_id", run.organization_id)
+      .eq("status", run.status)
+      .select("id")
+      .maybeSingle();
+    if (upgradeError) throw upgradeError;
+    if (!upgraded) throw new Error("This benchmark checkpoint changed while its token envelope was being upgraded");
+    run.metrics = upgradedMetrics;
   }
   const leaseId = crypto.randomUUID();
   const leaseExpiresAt = new Date(nowDate.getTime() + 5 * 60 * 1_000).toISOString();
