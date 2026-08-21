@@ -125,7 +125,13 @@ Fresh cohort `onlyfans-athlete-challenge-v2-2026-08-21-8c41eeca` is complete, re
 - Both runs used OpenRouter model `anthropic/claude-sonnet-5`, benchmark runner v30, case-level persisted checkpoints, and a $1.50 hard ceiling.
 - The benchmark runner is evaluation-only by construction: its mutation surface excludes athletes, pipeline candidates, messages, drafts, notifications, and outreach tables.
 
-This proves the historical scorer/Auditor release gates. It does not by itself prove fresh discovery yield for every sport. The remaining rollout check is bounded, evaluation-only live discovery across representative team, individual, and niche sports, with no tuning against this revealed cohort.
+This proves the historical scorer/Auditor release gates. Representative production discovery was then tested separately without tuning against this revealed cohort:
+
+- Team sport: volleyball `7e72bebe-b0bd-4633-b0ba-3570f60ac304` sourced 43 and scored five; none cleared the complete release gate, so it returned zero.
+- Individual sport: surfing `004f6d58-c6aa-4244-a811-11e4b95ac16f` sourced 12 and scored four; Sawyer Lindblad cleared the corroborated identity, current 21+, momentum, creator, commercial, and independent-audit gates at 81.
+- Niche sport: motorcycle racing `631adb62-6fec-4484-bed2-8dd08d0fe7d1` sourced 11 through the dedicated WorldWCR strategy and correctly returned zero; Ana Carrasco scored 56 because the evidence showed an established, heavily sponsored profile rather than an emerging accessible opportunity.
+
+All three completed with `quality_passed=true`. Their 66 candidate rows were test-only, zero linked to an athlete, zero athlete rows were created from the runs, and zero research notifications were emitted. The live workflow therefore demonstrated representative sourcing, strict no-padding behavior, and isolation. This is production-ready for owner-operated evaluation; outreach and automatic live-pipeline promotion remain out of scope and disabled during testing.
 
 ## Historical data and recovery chronology (superseded by the verified checkpoint above)
 
