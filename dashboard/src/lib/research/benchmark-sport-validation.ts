@@ -161,19 +161,31 @@ function benchmarkCanonicalSourceSupportsSport(sport: BenchmarkSport, sourceText
 
 export function benchmarkSourceSupportsSport(sport: string, sourceText: string) {
   const normalized = normalizeBenchmarkIdentity(sourceText);
-  const normalizedSport = normalizeBenchmarkIdentity(sport);
-  const baseSport = normalizeBenchmarkIdentity(sport.replace(/\([^)]*\)/g, " "));
-  const historicalTerms = Object.entries(HISTORICAL_SPORT_TERMS)
-    .find(([label]) => [normalizedSport, baseSport].includes(normalizeBenchmarkIdentity(label)))?.[1];
   const canonicalEntries = Object.entries(SPORT_TERMS);
-  const canonicalTerms = canonicalEntries
-    .find(([label]) => [normalizedSport, baseSport].includes(normalizeBenchmarkIdentity(label)))?.[1]
-    || canonicalEntries.find(([, aliases]) => aliases.some((alias) =>
-      normalizeBenchmarkIdentity(alias) === baseSport
-    ))?.[1];
-  const terms = historicalTerms
-    || canonicalTerms
-    || [baseSport || sport];
+  const historicalEntries = Object.entries(HISTORICAL_SPORT_TERMS);
+  const termsForLabel = (label: string) => {
+    const normalizedLabels = Array.from(new Set([
+      normalizeBenchmarkIdentity(label),
+      normalizeBenchmarkIdentity(label.replace(/\([^)]*\)/g, " ")),
+    ].filter(Boolean)));
+    if (!normalizedLabels.length) return null;
+    return historicalEntries.find(([candidate]) => normalizedLabels.includes(normalizeBenchmarkIdentity(candidate)))?.[1]
+      || canonicalEntries.find(([candidate]) => normalizedLabels.includes(normalizeBenchmarkIdentity(candidate)))?.[1]
+      || canonicalEntries.find(([, aliases]) => aliases.some((alias) =>
+        normalizedLabels.includes(normalizeBenchmarkIdentity(alias))
+      ))?.[1]
+      || null;
+  };
+  const directTerms = termsForLabel(sport);
+  // Historical labels often preserve multiple equivalent or adjacent sport
+  // descriptions (for example "MMA / UFC"). Treat each explicit segment as a
+  // bounded alias source rather than requiring the impossible contiguous text
+  // "mma ufc" to appear in a valid fighter profile.
+  const segmentedTerms = directTerms ? [] : sport
+    .split(/[/|]/)
+    .flatMap((segment) => termsForLabel(segment) || []);
+  const fallback = normalizeBenchmarkIdentity(sport.replace(/\([^)]*\)/g, " ")) || sport;
+  const terms = directTerms || (segmentedTerms.length ? Array.from(new Set(segmentedTerms)) : [fallback]);
   return terms.some((term) => normalized.includes(normalizeBenchmarkIdentity(term)));
 }
 

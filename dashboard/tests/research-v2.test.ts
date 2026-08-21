@@ -291,6 +291,21 @@ test("historical motorcycle racing accepts explicit Spanish motorcycle evidence"
   );
 });
 
+test("slash-delimited historical combat labels resolve each explicit sport segment", () => {
+  assert.equal(benchmarkSourceSupportsSport(
+    "MMA / UFC",
+    "Norma Dumont is an active UFC women's bantamweight fighter."
+  ), true);
+  assert.equal(benchmarkSourceSupportsSport(
+    "MMA / combat sports",
+    "Maria Belanson won the completed professional MMA bout."
+  ), true);
+  assert.equal(benchmarkSourceSupportsSport(
+    "MMA / UFC",
+    "The athlete competes in beach volleyball."
+  ), false);
+});
+
 test("surfing evidence accepts explicit Spanish and French athlete terms", () => {
   assert.equal(benchmarkSourceSupportsSport("Surfing", "Violeta Sanchez es surfista profesional"), true);
   assert.equal(benchmarkSourceSupportsSport("Surfing", "Violeta Sanchez est une surfeuse professionnelle"), true);
