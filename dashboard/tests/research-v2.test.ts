@@ -2600,6 +2600,18 @@ test("live research evaluation exits before athlete writes and suppresses notifi
   assert.ok(!workflow.includes("AVOID: athletes already on OnlyFans"));
 });
 
+test("owner-run research defaults to an isolated bounded evaluation path", () => {
+  const route = readFileSync(new URL("../src/app/api/research/run/route.ts", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/app/pipeline/research/page.tsx", import.meta.url), "utf8");
+  assert.match(route, /const evaluationMode = submitted\.evaluationMode === true/);
+  assert.match(route, /if \(evaluationMode\) await requireOrganizationRole\(\["owner", "admin"\]\)/);
+  assert.match(route, /getResearchEvaluationBudget\(requestedDepth === "extended" \? "development" : "smoke"\)/);
+  assert.match(route, /evaluationBudget: evaluationBudget \|\| undefined/);
+  assert.match(page, /evaluationMode: true/);
+  assert.match(page, /No athletes, notifications, drafts, messages, or outreach are created/);
+  assert.match(page, /if \(!config\.evaluationMode\) fetch\("\/api\/notifications"/);
+});
+
 test("evidence set hashes are order-independent but content-sensitive", () => {
   const left = stableEvidenceSetHash([{ url: "https://a.test", claim: "A" }, { url: "https://b.test", claim: "B" }]);
   const reordered = stableEvidenceSetHash([{ url: "https://b.test", claim: "B" }, { url: "https://a.test", claim: "A" }]);

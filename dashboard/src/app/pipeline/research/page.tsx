@@ -278,6 +278,7 @@ function ResearchStageContent() {
     resultCount: 10,
     scoringModel: RESEARCH_SCORING_MODEL,
     targetRegions: ["usa"],
+    evaluationMode: true,
   });
 
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
@@ -463,18 +464,20 @@ function ResearchStageContent() {
   const handleRunResearch = async () => {
     setShowConfigModal(false);
 
-    // Request notification permission
-    if ("Notification" in window && Notification.permission === "default") {
+    // Evaluation runs never create notifications or live pipeline records.
+    if (!config.evaluationMode && "Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
 
     // Show immediate toast
     setToast({
-      message: "Research started! We'll notify you when it's complete.",
+      message: config.evaluationMode
+        ? "Safe evaluation started. No athletes, notifications, drafts, or outreach will be created."
+        : "Research started! We'll notify you when it's complete.",
       type: "success",
     });
 
-    fetch("/api/notifications", {
+    if (!config.evaluationMode) fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -511,7 +514,9 @@ function ResearchStageContent() {
       }
       await fetchResearchLogs();
       setToast({
-        message: "Research queued safely. You can leave this page and come back anytime.",
+        message: config.evaluationMode
+          ? "Evaluation queued safely. Results stay isolated from the live pipeline."
+          : "Research queued safely. You can leave this page and come back anytime.",
         type: "success",
       });
     } catch (error) {
@@ -1595,8 +1600,8 @@ function ResearchStageContent() {
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   {([
-                    { value: "standard", title: "Standard", detail: "Up to 10 qualified athletes" },
-                    { value: "extended", title: "Extended", detail: "Two distinct 10-athlete waves" },
+                    { value: "standard", title: config.evaluationMode ? "Smoke" : "Standard", detail: config.evaluationMode ? "Up to 3 qualified athletes" : "Up to 10 qualified athletes" },
+                    { value: "extended", title: config.evaluationMode ? "Full quality test" : "Extended", detail: config.evaluationMode ? "Up to 10 qualified athletes" : "Two distinct 10-athlete waves" },
                   ] as const).map((option) => (
                     <button
                       key={option.value}
@@ -1609,11 +1614,35 @@ function ResearchStageContent() {
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-gray-800 mt-2">The agent will not pad the result. If only six candidates clear the evidence and fit gates, you get six.</p>
+                <p className="text-xs text-gray-800 mt-2">The agent will not pad the result. If fewer candidates clear the evidence and fit gates, you get the smaller qualified set.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  5. Run mode
+                </label>
+                <button
+                  type="button"
+                  aria-pressed={config.evaluationMode === true}
+                  onClick={() => setConfig({ ...config, evaluationMode: config.evaluationMode !== true })}
+                  className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left ${config.evaluationMode ? "border-emerald-600 bg-emerald-50" : "border-amber-500 bg-amber-50"}`}
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-gray-950">{config.evaluationMode ? "Evaluation only" : "Live pipeline"}</span>
+                    <span className="mt-1 block text-xs text-gray-600">
+                      {config.evaluationMode
+                        ? "No athletes, notifications, drafts, messages, or outreach are created."
+                        : "Qualified athletes may be added to the live research pipeline."}
+                    </span>
+                  </span>
+                  <span className={`h-6 w-11 rounded-full p-1 transition ${config.evaluationMode ? "bg-emerald-600" : "bg-amber-500"}`}>
+                    <span className={`block h-4 w-4 rounded-full bg-white transition ${config.evaluationMode ? "translate-x-5" : ""}`} />
+                  </span>
+                </button>
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-700">
-                Source target: {config.depth === "extended" ? "up to 100" : "up to 50"} names → identity verification → Instagram enrichment → age and legitimacy gates → latest Sonnet scoring. Research never sends messages.
+                Source target: {config.evaluationMode ? (config.depth === "extended" ? "up to 60" : "up to 12") : (config.depth === "extended" ? "up to 100" : "up to 50")} names → identity verification → Instagram enrichment → age and legitimacy gates → latest Sonnet scoring. Research never sends messages.
               </div>
             </div>
 

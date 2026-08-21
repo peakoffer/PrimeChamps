@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { start } from "workflow/api";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireOrganizationRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   DEFAULT_RESEARCH_OBJECTIVE,
@@ -17,6 +17,7 @@ import {
   type ResearchConfig,
 } from "./workflow";
 import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+import { getResearchEvaluationBudget } from "@/lib/research/evaluation-budget";
 
 export const maxDuration = 300;
 
@@ -47,6 +48,8 @@ export async function POST(request: NextRequest) {
     }
 
     const submitted = await request.json() as Partial<ResearchConfig>;
+    const evaluationMode = submitted.evaluationMode === true;
+    if (evaluationMode) await requireOrganizationRole(["owner", "admin"]);
     const sportFocus = typeof submitted.sportFocus === "string"
       ? submitted.sportFocus.trim()
       : "";
@@ -79,7 +82,11 @@ export async function POST(request: NextRequest) {
         ...((activeProfile?.compiled_profile as Partial<RecruitingProfile> | undefined)?.parameters || {}),
       },
     };
-    const depth: ResearchDepth = submitted.depth === "extended" ? "extended" : "standard";
+    const requestedDepth: ResearchDepth = submitted.depth === "extended" ? "extended" : "standard";
+    const evaluationBudget = evaluationMode
+      ? getResearchEvaluationBudget(requestedDepth === "extended" ? "development" : "smoke")
+      : null;
+    const depth: ResearchDepth = evaluationBudget?.depth || requestedDepth;
     const marketOverride = typeof submitted.marketOverride === "string"
       ? submitted.marketOverride.trim().slice(0, 500)
       : "";
@@ -93,9 +100,10 @@ export async function POST(request: NextRequest) {
       includeRecentGuidance,
       followerMin: Math.max(0, Number(profile.parameters.follower_min) || 30_000),
       followerMax: Math.max(1, Number(profile.parameters.follower_max) || 500_000),
-      resultCount: depth === "extended" ? 20 : 10,
+      resultCount: evaluationBudget?.resultCount || (depth === "extended" ? 20 : 10),
       scoringModel: undefined,
-      evaluationMode: false,
+      evaluationMode,
+      evaluationBudget: evaluationBudget || undefined,
       profileVersionId: activeProfile?.id,
       profileVersion: activeProfile?.version,
       profileName: activeProfile?.name || "Prime Champs baseline",
