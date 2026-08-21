@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBenchmarkEvidenceGapRow, rankBenchmarkEvidenceGaps } from "../src/lib/research/benchmark-evidence-gap.ts";
+import {
+  benchmarkSignalRecoveryRequired,
+  buildBenchmarkEvidenceGapRow,
+  rankBenchmarkEvidenceGaps,
+} from "../src/lib/research/benchmark-evidence-gap.ts";
 import type { BenchmarkEvidenceSelection, BenchmarkGoldenCase } from "../src/lib/research/benchmark-runner-support.ts";
 
 function record(overrides: Partial<BenchmarkGoldenCase> = {}): BenchmarkGoldenCase {
@@ -49,4 +53,10 @@ test("benchmark evidence gaps prioritize closest packets and omit empty packets"
     { recordId: "close", athleteName: "Close", sport: "C", evidenceCutoffAt: "", missingGates: ["a"], requestedEvidence: [], acceptedSourceTypes: "", safeClaimsAlready: 5, independentSourcesAlready: 2 },
   ]);
   assert.deepEqual(rows.map((row) => row.recordId), ["close", "far"]);
+});
+
+test("signal recovery never mutates an already execution-ready frozen packet", () => {
+  assert.equal(benchmarkSignalRecoveryRequired({ completedCurrentPlan: false, evidenceReady: true }), false);
+  assert.equal(benchmarkSignalRecoveryRequired({ completedCurrentPlan: true, evidenceReady: false }), false);
+  assert.equal(benchmarkSignalRecoveryRequired({ completedCurrentPlan: false, evidenceReady: false }), true);
 });

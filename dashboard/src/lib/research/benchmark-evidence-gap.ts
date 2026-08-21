@@ -84,3 +84,10 @@ export function rankBenchmarkEvidenceGaps(rows: BenchmarkEvidenceGapRow[], limit
       || left.athleteName.localeCompare(right.athleteName))
     .slice(0, Math.max(0, limit));
 }
+
+export function benchmarkSignalRecoveryRequired(input: {
+  completedCurrentPlan: boolean;
+  evidenceReady: boolean;
+}) {
+  return !input.completedCurrentPlan && !input.evidenceReady;
+}

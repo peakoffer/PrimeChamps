@@ -27,6 +27,7 @@ import {
 } from "@/lib/research/benchmark-runner-support";
 import { loadBenchmarkEvidenceRows } from "@/lib/research/benchmark-evidence-storage";
 import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+import { benchmarkSignalRecoveryRequired } from "@/lib/research/benchmark-evidence-gap";
 
 export const maxDuration = 60;
 
@@ -236,6 +237,34 @@ async function unresolvedRecordsForBaseline(input: {
     ).map(({ record }) => record);
 }
 
+async function unresolvedRecordsForSignalRecovery(input: {
+  admin: ReturnType<typeof createAdminClient>;
+  organizationId: string;
+  eligible: GoldenPreparationCandidate[];
+  signalRecoveryCompleted: Set<string>;
+}) {
+  const candidates = input.eligible;
+  if (!candidates.length) return [];
+  const recordIds = candidates.map((record) => record.id);
+  const { sources, claims } = await loadBenchmarkEvidenceRows({
+    admin: input.admin, organizationId: input.organizationId, recordIds,
+  });
+  return candidates.filter((record) => {
+    const benchmarkRecord = record as unknown as BenchmarkGoldenCase;
+    const selection = selectLeakageSafeBenchmarkEvidence({
+      record: benchmarkRecord,
+      sources: sources.filter((source) => source.golden_record_id === record.id),
+      claims: claims.filter((claim) => claim.golden_record_id === record.id),
+    });
+    const fitLabel = record.fit_label as "fit" | "not_fit";
+    const readiness = benchmarkEvidenceFreezeReadiness({ record: benchmarkRecord, fitLabel, selection });
+    return benchmarkSignalRecoveryRequired({
+      completedCurrentPlan: input.signalRecoveryCompleted.has(record.id),
+      evidenceReady: readiness.ready,
+    });
+  });
+}
+
 function eligibleForEvidencePreparation(record: GoldenPreparationCandidate) {
   const outcomeGroundTruth = record.stratification_tags?.includes("dylan_outcome_ground_truth") === true;
   return record.benchmark_split === "excluded"
@@ -329,18 +358,29 @@ export async function GET() {
     });
     const preparationMode: HistoricalEvidencePreparationMode = ageRecoveryRemaining.length ? "age_recovery" : "baseline";
     const nextRecords = ageRecoveryRemaining.length ? ageRecoveryRemaining : baselineRemaining;
+    const [excludedSignalRemaining, developmentSignalRemaining, heldOutSignalRemaining] = await Promise.all([
+      unresolvedRecordsForSignalRecovery({
+        admin, organizationId: user.organizationId, eligible: excludedEligible, signalRecoveryCompleted,
+      }),
+      unresolvedRecordsForSignalRecovery({
+        admin, organizationId: user.organizationId, eligible: developmentEligible, signalRecoveryCompleted,
+      }),
+      process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true"
+        ? unresolvedRecordsForSignalRecovery({
+          admin, organizationId: user.organizationId, eligible: heldOutEligible, signalRecoveryCompleted,
+        })
+        : Promise.resolve([]),
+    ]);
     return NextResponse.json({
       eligibleRecordCount: nextRecords.length,
       totalEligibleRecordCount: eligible.length,
       preparationMode,
       baselineRemainingCount: baselineRemaining.length,
       ageRecoveryRemainingCount: ageRecoveryRemaining.length,
-      excludedSignalRecoveryCount: excludedEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
+      excludedSignalRecoveryCount: excludedSignalRemaining.length,
       completedExcludedSignalRecordIds: Array.from(signalRecoveryCompleted),
-      developmentSignalRecoveryCount: developmentEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length,
-      heldOutSignalRecoveryCount: process.env.RESEARCH_HELD_OUT_EVALUATION_ENABLED === "true"
-        ? heldOutEligible.filter((record) => !signalRecoveryCompleted.has(record.id)).length
-        : 0,
+      developmentSignalRecoveryCount: developmentSignalRemaining.length,
+      heldOutSignalRecoveryCount: heldOutSignalRemaining.length,
       activeCohortConflict: activeCohort.conflict,
       activeCohortVersion: activeCohort.cohortVersion,
       maximumRecordsPerRun: EVIDENCE_PREPARATION_LIMITS.maximumRecords,
@@ -481,9 +521,12 @@ export async function POST(request: NextRequest) {
     const preparationMode: HistoricalEvidencePreparationMode = requestedMode
       || (ageRecoveryRemaining.length ? "age_recovery" : "baseline");
     const signalRecoveryRemaining = preparationMode === "signal_recovery"
-      ? eligible.filter((record) => !signalRecoveryCompleted.has(record.id))
+      ? await unresolvedRecordsForSignalRecovery({
+        admin, organizationId: user.organizationId, eligible, signalRecoveryCompleted,
+      })
       : [];
-    const eligibleById = new Map(eligible.map((record) => [record.id, record]));
+    const selectionPool = preparationMode === "signal_recovery" ? signalRecoveryRemaining : eligible;
+    const eligibleById = new Map(selectionPool.map((record) => [record.id, record]));
     const explicitlySelected = requestedIds.map((recordId) => eligibleById.get(recordId))
       .filter((record): record is GoldenPreparationCandidate => Boolean(record));
     // Explicit IDs arrive in audited priority order from the benchmark UI.
