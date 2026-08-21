@@ -4989,6 +4989,9 @@ test("fresh cohort assignment supports a locked 8+8 challenge after a revealed d
   assert.match(benchmarkPage, /evidenceSummary\.readyFit < 8/);
   assert.match(benchmarkPage, /Freeze 8 \+ 8 challenge set/);
   assert.match(benchmarkPage, /Development archive/);
+  assert.match(benchmarkPage, /latestCompletedHeldOutRun/);
+  assert.match(benchmarkPage, /One-time held-out result/);
+  assert.match(benchmarkPage, /Cohort is revealed and archive-only/);
   assert.doesNotMatch(route, /clean source pool requires 40 resolved-sport/);
 });
 

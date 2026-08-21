@@ -488,6 +488,9 @@ export default function ResearchBenchmarkPage() {
     ? benchmarkRuns.find((run) => run.benchmark_split === "held_out"
       && run.metrics.cohort_version === benchmarkReadiness.heldOut.cohortVersion)
     : undefined;
+  const latestCompletedHeldOutRun = benchmarkRuns.find((run) =>
+    run.benchmark_split === "held_out" && run.status === "completed"
+  );
   const activeDevelopmentRun = latestDevelopmentRun
     && ["queued", "running", "failed"].includes(latestDevelopmentRun.status)
     ? latestDevelopmentRun
@@ -1536,6 +1539,50 @@ export default function ResearchBenchmarkPage() {
                   ? `${titleize(latestDevelopmentRun.metrics.provider)} · ${latestDevelopmentRun.metrics.model}`
                   : "Model resolves when the run is created."}
                 {latestDevelopmentRun.metrics.last_error ? ` · ${latestDevelopmentRun.metrics.last_error}` : ""}
+              </p>
+            </div>
+          )}
+          {latestCompletedHeldOutRun?.calculated_metrics && (
+            <div className="mt-4 border-t border-zinc-900 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">One-time held-out result</p>
+                  <p className="mt-1 text-sm font-medium text-emerald-300">
+                    {latestCompletedHeldOutRun.release_readiness.ready ? "Production gates passed" : "Production gates not passed"}
+                  </p>
+                </div>
+                <p className="text-xs text-zinc-600">Cohort is revealed and archive-only</p>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Cases</p>
+                  <p className="mt-1 text-sm text-zinc-300">{latestCompletedHeldOutRun.result_count} / {latestCompletedHeldOutRun.metrics.case_ids?.length || 0}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Finalists</p>
+                  <p className="mt-1 text-sm text-zinc-300">{latestCompletedHeldOutRun.calculated_metrics.finalistsAbove80}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Precision &gt;80</p>
+                  <p className="mt-1 text-sm text-zinc-300">{percent(latestCompletedHeldOutRun.calculated_metrics.precisionAbove80)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Finalist audit</p>
+                  <p className="mt-1 text-sm text-zinc-300">{percent(latestCompletedHeldOutRun.calculated_metrics.finalistAuditPassRate)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Outcome agreement</p>
+                  <p className="mt-1 text-sm text-zinc-300">{percent(latestCompletedHeldOutRun.calculated_metrics.outcomeAgreementRate)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Spend</p>
+                  <p className="mt-1 text-sm text-zinc-300">${(latestCompletedHeldOutRun.total_cost_microusd / 1_000_000).toFixed(3)}</p>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-zinc-600">
+                {latestCompletedHeldOutRun.metrics.provider && latestCompletedHeldOutRun.metrics.model
+                  ? `${titleize(latestCompletedHeldOutRun.metrics.provider)} · ${latestCompletedHeldOutRun.metrics.model}`
+                  : "Model metadata unavailable."}
               </p>
             </div>
           )}

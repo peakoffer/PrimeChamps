@@ -116,7 +116,18 @@ No metric is considered passed when its denominator is zero. Fewer than ten reco
 
 The runtime enforces that last rule separately from target coverage. A short or empty qualified list is a valid no-padding result; `targetMet` and `shortfall` report coverage without marking an unsafe candidate as a quality pass.
 
-## Current data status (2026-08-20)
+## Verified release checkpoint (2026-08-20)
+
+Fresh cohort `onlyfans-athlete-challenge-v2-2026-08-21-8c41eeca` is complete, revealed, and archive-only.
+
+- Development replay `e4603422-5e21-4840-985e-297a77505550`: 16/16 cases, five finalists, 100% precision above 80, 100% finalist identity/21+/source/audit accuracy, zero unsupported claims, 93.75% audit-decision and outcome agreement, $1.133822 spend.
+- One-time held-out release `8d77f5f5-8336-461d-9547-df3cd5df9519`: 16/16 cases, eight finalists, eight true positives, zero false positives, eight true negatives, 100% precision above 80, 100% fit/achievability/outcome agreement, 100% finalist identity and corroborated 21+, 100% source verification and point-in-time compliance, 100% Auditor catch and finalist audit pass, zero unsupported material claims, $1.002448 spend.
+- Both runs used OpenRouter model `anthropic/claude-sonnet-5`, benchmark runner v30, case-level persisted checkpoints, and a $1.50 hard ceiling.
+- The benchmark runner is evaluation-only by construction: its mutation surface excludes athletes, pipeline candidates, messages, drafts, notifications, and outreach tables.
+
+This proves the historical scorer/Auditor release gates. It does not by itself prove fresh discovery yield for every sport. The remaining rollout check is bounded, evaluation-only live discovery across representative team, individual, and niche sports, with no tuning against this revealed cohort.
+
+## Historical data and recovery chronology (superseded by the verified checkpoint above)
 
 ### Verified v29 development baseline
 
