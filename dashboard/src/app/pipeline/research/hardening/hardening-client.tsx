@@ -184,6 +184,11 @@ export default function HardeningClient() {
   const confirmationArchetypes = Array.from(new Set(latestCanonicalCases.map((item) => item.archetype)))
     .filter((archetype) => !confirmedArchetypes.has(archetype));
   const confirmationFitsBudget = spent + confirmationArchetypes.length * 2_000_000 <= limit;
+  const weakRerunArchetypes = latestCanonicalCases
+    .filter((item) => item.status === "completed" && item.verdict !== "passed")
+    .map((item) => item.archetype);
+  const weakRerunsFitBudget = spent + weakRerunArchetypes.length * 1_000_000
+    <= (campaign?.preconfirmation_stop_microusd || 80_000_000);
   const thirdReplicateArchetypes = Array.from(new Set([
     "adaptive", "precision", "winter", "general",
     ...Array.from(new Set(latestCanonicalCases.map((item) => item.archetype))).filter((archetype) => {
@@ -231,6 +236,9 @@ export default function HardeningClient() {
             <>
               {untouchedPending > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
                 <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
+              </button>}
+              {weakRerunArchetypes.length > 0 && weakRerunsFitBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", weakRerunArchetypes, "targeted_rerun")} disabled={acting !== null}>
+                <RefreshCw className="h-4 w-4" /> Rerun {weakRerunArchetypes.length} weak archetypes
               </button>}
               {campaign && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged", "motorsport"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 4 regression controls
