@@ -52,6 +52,12 @@ Source-exhaustion notes:
 - Skiing: 88 sources checked; four exact people found, but no scoring dossier survived the full evidence funnel.
 - Esports: 64 sources checked; ten exact people found, but none passed source, sport, and public Instagram identity gates.
 
+Shadow-audit observations that did not change a disposition:
+
+- Adaptive track: Opus agreed the athletes could not advance, but noted that Paralympic championship evidence was on-sport even where the deterministic sport gate said otherwise.
+- Equestrian: Opus agreed the athletes could not advance, but identified FEI jumping and Global Champions evidence as on-sport; the authoritative-domain classification needs expansion.
+- Esports: Opus agreed the athletes could not advance, but identified a team roster announcement as on-sport while still rejecting it as non-independent and insufficient for identity, age, audience, creator, and contact gates.
+
 ## Clean regression controls
 
 | Sport | Verdict | Exact people | Scored | Finalists | Under-21 blocked before scoring | Findings |
@@ -68,6 +74,18 @@ Source-exhaustion notes:
 - Motocross ontology and bounded OnlyFans provider recovery were corrected and confirmed without promoting a false match.
 - Historical provider failures become non-blocking only after evidence-backed recovery; the campaign retains one resolved provider failure and zero unresolved failures.
 - The workflow's outer loop incorrectly stopped confirmation batches after $40 even though batch admission reserved spend through $50. Commit `1030aa0` removed the contradictory stop, gave confirmation runs the correct remaining ceiling, and added resumable untouched cases. The queued esports case then completed at a final campaign spend of $43.
+
+## Sanitized evidence references
+
+Representative public sources retained by the independent audits:
+
+- Finalist confirmation: `https://en.wikipedia.org/wiki/Chance_Hymas`, `https://racerxonline.com/rider/chance-hymas`, `https://honda.racing/ama-sx/profiles/2475`, `https://www.vurbmoto.com/team-honda-signs-chance-hymas/`, `https://results.promotocross.com/results/`, `https://instagram.com/chancehymas_`.
+- Adaptive investigation: `https://www.paralympic.org/news/new-delhi-2025-day-one-medallists`.
+- Equestrian investigation: `https://www.fei.org/jumping`, `https://www.gcglobalchampions.com/en-us/news/from-opportunity-to-impact-the-power-of-gcl-s-u25-rule`.
+- Esports investigation: `https://100thieves.com/blogs/all/2026-valorant-roster-update`.
+- Skiing investigation: `https://www.fis-ski.com/alpine-skiing/news/2025-26/rassat-s-rise-continues-with-adelboden-slalom-victory`, `https://www.fis-ski.com/alpine-skiing/news/2025-26/von-allmen-stuns-on-the-downhill-to-become-first-olympic-champion-of-milano-cortina`.
+
+No private tokens, raw provider payloads, email data, or sensitive internal URLs are included.
 
 ## Acceptance status
 

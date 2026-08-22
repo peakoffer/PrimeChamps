@@ -48,6 +48,29 @@
     {"sport":"surfing","verdict":"passed","exactPeople":73,"scored":6,"finalists":0,"auditedRejected":2,"under21Blocked":1,"findings":0},
     {"sport":"gymnastics","verdict":"passed","exactPeople":77,"scored":9,"finalists":0,"auditedRejected":2,"under21Blocked":6,"findings":0}
   ],
+  "shadowAuditObservations": [
+    {"archetype":"adaptive","outcomeChanged":false,"observation":"Paralympic championship evidence was on-sport even where the deterministic sport gate said otherwise."},
+    {"archetype":"precision","outcomeChanged":false,"observation":"FEI jumping and Global Champions evidence was on-sport; authoritative-domain coverage should expand."},
+    {"archetype":"general","outcomeChanged":false,"observation":"A team roster announcement was on-sport but remained non-independent and insufficient for finalist gates."}
+  ],
+  "sanitizedEvidenceReferences": {
+    "finalistConfirmation": [
+      "https://en.wikipedia.org/wiki/Chance_Hymas",
+      "https://racerxonline.com/rider/chance-hymas",
+      "https://honda.racing/ama-sx/profiles/2475",
+      "https://www.vurbmoto.com/team-honda-signs-chance-hymas/",
+      "https://results.promotocross.com/results/",
+      "https://instagram.com/chancehymas_"
+    ],
+    "sourceExhaustionInvestigations": [
+      "https://www.paralympic.org/news/new-delhi-2025-day-one-medallists",
+      "https://www.fei.org/jumping",
+      "https://www.gcglobalchampions.com/en-us/news/from-opportunity-to-impact-the-power-of-gcl-s-u25-rule",
+      "https://100thieves.com/blogs/all/2026-valorant-roster-update",
+      "https://www.fis-ski.com/alpine-skiing/news/2025-26/rassat-s-rise-continues-with-adelboden-slalom-victory",
+      "https://www.fis-ski.com/alpine-skiing/news/2025-26/von-allmen-stuns-on-the-downhill-to-become-first-olympic-champion-of-milano-cortina"
+    ]
+  },
   "safety": {
     "evaluationOnly": true,
     "liveMutationCount": 0,
