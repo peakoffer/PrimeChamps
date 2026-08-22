@@ -104,6 +104,7 @@ export function evaluateDiscoveryEvidence(input: {
   context: string;
   source?: string;
   evidence?: CandidateEvidence[];
+  audienceScope?: "women" | "men" | "mixed_global";
 }): DiscoveryQuality {
   const strategy = getSportResearchStrategy(input.sport);
   const evidence = input.evidence || [];
@@ -127,7 +128,9 @@ export function evaluateDiscoveryEvidence(input: {
   const sportMatched = !excludedMatch && (sportDomainMatched
     || strategy.canonicalTerms.some((term) => hasPhrase(normalizedAttributableEvidence, term)));
   const competitiveAthlete = hasCompetitiveAthleteSignal(attributableEvidence);
-  const targetCategoryMatched = !conflictsWithFemaleCompetitionCategory(attributableEvidence);
+  const targetCategoryMatched = input.audienceScope === "mixed_global"
+    ? true
+    : !conflictsWithFemaleCompetitionCategory(attributableEvidence);
   const targetAgeEligible = !underTwentyOne && !abovePriorityAge;
   const emergingCareer = !legacyCareer;
   const authoritativeSource = evidence.some((item) => {

@@ -14,6 +14,7 @@ import {
 } from "../src/lib/research/hardening.ts";
 import { buildMixedGlobalDiscoveryPlan, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
 import { evaluatePreScoringAgeGate } from "../src/lib/research/scoring.ts";
+import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.ts";
 
 test("hardening matrix covers all 13 materially distinct archetypes exactly once", () => {
   assert.equal(RESEARCH_HARDENING_MATRIX.length, 13);
@@ -30,6 +31,25 @@ test("mixed global discovery has explicit women, men, and neutral lanes without 
   assert.ok(plan[0].queries.every((query) => query.startsWith("women ")));
   assert.ok(plan[1].queries.every((query) => query.startsWith("men ")));
   assert.ok(plan[2].queries.every((query) => !/^women\b|^men\b/i.test(query)));
+});
+
+test("mixed global evidence verification does not reapply the legacy women-only gate", () => {
+  const result = evaluateDiscoveryEvidence({
+    name: "Cameron Wood",
+    sport: "cycling",
+    context: "",
+    audienceScope: "mixed_global",
+    evidence: [{
+      url: "https://www.uci.org/athlete/cameron-wood",
+      title: "Cameron Wood - UCI BMX Racing",
+      claim: "Cycling athlete Cameron Wood won a Men's Elite UCI BMX Racing World Cup round in 2026.",
+      sourceExcerpt: "Cycling athlete Cameron Wood won a Men's Elite UCI BMX Racing World Cup round in 2026.",
+      provider: "UCI",
+    }],
+  });
+  assert.equal(result.targetCategoryMatched, true);
+  assert.equal(result.sportMatched, true);
+  assert.equal(result.passed, true);
 });
 
 test("campaign batching never exceeds three concurrent evaluations", () => {

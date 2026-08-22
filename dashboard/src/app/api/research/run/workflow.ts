@@ -597,7 +597,10 @@ interface EnrichedAthlete extends DiscoveredAthlete {
   onlyfans_platform_reason?: string;
 }
 
-function verifyDiscoveredAthlete(athlete: DiscoveredAthlete): DiscoveredAthlete {
+function verifyDiscoveredAthlete(
+  athlete: DiscoveredAthlete,
+  audienceScope?: ResearchConfig["audienceScope"]
+): DiscoveredAthlete {
   const evidenceHandle = rankInstagramSearchCandidates({
     athleteName: athlete.name,
     sport: athlete.sport,
@@ -611,7 +614,7 @@ function verifyDiscoveredAthlete(athlete: DiscoveredAthlete): DiscoveredAthlete 
     ...athlete,
     known_instagram_handle: athlete.known_instagram_handle
       || evidenceHandle,
-    discovery_verification: evaluateDiscoveryEvidence(athlete),
+    discovery_verification: evaluateDiscoveryEvidence({ ...athlete, audienceScope }),
   };
 }
 
@@ -686,7 +689,7 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
             : undefined,
       },
       discovery_lane: "memory",
-    });
+    }, input.config.audienceScope);
     return candidate.discovery_verification?.passed === true ? [candidate] : [];
   });
   return Array.from(new Map(remembered.map((candidate) => [researchCandidateKey(candidate.name, candidate.sport), candidate])).values()).slice(0, 40);
@@ -1760,12 +1763,12 @@ async function repairDiscoveryEvidenceWithExactSearch(
   maximumLookups: number
 ) {
   if (!PERPLEXITY_API_KEY || athletes.length === 0 || maximumLookups <= 0) {
-    return athletes.map(verifyDiscoveredAthlete);
+    return athletes.map((athlete) => verifyDiscoveredAthlete(athlete));
   }
 
   const currentYear = new Date().getUTCFullYear();
   const lookupCandidates = athletes
-    .map(verifyDiscoveredAthlete)
+    .map((athlete) => verifyDiscoveredAthlete(athlete))
     .filter((athlete) => athlete.discovery_verification?.passed !== true)
     .slice(0, maximumLookups);
   const repairedByName = new Map<string, DiscoveredAthlete>();
@@ -5721,7 +5724,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         firstWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })),
       ];
       const firstWaveEvidenceCount = [...candidateMemory, ...firstWave].filter((athlete) =>
-        verifyDiscoveredAthlete(athlete).discovery_verification?.passed === true
+        verifyDiscoveredAthlete(athlete, config.audienceScope).discovery_verification?.passed === true
       ).length;
       await updateResearchProgress(researchLogId, "discovering_candidates", {
         sourced: candidateMemory.length + firstWave.length,
@@ -5743,7 +5746,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         );
         discoveryWaves.push(secondWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
         const secondWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
-          verifyDiscoveredAthlete(athlete).discovery_verification?.passed === true
+          verifyDiscoveredAthlete(athlete, config.audienceScope).discovery_verification?.passed === true
         ).length;
         await updateResearchProgress(researchLogId, "discovering_candidates", {
           sourced: discoveryWaves.flat().length,
@@ -5765,7 +5768,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           );
           discoveryWaves.push(thirdWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
           const thirdWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
-            verifyDiscoveredAthlete(athlete).discovery_verification?.passed === true
+            verifyDiscoveredAthlete(athlete, config.audienceScope).discovery_verification?.passed === true
           ).length;
           await updateResearchProgress(researchLogId, "discovering_candidates", {
             sourced: discoveryWaves.flat().length,
@@ -5783,8 +5786,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       for (const athlete of discoveryWaves.flat()) {
         const key = researchCandidateKey(athlete.name, athlete.sport);
         const previous = mergedDiscoveries.get(key);
-        const nextVerified = verifyDiscoveredAthlete(athlete);
-        const previousVerified = previous ? verifyDiscoveredAthlete(previous) : undefined;
+        const nextVerified = verifyDiscoveredAthlete(athlete, config.audienceScope);
+        const previousVerified = previous ? verifyDiscoveredAthlete(previous, config.audienceScope) : undefined;
         const preferred = previousVerified?.discovery_verification?.passed === true
           && nextVerified.discovery_verification?.passed !== true
           ? previousVerified
@@ -5808,11 +5811,13 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           },
         });
       }
-      allDiscoveredAthletes = Array.from(mergedDiscoveries.values()).map(verifyDiscoveredAthlete);
+      allDiscoveredAthletes = Array.from(mergedDiscoveries.values())
+        .map((athlete) => verifyDiscoveredAthlete(athlete, config.audienceScope));
     }
     // Re-evaluate checkpoints with the current quality contract so a workflow
     // resumed after a deployment cannot bypass a newly added evidence gate.
-    allDiscoveredAthletes = allDiscoveredAthletes.map(verifyDiscoveredAthlete);
+    allDiscoveredAthletes = allDiscoveredAthletes
+      .map((athlete) => verifyDiscoveredAthlete(athlete, config.audienceScope));
 
     // A wider identity pool gives emerging prospects a fair chance to survive
     // handle resolution and follower filters while the durable workflow keeps

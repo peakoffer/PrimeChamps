@@ -651,7 +651,8 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
   if (runIds.length) await admin.from("research_logs").update({
     cancel_requested_at: now, status: "cancelled", phase: "cancelled",
     error_message: "Cancelled with hardening campaign", completed_at: now, heartbeat_at: now,
-  }).in("id", runIds).eq("organization_id", organizationId).eq("is_evaluation", true);
+  }).in("id", runIds).eq("organization_id", organizationId).eq("is_evaluation", true)
+    .in("status", ["queued", "running"]);
   await admin.from("research_hardening_cases").update({ status: "cancelled", completed_at: now })
     .eq("campaign_id", campaignId).eq("organization_id", organizationId).in("status", ["queued", "running"]);
   const { data: reconciledCases, error: reconcileError } = await admin.from("research_hardening_cases")
