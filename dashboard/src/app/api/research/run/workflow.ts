@@ -79,6 +79,10 @@ import {
   type ResearchObjective,
 } from "@/lib/research/scoring";
 import {
+  selectFreshPriorUnder21SafetyEvidence,
+  type PriorAgeSafetyRow,
+} from "@/lib/research/prior-age-safety";
+import {
   DEFAULT_RECRUITING_PROFILE,
   formatRecruitingProfileForPrompt,
   type RecruitingProfile,
@@ -3423,6 +3427,63 @@ type AthleteAgeLookupResult = {
   researchEvidence: NonNullable<DiscoveredAthlete["evidence"]>;
 };
 
+async function loadPriorUnder21SafetyEvidence(
+  athletes: EnrichedAthlete[],
+  input: ResearchWorkflowInput,
+  targetAgeMin: number
+) {
+  const handles = Array.from(new Set(athletes.flatMap((athlete) =>
+    athlete.instagram_handle ? [athlete.instagram_handle.toLowerCase()] : []
+  )));
+  const byCandidateKey = new Map<string, AthleteAgeLookupResult>();
+  if (handles.length === 0) return byCandidateKey;
+  const { data, error } = await supabase.from("research_candidates")
+    .select("research_log_id,name,sport,instagram_handle,identity_status,age,age_verified,age_source,source_evidence,gate_results,updated_at")
+    .eq("organization_id", input.organizationId)
+    .neq("research_log_id", input.researchLogId)
+    .eq("identity_status", "verified")
+    .eq("age_verified", true)
+    .lt("age", targetAgeMin)
+    .in("instagram_handle", handles)
+    .gte("updated_at", new Date(Date.now() - 7 * 86_400_000).toISOString())
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  const rows = (data || []) as PriorAgeSafetyRow[];
+  for (const athlete of athletes) {
+    if (!athlete.instagram_handle) continue;
+    const prior = selectFreshPriorUnder21SafetyEvidence({
+      candidate: { name: athlete.name, sport: athlete.sport, instagramHandle: athlete.instagram_handle },
+      currentResearchLogId: input.researchLogId,
+      targetAgeMin,
+      rows,
+    });
+    if (!prior) continue;
+    const gates = prior.gate_results as Record<string, unknown>;
+    const corroboratingSources = Array.isArray(gates.age_sources)
+      ? gates.age_sources as VerifiedAthleteAge["corroboratingSources"]
+      : [];
+    const firstSource = corroboratingSources[0];
+    const researchEvidence = Array.isArray(prior.source_evidence)
+      ? prior.source_evidence.slice(0, 12) as NonNullable<DiscoveredAthlete["evidence"]>
+      : [];
+    byCandidateKey.set(researchCandidateKey(athlete.name, athlete.sport), {
+      age: prior.age,
+      birthYear: firstSource?.birthYear ?? null,
+      isMinor: prior.age !== null && prior.age < 18,
+      source: prior.age_source || firstSource?.source || null,
+      evidence: firstSource?.evidence || "Previously corroborated under-21 safety evidence",
+      precision: firstSource?.precision || null,
+      corroborated: true,
+      corroboratingSources,
+      researchEvidence,
+    });
+  }
+  if (byCandidateKey.size > 0) {
+    log(`Reused fresh, exact-identity under-21 safety evidence for ${byCandidateKey.size} candidate${byCandidateKey.size === 1 ? "" : "s"}`);
+  }
+  return byCandidateKey;
+}
+
 function trustedAgeDomainsForSport(sport: string) {
   return [
     "britannica.com",
@@ -3920,6 +3981,9 @@ async function scoreAthletes(
       break;
     }
     const batch = pendingAthletes.slice(index, index + scoringBatchSize);
+    const targetAgeMin = config.profileSnapshot?.parameters.target_age_min
+      ?? DEFAULT_RECRUITING_PROFILE.parameters.target_age_min;
+    const priorUnder21ByCandidate = await loadPriorUnder21SafetyEvidence(batch, input, targetAgeMin);
     const onlyFansPlatformByCandidate = await lookupOnlyFansPlatformSignals(batch);
     const apifyAgeByCandidate = await lookupAthleteAgesWithApify(batch);
     const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(
@@ -3956,9 +4020,13 @@ async function scoreAthletes(
             ...(apifyAge?.researchEvidence || []),
             ...(openAiAge?.researchEvidence || []),
           ]);
-      const ageInfo = fallbackAge?.corroborated
+      const freshAgeInfo = fallbackAge?.corroborated
         ? fallbackAge
         : preferredAge || fallbackAge || await lookupAthleteAge(athlete.name, athlete.sport, athlete.evidence);
+      // Fresh exact-identity, two-source under-21 evidence is a durable safety
+      // fact during a hardening wave. A temporary provider miss must never turn
+      // it back into "unknown" and allow paid scoring.
+      const ageInfo = priorUnder21ByCandidate.get(candidateKey) || freshAgeInfo;
       const mergedEvidence = Array.from(new Map([
         ...(athlete.evidence || []),
         ...ageInfo.researchEvidence,

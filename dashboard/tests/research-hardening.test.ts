@@ -17,6 +17,7 @@ import {
 import { buildMixedGlobalDiscoveryPlan, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
 import { evaluatePreScoringAgeGate } from "../src/lib/research/scoring.ts";
 import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.ts";
+import { selectFreshPriorUnder21SafetyEvidence } from "../src/lib/research/prior-age-safety.ts";
 
 test("hardening matrix covers all 13 materially distinct archetypes exactly once", () => {
   assert.equal(RESEARCH_HARDENING_MATRIX.length, 13);
@@ -124,6 +125,50 @@ test("known under-21 candidates are blocked before paid scoring", () => {
   assert.equal(evaluatePreScoringAgeGate({ age: 20 }).allowed, false);
   assert.equal(evaluatePreScoringAgeGate({ age: 21 }).allowed, true);
   assert.equal(evaluatePreScoringAgeGate({ age: null }).allowed, true);
+});
+
+test("fresh corroborated under-21 evidence survives a provider miss on rerun", () => {
+  const now = Date.parse("2026-08-22T04:00:00Z");
+  const base = {
+    research_log_id: "prior-run",
+    name: "Kayden Minear",
+    sport: "motocross",
+    instagram_handle: "kayden_minear",
+    identity_status: "verified",
+    age: 19,
+    age_verified: true,
+    age_source: "https://worldsupercrosschampionship.com/riders/kayden-minear/",
+    source_evidence: [],
+    gate_results: {
+      age_corroborated: true,
+      age_sources: [
+        { age: 19, hostname: "worldsupercrosschampionship.com" },
+        { age: 19, hostname: "motonowblog.com" },
+      ],
+    },
+    updated_at: "2026-08-22T03:00:00Z",
+  };
+  assert.equal(selectFreshPriorUnder21SafetyEvidence({
+    candidate: { name: "Kayden Minear", sport: "motocross", instagramHandle: "kayden_minear" },
+    currentResearchLogId: "current-run",
+    targetAgeMin: 21,
+    rows: [base],
+    nowMs: now,
+  })?.age, 19);
+  assert.equal(selectFreshPriorUnder21SafetyEvidence({
+    candidate: { name: "Different Athlete", sport: "motocross", instagramHandle: "kayden_minear" },
+    currentResearchLogId: "current-run",
+    targetAgeMin: 21,
+    rows: [base],
+    nowMs: now,
+  }), null);
+  assert.equal(selectFreshPriorUnder21SafetyEvidence({
+    candidate: { name: "Kayden Minear", sport: "motocross", instagramHandle: "kayden_minear" },
+    currentResearchLogId: "current-run",
+    targetAgeMin: 21,
+    rows: [{ ...base, gate_results: { age_corroborated: true, age_sources: [{ age: 19, hostname: "one.example" }] } }],
+    nowMs: now,
+  }), null);
 });
 
 test("cycling recognizes UCI disciplines and the governing body as authoritative", () => {
