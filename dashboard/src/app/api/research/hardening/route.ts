@@ -26,11 +26,16 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
-    const body = await request.json().catch(() => ({})) as { name?: unknown };
+    const body = await request.json().catch(() => ({})) as { name?: unknown; budgetUsd?: unknown };
+    const requestedBudget = Number(body.budgetUsd ?? 100);
+    if (!Number.isFinite(requestedBudget) || requestedBudget < 25 || requestedBudget > 100) {
+      return NextResponse.json({ error: "Campaign budget must be between $25 and $100" }, { status: 400 });
+    }
     const campaignId = await createHardeningCampaign({
       organizationId: user.organizationId,
       requestedByUserId: user.id,
       name: typeof body.name === "string" ? body.name : undefined,
+      budgetMicrousd: Math.round(requestedBudget * 1_000_000),
     });
     const workflow = await start(runResearchHardeningCampaign, [{
       campaignId,

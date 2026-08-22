@@ -6,11 +6,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_RECRUITING_PROFILE, type RecruitingProfile } from "@/lib/research/intelligence";
 import { RESEARCH_PROMPT_VERSION } from "@/lib/research/scoring";
 import { getResearchEvaluationBudget, type ResearchEvaluationBudget } from "@/lib/research/evaluation-budget";
+import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import {
   HARDENING_BUDGET_LIMIT_MICROUSD,
   HARDENING_CONFIRMATION_RESERVE_MICROUSD,
   HARDENING_MAX_CONCURRENCY,
-  HARDENING_PRE_CONFIRMATION_STOP_MICROUSD,
   HARDENING_STAGE_RESERVATION_MICROUSD,
   RESEARCH_HARDENING_MATRIX,
   RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE,
@@ -44,6 +44,7 @@ export type PreparedHardeningCase = {
   archetype: HardeningArchetype;
   sport: string;
   stage: HardeningStage;
+  profileVariant: "baseline" | "guided";
   workflowInput: ResearchWorkflowInput;
 };
 
@@ -78,9 +79,38 @@ type HardeningSummaryRow = {
   cost_microusd: number | string | null;
   metrics: unknown;
   defects: unknown;
+  profile_variant?: string | null;
 };
 
-function summarizeHardeningCaseRows(cases: HardeningSummaryRow[]) {
+function profileComparisonFromRows(rows: HardeningSummaryRow[]): ProfileComparisonMetrics {
+  const scored = rows.reduce((sum, row) => sum + integer(object(row.metrics).scoredCandidates), 0);
+  const highScore = rows.reduce((sum, row) => sum + integer(object(row.metrics).highScoreCandidates), 0);
+  const finalists = rows.reduce((sum, row) => sum + integer(object(row.metrics).finalists), 0);
+  const aligned = rows.reduce((sum, row) => sum + integer(object(row.metrics).alignedCandidates), 0);
+  const exploration = rows.reduce((sum, row) => sum + integer(object(row.metrics).explorationCandidates), 0);
+  const cost = rows.reduce((sum, row) => sum + integer(row.cost_microusd), 0);
+  const safetyRegressions = rows.reduce((sum, row) => {
+    const metrics = object(row.metrics);
+    return sum
+      + integer(metrics.wrongPersonReachedScoring)
+      + integer(metrics.wrongSportReachedScoring)
+      + integer(metrics.knownUnder21ReachedScoring)
+      + integer(metrics.unsupportedMaterialClaims);
+  }, 0);
+  return {
+    safetyRegressions,
+    scoredCandidateYield: rows.length > 0 ? scored / rows.length : 0,
+    costPerScoredCandidate: scored > 0 ? cost / scored : 1_000_000_000_000,
+    explorationShare: aligned + exploration > 0 ? exploration / (aligned + exploration) : 0,
+    heldOutPrecision80Plus: highScore > 0 ? finalists / highScore : 0,
+  };
+}
+
+function summarizeHardeningCaseRows(
+  cases: HardeningSummaryRow[],
+  budgetLimitMicrousd = HARDENING_BUDGET_LIMIT_MICROUSD,
+  confirmationReserveMicrousd = HARDENING_CONFIRMATION_RESERVE_MICROUSD
+) {
   const totalCost = cases.reduce((sum, item) => sum + integer(item.cost_microusd), 0);
   const unresolvedDefects = cases.flatMap((item) => array(item.defects).map(object))
     .filter((defect) => defect.resolved !== true).length;
@@ -121,8 +151,13 @@ function summarizeHardeningCaseRows(cases: HardeningSummaryRow[]) {
       critical_defects: criticalDefects,
       provider_failures: providerFailures,
       safety_stops: safetyStops,
-      budget_remaining_microusd: Math.max(0, HARDENING_BUDGET_LIMIT_MICROUSD - totalCost),
-      confirmation_reserve_microusd: HARDENING_CONFIRMATION_RESERVE_MICROUSD,
+      duplicate_suppressions: cases.reduce((sum, item) => sum + integer(object(item.metrics).duplicatesSuppressedBeforeEnrichment), 0),
+      paid_calls_avoided: cases.reduce((sum, item) => sum + integer(object(item.metrics).paidCallsAvoided), 0),
+      scored_candidates: cases.reduce((sum, item) => sum + integer(object(item.metrics).scoredCandidates), 0),
+      exploration_candidates: cases.reduce((sum, item) => sum + integer(object(item.metrics).explorationCandidates), 0),
+      aligned_candidates: cases.reduce((sum, item) => sum + integer(object(item.metrics).alignedCandidates), 0),
+      budget_remaining_microusd: Math.max(0, budgetLimitMicrousd - totalCost),
+      confirmation_reserve_microusd: confirmationReserveMicrousd,
     },
   };
 }
@@ -148,8 +183,16 @@ export async function createHardeningCampaign(input: {
   organizationId: string;
   requestedByUserId: string;
   name?: string;
+  budgetMicrousd?: number;
+  campaignType?: "cross_sport" | "profile_validation" | "targeted";
+  profileVersionId?: string;
+  baselineProfileVersionId?: string;
 }) {
   const admin = createAdminClient({ disableRealtime: true });
+  const campaignType = input.campaignType || "cross_sport";
+  if (campaignType === "profile_validation" && (!input.profileVersionId || !input.baselineProfileVersionId)) {
+    throw new Error("Paired profile validation requires both guided and baseline profile versions");
+  }
   const { data: active } = await admin.from("research_hardening_campaigns")
     .select("id,status")
     .eq("organization_id", input.organizationId)
@@ -158,6 +201,12 @@ export async function createHardeningCampaign(input: {
     .maybeSingle();
   if (active) throw new Error("An active research hardening campaign already exists");
   const models = await resolveHardeningModelSnapshot();
+  const budgetLimitMicrousd = Math.min(
+    HARDENING_BUDGET_LIMIT_MICROUSD,
+    Math.max(25_000_000, integer(input.budgetMicrousd || HARDENING_BUDGET_LIMIT_MICROUSD))
+  );
+  const confirmationReserveMicrousd = Math.min(20_000_000, Math.round(budgetLimitMicrousd * 0.2));
+  const preconfirmationStopMicrousd = budgetLimitMicrousd - confirmationReserveMicrousd;
   const { data: campaign, error } = await admin.from("research_hardening_campaigns").insert({
     organization_id: input.organizationId,
     requested_by_user_id: input.requestedByUserId,
@@ -170,29 +219,57 @@ export async function createHardeningCampaign(input: {
     challenger_model_id: models.challenger.model,
     model_route_snapshot: models.routeSnapshot,
     matrix: RESEARCH_HARDENING_MATRIX,
-    budget_limit_microusd: HARDENING_BUDGET_LIMIT_MICROUSD,
-    confirmation_reserve_microusd: HARDENING_CONFIRMATION_RESERVE_MICROUSD,
+    budget_limit_microusd: budgetLimitMicrousd,
+    confirmation_reserve_microusd: confirmationReserveMicrousd,
+    preconfirmation_stop_microusd: preconfirmationStopMicrousd,
+    campaign_type: campaignType,
+    profile_version_id: input.profileVersionId || null,
+    baseline_profile_version_id: input.baselineProfileVersionId || null,
     max_concurrency: HARDENING_MAX_CONCURRENCY,
     summary: {
       evaluation_only: true,
       mutation_surfaces: [],
-      stages: { smoke: 13, targeted_rerun: 0, confirmation: 0, control: 0 },
+      stages: campaignType === "profile_validation"
+        ? { smoke: 0, targeted_rerun: 0, confirmation: 0, control: 8 }
+        : { smoke: 13, targeted_rerun: 0, confirmation: 0, control: 0 },
     },
   }).select("id").single();
   if (error || !campaign) throw error || new Error("Could not create hardening campaign");
-  const { error: caseError } = await admin.from("research_hardening_cases").insert(
-    RESEARCH_HARDENING_MATRIX.map((entry) => ({
+  let caseError: { message?: string } | null = null;
+  if (campaignType === "profile_validation") {
+    const rows = Object.entries(RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE).flatMap(([archetype, sport]) =>
+      (["baseline", "guided"] as const).map((profileVariant) => ({
+        organization_id: input.organizationId,
+        campaign_id: campaign.id,
+        archetype,
+        sport,
+        stage: "control",
+        attempt: 1,
+        replicate_number: 1,
+        profile_variant: profileVariant,
+        status: "queued",
+        official_model_id: models.officialModel,
+        challenger_model_id: models.challenger.model,
+      })));
+    const result = await admin.from("research_hardening_cases").insert(rows);
+    caseError = result.error;
+  } else {
+    const rows = RESEARCH_HARDENING_MATRIX.map((entry) => ({
       organization_id: input.organizationId,
       campaign_id: campaign.id,
       archetype: entry.archetype,
       sport: entry.sport,
       stage: "smoke",
       attempt: 1,
+      replicate_number: 1,
+      profile_variant: "baseline",
       status: "queued",
       official_model_id: models.officialModel,
       challenger_model_id: models.challenger.model,
-    }))
-  );
+    }));
+    const result = await admin.from("research_hardening_cases").insert(rows);
+    caseError = result.error;
+  }
   if (caseError) throw caseError;
   return campaign.id;
 }
@@ -251,14 +328,19 @@ export async function prepareHardeningBatch(input: {
     .select("id,version,name,compiled_profile")
     .eq("organization_id", input.campaign.organizationId).eq("status", "active").maybeSingle();
   if (profileError) throw profileError;
-  const storedProfile = object(activeProfile?.compiled_profile) as Partial<RecruitingProfile>;
-  const profile: RecruitingProfile = {
-    ...DEFAULT_RECRUITING_PROFILE,
-    ...storedProfile,
-    parameters: { ...DEFAULT_RECRUITING_PROFILE.parameters, ...(storedProfile.parameters || {}) },
-  };
+  const referencedProfileIds = Array.from(new Set([
+    campaign.profile_version_id,
+    campaign.baseline_profile_version_id,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)));
+  const { data: referencedProfiles, error: referencedProfileError } = referencedProfileIds.length > 0
+    ? await admin.from("research_profile_versions").select("id,version,name,compiled_profile")
+      .eq("organization_id", input.campaign.organizationId).in("id", referencedProfileIds)
+    : { data: [], error: null };
+  if (referencedProfileError) throw referencedProfileError;
+  const profileById = new Map((referencedProfiles || []).map((profile) => [profile.id, profile]));
+  if (activeProfile) profileById.set(activeProfile.id, activeProfile);
   const { data: cases, error: casesError } = await admin.from("research_hardening_cases")
-    .select("id,archetype,sport,stage,status,research_log_id")
+    .select("id,archetype,sport,stage,status,research_log_id,profile_variant")
     .eq("campaign_id", input.campaign.campaignId).eq("organization_id", input.campaign.organizationId)
     .in("id", input.caseIds);
   if (casesError) throw casesError;
@@ -269,12 +351,31 @@ export async function prepareHardeningBatch(input: {
     totalCostMicrousd: integer(campaign.total_cost_microusd),
     stage: batchStage,
     nextEstimatedCostMicrousd: projectedReservation,
+    budgetLimitMicrousd: integer(campaign.budget_limit_microusd),
+    preConfirmationStopMicrousd: integer(campaign.preconfirmation_stop_microusd),
+    confirmationReserveMicrousd: integer(campaign.confirmation_reserve_microusd),
   });
   if (!spend.allowed) throw new Error(spend.reason);
   const prepared: PreparedHardeningCase[] = [];
   for (const item of cases || []) {
     if (item.status !== "queued") continue;
     const stage = item.stage as HardeningStage;
+    const profileVariant = item.profile_variant === "guided" ? "guided" : "baseline";
+    const selectedProfileId = campaign.campaign_type === "profile_validation"
+      ? profileVariant === "guided"
+        ? campaign.profile_version_id
+        : campaign.baseline_profile_version_id
+      : activeProfile?.id;
+    const selectedProfile = selectedProfileId ? profileById.get(selectedProfileId) : activeProfile;
+    if (campaign.campaign_type === "profile_validation" && !selectedProfile) {
+      throw new Error(`The ${profileVariant} profile snapshot is missing`);
+    }
+    const storedProfile = object(selectedProfile?.compiled_profile) as Partial<RecruitingProfile>;
+    const profile: RecruitingProfile = {
+      ...DEFAULT_RECRUITING_PROFILE,
+      ...storedProfile,
+      parameters: { ...DEFAULT_RECRUITING_PROFILE.parameters, ...(storedProfile.parameters || {}) },
+    };
     const evaluationBudget = hardeningEvaluationBudget(stage);
     const config: ResearchConfig = {
       sportFocus: item.sport,
@@ -290,16 +391,16 @@ export async function prepareHardeningBatch(input: {
       evaluationMode: true,
       audienceScope: "mixed_global",
       evaluationBudget,
-      profileVersionId: activeProfile?.id,
-      profileVersion: activeProfile?.version,
-      profileName: activeProfile?.name || "Prime Champs baseline",
+      profileVersionId: selectedProfile?.id,
+      profileVersion: selectedProfile?.version,
+      profileName: selectedProfile?.name || "Prime Champs baseline",
       profileSnapshot: profile,
       targetRegions: [],
     };
     const { data: log, error: logError } = await admin.from("research_logs").insert({
       organization_id: input.campaign.organizationId,
       requested_by_user_id: input.campaign.requestedByUserId,
-      profile_version_id: activeProfile?.id || null,
+      profile_version_id: selectedProfile?.id || null,
       research_depth: evaluationBudget.depth,
       status: "queued",
       phase: "queued",
@@ -308,7 +409,9 @@ export async function prepareHardeningBatch(input: {
       is_evaluation: true,
       scoring_model: campaign.official_model_id,
       cost_limit_microusd: Math.max(0, (
-        stage === "confirmation" ? HARDENING_BUDGET_LIMIT_MICROUSD : HARDENING_PRE_CONFIRMATION_STOP_MICROUSD
+        stage === "confirmation"
+          ? integer(campaign.budget_limit_microusd)
+          : integer(campaign.preconfirmation_stop_microusd)
       ) - integer(campaign.total_cost_microusd)),
       prompt_version: RESEARCH_PROMPT_VERSION,
       context_summary: {
@@ -318,6 +421,7 @@ export async function prepareHardeningBatch(input: {
         hardening_campaign_id: campaign.id,
         hardening_case_id: item.id,
         hardening_stage: stage,
+        profile_variant: profileVariant,
         evaluation_budget: evaluationBudget,
         evaluation_only: true,
         mutation_surfaces: [],
@@ -340,6 +444,7 @@ export async function prepareHardeningBatch(input: {
       archetype: item.archetype as HardeningArchetype,
       sport: item.sport,
       stage,
+      profileVariant,
       workflowInput: {
         researchLogId: log.id,
         organizationId: input.campaign.organizationId,
@@ -376,7 +481,7 @@ export async function auditCompletedHardeningCase(input: {
   const challenger = object(campaign.model_route_snapshot).challenger as OpusRouteSnapshot | undefined;
   if (!challenger?.model || challenger.model !== campaign.challenger_model_id) throw new Error("Frozen Opus route is missing or inconsistent");
   const { data: log, error: logError } = await admin.from("research_logs")
-    .select("id,status,stats,final_results,error_message,provider_costs")
+    .select("id,status,stats,final_results,error_message,provider_costs,context_summary")
     .eq("id", input.prepared.workflowInput.researchLogId).eq("organization_id", input.campaign.organizationId).single();
   if (logError || !log) throw logError || new Error("Hardening research log not found");
   const { data: candidates, error: candidateError } = await admin.from("research_candidates")
@@ -493,6 +598,10 @@ export async function auditCompletedHardeningCase(input: {
     });
   }
   const allDefects = [...existingDefects, ...shadowDefects];
+  const lifecycleMemory = object(object(log.context_summary).lifecycle_memory);
+  const alignedCandidates = (candidates || []).filter((candidate) => object(candidate.raw_candidate).guidance_lane === "aligned").length;
+  const explorationCandidates = (candidates || []).filter((candidate) => object(candidate.raw_candidate).guidance_lane === "exploration").length;
+  const highScoreCandidates = (candidates || []).filter((candidate) => Number(candidate.score) >= 80).length;
   const scoreCost = (scores || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const auditCost = (audits || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const metrics: HardeningCaseMetrics = {
@@ -516,11 +625,24 @@ export async function auditCompletedHardeningCase(input: {
     under21BlockedBeforeScoring,
     unresolvedChallengerFindings: shadowDefects.filter((defect) => defect.category !== "provider_failure").length,
     providerFailures: Number(log.status === "error") + shadowDefects.filter((defect) => defect.category === "provider_failure").length,
+    duplicatesSuppressedBeforeEnrichment: integer(lifecycleMemory.duplicatesSuppressedBeforeEnrichment),
+    paidCallsAvoided: integer(lifecycleMemory.paidCallsAvoided),
+    alignedCandidates,
+    explorationCandidates,
+    explorationRatio: alignedCandidates + explorationCandidates > 0
+      ? explorationCandidates / (alignedCandidates + explorationCandidates)
+      : 0,
+    highScoreCandidates,
+    heldOutPrecision80Plus: highScoreCandidates > 0 ? finalists.length / highScoreCandidates : 0,
+    profileVariant: input.prepared.profileVariant,
   };
   const verdict = log.status === "error" ? "technical_failure" : evaluateHardeningCase(metrics, allDefects);
   const knownCostMicrousd = scoreCost + auditCost + shadowCost;
   const reservationMicrousd = HARDENING_STAGE_RESERVATION_MICROUSD[input.prepared.stage];
   const costMicrousd = Math.max(knownCostMicrousd, reservationMicrousd);
+  metrics.costPerScoredCandidateMicrousd = metrics.scoredCandidates > 0
+    ? Math.round(costMicrousd / metrics.scoredCandidates)
+    : 0;
   let resolvedPriorDefects = 0;
   if (input.prepared.stage !== "smoke") {
     const currentByName = new Map((candidates || []).map((candidate) => [candidateKey(candidate.name), candidate]));
@@ -611,12 +733,22 @@ auditCompletedHardeningCase.maxRetries = 1;
 export async function refreshHardeningCampaign(input: HardeningCampaignWorkflowInput) {
   "use step";
   const admin = createAdminClient({ disableRealtime: true });
-  const { data: cases, error } = await admin.from("research_hardening_cases")
-    .select("stage,status,verdict,cost_microusd,metrics,defects")
-    .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId);
+  const [{ data: cases, error }, { data: campaign, error: campaignError }] = await Promise.all([
+    admin.from("research_hardening_cases")
+      .select("stage,status,verdict,cost_microusd,metrics,defects,profile_variant")
+      .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId),
+    admin.from("research_hardening_campaigns")
+      .select("budget_limit_microusd,confirmation_reserve_microusd,campaign_type,profile_version_id")
+      .eq("id", input.campaignId).eq("organization_id", input.organizationId).single(),
+  ]);
   if (error) throw error;
+  if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
   const { totalCost, criticalDefects, providerFailures, safetyStops, queued, running, failed, summary } =
-    summarizeHardeningCaseRows((cases || []) as HardeningSummaryRow[]);
+    summarizeHardeningCaseRows(
+      (cases || []) as HardeningSummaryRow[],
+      integer(campaign.budget_limit_microusd),
+      integer(campaign.confirmation_reserve_microusd)
+    );
   const mustStop = safetyStops > 0 || criticalDefects > 0 || providerFailures >= 2;
   if (mustStop && queued > 0) {
     await admin.from("research_hardening_cases").update({
@@ -637,6 +769,24 @@ export async function refreshHardeningCampaign(input: HardeningCampaignWorkflowI
     completed_at: active ? null : new Date().toISOString(),
   }).eq("id", input.campaignId).eq("organization_id", input.organizationId);
   if (updateError) throw updateError;
+  if (!active && campaign.campaign_type === "profile_validation" && campaign.profile_version_id) {
+    const baseline = profileComparisonFromRows((cases || []).filter((item) => item.profile_variant === "baseline"));
+    const guided = profileComparisonFromRows((cases || []).filter((item) => item.profile_variant === "guided"));
+    const decision = evaluateProfileActivation(baseline, guided);
+    const validationPassed = status === "completed" && decision.allowed;
+    const { error: validationError } = await admin.from("research_profile_versions").update({
+      validation_status: validationPassed ? "passed" : "failed",
+      validation_metrics: {
+        campaignId: input.campaignId,
+        baseline,
+        guided,
+        blockers: status === "completed" ? decision.blockers : ["The paired validation campaign did not complete cleanly"],
+      },
+      validated_at: new Date().toISOString(),
+      validated_by_user_id: input.requestedByUserId,
+    }).eq("id", campaign.profile_version_id).eq("organization_id", input.organizationId).eq("status", "draft");
+    if (validationError) throw validationError;
+  }
   return { status, totalCostMicrousd: totalCost, summary };
 }
 refreshHardeningCampaign.maxRetries = 2;
@@ -645,10 +795,19 @@ export async function failHardeningCampaign(input: HardeningCampaignWorkflowInpu
   "use step";
   const message = error instanceof Error ? error.message : String(error);
   const admin = createAdminClient({ disableRealtime: true });
-  const { data: cases } = await admin.from("research_hardening_cases")
-    .select("status,verdict,cost_microusd,metrics,defects")
-    .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId);
-  const reconciled = summarizeHardeningCaseRows((cases || []) as HardeningSummaryRow[]);
+  const [{ data: cases }, { data: campaign }] = await Promise.all([
+    admin.from("research_hardening_cases")
+      .select("status,verdict,cost_microusd,metrics,defects")
+      .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId),
+    admin.from("research_hardening_campaigns")
+      .select("budget_limit_microusd,confirmation_reserve_microusd")
+      .eq("id", input.campaignId).eq("organization_id", input.organizationId).maybeSingle(),
+  ]);
+  const reconciled = summarizeHardeningCaseRows(
+    (cases || []) as HardeningSummaryRow[],
+    integer(campaign?.budget_limit_microusd || HARDENING_BUDGET_LIMIT_MICROUSD),
+    integer(campaign?.confirmation_reserve_microusd || HARDENING_CONFIRMATION_RESERVE_MICROUSD)
+  );
   await admin.from("research_hardening_campaigns").update({
     status: message.toLowerCase().includes("cancel") ? "cancelled" : "failed",
     error_message: message.slice(0, 1_000),
@@ -727,7 +886,8 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
   const { data: campaign, error } = await admin.from("research_hardening_campaigns")
     .update({ status: "cancelled", cancel_requested_at: now, completed_at: now })
     .eq("id", campaignId).eq("organization_id", organizationId)
-    .in("status", ["queued", "running", "paused"]).select("id,workflow_run_id").maybeSingle();
+    .in("status", ["queued", "running", "paused"])
+    .select("id,workflow_run_id,budget_limit_microusd,confirmation_reserve_microusd").maybeSingle();
   if (error) throw error;
   if (!campaign) throw new Error("Active hardening campaign not found");
   const { data: cases } = await admin.from("research_hardening_cases")
@@ -745,7 +905,11 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
     .select("status,verdict,cost_microusd,metrics,defects")
     .eq("campaign_id", campaignId).eq("organization_id", organizationId);
   if (reconcileError) throw reconcileError;
-  const reconciled = summarizeHardeningCaseRows((reconciledCases || []) as HardeningSummaryRow[]);
+  const reconciled = summarizeHardeningCaseRows(
+    (reconciledCases || []) as HardeningSummaryRow[],
+    integer(campaign.budget_limit_microusd),
+    integer(campaign.confirmation_reserve_microusd)
+  );
   await admin.from("research_hardening_campaigns").update({
     status: "cancelled",
     total_cost_microusd: reconciled.totalCost,
@@ -757,7 +921,8 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
 export async function resumeUntouchedHardeningCases(campaignId: string, organizationId: string) {
   const admin = createAdminClient({ disableRealtime: true });
   const { data: campaign, error: campaignError } = await admin.from("research_hardening_campaigns")
-    .select("id,status,total_cost_microusd,official_model_id,challenger_model_id").eq("id", campaignId).eq("organization_id", organizationId).single();
+    .select("id,status,total_cost_microusd,official_model_id,challenger_model_id,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
+    .eq("id", campaignId).eq("organization_id", organizationId).single();
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
   const currentModels = await resolveHardeningModelSnapshot();
   if (currentModels.officialModel !== campaign.official_model_id
@@ -780,7 +945,14 @@ export async function resumeUntouchedHardeningCases(campaignId: string, organiza
   for (const item of untouched || []) {
     const stage = item.stage as HardeningStage;
     const reservation = HARDENING_STAGE_RESERVATION_MICROUSD[stage];
-    const spend = campaignSpendDecision({ totalCostMicrousd: projectedCost, stage, nextEstimatedCostMicrousd: reservation });
+    const spend = campaignSpendDecision({
+      totalCostMicrousd: projectedCost,
+      stage,
+      nextEstimatedCostMicrousd: reservation,
+      budgetLimitMicrousd: integer(campaign.budget_limit_microusd),
+      preConfirmationStopMicrousd: integer(campaign.preconfirmation_stop_microusd),
+      confirmationReserveMicrousd: integer(campaign.confirmation_reserve_microusd),
+    });
     if (!spend.allowed) throw new Error(spend.reason);
     projectedCost += reservation;
   }
@@ -805,7 +977,7 @@ export async function addHardeningRerunCases(input: {
 }) {
   const admin = createAdminClient({ disableRealtime: true });
   const { data: campaign, error } = await admin.from("research_hardening_campaigns")
-    .select("id,official_model_id,challenger_model_id,total_cost_microusd")
+    .select("id,official_model_id,challenger_model_id,total_cost_microusd,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
     .eq("id", input.campaignId).eq("organization_id", input.organizationId).single();
   if (error || !campaign) throw error || new Error("Hardening campaign not found");
   const currentModels = await resolveHardeningModelSnapshot();
@@ -813,7 +985,13 @@ export async function addHardeningRerunCases(input: {
     || currentModels.challenger.model !== campaign.challenger_model_id) {
     throw new Error("The frozen model route has changed. Start a new campaign so results remain comparable and use the current cost-optimized route.");
   }
-  const spend = campaignSpendDecision({ totalCostMicrousd: integer(campaign.total_cost_microusd), stage: input.stage });
+  const spend = campaignSpendDecision({
+    totalCostMicrousd: integer(campaign.total_cost_microusd),
+    stage: input.stage,
+    budgetLimitMicrousd: integer(campaign.budget_limit_microusd),
+    preConfirmationStopMicrousd: integer(campaign.preconfirmation_stop_microusd),
+    confirmationReserveMicrousd: integer(campaign.confirmation_reserve_microusd),
+  });
   if (!spend.allowed) throw new Error(spend.reason);
   const matrix = new Map(RESEARCH_HARDENING_MATRIX.map((entry) => [entry.archetype, entry.sport]));
   const rows = [];

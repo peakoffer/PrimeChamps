@@ -7,12 +7,20 @@ export async function GET() {
     const user = await requireAuth();
     const supabase = createAdminClient();
 
-    const [profileResult, meetingsResult] = await Promise.all([
+    const [profileResult, draftResult, meetingsResult] = await Promise.all([
       supabase
         .from("research_profile_versions")
-        .select("id,version,name,compiled_profile,source_meeting_ids,source_item_ids,activated_at,created_at")
+        .select("id,version,name,compiled_profile,source_meeting_ids,source_item_ids,status,validation_status,validation_metrics,validated_at,activated_at,created_at")
         .eq("organization_id", user.organizationId)
         .eq("status", "active")
+        .maybeSingle(),
+      supabase
+        .from("research_profile_versions")
+        .select("id,version,name,compiled_profile,status,validation_status,validation_metrics,validated_at,created_at")
+        .eq("organization_id", user.organizationId)
+        .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle(),
       supabase
         .from("research_meetings")
@@ -23,6 +31,7 @@ export async function GET() {
     ]);
 
     if (profileResult.error) throw profileResult.error;
+    if (draftResult.error) throw draftResult.error;
     if (meetingsResult.error) throw meetingsResult.error;
 
     const meetings = meetingsResult.data || [];
@@ -30,7 +39,7 @@ export async function GET() {
     const itemsResult = meetingIds.length > 0
       ? await supabase
           .from("research_intelligence_items")
-          .select("id,meeting_id,category,statement,normalized_value,confidence,evidence_refs,status,reviewed_at,created_at")
+          .select("id,meeting_id,category,statement,normalized_value,confidence,evidence_refs,status,signal_key,direction,scope,validity,effective_at,expires_at,reviewed_at,created_at")
           .eq("organization_id", user.organizationId)
           .in("meeting_id", meetingIds)
           .order("created_at", { ascending: true })
@@ -50,6 +59,7 @@ export async function GET() {
         transcriptPaste: true,
       },
       profile: profileResult.data || null,
+      draftProfile: draftResult.data || null,
       meetings: meetings.map((meeting) => ({
         ...meeting,
         items: itemsByMeeting.get(meeting.id) || [],

@@ -24,6 +24,17 @@ interface ResearchProfileVersion {
   name: string;
   compiled_profile: RecruitingProfile;
   activated_at: string | null;
+  validation_status?: "not_run" | "running" | "passed" | "failed";
+  validation_metrics?: Record<string, unknown>;
+}
+
+interface DraftPreview {
+  profileId: string;
+  activeSignals: number;
+  conflicts: string[];
+  estimatedPromptTokens: number;
+  explorationRate: number;
+  contextualAdjustmentCap: number;
 }
 
 interface ResearchMeeting {
@@ -46,6 +57,7 @@ interface IntelligenceResponse {
     transcriptPaste: boolean;
   };
   profile: ResearchProfileVersion | null;
+  draftProfile?: ResearchProfileVersion | null;
   meetings: ResearchMeeting[];
   error?: string;
 }
@@ -82,6 +94,8 @@ export default function ResearchIntelligencePage() {
   const [submitting, setSubmitting] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [activating, setActivating] = useState(false);
   const [expandedMeeting, setExpandedMeeting] = useState<string | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -90,6 +104,7 @@ export default function ResearchIntelligencePage() {
   const [participants, setParticipants] = useState("Zac, Dylan");
   const [transcript, setTranscript] = useState("");
   const [audio, setAudio] = useState<File | null>(null);
+  const [draftPreview, setDraftPreview] = useState<DraftPreview | null>(null);
 
   const loadIntelligence = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
@@ -168,7 +183,7 @@ export default function ResearchIntelligencePage() {
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "Could not save review");
       setDecisions({});
-      setNotice({ type: "success", text: "Review saved. Approved insights are ready to publish into the recruiting thesis." });
+      setNotice({ type: "success", text: "Review saved. Approved insights are ready for a bounded draft and paired validation." });
       await loadIntelligence();
     } catch (error) {
       setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not save review" });
@@ -177,7 +192,7 @@ export default function ResearchIntelligencePage() {
     }
   };
 
-  const publishProfile = async () => {
+  const createDraftProfile = async () => {
     setPublishing(true);
     setNotice(null);
     try {
@@ -186,14 +201,50 @@ export default function ResearchIntelligencePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Could not publish thesis");
-      setNotice({ type: "success", text: "New recruiting thesis published. New research runs will pin and use this version." });
+      const result = await response.json() as {
+        error?: string;
+        profile?: { id: string };
+        preview?: Omit<DraftPreview, "profileId">;
+      };
+      if (!response.ok) throw new Error(result.error || "Could not create thesis draft");
+      if (result.profile?.id && result.preview) {
+        setDraftPreview({ profileId: result.profile.id, ...result.preview });
+      }
+      setNotice({ type: "success", text: "Draft created. It is not active and cannot affect research until paired validation passes and you activate it." });
       await loadIntelligence();
     } catch (error) {
-      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not publish thesis" });
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not create thesis draft" });
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const updateDraftProfile = async (action: "start_validation" | "activate") => {
+    const profileId = draftPreview?.profileId || data.draftProfile?.id;
+    if (!profileId) return;
+    if (action === "start_validation") setValidating(true);
+    else setActivating(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/research/intelligence/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId, action }),
+      });
+      const result = await response.json() as { error?: string; campaignId?: string };
+      if (!response.ok) throw new Error(result.error || "Could not update thesis draft");
+      setNotice({
+        type: "success",
+        text: action === "start_validation"
+          ? "Paired baseline-versus-guided controls started. Research stays unchanged until this draft passes and you activate it."
+          : "Validated thesis activated and pinned for future research runs.",
+      });
+      await loadIntelligence();
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "Could not update thesis draft" });
+    } finally {
+      setValidating(false);
+      setActivating(false);
     }
   };
 
@@ -230,7 +281,7 @@ export default function ResearchIntelligencePage() {
           {[
             ["1", "Add the meeting", "Upload the recording or paste the transcript."],
             ["2", "Review what changed", "Approve or reject every evidence-linked proposal."],
-            ["3", "Publish one thesis", "New research runs pin the exact active version."],
+            ["3", "Validate the draft", "Compare baseline and guided runs, then activate only if quality holds."],
           ].map(([number, heading, copy]) => (
             <div key={number} className="min-h-[132px] border-b border-r border-brand-ink/15 bg-brand-paper-bright p-5">
               <div className="grid h-7 w-7 place-items-center border border-brand-ink bg-brand-ink font-mono text-[9px] font-bold text-brand-cyan">0{number}</div>
@@ -329,23 +380,47 @@ export default function ResearchIntelligencePage() {
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Default audience</p>
-                <p className="mt-2 text-sm text-slate-200">{(profile?.parameters.follower_min || 30_000).toLocaleString()}–{(profile?.parameters.follower_max || 500_000).toLocaleString()} Instagram followers</p>
+                <p className="mt-2 text-sm text-slate-200">{(profile?.parameters.follower_min || 30_000).toLocaleString()}–{(profile?.parameters.follower_max || 500_000).toLocaleString()} followers · ranking context, never a filter</p>
               </div>
             </div>
+
+            {(draftPreview || data.draftProfile) && (
+              <div className="mt-6 border border-brand-cyan/30 bg-brand-cyan/10 p-4">
+                <p className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-brand-cyan">Draft ready for validation</p>
+                {draftPreview && <p className="mt-2 text-sm text-slate-200">
+                  {draftPreview.activeSignals}/12 signals · about {draftPreview.estimatedPromptTokens}/1,200 tokens · {Math.round(draftPreview.explorationRate * 100)}% exploration · ±{draftPreview.contextualAdjustmentCap} max priority adjustment
+                </p>}
+                {draftPreview && draftPreview.conflicts.length > 0 && <p className="mt-2 text-xs text-amber-200">{draftPreview.conflicts.length} conflict{draftPreview.conflicts.length === 1 ? "" : "s"} held neutral.</p>}
+                <p className="mt-2 text-xs text-slate-300">Status: {data.draftProfile?.validation_status?.replaceAll("_", " ") || "not run"}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(data.draftProfile?.validation_status === "not_run" || (!data.draftProfile && draftPreview)) && (
+                    <button className="pc-button-primary" disabled={validating} onClick={() => void updateDraftProfile("start_validation")}>
+                      {validating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Run paired validation
+                    </button>
+                  )}
+                  {data.draftProfile?.validation_status === "running" && <Link className="pc-button-secondary" href="/pipeline/research/hardening">View validation</Link>}
+                  {data.draftProfile?.validation_status === "passed" && (
+                    <button className="pc-button-primary" disabled={activating} onClick={() => void updateDraftProfile("activate")}>
+                      {activating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Activate validated draft
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="mt-7 grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-white/5 p-4"><div className="text-2xl font-semibold">{proposedCount}</div><div className="mt-1 text-xs text-slate-400">Awaiting review</div></div>
               <div className="rounded-xl bg-white/5 p-4"><div className="text-2xl font-semibold">{approvedCount}</div><div className="mt-1 text-xs text-slate-400">Approved insights</div></div>
             </div>
             <button
-              onClick={() => void publishProfile()}
+              onClick={() => void createDraftProfile()}
               disabled={publishing || approvedCount === 0 || Object.keys(decisions).length > 0}
               className="pc-button-primary mt-4 w-full"
             >
               {publishing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              Publish reviewed thesis
+              Create validation draft
             </button>
-            {Object.keys(decisions).length > 0 && <p className="mt-2 text-center text-xs text-slate-500">Save the current review before publishing.</p>}
+            {Object.keys(decisions).length > 0 && <p className="mt-2 text-center text-xs text-slate-500">Save the current review before creating a draft.</p>}
           </div>
         </section>
 

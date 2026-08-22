@@ -1,6 +1,6 @@
-export const HARDENING_BUDGET_LIMIT_MICROUSD = 50_000_000;
-export const HARDENING_CONFIRMATION_RESERVE_MICROUSD = 10_000_000;
-export const HARDENING_PRE_CONFIRMATION_STOP_MICROUSD = 40_000_000;
+export const HARDENING_BUDGET_LIMIT_MICROUSD = 100_000_000;
+export const HARDENING_CONFIRMATION_RESERVE_MICROUSD = 20_000_000;
+export const HARDENING_PRE_CONFIRMATION_STOP_MICROUSD = 80_000_000;
 export const HARDENING_MAX_CONCURRENCY = 3;
 export const HARDENING_STALE_AFTER_MS = 20 * 60 * 1000;
 
@@ -72,6 +72,16 @@ export interface HardeningCaseMetrics {
   under21BlockedBeforeScoring: number;
   unresolvedChallengerFindings: number;
   providerFailures: number;
+  duplicatesSuppressedBeforeEnrichment?: number;
+  paidCallsAvoided?: number;
+  alignedCandidates?: number;
+  explorationCandidates?: number;
+  explorationRatio?: number;
+  costPerScoredCandidateMicrousd?: number;
+  highScoreCandidates?: number;
+  heldOutPrecision80Plus?: number;
+  profileVariant?: "baseline" | "guided";
+  repeatabilityVariance?: number;
 }
 
 export interface HardeningDefect {
@@ -90,14 +100,26 @@ export function campaignSpendDecision(input: {
   totalCostMicrousd: number;
   stage: HardeningStage;
   nextEstimatedCostMicrousd?: number;
+  budgetLimitMicrousd?: number;
+  preConfirmationStopMicrousd?: number;
+  confirmationReserveMicrousd?: number;
 }) {
+  const budgetLimit = Math.max(1, input.budgetLimitMicrousd ?? HARDENING_BUDGET_LIMIT_MICROUSD);
+  const confirmationReserve = Math.max(0, input.confirmationReserveMicrousd ?? HARDENING_CONFIRMATION_RESERVE_MICROUSD);
+  const preConfirmationStop = Math.min(
+    budgetLimit - confirmationReserve,
+    input.preConfirmationStopMicrousd ?? HARDENING_PRE_CONFIRMATION_STOP_MICROUSD
+  );
   const next = Math.max(0, input.nextEstimatedCostMicrousd || 0);
   const absoluteProjected = input.totalCostMicrousd + next;
-  if (absoluteProjected > HARDENING_BUDGET_LIMIT_MICROUSD) {
-    return { allowed: false, reason: "The $50 campaign ceiling would be exceeded" } as const;
+  if (absoluteProjected > budgetLimit) {
+    return { allowed: false, reason: `The $${(budgetLimit / 1_000_000).toFixed(0)} campaign ceiling would be exceeded` } as const;
   }
-  if (input.stage !== "confirmation" && absoluteProjected >= HARDENING_PRE_CONFIRMATION_STOP_MICROUSD) {
-    return { allowed: false, reason: "The $40 pre-confirmation stop preserves the final $10" } as const;
+  if (input.stage !== "confirmation" && absoluteProjected >= preConfirmationStop) {
+    return {
+      allowed: false,
+      reason: `The $${(preConfirmationStop / 1_000_000).toFixed(0)} pre-confirmation stop preserves $${(confirmationReserve / 1_000_000).toFixed(0)}`,
+    } as const;
   }
   return { allowed: true, reason: null } as const;
 }

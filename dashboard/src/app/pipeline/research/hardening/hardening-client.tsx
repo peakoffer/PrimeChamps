@@ -31,6 +31,9 @@ type Campaign = {
   challenger_model_id: string;
   total_cost_microusd: number;
   budget_limit_microusd: number;
+  confirmation_reserve_microusd: number;
+  preconfirmation_stop_microusd: number;
+  campaign_type: string;
   summary: JsonRecord;
   cases: HardeningCase[];
 };
@@ -133,7 +136,7 @@ export default function HardeningClient() {
     setActing("start"); setError(null);
     try {
       const response = await fetch("/api/research/hardening", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ budgetUsd: 100 }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not start campaign");
@@ -164,7 +167,8 @@ export default function HardeningClient() {
   if (loading) return <div className="h-72 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />;
 
   const spent = campaign?.total_cost_microusd || 0;
-  const limit = campaign?.budget_limit_microusd || 50_000_000;
+  const limit = campaign?.budget_limit_microusd || 100_000_000;
+  const confirmationReserve = campaign?.confirmation_reserve_microusd || 20_000_000;
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
   const legacyFastRoute = /(?:^|[-_/])fast(?:$|[-_/])/i.test(campaign?.challenger_model_id || "");
@@ -174,19 +178,29 @@ export default function HardeningClient() {
   const confirmedArchetypes = new Set(campaign?.cases.filter((item) =>
     item.stage === "confirmation" && item.status === "completed" && item.verdict === "passed"
   ).map((item) => item.archetype) || []);
-  const correctedArchetypes = Array.from(new Set(campaign?.cases.filter((item) =>
-    item.stage === "targeted_rerun"
-      || item.defects.length > 0
-      || /coverage reconciled/i.test(item.resolution_notes || "")
-  ).map((item) => item.archetype) || [])).filter((archetype) => !confirmedArchetypes.has(archetype));
-  const weakArchetypes = latestCanonicalCases.filter((item) =>
-    ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status)
-  ).map((item) => item.archetype).filter((archetype) => !confirmedArchetypes.has(archetype));
-  // Spend the reserved confirmation budget on unresolved archetypes first.
-  // Previously corrected archetypes remain independently covered by their
-  // targeted reruns plus the three clean release-depth regression controls.
-  const confirmationArchetypes = weakArchetypes.length > 0 ? weakArchetypes : correctedArchetypes;
+  // Every archetype receives an independent full-quality confirmation. A
+  // short or zero-result run is still valid, but it must be reproduced and
+  // investigated rather than silently treated as coverage.
+  const confirmationArchetypes = Array.from(new Set(latestCanonicalCases.map((item) => item.archetype)))
+    .filter((archetype) => !confirmedArchetypes.has(archetype));
   const confirmationFitsBudget = spent + confirmationArchetypes.length * 2_000_000 <= limit;
+  const thirdReplicateArchetypes = Array.from(new Set([
+    "adaptive", "precision", "winter", "general",
+    ...Array.from(new Set(latestCanonicalCases.map((item) => item.archetype))).filter((archetype) => {
+      const yields = campaign?.cases
+        .filter((item) => item.archetype === archetype && item.stage !== "control" && item.status === "completed")
+        .map((item) => metric(item.metrics, "exactPersonCandidates")) || [];
+      if (yields.length < 2) return false;
+      const high = Math.max(...yields);
+      const low = Math.min(...yields);
+      return high > 0 && (high - low) / high > 0.5;
+    }),
+  ])).filter((archetype) => {
+    const completed = campaign?.cases.filter((item) =>
+      item.archetype === archetype && item.stage !== "control" && item.status === "completed"
+    ).length || 0;
+    return completed >= 2 && completed < 3;
+  });
 
   return (
     <div className="space-y-5">
@@ -197,7 +211,7 @@ export default function HardeningClient() {
           </Link>
           <p className="pc-eyebrow">Owner controls · evaluation only</p>
           <h1 className="pc-page-title">Research Hardening</h1>
-          <p className="pc-page-description">Thirteen materially different sport archetypes, one fixed safety policy, and a visible $50 ceiling.</p>
+          <p className="pc-page-description">Thirteen materially different sport archetypes, one fixed safety policy, and a campaign-owned $100 ceiling.</p>
         </div>
         <div className="pc-header-actions">
           <button className="pc-button-secondary" onClick={() => void load()} disabled={acting !== null}>
@@ -218,11 +232,14 @@ export default function HardeningClient() {
               {untouchedPending > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
                 <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
               </button>}
-              {campaign && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
-                <ShieldCheck className="h-4 w-4" /> Run 3 regression controls
+              {campaign && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged", "motorsport"], "control")} disabled={acting !== null}>
+                <ShieldCheck className="h-4 w-4" /> Run 4 regression controls
               </button>}
               {confirmationArchetypes.length > 0 && confirmationFitsBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run {confirmationArchetypes.length} full confirmations
+              </button>}
+              {thirdReplicateArchetypes.length > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", thirdReplicateArchetypes, "confirmation")} disabled={acting !== null}>
+                <ShieldCheck className="h-4 w-4" /> Run {thirdReplicateArchetypes.length} stability replicates
               </button>}
               <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null}>
                 <FlaskConical className="h-4 w-4" /> Start 13-archetype smoke wave
@@ -279,7 +296,7 @@ export default function HardeningClient() {
         <div className="border-t border-brand-ink/10 p-4">
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="font-semibold text-brand-ink">Reserved safety ledger {money(spent)} / {money(limit)}</span>
-            <span className="text-brand-muted">This is a guardrail, not the provider bill · $10 held for confirmation</span>
+            <span className="text-brand-muted">This is a guardrail, not the provider bill · {money(confirmationReserve)} held for confirmation</span>
           </div>
           <div className="h-2 overflow-hidden bg-brand-chrome/30"><div className={`h-full ${spendPercent >= 80 ? "bg-brand-danger" : "bg-brand-blue"}`} style={{ width: `${spendPercent}%` }} /></div>
         </div>
@@ -296,6 +313,8 @@ export default function HardeningClient() {
             <span><strong>{String(summary.completed || 0)}</strong> completed</span>
             <span><strong>{String(summary.passed || 0)}</strong> passed</span>
             <span><strong>{String(summary.unresolved_defects || 0)}</strong> open defects</span>
+            <span><strong>{String(summary.duplicate_suppressions || 0)}</strong> duplicates stopped</span>
+            <span><strong>{String(summary.paid_calls_avoided || 0)}</strong> paid calls avoided</span>
           </div>
           <a className="pc-button-secondary" href={`/api/research/hardening/${campaign.id}/report?format=md`}><Download className="h-4 w-4" /> Markdown</a>
           <a className="pc-button-secondary" href={`/api/research/hardening/${campaign.id}/report?format=json`}><Download className="h-4 w-4" /> JSON</a>
@@ -363,7 +382,7 @@ export default function HardeningClient() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] border-collapse text-left text-sm">
             <thead className="bg-brand-paper text-[10px] uppercase tracking-[0.08em] text-brand-muted">
-              <tr><th className="px-4 py-3">Archetype / sport</th><th className="px-3 py-3">Stage</th><th className="px-3 py-3">Run</th><th className="px-3 py-3">Verdict</th><th className="px-3 py-3">Funnel</th><th className="px-3 py-3">Rejected audits</th><th className="px-3 py-3">Defects</th><th className="px-3 py-3">Cost</th><th className="px-4 py-3 text-right">Action</th></tr>
+              <tr><th className="px-4 py-3">Archetype / sport</th><th className="px-3 py-3">Stage</th><th className="px-3 py-3">Run</th><th className="px-3 py-3">Verdict</th><th className="px-3 py-3">Funnel</th><th className="px-3 py-3">Memory / explore</th><th className="px-3 py-3">Rejected audits</th><th className="px-3 py-3">Defects</th><th className="px-3 py-3">Cost</th><th className="px-4 py-3 text-right">Action</th></tr>
             </thead>
             <tbody className="divide-y divide-brand-ink/10">
               {latestCases.map((item) => {
@@ -378,6 +397,10 @@ export default function HardeningClient() {
                     <td className="px-3 py-4"><StatusPill value={item.status} /></td>
                     <td className="px-3 py-4"><StatusPill value={item.verdict} /></td>
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "exactPersonCandidates")} → {metric(item.metrics, "scoredCandidates")} → {metric(item.metrics, "finalists")}</td>
+                    <td className="px-3 py-4 text-xs text-brand-ink">
+                      <p><span className="font-mono font-semibold">{metric(item.metrics, "duplicatesSuppressedBeforeEnrichment")}</span> stopped</p>
+                      <p className="mt-1 text-brand-muted"><span className="font-mono">{Math.round(metric(item.metrics, "explorationRatio") * 100)}%</span> explore · <span className="font-mono">{metric(item.metrics, "paidCallsAvoided")}</span> calls saved</p>
+                    </td>
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "auditedRejected")} / 2</td>
                     <td className="max-w-[260px] px-3 py-4">
                       {unresolvedDefects.length === 0 ? <span className="inline-flex items-center gap-1 text-xs text-brand-success"><Check className="h-3.5 w-3.5" /> None{resolvedDefects > 0 ? ` · ${resolvedDefects} fixed` : ""}</span> : (
@@ -397,7 +420,7 @@ export default function HardeningClient() {
                   </tr>
                 );
               })}
-              {latestCases.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-brand-muted">Start the bounded smoke wave to create the 13-case scorecard.</td></tr>}
+              {latestCases.length === 0 && <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-brand-muted">Start the bounded smoke wave to create the 13-case scorecard.</td></tr>}
             </tbody>
           </table>
         </div>

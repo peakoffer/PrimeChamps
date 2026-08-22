@@ -315,6 +315,21 @@ function recruitingProfileSnapshot(value: unknown): RecruitingProfile {
     geography: list("geography"),
     process: list("process"),
     other: list("other"),
+    active_signals: Array.isArray(source.active_signals)
+      ? source.active_signals.slice(0, 12)
+      : [],
+    exploration_rate: Number.isFinite(Number(source.exploration_rate))
+      ? Math.min(1, Math.max(0.2, Number(source.exploration_rate)))
+      : DEFAULT_RECRUITING_PROFILE.exploration_rate,
+    contextual_adjustment_cap: Number.isFinite(Number(source.contextual_adjustment_cap))
+      ? Math.min(5, Math.max(0, Number(source.contextual_adjustment_cap)))
+      : DEFAULT_RECRUITING_PROFILE.contextual_adjustment_cap,
+    prompt_token_estimate: Number.isFinite(Number(source.prompt_token_estimate))
+      ? Math.min(1_200, Math.max(0, Number(source.prompt_token_estimate)))
+      : 0,
+    conflicts: Array.isArray(source.conflicts)
+      ? source.conflicts.filter((item): item is string => typeof item === "string").slice(0, 12)
+      : [],
     parameters: {
       target_age_min: parameter("target_age_min"),
       target_age_max: parameter("target_age_max"),

@@ -62,12 +62,19 @@ test("campaign batching never exceeds three concurrent evaluations", () => {
   assert.equal(batches.length, 5);
 });
 
-test("budget policy stops at $40 before confirmation and never permits more than $50", () => {
-  assert.equal(campaignSpendDecision({ totalCostMicrousd: 39_999_999, stage: "smoke" }).allowed, true);
-  assert.equal(campaignSpendDecision({ totalCostMicrousd: 40_000_000, stage: "smoke" }).allowed, false);
-  assert.equal(campaignSpendDecision({ totalCostMicrousd: 40_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 9_999_999 }).allowed, true);
-  assert.equal(campaignSpendDecision({ totalCostMicrousd: 40_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 10_000_001 }).allowed, false);
-  assert.equal(HARDENING_BUDGET_LIMIT_MICROUSD, 50_000_000);
+test("budget policy stops at $80 before confirmation and never permits more than $100", () => {
+  assert.equal(campaignSpendDecision({ totalCostMicrousd: 79_999_999, stage: "smoke" }).allowed, true);
+  assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "smoke" }).allowed, false);
+  assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 19_999_999 }).allowed, true);
+  assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 20_000_001 }).allowed, false);
+  assert.equal(HARDENING_BUDGET_LIMIT_MICROUSD, 100_000_000);
+  assert.equal(campaignSpendDecision({
+    totalCostMicrousd: 39_999_999,
+    stage: "smoke",
+    budgetLimitMicrousd: 50_000_000,
+    preConfirmationStopMicrousd: 40_000_000,
+    confirmationReserveMicrousd: 10_000_000,
+  }).allowed, true);
 });
 
 test("cost accounting separates measured spend, optimized Opus, external estimates, and reservations", () => {
@@ -234,22 +241,30 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /failureResolved !== true/);
   assert.match(service, /resolved_failures/);
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
-  assert.match(service, /stage === "confirmation" \? HARDENING_BUDGET_LIMIT_MICROUSD : HARDENING_PRE_CONFIRMATION_STOP_MICROUSD/);
+  assert.match(service, /campaign\.preconfirmation_stop_microusd/);
+  assert.match(service, /campaign\.budget_limit_microusd/);
+  assert.match(service, /campaignType === "profile_validation"/);
+  assert.match(service, /\["baseline", "guided"\]/);
+  assert.match(service, /evaluateProfileActivation\(baseline, guided\)/);
   assert.doesNotMatch(workflow, /totalCostMicrousd >= 40_000_000/);
   const client = readFileSync(new URL("../src/app/pipeline/research/hardening/hardening-client.tsx", import.meta.url), "utf8");
-  assert.match(client, /weakArchetypes\.length > 0 \? weakArchetypes : correctedArchetypes/);
+  assert.match(client, /Every archetype receives an independent full-quality confirmation/);
   assert.match(client, /Run \{confirmationArchetypes\.length\} full confirmations/);
+  assert.match(client, /Run 4 regression controls/);
+  assert.match(client, /Run \{thirdReplicateArchetypes\.length\} stability replicates/);
   assert.match(client, /"confirmation"/);
   assert.doesNotMatch(service, /\.from\(["']athletes["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["']activity_notifications["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["'](?:outreach_drafts|messages|outreach_queue)["']\)\.(insert|upsert|update)/);
 });
 
-test("database migration enforces organization scope, RLS, server-only access, and the $50 ceiling", () => {
-  const sql = readFileSync(new URL("../../supabase/migrations/20260822025551_research_hardening_campaigns.sql", import.meta.url), "utf8");
+test("database migration enforces organization scope, RLS, server-only access, and the $100 ceiling", () => {
+  const sql = readFileSync(new URL("../../supabase/migrations/20260822143130_production_research_memory_and_learning.sql", import.meta.url), "utf8");
   assert.match(sql, /organization_id uuid not null/);
   assert.match(sql, /enable row level security/g);
   assert.match(sql, /revoke all[\s\S]*from anon, authenticated/);
-  assert.match(sql, /budget_limit_microusd > 0 and budget_limit_microusd <= 50000000/);
-  assert.match(sql, /max_concurrency between 1 and 3/);
+  assert.match(sql, /budget_limit_microusd > 0 and budget_limit_microusd <= 100000000/);
+  assert.match(sql, /preconfirmation_stop_microusd bigint not null default 80000000/);
+  assert.match(sql, /unique \(campaign_id, archetype, stage, attempt, profile_variant\)/);
+  assert.match(sql, /from anon, authenticated/);
 });

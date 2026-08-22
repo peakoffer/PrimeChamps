@@ -1,6 +1,9 @@
 import { FatalError, RetryableError } from "workflow";
 import { resolveAnthropicScoringModel } from "@/lib/ai/anthropic-models";
 import {
+  buildStableSignalKey,
+  defaultSignalDirection,
+  TEMPORARY_SIGNAL_LIFETIME_DAYS,
   RESEARCH_INTELLIGENCE_CATEGORIES,
   type ProposedIntelligenceItem,
   type ResearchIntelligenceCategory,
@@ -21,6 +24,7 @@ interface MeetingRecord {
   id: string;
   organization_id: string;
   title: string;
+  occurred_at: string;
   participants: string[];
   source_type: "audio" | "transcript";
   audio_storage_path: string | null;
@@ -67,7 +71,7 @@ async function loadMeeting(input: MeetingWorkflowInput): Promise<MeetingRecord> 
   const supabase = createAdminClient({ disableRealtime: true });
   const { data, error } = await supabase
     .from("research_meetings")
-    .select("id,organization_id,title,participants,source_type,audio_storage_path,audio_mime_type,audio_size_bytes,transcript,transcript_segments")
+    .select("id,organization_id,title,occurred_at,participants,source_type,audio_storage_path,audio_mime_type,audio_size_bytes,transcript,transcript_segments")
     .eq("id", input.meetingId)
     .eq("organization_id", input.organizationId)
     .single();
@@ -316,6 +320,17 @@ async function persistMeetingIntelligence(
         normalized_value: item.normalized_value,
         confidence: item.confidence,
         evidence_refs: item.evidence_refs,
+        signal_key: buildStableSignalKey(item),
+        direction: defaultSignalDirection(item.category),
+        scope: {
+          type: typeof item.normalized_value.sport === "string" ? "sport" : "global",
+          ...(typeof item.normalized_value.sport === "string" ? { sport: item.normalized_value.sport } : {}),
+        },
+        validity: "temporary",
+        effective_at: meeting.occurred_at,
+        expires_at: new Date(
+          Date.parse(meeting.occurred_at) + TEMPORARY_SIGNAL_LIFETIME_DAYS * 86_400_000
+        ).toISOString(),
         status: "proposed",
       })), { onConflict: "meeting_id,statement", ignoreDuplicates: false });
     if (itemError) throw itemError;

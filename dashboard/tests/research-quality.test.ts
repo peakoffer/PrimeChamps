@@ -1065,9 +1065,12 @@ test("approved weekly intelligence compiles into a versionable thesis", () => {
     created_at: "2026-08-06T12:00:00.000Z",
   }]);
 
-  assert.equal(profile.parameters.follower_min, 40_000);
-  assert.equal(profile.parameters.follower_max, 250_000);
+  assert.equal(profile.parameters.follower_min, 30_000);
+  assert.equal(profile.parameters.follower_max, 500_000);
   assert.deepEqual(profile.follower_band, ["Prioritize athletes with 40K to 250K followers."]);
+  assert.equal(profile.active_signals.length, 1);
+  assert.equal(profile.exploration_rate, 0.2);
+  assert.equal(profile.contextual_adjustment_cap, 5);
 });
 
 test("browser pages use authenticated app APIs instead of a Supabase client", () => {

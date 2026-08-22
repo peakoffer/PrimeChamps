@@ -1180,7 +1180,7 @@ test("source-backed Instagram bio signals improve precheck order without satisfy
   ]);
 });
 
-test("precheck selection rejects measured out-of-range audiences before paid enrichment", () => {
+test("precheck selection ranks out-of-range audiences without turning soft guidance into a filter", () => {
   const selected = selectBalancedResearchCandidates([
     { id: "below-range", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/one", followerCount: 20_000 } },
     { id: "in-range", discovery_lane: "fresh" as const, discovery_precheck: { instagramUrl: "https://instagram.com/two", followerCount: 75_000 } },
@@ -1190,7 +1190,17 @@ test("precheck selection rejects measured out-of-range audiences before paid enr
   assert.deepEqual(selected.map((candidate) => candidate.id), [
     "in-range",
     "unknown",
+    "below-range",
   ]);
+});
+
+test("guided enrichment always reserves a 20 percent exploration lane", () => {
+  const selected = selectBalancedResearchCandidates([
+    ...Array.from({ length: 20 }, (_, index) => ({ id: `aligned-${index}`, guidance_lane: "aligned" as const })),
+    ...Array.from({ length: 5 }, (_, index) => ({ id: `explore-${index}`, guidance_lane: "exploration" as const })),
+  ], 10);
+  assert.equal(selected.filter((candidate) => candidate.guidance_lane === "exploration").length, 2);
+  assert.equal(selected.filter((candidate) => candidate.guidance_lane === "aligned").length, 8);
 });
 
 const HISTORICAL_CASE: HistoricalBenchmarkRecord = {
@@ -2320,7 +2330,8 @@ test("persistence reuses the completed audit checkpoint instead of auditing cand
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
   assert.match(workflow, /"scoring",\s+"auditing",\s+"saving_candidates"/);
   assert.match(workflow, /const scoredAthletes = reachedPhase\("auditing"\)/);
-  assert.match(workflow, /const auditedAthletes = reachedPhase\("saving_candidates"\)\s+\? scoredAthletes\s+: await auditPriorityCandidates/);
+  assert.match(workflow, /const baseAuditedAthletes = reachedPhase\("saving_candidates"\)\s+\? scoredAthletes\s+: await auditPriorityCandidates/);
+  assert.match(workflow, /const auditedAthletes = baseAuditedAthletes\.map/);
 });
 
 test("V2 final gate requires independent audit and every evidence gate", () => {

@@ -83,8 +83,10 @@ import {
   type PriorAgeSafetyRow,
 } from "@/lib/research/prior-age-safety";
 import {
+  contextualPriorityAdjustment,
   DEFAULT_RECRUITING_PROFILE,
   formatRecruitingProfileForPrompt,
+  matchedRecruitingSignalKeys,
   type RecruitingProfile,
   type ResearchDepth,
 } from "@/lib/research/intelligence";
@@ -104,6 +106,13 @@ import {
   sonnetPriceSnapshot,
 } from "@/lib/research/benchmark-runner-support";
 import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+import {
+  consumeResearchMemoryOverride,
+  loadResearchMemorySnapshot,
+  matchCandidateAgainstMemory,
+  type LifecycleMemoryMatch,
+  type ResearchMemorySnapshot,
+} from "@/lib/research/crm-memory";
 
 const APIFY_CREDENTIAL_STATUS = inspectApifyCredentials(process.env.APIFY_API_KEY);
 const APIFY_API_KEY = APIFY_CREDENTIAL_STATUS.usable ? process.env.APIFY_API_KEY!.trim() : undefined;
@@ -469,11 +478,19 @@ async function persistDiscoveredCandidates(
         sport_evidence: candidate.discovery_verification,
         professional_source_present: candidate.discovery_verification?.sourcePresent === true,
         sport_correct: candidate.discovery_verification?.sportMatched === true,
+        crm_memory: candidate.crm_memory_match || null,
       },
-      disposition: candidate.discovery_verification?.passed === true ? "discovered" : "rejected",
-      disposition_reason: candidate.discovery_verification?.passed === true
-        ? null
-        : candidate.discovery_verification?.reasons.join("; ") || "Discovery evidence did not pass quality gates",
+      athlete_id: candidate.crm_memory_match?.athleteId || null,
+      disposition: candidate.crm_memory_blocked
+        ? candidate.crm_memory_match?.matchType === "name_sport_warning" ? "blocked" : "existing"
+        : candidate.discovery_verification?.passed === true ? "discovered" : "rejected",
+      disposition_reason: candidate.crm_memory_blocked
+        ? candidate.crm_memory_match?.matchType === "name_sport_warning"
+          ? "Blocked before scoring: exact name and sport match an existing CRM athlete but identity remains ambiguous"
+          : `Suppressed before enrichment: ${candidate.crm_memory_match?.reason}`
+        : candidate.discovery_verification?.passed === true
+          ? null
+          : candidate.discovery_verification?.reasons.join("; ") || "Discovery evidence did not pass quality gates",
       prompt_version: RESEARCH_PROMPT_VERSION,
       is_test_data: input.config.evaluationMode === true,
     })),
@@ -552,6 +569,9 @@ interface DiscoveredAthlete {
   known_instagram_handle?: string;
   discovery_precheck?: ResearchCandidatePrecheck;
   discovery_lane?: ResearchCandidateLane;
+  guidance_lane?: "aligned" | "exploration";
+  crm_memory_match?: LifecycleMemoryMatch;
+  crm_memory_blocked?: boolean;
 }
 
 interface EnrichedAthlete extends DiscoveredAthlete {
@@ -624,6 +644,78 @@ function verifyDiscoveredAthlete(
     known_instagram_handle: athlete.known_instagram_handle
       || evidenceHandle,
     discovery_verification: evaluateDiscoveryEvidence({ ...athlete, audienceScope }),
+  };
+}
+
+function annotateLifecycleMemory(
+  candidates: DiscoveredAthlete[],
+  snapshot: ResearchMemorySnapshot,
+  afterIdentityPrecheck: boolean
+) {
+  let duplicatesSuppressedBeforeEnrichment = 0;
+  let paidCallsAvoided = 0;
+  let ambiguousIdentityBlocks = 0;
+  const eligible: DiscoveredAthlete[] = [];
+  const usedOverrideIds = new Set<string>();
+  const annotated = candidates.map((candidate) => {
+    const instagramHandle = candidate.known_instagram_handle
+      || instagramHandleFromUrl(candidate.discovery_precheck?.instagramUrl || "");
+    const match = matchCandidateAgainstMemory(snapshot, {
+      name: candidate.name,
+      sport: candidate.sport,
+      instagramHandle,
+    }, afterIdentityPrecheck ? 3 : 4);
+    if (!match) {
+      eligible.push(candidate);
+      return candidate;
+    }
+    if (match.overrideId && !usedOverrideIds.has(match.overrideId)) {
+      usedOverrideIds.add(match.overrideId);
+      const authorized = { ...candidate, crm_memory_match: match };
+      eligible.push(authorized);
+      return authorized;
+    }
+    if (match.overrideId) {
+      duplicatesSuppressedBeforeEnrichment += 1;
+      return { ...candidate, crm_memory_match: match, crm_memory_blocked: true };
+    }
+    if (match.matchType === "name_sport_warning" && !afterIdentityPrecheck) {
+      eligible.push({ ...candidate, crm_memory_match: match });
+      return { ...candidate, crm_memory_match: match };
+    }
+    if (match.matchType === "name_sport_warning") ambiguousIdentityBlocks += 1;
+    else duplicatesSuppressedBeforeEnrichment += 1;
+    paidCallsAvoided += match.paidCallsAvoided;
+    return {
+      ...candidate,
+      crm_memory_match: match,
+      crm_memory_blocked: true,
+    };
+  });
+  return {
+    annotated,
+    eligible,
+    metrics: { duplicatesSuppressedBeforeEnrichment, paidCallsAvoided, ambiguousIdentityBlocks },
+  };
+}
+
+function assignSoftGuidanceLane(candidate: DiscoveredAthlete, profile?: RecruitingProfile) {
+  const followers = candidate.discovery_precheck?.followerCount;
+  const hasCreatorOrAccess = Boolean(
+    candidate.discovery_precheck?.creatorEvidenceUrl
+    || candidate.discovery_precheck?.creatorSignalSourceUrl
+    || candidate.discovery_precheck?.businessOrRepresentationUrl
+    || candidate.discovery_precheck?.businessSignalSourceUrl
+  );
+  const withinAudienceReference = typeof followers !== "number" || (
+    followers >= (profile?.parameters.follower_min || DEFAULT_RECRUITING_PROFILE.parameters.follower_min)
+    && followers <= (profile?.parameters.follower_max || DEFAULT_RECRUITING_PROFILE.parameters.follower_max)
+  );
+  return {
+    ...candidate,
+    guidance_lane: hasCreatorOrAccess && withinAudienceReference
+      ? "aligned" as const
+      : "exploration" as const,
   };
 }
 
@@ -755,6 +847,9 @@ interface ScoredAthlete extends EnrichedAthlete {
   audit_commercial_constraints_complete?: boolean;
   disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
   disposition_reason?: string;
+  matched_guidance_signal_keys?: string[];
+  contextual_adjustment?: number;
+  contextual_priority_score?: number;
   score_breakdown?: {
     momentum: number;
     brand_fit: number;
@@ -1018,24 +1113,6 @@ function explainResearchHold(athlete: ScoredAthlete) {
   return "the profile requires manual review before Approval";
 }
 
-interface SuccessProfile {
-  totalConversions: number;
-  totalHistorical: number;
-  sportBreakdown: Record<string, number>;
-  successPatterns: string[];
-  exclusionHandles: Set<string>; // IG handles to exclude (historical + rejected)
-  exampleConversions: Array<{
-    name: string;
-    sport: string;
-    igHandle: string;
-  }>;
-}
-
-// Historical performance is organization-specific. Keeping a per-org cache
-// avoids leaking one workspace's conversions or exclusions into another.
-const successProfileCache = new Map<string, { profile: SuccessProfile; loadedAt: number }>();
-const SUCCESS_PROFILE_CACHE_MS = 1000 * 60 * 60; // 1 hour cache
-
 // ============================================================================
 // LOGGING
 // ============================================================================
@@ -1056,235 +1133,6 @@ function describeError(error: unknown) {
   }
   try { return JSON.stringify(error); }
   catch { return String(error); }
-}
-
-// ============================================================================
-// HISTORICAL DATA & SUCCESS PROFILE
-// ============================================================================
-
-async function loadSuccessProfile(organizationId: string): Promise<SuccessProfile> {
-  // Check cache
-  const cached = successProfileCache.get(organizationId);
-  if (cached && Date.now() - cached.loadedAt < SUCCESS_PROFILE_CACHE_MS) {
-    return cached.profile;
-  }
-
-  log("Loading historical success profile from database...");
-
-  // A conversion means a real signed or active contract. Imported historical
-  // records remain useful exclusions, but they are never labeled as wins.
-  const { data: convertedContracts, error: contractError } = await supabase
-    .from("contracts")
-    .select("athlete_id")
-    .eq("organization_id", organizationId)
-    .eq("is_test_data", false)
-    .in("status", ["signed", "active"]);
-  if (contractError) log(`Error loading converted contracts: ${contractError.message}`);
-  const convertedAthleteIds = (convertedContracts || [])
-    .map((contract) => contract.athlete_id)
-    .filter((value): value is string => typeof value === "string");
-
-  const { data: convertedAthletes, error: convertedAthletesError } = convertedAthleteIds.length
-    ? await supabase
-        .from("athletes")
-        .select("id, name, sport, instagram_handle, follower_count, notes, source, pipeline_stage, created_at")
-        .eq("organization_id", organizationId)
-        .eq("is_test_data", false)
-        .in("id", convertedAthleteIds)
-    : { data: [], error: null };
-  if (convertedAthletesError) log(`Error loading signed athletes: ${convertedAthletesError.message}`);
-
-  const { data: historicalAthletes, error } = await supabase
-    .from("athletes")
-    .select("id, name, sport, instagram_handle, follower_count, notes, source, pipeline_stage, created_at")
-    .eq("organization_id", organizationId)
-    .eq("is_test_data", false)
-    .eq("is_historical", true);
-
-  if (error) {
-    log(`Error loading historical athletes: ${error.message}`);
-  }
-
-  // Also load rejected athletes (we don't want to contact them again)
-  const { data: rejectedAthletes } = await supabase
-    .from("athletes")
-    .select("instagram_handle")
-    .eq("organization_id", organizationId)
-    .eq("pipeline_stage", "rejected");
-
-  // Build the success profile from database
-  const profile = buildSuccessProfileFromDB(
-    convertedAthletes || [],
-    historicalAthletes || [],
-    rejectedAthletes || []
-  );
-
-  // Cache it
-  successProfileCache.set(organizationId, { profile, loadedAt: Date.now() });
-
-  log(`Success profile built: ${profile.totalConversions} conversions, ${profile.exclusionHandles.size} exclusions`);
-
-  return profile;
-}
-
-interface DBHistoricalAthlete {
-  id: string;
-  name: string;
-  sport: string;
-  instagram_handle: string;
-  follower_count: number | null;
-  notes: string | null;
-  source: string;
-  pipeline_stage: string | null;
-  created_at: string;
-}
-
-function buildSuccessProfileFromDB(
-  convertedAthletes: DBHistoricalAthlete[],
-  historicalAthletes: DBHistoricalAthlete[],
-  rejectedAthletes: Array<{ instagram_handle: string }>
-): SuccessProfile {
-  const sportBreakdown: Record<string, number> = {};
-  const exclusionHandles = new Set<string>();
-  const followerRanges: number[] = [];
-
-  // Only signed/active contract athletes contribute conversion patterns.
-  for (const athlete of convertedAthletes) {
-    // Track sport breakdown
-    if (athlete.sport) {
-      const sport = athlete.sport.toLowerCase();
-      // Normalize sport names
-      let category = athlete.sport;
-      if (sport.includes("mma") || sport.includes("ufc") || sport.includes("boxing") || sport.includes("combat")) {
-        category = "Combat Sports";
-      } else if (sport.includes("surf") || sport.includes("skate") || sport.includes("snowboard") || sport.includes("bmx")) {
-        category = "Action Sports";
-      } else if (sport.includes("golf") || sport.includes("tennis") || sport.includes("football") || sport.includes("soccer")) {
-        category = "Ball Sports";
-      } else if (sport.includes("racing") || sport.includes("motor") || sport.includes("nascar")) {
-        category = "Motorsports";
-      }
-      sportBreakdown[category] = (sportBreakdown[category] || 0) + 1;
-    }
-
-    // Track follower counts for analysis
-    if (athlete.follower_count && athlete.follower_count > 0) {
-      followerRanges.push(athlete.follower_count);
-    }
-  }
-
-  // Historical records and signed athletes are exclusions, not equivalent
-  // evidence of what converts.
-  for (const athlete of [...historicalAthletes, ...convertedAthletes]) {
-    if (athlete.instagram_handle) exclusionHandles.add(athlete.instagram_handle.toLowerCase());
-  }
-
-  // Add rejected athletes to exclusion list
-  for (const athlete of rejectedAthletes) {
-    if (athlete.instagram_handle) {
-      exclusionHandles.add(athlete.instagram_handle.toLowerCase());
-    }
-  }
-
-  // Calculate follower insights
-  const avgFollowers = followerRanges.length > 0
-    ? Math.round(followerRanges.reduce((a, b) => a + b, 0) / followerRanges.length)
-    : 0;
-  const minFollowers = followerRanges.length > 0 ? Math.min(...followerRanges) : 0;
-  const maxFollowers = followerRanges.length > 0 ? Math.max(...followerRanges) : 0;
-
-  // Build success patterns from database analysis
-  const successPatterns = buildSuccessPatternsFromDB(
-    convertedAthletes.length,
-    sportBreakdown,
-    avgFollowers,
-    minFollowers,
-    maxFollowers
-  );
-
-  // Get example conversions from database
-  const exampleConversions = getExampleConversionsFromDB(convertedAthletes);
-
-  return {
-    totalConversions: convertedAthletes.length,
-    totalHistorical: historicalAthletes.length,
-    sportBreakdown,
-    successPatterns,
-    exclusionHandles,
-    exampleConversions,
-  };
-}
-
-function buildSuccessPatternsFromDB(
-  totalConversions: number,
-  sportBreakdown: Record<string, number>,
-  avgFollowers: number,
-  minFollowers: number,
-  maxFollowers: number
-): string[] {
-  const patterns: string[] = [];
-
-  // Overall stats
-  patterns.push(
-    totalConversions > 0
-      ? `We have ${totalConversions} signed or active athlete contract${totalConversions === 1 ? "" : "s"}.`
-      : "We do not yet have enough signed athlete outcomes to infer conversion patterns."
-  );
-
-  // Sport breakdown insights
-  const sortedSports = Object.entries(sportBreakdown).sort((a, b) => b[1] - a[1]);
-  if (sortedSports.length > 0) {
-    const topSport = sortedSports[0];
-    patterns.push(`Our strongest signed category is ${topSport[0]} with ${topSport[1]} contract${topSport[1] === 1 ? "" : "s"}.`);
-
-    // List all categories
-    const sportSummary = sortedSports.map(([sport, count]) => `${sport}: ${count}`).join(", ");
-    patterns.push(`Sport breakdown: ${sportSummary}`);
-  }
-
-  // Follower insights
-  if (avgFollowers > 0) {
-    patterns.push(`Follower range of our athletes: ${minFollowers.toLocaleString()} - ${maxFollowers.toLocaleString()} (avg: ${avgFollowers.toLocaleString()})`);
-  }
-
-  if (totalConversions < 5) {
-    patterns.push("Sample size is too small for an automatic scoring boost; treat signed records as examples only.");
-  }
-
-  return patterns;
-}
-
-function getExampleConversionsFromDB(athletes: DBHistoricalAthlete[]): Array<{ name: string; sport: string; igHandle: string }> {
-  const examples: Array<{ name: string; sport: string; igHandle: string }> = [];
-  const seenSports = new Set<string>();
-
-  // Get one example per sport (max 5)
-  for (const athlete of athletes) {
-    if (athlete.name && athlete.sport && !seenSports.has(athlete.sport)) {
-      examples.push({
-        name: athlete.name,
-        sport: athlete.sport,
-        igHandle: athlete.instagram_handle || "",
-      });
-      seenSports.add(athlete.sport);
-      if (examples.length >= 5) break;
-    }
-  }
-
-  return examples;
-}
-
-function isExcludedAthlete(
-  instagramHandle: string,
-  profile: SuccessProfile
-): { excluded: boolean; reason?: string } {
-  const handle = instagramHandle.toLowerCase().replace("@", "");
-
-  if (profile.exclusionHandles.has(handle)) {
-    return { excluded: true, reason: "Already in our historical database (previously contacted or signed)" };
-  }
-
-  return { excluded: false };
 }
 
 // ============================================================================
@@ -5086,6 +4934,9 @@ async function persistScoringAudit(
         age_verified: athlete.age_verified === true,
         age_source: athlete.age_source || null,
         score: athlete.score,
+        contextual_adjustment: athlete.contextual_adjustment || 0,
+        contextual_priority_score: athlete.contextual_priority_score ?? athlete.score,
+        guidance_lane: athlete.guidance_lane || null,
         score_breakdown: athlete.score_breakdown || {},
         scoring_reasoning: athlete.reasoning,
         scoring_model: scoringModel,
@@ -5722,10 +5573,20 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       };
     }
 
-    // LOAD HISTORICAL SUCCESS PROFILE - for context and exclusions
-    log("Loading historical success profile...");
-    const successProfile = await loadSuccessProfile(input.organizationId);
-    log(`Historical context: ${successProfile.totalConversions} conversions, ${successProfile.exclusionHandles.size} exclusions`);
+    // Pin a fresh organization-scoped lifecycle view before any
+    // candidate-specific paid work. A later checkpoint may re-load this view
+    // only to strengthen suppression; it can never weaken an earlier match.
+    const crmMemory = await loadResearchMemorySnapshot(
+      supabase,
+      input.organizationId,
+      researchLogId
+    );
+    const lifecycleMemoryMetrics = {
+      duplicatesSuppressedBeforeEnrichment: 0,
+      paidCallsAvoided: 0,
+      ambiguousIdentityBlocks: 0,
+    };
+    log(`CRM lifecycle memory pinned: ${crmMemory.lifecycleCounts.athletes} live athletes across ${crmMemory.aliases.size} verified aliases`);
 
     const { error: startError } = await supabase
       .from("research_logs")
@@ -5896,6 +5757,9 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // handle resolution and follower filters while the durable workflow keeps
     // the provider work bounded.
     const evidenceQualifiedAthletes = allDiscoveredAthletes.filter((athlete) => athlete.discovery_verification?.passed === true);
+    const earlyMemoryGate = annotateLifecycleMemory(evidenceQualifiedAthletes, crmMemory, false);
+    lifecycleMemoryMetrics.duplicatesSuppressedBeforeEnrichment += earlyMemoryGate.metrics.duplicatesSuppressedBeforeEnrichment;
+    lifecycleMemoryMetrics.paidCallsAvoided += earlyMemoryGate.metrics.paidCallsAvoided;
     // Identity/profile enrichment is the most expensive stage. Four verified
     // discovery candidates per requested finalist leaves room for identity,
     // age, activity, and scoring rejection without sending an unbounded pool
@@ -5909,12 +5773,29 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     );
     await assertRunNotCancelled(researchLogId);
     const precheckedEvidenceQualifiedAthletes = hasDiscoveryCheckpoint
-      ? evidenceQualifiedAthletes
+      ? earlyMemoryGate.eligible
       : await addInstagramPrechecksForEnrichment(
-          evidenceQualifiedAthletes,
+          earlyMemoryGate.eligible,
           Math.min(60, enrichmentPoolLimit * 2)
         );
-    const precheckedByKey = new Map(precheckedEvidenceQualifiedAthletes.map((athlete) => [
+    const resolvedMemoryGate = annotateLifecycleMemory(precheckedEvidenceQualifiedAthletes, crmMemory, true);
+    lifecycleMemoryMetrics.duplicatesSuppressedBeforeEnrichment += resolvedMemoryGate.metrics.duplicatesSuppressedBeforeEnrichment;
+    lifecycleMemoryMetrics.paidCallsAvoided += resolvedMemoryGate.metrics.paidCallsAvoided;
+    lifecycleMemoryMetrics.ambiguousIdentityBlocks += resolvedMemoryGate.metrics.ambiguousIdentityBlocks;
+    for (const athlete of resolvedMemoryGate.eligible) {
+      const overrideMatch = athlete.crm_memory_match;
+      if (!overrideMatch?.overrideId || !overrideMatch.athleteId) continue;
+      const consumed = await consumeResearchMemoryOverride(
+        supabase,
+        crmMemory,
+        overrideMatch.athleteId,
+        researchCandidateKey(athlete.name, athlete.sport)
+      );
+      if (!consumed) throw new Error(`Re-research override could not be consumed for ${athlete.name}`);
+      log(`Owner override ${consumed} consumed for one evaluation of ${athlete.name}`);
+    }
+    const memoryAnnotated = [...earlyMemoryGate.annotated, ...resolvedMemoryGate.annotated];
+    const precheckedByKey = new Map(memoryAnnotated.map((athlete) => [
       researchCandidateKey(athlete.name, athlete.sport),
       athlete,
     ]));
@@ -5922,10 +5803,13 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       precheckedByKey.get(researchCandidateKey(athlete.name, athlete.sport)) || athlete
     );
     const discoveredAthletes = selectBalancedResearchCandidates(
-      precheckedEvidenceQualifiedAthletes,
+      resolvedMemoryGate.eligible.map((athlete) => assignSoftGuidanceLane(athlete, config.profileSnapshot)),
       enrichmentPoolLimit,
       { followerMin: config.followerMin, followerMax: config.followerMax }
     );
+    if (lifecycleMemoryMetrics.duplicatesSuppressedBeforeEnrichment > 0 || lifecycleMemoryMetrics.ambiguousIdentityBlocks > 0) {
+      log(`Lifecycle memory suppressed ${lifecycleMemoryMetrics.duplicatesSuppressedBeforeEnrichment} known CRM athletes and blocked ${lifecycleMemoryMetrics.ambiguousIdentityBlocks} unresolved name collisions before premium work`);
+    }
     if (allDiscoveredAthletes.length !== evidenceQualifiedAthletes.length) {
       log(`Rejected ${allDiscoveredAthletes.length - evidenceQualifiedAthletes.length} discoveries at the sport/source evidence gate`);
     }
@@ -6093,7 +5977,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // saving_candidates. The following persistence step must reuse that
     // checkpoint instead of buying a second blind/review audit and allowing a
     // second stochastic verdict to overwrite the first.
-    const auditedAthletes = reachedPhase("saving_candidates")
+    const baseAuditedAthletes = reachedPhase("saving_candidates")
       ? scoredAthletes
       : await auditPriorityCandidates(
           input,
@@ -6101,6 +5985,25 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           scoringModel,
           config.evaluationBudget?.maxAuditCandidates
         );
+    const auditedAthletes = baseAuditedAthletes.map((athlete) => {
+      const matchedSignalKeys = matchedRecruitingSignalKeys(config.profileSnapshot, {
+        sport: athlete.sport,
+        evidenceText: JSON.stringify({
+          context: athlete.context,
+          evidence: athlete.evidence,
+          bio: athlete.bio,
+          creatorSignals: athlete.creator_signals,
+          reasoning: athlete.reasoning,
+        }),
+      });
+      const contextualAdjustment = contextualPriorityAdjustment(config.profileSnapshot, matchedSignalKeys);
+      return {
+        ...athlete,
+        matched_guidance_signal_keys: matchedSignalKeys,
+        contextual_adjustment: contextualAdjustment,
+        contextual_priority_score: Math.max(0, Math.min(100, athlete.score + contextualAdjustment)),
+      };
+    });
 
     // Never pad a run with weak candidates just to hit a requested count. The
     // deterministic V1 gates and the independent V2 audit both have veto power.
@@ -6242,6 +6145,9 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             age_verified: athlete.age_verified === true,
             age_source: athlete.age_source || null,
             score: athlete.score,
+            contextual_adjustment: athlete.contextual_adjustment || 0,
+            contextual_priority_score: athlete.contextual_priority_score ?? athlete.score,
+            guidance_lane: athlete.guidance_lane || null,
             score_breakdown: athlete.score_breakdown || {},
             scoring_reasoning: athlete.reasoning,
             scoring_model: scoringModel,
@@ -6280,7 +6186,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             is_minor: athlete.is_minor ?? null,
             is_test_data: config.evaluationMode === true,
           }, { onConflict: "research_log_id,candidate_key" })
-          .select("id,athlete_id,disposition")
+          .select("id,athlete_id,disposition,gate_results")
           .single();
         if (candidateError) throw candidateError;
 
@@ -6369,17 +6275,33 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           continue;
         }
 
-        // CHECK HISTORICAL EXCLUSIONS - don't contact athletes we've already worked with
-        const exclusionCheck = isExcludedAthlete(athlete.instagram_handle, successProfile);
-        if (exclusionCheck.excluded) {
-          athlete.disposition = "skipped";
-          athlete.disposition_reason = exclusionCheck.reason || "Matched a historical exclusion";
-          skippedCount++;
+        // Defense in depth. The same fresh run snapshot should have suppressed
+        // this identity before enrichment; this final check prevents a newly
+        // resolved alias from mutating the CRM even if discovery was ambiguous.
+        const lifecycleMatch = matchCandidateAgainstMemory(crmMemory, {
+          name: athlete.name,
+          sport: athlete.sport,
+          instagramHandle: athlete.instagram_handle,
+        }, 0);
+        if (lifecycleMatch) {
+          athlete.disposition = "existing";
+          athlete.disposition_reason = `Matched CRM lifecycle memory: ${lifecycleMatch.reason}`;
+          duplicateCount++;
           await supabase
             .from("research_candidates")
-            .update({ disposition: "skipped", disposition_reason: athlete.disposition_reason })
+            .update({
+              athlete_id: lifecycleMatch.athleteId,
+              disposition: "existing",
+              disposition_reason: athlete.disposition_reason,
+              gate_results: {
+                ...((candidateRecord.gate_results && typeof candidateRecord.gate_results === "object")
+                  ? candidateRecord.gate_results as Record<string, unknown>
+                  : {}),
+                crm_memory: lifecycleMatch,
+              },
+            })
             .eq("id", candidateRecord.id);
-          log(`  ⏭️ EXCLUDED ${athlete.name} (@${athlete.instagram_handle}) - ${exclusionCheck.reason}`);
+          log(`  Existing ${athlete.name} (@${athlete.instagram_handle}) - ${lifecycleMatch.reason}`);
           continue;
         }
 
@@ -6557,9 +6479,14 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             },
             sportContext,
             qualityAudit,
-            signed_conversion_count: successProfile.totalConversions,
-            historical_record_count: successProfile.totalHistorical,
-            exclusion_count: successProfile.exclusionHandles.size,
+            lifecycle_memory: {
+              captured_at: crmMemory.capturedAt,
+              source_counts: crmMemory.lifecycleCounts,
+              ...lifecycleMemoryMetrics,
+              profile_version_id: config.profileVersionId || null,
+              active_signal_snapshot: config.profileSnapshot?.active_signals || [],
+              exploration_rate: config.profileSnapshot?.exploration_rate ?? 0.2,
+            },
             toolchain: [
               { step: "Discovery", provider: `OpenAI ${OPENAI_RESEARCH_MODEL} web search`, purpose: "Find live, citation-bound athlete candidates" },
               { step: "Identity lookup", provider: RESEARCH_IDENTITY_PROVIDER === "openrouter"

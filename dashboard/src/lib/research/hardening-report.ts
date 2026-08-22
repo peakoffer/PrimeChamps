@@ -59,7 +59,7 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
     resolutionNotes: item.resolution_notes,
   }));
   return {
-    reportVersion: "research-hardening-v2",
+    reportVersion: "research-hardening-v3",
     generatedAt: new Date().toISOString(),
     campaign: {
       id: campaign.id,
@@ -70,6 +70,10 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
       challengerModelId: campaign.challenger_model_id,
       budgetLimitMicrousd: campaign.budget_limit_microusd,
       confirmationReserveMicrousd: campaign.confirmation_reserve_microusd,
+      preconfirmationStopMicrousd: campaign.preconfirmation_stop_microusd,
+      campaignType: campaign.campaign_type,
+      profileVersionId: campaign.profile_version_id,
+      baselineProfileVersionId: campaign.baseline_profile_version_id,
       totalCostMicrousd: campaign.total_cost_microusd,
       maxConcurrency: campaign.max_concurrency,
       summary: campaign.summary,
@@ -95,7 +99,7 @@ export function hardeningReportMarkdown(campaign: JsonRecord) {
   const summary = object(report.campaign.summary);
   const rows = report.cases.map((item) => {
     const metrics = object(item.metrics);
-    return `| ${item.archetype} | ${item.sport} | ${item.stage} | ${item.status} | ${item.verdict || "—"} | ${metrics.exactPersonCandidates ?? 0} | ${metrics.scoredCandidates ?? 0} | ${metrics.finalists ?? 0} | ${dollars(item.costMicrousd)} |`;
+    return `| ${item.archetype} | ${item.sport} | ${item.stage} | ${item.status} | ${item.verdict || "—"} | ${metrics.exactPersonCandidates ?? 0} | ${metrics.duplicatesSuppressedBeforeEnrichment ?? 0} | ${Math.round(Number(metrics.explorationRatio || 0) * 100)}% | ${metrics.scoredCandidates ?? 0} | ${metrics.finalists ?? 0} | ${dollars(metrics.costPerScoredCandidateMicrousd)} | ${dollars(item.costMicrousd)} |`;
   }).join("\n");
   const defects = report.cases.flatMap((item) => item.defects.map((defect) =>
     `- **${item.sport} · ${defect.category} · ${defect.severity}:** ${defect.summary}${defect.evidenceRefs.length ? ` (${defect.evidenceRefs.join(", ")})` : ""}`
@@ -121,24 +125,26 @@ export function hardeningReportMarkdown(campaign: JsonRecord) {
 
 ## Archetype scorecard
 
-| Archetype | Sport | Stage | Status | Verdict | Exact people | Scored | Finalists | Cost |
-|---|---|---|---|---|---:|---:|---:|---:|
+| Archetype | Sport | Stage | Status | Verdict | Exact people | CRM suppressed | Exploration | Scored | Finalists | Cost / scored | Reserved |
+|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
 ${rows}
 
 ## Research-agent process map
 
 \`\`\`mermaid
 flowchart LR
-  A["Brief + candidate memory"] --> B["Live source-linked discovery"]
-  B -->|exact athlete + current sport proof| C["Instagram identity + audience"]
-  C -->|exact personal account| D["Two-source 21+ + evidence gates"]
-  D -->|all deterministic gates pass| E["Sonnet scoring + independent audit"]
-  E --> F["Standard Opus shadow challenge"]
-  F --> G{"Evidence complete?"}
-  G -->|yes| H["Finalist for human review"]
-  G -->|no| I["Evidence hold / reject"]
-  H -. evaluation only .-> J["No pipeline or outreach mutation"]
-  I -. evaluation only .-> J
+  A["Fresh CRM lifecycle memory"] --> B["Brief + 80/20 candidate allocation"]
+  B --> C["Live source-linked discovery"]
+  C -->|exact athlete + current sport proof| D["CRM suppression before premium work"]
+  D -->|novel exact person| E["Instagram identity + audience"]
+  E -->|exact personal account| F["Two-source 21+ + evidence gates"]
+  F -->|all deterministic gates pass| G["Sonnet scoring + independent audit"]
+  G --> H["Standard Opus shadow challenge"]
+  H --> I{"Evidence complete?"}
+  I -->|yes| J["Finalist for human review"]
+  I -->|no| K["Evidence hold / reject"]
+  J -. evaluation only .-> L["No pipeline or outreach mutation"]
+  K -. evaluation only .-> L
 \`\`\`
 
 | # | Stage | Provider | Typical full-run cost | What happens |
