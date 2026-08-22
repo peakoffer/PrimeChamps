@@ -17,6 +17,7 @@ import {
   campaignSpendDecision,
   evaluateHardeningCase,
   isExactPersonSourcedCandidate,
+  isStaleEvaluationRun,
   type HardeningArchetype,
   type HardeningCaseMetrics,
   type HardeningDefect,
@@ -828,8 +829,19 @@ export async function recoverStaleHardeningRuns(organizationId?: string) {
   if (caseError) throw caseError;
   const runIds = (cases || []).flatMap((item) => item.research_log_id ? [item.research_log_id] : []);
   if (runIds.length === 0) return { recovered: 0, runIds: [] as string[] };
-  const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   const now = new Date().toISOString();
+  // Polling the owner scorecard must stay read-only in the normal case. First
+  // identify genuinely stale rows, then issue the cancellation update only
+  // when recovery is required; this avoids a write query every ten seconds
+  // while active workflows are already updating their heartbeats.
+  const { data: activeRuns, error: activeRunsError } = await admin.from("research_logs")
+    .select("id,heartbeat_at")
+    .in("id", runIds).eq("is_evaluation", true).in("status", ["queued", "running"]);
+  if (activeRunsError) throw activeRunsError;
+  const staleRunIds = (activeRuns || [])
+    .filter((run) => isStaleEvaluationRun(run.heartbeat_at, Date.now()))
+    .map((run) => run.id);
+  if (staleRunIds.length === 0) return { recovered: 0, runIds: [] as string[] };
   const { data: recovered, error } = await admin.from("research_logs").update({
     cancel_requested_at: now,
     status: "cancelled",
@@ -837,8 +849,7 @@ export async function recoverStaleHardeningRuns(organizationId?: string) {
     error_message: "Evaluation run was atomically cancelled after 20 minutes without a heartbeat",
     completed_at: now,
     heartbeat_at: now,
-  }).in("id", runIds).eq("is_evaluation", true).in("status", ["queued", "running"])
-    .or(`heartbeat_at.is.null,heartbeat_at.lt.${cutoff}`).select("id");
+  }).in("id", staleRunIds).eq("is_evaluation", true).in("status", ["queued", "running"]).select("id");
   if (error) throw error;
   const recoveredIds = (recovered || []).map((item) => item.id);
   if (recoveredIds.length > 0) {

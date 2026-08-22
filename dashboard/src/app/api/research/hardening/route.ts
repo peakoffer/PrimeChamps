@@ -11,6 +11,14 @@ import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
 
 export const maxDuration = 60;
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+  return fallback;
+}
+
 export async function GET() {
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
@@ -18,7 +26,7 @@ export async function GET() {
     const campaigns = await getHardeningCampaigns(user.organizationId);
     return NextResponse.json({ campaigns, staleRecovery });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not load hardening campaigns";
+    const message = errorMessage(error, "Could not load hardening campaigns");
     return NextResponse.json({ error: message }, { status: message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
@@ -45,7 +53,7 @@ export async function POST(request: NextRequest) {
     await linkCampaignWorkflow({ campaignId, organizationId: user.organizationId, workflowRunId: workflow.runId });
     return NextResponse.json({ ok: true, campaignId, workflowRunId: workflow.runId }, { status: 202 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not start hardening campaign";
+    const message = errorMessage(error, "Could not start hardening campaign");
     return NextResponse.json({ error: message }, { status: message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 400 });
   }
 }
