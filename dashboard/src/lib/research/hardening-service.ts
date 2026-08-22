@@ -540,7 +540,10 @@ export async function auditCompletedHardeningCase(input: {
           && evidenceRefs.some((ref) => /(?:^|\.)uci\.org\//i.test(ref.replace(/^https?:\/\//i, "")))
           && /bmx|mountain bike|uci|sport_correct|cycling/i.test(summary)
           && gates.sport_correct === true;
-        if (!ageSafetyConfirmed && !cyclingOntologyConfirmed) return defect;
+        const onlyFansProviderRecoveryConfirmed = defect.category === "provider_failure"
+          && object(candidate.raw_candidate).onlyfans_platform_check_completed === true
+          && finalists.some((finalist) => finalist.id === candidate.id);
+        if (!ageSafetyConfirmed && !cyclingOntologyConfirmed && !onlyFansProviderRecoveryConfirmed) return defect;
         changed = true;
         resolvedPriorDefects += 1;
         return {
@@ -550,7 +553,9 @@ export async function auditCompletedHardeningCase(input: {
           resolvedByCaseId: input.prepared.caseId,
           resolutionNote: ageSafetyConfirmed
             ? "The same athlete was rediscovered and deterministically blocked before scoring by the 21+ safety gate."
-            : "The same UCI cycling athlete was rediscovered with sport_correct=true after the cycling ontology fix.",
+            : cyclingOntologyConfirmed
+              ? "The same UCI cycling athlete was rediscovered with sport_correct=true after the cycling ontology fix."
+              : "The same athlete completed the bounded OnlyFans platform check and passed every finalist gate on rerun.",
         };
       });
       if (changed) {
