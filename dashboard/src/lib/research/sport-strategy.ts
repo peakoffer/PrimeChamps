@@ -148,6 +148,21 @@ const STRATEGIES: Record<SportArchetype, Omit<SportResearchStrategy, "archetype"
 };
 
 const SPORT_OVERRIDES: Record<string, Partial<Omit<SportResearchStrategy, "archetype">>> = {
+  cycling: {
+    canonicalTerms: [
+      "cycling", "cyclist", "road cycling", "track cycling", "mountain bike", "mountain biking",
+      "cross-country eliminator", "cross country eliminator", "bmx", "bmx racing", "uci world cup",
+    ],
+    excludedTerms: ["motorcycle", "motocross", "stationary cycling instructor"],
+    authoritativeDomains: ["uci.org", "procyclingstats.com", ...BASE_DOMAINS],
+    queryTemplates: [
+      "site:uci.org cycling rising elite athletes results {year}",
+      "site:uci.org BMX racing emerging elite athletes {year}",
+      "site:uci.org mountain bike breakout athletes results {year}",
+      "professional cycling emerging athlete podium personal brand Instagram {year}",
+      "cycling development team breakout rider results {year}",
+    ],
+  },
   "motorcycle racing": {
     canonicalTerms: [
       "motorcycle racing", "motorbike racing", "road racing", "motorcycle racer",

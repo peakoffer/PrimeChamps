@@ -388,6 +388,13 @@ export async function auditCompletedHardeningCase(input: {
       category: "discovery", severity: "critical", candidateName: candidate.name,
       summary: "A wrong-sport candidate reached scoring", evidenceRefs: exactEvidenceRefs(array(candidate.source_evidence)), resolved: false,
     });
+    if (typeof candidate.age === "number" && candidate.age < DEFAULT_RECRUITING_PROFILE.parameters.target_age_min) {
+      existingDefects.push({
+        category: "eligibility", severity: "critical", candidateName: candidate.name,
+        summary: `A known under-${DEFAULT_RECRUITING_PROFILE.parameters.target_age_min} candidate reached scoring`,
+        evidenceRefs: exactEvidenceRefs(array(candidate.source_evidence)), resolved: false,
+      });
+    }
   }
   const auditByCandidateId = new Map((audits || []).map((audit) => [audit.research_candidate_id, audit]));
   const finalistGateRequirements = [

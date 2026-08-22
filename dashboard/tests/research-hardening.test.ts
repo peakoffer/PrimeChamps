@@ -13,6 +13,7 @@ import {
   isStaleEvaluationRun,
 } from "../src/lib/research/hardening.ts";
 import { buildMixedGlobalDiscoveryPlan, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
+import { evaluatePreScoringAgeGate } from "../src/lib/research/scoring.ts";
 
 test("hardening matrix covers all 13 materially distinct archetypes exactly once", () => {
   assert.equal(RESEARCH_HARDENING_MATRIX.length, 13);
@@ -73,6 +74,21 @@ test("hardening verdict fails closed on wrong identity, unsupported claims, and 
   assert.equal(evaluateHardeningCase({ ...base, unsupportedMaterialClaims: 1 }, []), "safety_stop");
   assert.equal(evaluateHardeningCase({ ...base, unresolvedChallengerFindings: 1 }, []), "needs_fix");
   assert.equal(evaluateHardeningCase({ ...base, exactPersonCandidates: 7, scoredCandidates: 0 }, []), "source_exhausted");
+});
+
+test("known under-21 candidates are blocked before paid scoring", () => {
+  assert.equal(evaluatePreScoringAgeGate({ age: 17, isMinor: true }).allowed, false);
+  assert.equal(evaluatePreScoringAgeGate({ age: 18 }).allowed, false);
+  assert.equal(evaluatePreScoringAgeGate({ age: 20 }).allowed, false);
+  assert.equal(evaluatePreScoringAgeGate({ age: 21 }).allowed, true);
+  assert.equal(evaluatePreScoringAgeGate({ age: null }).allowed, true);
+});
+
+test("cycling recognizes UCI disciplines and the governing body as authoritative", () => {
+  const strategy = getSportResearchStrategy("cycling");
+  assert.ok(strategy.authoritativeDomains.includes("uci.org"));
+  assert.ok(strategy.canonicalTerms.includes("bmx racing"));
+  assert.ok(strategy.canonicalTerms.includes("mountain bike"));
 });
 
 test("hardening routes and workflow preserve the evaluation-only mutation boundary", () => {

@@ -1,4 +1,4 @@
-export const RESEARCH_PROMPT_VERSION = "research-v11-onlyfans-platform-activity-gate";
+export const RESEARCH_PROMPT_VERSION = "research-v12-pre-score-age-safety-gate";
 export const DEFAULT_RESEARCH_OBJECTIVE = "onlyfans_creator" as const;
 
 export type ResearchObjective = typeof DEFAULT_RESEARCH_OBJECTIVE;
@@ -25,6 +25,24 @@ export const RESEARCH_SCORE_WEIGHTS = {
 export type ResearchScoreDimension = keyof typeof RESEARCH_SCORE_WEIGHTS;
 export type ResearchScoreBreakdown = Record<ResearchScoreDimension, number>;
 export type ResearchDisposition = "approval" | "held" | "blocked";
+
+export function evaluatePreScoringAgeGate(input: {
+  age?: number | null;
+  isMinor?: boolean | null;
+  targetAgeMin?: number;
+}) {
+  const targetAgeMin = input.targetAgeMin || ONLYFANS_CREATOR_PROFILE.targetAgeMin;
+  if (input.isMinor === true) {
+    return { allowed: false, reason: "Confirmed minor must be blocked before scoring" } as const;
+  }
+  if (typeof input.age === "number" && input.age < targetAgeMin) {
+    return {
+      allowed: false,
+      reason: `Known age ${input.age} is below the ${targetAgeMin}+ partnership threshold`,
+    } as const;
+  }
+  return { allowed: true, reason: null } as const;
+}
 
 function isScore(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;

@@ -70,6 +70,7 @@ import {
 import {
   applyResearchObjectiveScoreGuardrails,
   DEFAULT_RESEARCH_OBJECTIVE,
+  evaluatePreScoringAgeGate,
   ONLYFANS_CREATOR_PROFILE,
   parseResearchScoreBreakdown,
   RESEARCH_PROMPT_VERSION,
@@ -3988,6 +3989,40 @@ async function scoreAthletes(
           is_minor: ageInfo.isMinor === true,
         } : {}),
       };
+      const preScoringAgeGate = evaluatePreScoringAgeGate({
+        age: ageInfo.age,
+        isMinor: ageInfo.isMinor,
+        targetAgeMin: config.profileSnapshot?.parameters.target_age_min,
+      });
+      if (!preScoringAgeGate.allowed) {
+        log(`    ⛔ AGE SAFETY GATE: ${athlete.name} was blocked before scoring (${preScoringAgeGate.reason})`);
+        const { error: ageGateError } = await supabase.from("research_candidates").update({
+          raw_candidate: athleteForScoring,
+          source_evidence: athleteForScoring.evidence || [],
+          identity_status: (athleteForScoring.identity_confidence || 0) >= 70
+            && athleteForScoring.identity_corroborated === true ? "verified" : "probable",
+          identity_confidence: athleteForScoring.identity_confidence || 0,
+          instagram_handle: athleteForScoring.instagram_handle || null,
+          follower_count: athleteForScoring.follower_count || null,
+          engagement_rate: athleteForScoring.engagement_rate ?? null,
+          age: ageInfo.age,
+          age_verified: ageInfo.isMinor === true || ageInfo.corroborated,
+          age_source: ageInfo.source || null,
+          disposition: "rejected",
+          disposition_reason: preScoringAgeGate.reason,
+          gate_results: {
+            sport_evidence: athlete.discovery_verification,
+            identity_resolved: (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true,
+            identity_corroborated: athlete.identity_corroborated === true,
+            adult_age_verified: false,
+            age_safety_blocked_before_scoring: true,
+            scoring_completed: false,
+          },
+        }).eq("research_log_id", input.researchLogId)
+          .eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
+        if (ageGateError) throw ageGateError;
+        return null;
+      }
       let score: ScoredAthlete;
       try {
         score = await scoreAthlete(athleteForScoring, scoringModel, config);
