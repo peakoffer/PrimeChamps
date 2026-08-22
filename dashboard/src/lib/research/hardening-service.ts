@@ -729,7 +729,12 @@ export async function addHardeningRerunCases(input: {
   const { data: inserted, error: insertError } = await admin.from("research_hardening_cases")
     .insert(rows).select("id");
   if (insertError) throw insertError;
-  await admin.from("research_hardening_campaigns").update({ status: "queued", completed_at: null, error_message: null })
+  await admin.from("research_hardening_campaigns").update({
+    status: "queued",
+    cancel_requested_at: null,
+    completed_at: null,
+    error_message: null,
+  })
     .eq("id", input.campaignId).eq("organization_id", input.organizationId);
   return (inserted || []).map((item) => item.id);
 }

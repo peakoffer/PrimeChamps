@@ -235,7 +235,7 @@ export default function HardeningClient() {
             <tbody className="divide-y divide-brand-ink/10">
               {latestCases.map((item) => {
                 const defects = Array.isArray(item.defects) ? item.defects : [];
-                const canRerun = !active && ["needs_fix", "source_exhausted", "technical_failure", "failed"].includes(item.verdict || item.status);
+                const canRerun = !active && ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
                 return (
                   <tr key={item.id} className="align-top hover:bg-brand-paper/60">
                     <td className="px-4 py-4"><p className="font-semibold capitalize text-brand-ink">{item.archetype}</p><p className="mt-1 text-xs capitalize text-brand-muted">{item.sport}</p></td>

@@ -99,6 +99,7 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /evaluationMode:\s*true/);
   assert.match(service, /mutation_surfaces:\s*\[\]/);
   assert.match(workflow, /HARDENING_MAX_CONCURRENCY/);
+  assert.match(service, /cancel_requested_at:\s*null/);
   assert.doesNotMatch(service, /\.from\(["']athletes["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["']activity_notifications["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["'](?:outreach_drafts|messages|outreach_queue)["']\)\.(insert|upsert|update)/);
