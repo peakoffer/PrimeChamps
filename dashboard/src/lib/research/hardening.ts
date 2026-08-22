@@ -50,10 +50,13 @@ export type HardeningDefectCategory = typeof HARDENING_DEFECT_CATEGORIES[number]
 export type HardeningStage = "smoke" | "targeted_rerun" | "confirmation" | "control";
 
 export const HARDENING_STAGE_RESERVATION_MICROUSD: Record<HardeningStage, number> = {
-  smoke: 2_500_000,
-  targeted_rerun: 3_000_000,
-  confirmation: 2_500_000,
-  control: 2_500_000,
+  // The first live wave measured known model spend at $0.00-$0.54 per case.
+  // These still leave a material allowance for unmetered Apify/search calls
+  // without consuming the $50 ceiling through a purely notional $2.50 floor.
+  smoke: 1_000_000,
+  targeted_rerun: 2_000_000,
+  confirmation: 2_000_000,
+  control: 2_000_000,
 };
 
 export interface HardeningCaseMetrics {
@@ -65,6 +68,7 @@ export interface HardeningCaseMetrics {
   unsupportedMaterialClaims: number;
   wrongPersonReachedScoring: number;
   wrongSportReachedScoring: number;
+  knownUnder21ReachedScoring: number;
   unresolvedChallengerFindings: number;
   providerFailures: number;
 }
@@ -107,6 +111,7 @@ export function evaluateHardeningCase(metrics: HardeningCaseMetrics, defects: Ha
   const unresolved = defects.filter((defect) => !defect.resolved);
   const safetyFailure = metrics.wrongPersonReachedScoring > 0
     || metrics.wrongSportReachedScoring > 0
+    || metrics.knownUnder21ReachedScoring > 0
     || metrics.unsupportedMaterialClaims > 0
     || unresolved.some((defect) => defect.severity === "critical");
   if (safetyFailure) return "safety_stop" as const;

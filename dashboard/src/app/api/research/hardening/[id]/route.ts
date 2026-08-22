@@ -8,6 +8,7 @@ import {
   getHardeningCampaigns,
   linkCampaignWorkflow,
   recoverStaleHardeningRuns,
+  resumeUntouchedHardeningSmokeCases,
 } from "@/lib/research/hardening-service";
 import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
 
@@ -46,7 +47,15 @@ export async function POST(
       }
       return NextResponse.json({ ok: true, campaignId: id, status: "cancelled" });
     }
-    if (body.action !== "rerun") return NextResponse.json({ error: "Action must be cancel or rerun" }, { status: 400 });
+    if (body.action === "resume_remaining") {
+      const caseIds = await resumeUntouchedHardeningSmokeCases(id, user.organizationId);
+      const workflow = await start(runResearchHardeningCampaign, [{
+        campaignId: id, organizationId: user.organizationId, requestedByUserId: user.id, caseIds,
+      }]);
+      await linkCampaignWorkflow({ campaignId: id, organizationId: user.organizationId, workflowRunId: workflow.runId });
+      return NextResponse.json({ ok: true, campaignId: id, caseIds, workflowRunId: workflow.runId }, { status: 202 });
+    }
+    if (body.action !== "rerun") return NextResponse.json({ error: "Action must be cancel, resume_remaining, or rerun" }, { status: 400 });
     const requested = Array.isArray(body.archetypes) ? body.archetypes : [];
     const selected = Array.from(new Set(requested.filter((value): value is HardeningArchetype =>
       typeof value === "string" && archetypes.has(value as HardeningArchetype)

@@ -114,14 +114,16 @@ export default function HardeningClient() {
     finally { setActing(null); }
   }
 
-  async function campaignAction(action: "cancel" | "rerun", archetype?: string | string[], stage = "targeted_rerun") {
+  async function campaignAction(action: "cancel" | "rerun" | "resume_remaining", archetype?: string | string[], stage = "targeted_rerun") {
     if (!campaign) return;
     setActing(`${action}:${archetype || "campaign"}`); setError(null);
     try {
       const response = await fetch(`/api/research/hardening/${campaign.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action === "cancel" ? { action } : { action, archetypes: Array.isArray(archetype) ? archetype : [archetype], stage }),
+        body: JSON.stringify(action === "cancel" || action === "resume_remaining"
+          ? { action }
+          : { action, archetypes: Array.isArray(archetype) ? archetype : [archetype], stage }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || `Could not ${action} campaign`);
@@ -136,6 +138,9 @@ export default function HardeningClient() {
   const limit = campaign?.budget_limit_microusd || 50_000_000;
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
+  const untouchedCancelled = campaign?.cases.filter((item) =>
+    item.stage === "smoke" && item.status === "cancelled" && !item.research_log_id
+  ).length || 0;
 
   return (
     <div className="space-y-5">
@@ -158,6 +163,9 @@ export default function HardeningClient() {
             </button>
           ) : (
             <>
+              {untouchedCancelled > 0 && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
+                <FlaskConical className="h-4 w-4" /> Resume {untouchedCancelled} untouched smoke cases
+              </button>}
               {campaign && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 3 regression controls
               </button>}

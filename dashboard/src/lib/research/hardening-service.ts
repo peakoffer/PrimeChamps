@@ -71,6 +71,50 @@ function array(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
+type HardeningSummaryRow = {
+  status: string;
+  verdict: string | null;
+  cost_microusd: number | string | null;
+  metrics: unknown;
+  defects: unknown;
+};
+
+function summarizeHardeningCaseRows(cases: HardeningSummaryRow[]) {
+  const totalCost = cases.reduce((sum, item) => sum + integer(item.cost_microusd), 0);
+  const unresolvedDefects = cases.flatMap((item) => array(item.defects).map(object))
+    .filter((defect) => defect.resolved !== true).length;
+  const criticalDefects = cases.flatMap((item) => array(item.defects).map(object))
+    .filter((defect) => defect.resolved !== true && defect.severity === "critical").length;
+  const providerFailures = cases.reduce((sum, item) => sum + integer(object(item.metrics).providerFailures), 0);
+  const safetyStops = cases.filter((item) => item.verdict === "safety_stop").length;
+  return {
+    totalCost,
+    unresolvedDefects,
+    criticalDefects,
+    providerFailures,
+    safetyStops,
+    queued: cases.filter((item) => item.status === "queued").length,
+    running: cases.filter((item) => item.status === "running").length,
+    failed: cases.filter((item) => item.status === "failed").length,
+    summary: {
+      evaluation_only: true,
+      mutation_surfaces: [],
+      total_cases: cases.length,
+      completed: cases.filter((item) => item.status === "completed").length,
+      cancelled: cases.filter((item) => item.status === "cancelled").length,
+      passed: cases.filter((item) => item.verdict === "passed").length,
+      needs_fix: cases.filter((item) => item.verdict === "needs_fix").length,
+      source_exhausted: cases.filter((item) => item.verdict === "source_exhausted").length,
+      unresolved_defects: unresolvedDefects,
+      critical_defects: criticalDefects,
+      provider_failures: providerFailures,
+      safety_stops: safetyStops,
+      budget_remaining_microusd: Math.max(0, HARDENING_BUDGET_LIMIT_MICROUSD - totalCost),
+      confirmation_reserve_microusd: HARDENING_CONFIRMATION_RESERVE_MICROUSD,
+    },
+  };
+}
+
 export async function resolveHardeningModelSnapshot() {
   const [officialModel, challenger] = await Promise.all([
     resolveAnthropicModelFamily("sonnet"),
@@ -377,6 +421,7 @@ export async function auditCompletedHardeningCase(input: {
     shadow = { model: challenger.model, audits: [], costMicrousd: 0, inputTokens: 0, outputTokens: 0 };
   }
   const existingDefects: HardeningDefect[] = [];
+  let knownUnder21ReachedScoring = 0;
   for (const candidate of candidates || []) {
     if (!scoredIds.has(candidate.id)) continue;
     const gates = object(candidate.gate_results);
@@ -389,6 +434,7 @@ export async function auditCompletedHardeningCase(input: {
       summary: "A wrong-sport candidate reached scoring", evidenceRefs: exactEvidenceRefs(array(candidate.source_evidence)), resolved: false,
     });
     if (typeof candidate.age === "number" && candidate.age < DEFAULT_RECRUITING_PROFILE.parameters.target_age_min) {
+      knownUnder21ReachedScoring += 1;
       existingDefects.push({
         category: "eligibility", severity: "critical", candidateName: candidate.name,
         summary: `A known under-${DEFAULT_RECRUITING_PROFILE.parameters.target_age_min} candidate reached scoring`,
@@ -439,6 +485,7 @@ export async function auditCompletedHardeningCase(input: {
         .reduce((sum, row) => sum + integer(row.unsupported_sampled_claim_count), 0),
     wrongPersonReachedScoring: existingDefects.filter((defect) => defect.category === "identity").length,
     wrongSportReachedScoring: existingDefects.filter((defect) => defect.category === "discovery").length,
+    knownUnder21ReachedScoring,
     unresolvedChallengerFindings: shadowDefects.filter((defect) => defect.category !== "provider_failure").length,
     providerFailures: Number(log.status === "error") + shadowDefects.filter((defect) => defect.category === "provider_failure").length,
   };
@@ -482,32 +529,8 @@ export async function refreshHardeningCampaign(input: HardeningCampaignWorkflowI
     .select("stage,status,verdict,cost_microusd,metrics,defects")
     .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId);
   if (error) throw error;
-  const totalCost = (cases || []).reduce((sum, item) => sum + integer(item.cost_microusd), 0);
-  const unresolvedDefects = (cases || []).flatMap((item) => array(item.defects).map(object))
-    .filter((defect) => defect.resolved !== true).length;
-  const criticalDefects = (cases || []).flatMap((item) => array(item.defects).map(object))
-    .filter((defect) => defect.resolved !== true && defect.severity === "critical").length;
-  const queued = (cases || []).filter((item) => item.status === "queued").length;
-  const running = (cases || []).filter((item) => item.status === "running").length;
-  const failed = (cases || []).filter((item) => item.status === "failed").length;
-  const providerFailures = (cases || []).reduce((sum, item) =>
-    sum + integer(object(item.metrics).providerFailures), 0);
-  const safetyStops = (cases || []).filter((item) => item.verdict === "safety_stop").length;
-  const summary = {
-    evaluation_only: true,
-    mutation_surfaces: [],
-    total_cases: cases?.length || 0,
-    completed: (cases || []).filter((item) => item.status === "completed").length,
-    passed: (cases || []).filter((item) => item.verdict === "passed").length,
-    needs_fix: (cases || []).filter((item) => item.verdict === "needs_fix").length,
-    source_exhausted: (cases || []).filter((item) => item.verdict === "source_exhausted").length,
-    unresolved_defects: unresolvedDefects,
-    critical_defects: criticalDefects,
-    provider_failures: providerFailures,
-    safety_stops: safetyStops,
-    budget_remaining_microusd: Math.max(0, HARDENING_BUDGET_LIMIT_MICROUSD - totalCost),
-    confirmation_reserve_microusd: HARDENING_CONFIRMATION_RESERVE_MICROUSD,
-  };
+  const { totalCost, criticalDefects, providerFailures, safetyStops, queued, running, failed, summary } =
+    summarizeHardeningCaseRows((cases || []) as HardeningSummaryRow[]);
   const mustStop = safetyStops > 0 || criticalDefects > 0 || providerFailures >= 2;
   if (mustStop && queued > 0) {
     await admin.from("research_hardening_cases").update({
@@ -536,9 +559,15 @@ export async function failHardeningCampaign(input: HardeningCampaignWorkflowInpu
   "use step";
   const message = error instanceof Error ? error.message : String(error);
   const admin = createAdminClient({ disableRealtime: true });
+  const { data: cases } = await admin.from("research_hardening_cases")
+    .select("status,verdict,cost_microusd,metrics,defects")
+    .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId);
+  const reconciled = summarizeHardeningCaseRows((cases || []) as HardeningSummaryRow[]);
   await admin.from("research_hardening_campaigns").update({
     status: message.toLowerCase().includes("cancel") ? "cancelled" : "failed",
     error_message: message.slice(0, 1_000),
+    total_cost_microusd: reconciled.totalCost,
+    summary: reconciled.summary,
     completed_at: new Date().toISOString(),
   }).eq("id", input.campaignId).eq("organization_id", input.organizationId);
   return { status: "failed", error: message };
@@ -625,7 +654,45 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
   }).in("id", runIds).eq("organization_id", organizationId).eq("is_evaluation", true);
   await admin.from("research_hardening_cases").update({ status: "cancelled", completed_at: now })
     .eq("campaign_id", campaignId).eq("organization_id", organizationId).in("status", ["queued", "running"]);
+  const { data: reconciledCases, error: reconcileError } = await admin.from("research_hardening_cases")
+    .select("status,verdict,cost_microusd,metrics,defects")
+    .eq("campaign_id", campaignId).eq("organization_id", organizationId);
+  if (reconcileError) throw reconcileError;
+  const reconciled = summarizeHardeningCaseRows((reconciledCases || []) as HardeningSummaryRow[]);
+  await admin.from("research_hardening_campaigns").update({
+    status: "cancelled",
+    total_cost_microusd: reconciled.totalCost,
+    summary: reconciled.summary,
+  }).eq("id", campaignId).eq("organization_id", organizationId);
   return campaign;
+}
+
+export async function resumeUntouchedHardeningSmokeCases(campaignId: string, organizationId: string) {
+  const admin = createAdminClient({ disableRealtime: true });
+  const { data: campaign, error: campaignError } = await admin.from("research_hardening_campaigns")
+    .select("id,status,total_cost_microusd").eq("id", campaignId).eq("organization_id", organizationId).single();
+  if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
+  if (["queued", "running", "paused"].includes(campaign.status)) throw new Error("The hardening campaign is already active");
+  const { data: untouched, error } = await admin.from("research_hardening_cases")
+    .select("id").eq("campaign_id", campaignId).eq("organization_id", organizationId)
+    .eq("stage", "smoke").eq("status", "cancelled").is("research_log_id", null);
+  if (error) throw error;
+  const caseIds = (untouched || []).map((item) => item.id);
+  if (caseIds.length === 0) throw new Error("No untouched smoke cases remain");
+  const spend = campaignSpendDecision({
+    totalCostMicrousd: integer(campaign.total_cost_microusd),
+    stage: "smoke",
+    nextEstimatedCostMicrousd: caseIds.length * HARDENING_STAGE_RESERVATION_MICROUSD.smoke,
+  });
+  if (!spend.allowed) throw new Error(spend.reason);
+  const { error: resetError } = await admin.from("research_hardening_cases").update({
+    status: "queued", verdict: null, resolution_notes: null, completed_at: null,
+  }).in("id", caseIds).eq("organization_id", organizationId).eq("status", "cancelled").is("research_log_id", null);
+  if (resetError) throw resetError;
+  await admin.from("research_hardening_campaigns").update({
+    status: "queued", cancel_requested_at: null, completed_at: null, error_message: null,
+  }).eq("id", campaignId).eq("organization_id", organizationId);
+  return caseIds;
 }
 
 export async function addHardeningRerunCases(input: {

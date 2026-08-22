@@ -67,11 +67,13 @@ test("hardening verdict fails closed on wrong identity, unsupported claims, and 
   const base = {
     exactPersonCandidates: 8, scoredCandidates: 1, finalists: 1, auditedFinalists: 1, auditedRejected: 2,
     unsupportedMaterialClaims: 0, wrongPersonReachedScoring: 0, wrongSportReachedScoring: 0,
+    knownUnder21ReachedScoring: 0,
     unresolvedChallengerFindings: 0, providerFailures: 0,
   };
   assert.equal(evaluateHardeningCase(base, []), "passed");
   assert.equal(evaluateHardeningCase({ ...base, wrongPersonReachedScoring: 1 }, []), "safety_stop");
   assert.equal(evaluateHardeningCase({ ...base, unsupportedMaterialClaims: 1 }, []), "safety_stop");
+  assert.equal(evaluateHardeningCase({ ...base, knownUnder21ReachedScoring: 1 }, []), "safety_stop");
   assert.equal(evaluateHardeningCase({ ...base, unresolvedChallengerFindings: 1 }, []), "needs_fix");
   assert.equal(evaluateHardeningCase({ ...base, exactPersonCandidates: 7, scoredCandidates: 0 }, []), "source_exhausted");
 });
