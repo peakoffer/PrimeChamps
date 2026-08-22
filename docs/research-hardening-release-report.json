@@ -1,12 +1,68 @@
 {
   "reportVersion": "research-hardening-v1",
-  "status": "implementation_in_progress",
-  "archetypeCount": 13,
-  "officialModelFamily": "sonnet",
-  "challengerModelFamily": "opus",
-  "evaluationOnly": true,
-  "maxConcurrency": 3,
-  "preConfirmationStopMicrousd": 40000000,
-  "budgetLimitMicrousd": 50000000,
-  "cases": []
+  "generatedAt": "2026-08-22T06:19:09.350Z",
+  "campaign": {
+    "id": "bd216e99-b7ac-4b76-b137-2c1ae70af584",
+    "name": "Cross-sport hardening 2026-08-22",
+    "status": "completed",
+    "audienceScope": "mixed_global",
+    "officialModelId": "claude-sonnet-5",
+    "challengerModelId": "anthropic/claude-opus-5-fast",
+    "budgetLimitMicrousd": 50000000,
+    "preConfirmationStopMicrousd": 40000000,
+    "confirmationReserveMicrousd": 10000000,
+    "totalCostMicrousd": 43000000,
+    "budgetRemainingMicrousd": 7000000,
+    "maxConcurrency": 3,
+    "summary": {
+      "totalCases": 29,
+      "completed": 27,
+      "passed": 12,
+      "cancelled": 1,
+      "needsFix": 3,
+      "sourceExhausted": 12,
+      "safetyStops": 0,
+      "criticalDefects": 0,
+      "providerFailures": 1,
+      "resolvedFailures": 1,
+      "unresolvedDefects": 0
+    }
+  },
+  "latestCanonicalCases": [
+    {"archetype":"action","sport":"climbing","stage":"smoke","verdict":"passed","exactPeople":12,"scored":2,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0},
+    {"archetype":"adaptive","sport":"adaptive track and field","stage":"confirmation","verdict":"source_exhausted","exactPeople":0,"scored":0,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0,"resolution":"No athletes found after 66 sourced results."},
+    {"archetype":"combat","sport":"boxing","stage":"confirmation","verdict":"passed","exactPeople":80,"scored":11,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0},
+    {"archetype":"endurance","sport":"cycling","stage":"targeted_rerun","verdict":"passed","exactPeople":32,"scored":1,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0,"resolvedDefects":1},
+    {"archetype":"general","sport":"esports","stage":"confirmation","verdict":"needs_fix","exactPeople":10,"scored":0,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0,"resolution":"Ten exact people found from 64 sources; none passed source, sport, and public Instagram identity gates."},
+    {"archetype":"judged","sport":"figure skating","stage":"smoke","verdict":"passed","exactPeople":14,"scored":4,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0},
+    {"archetype":"motorsport","sport":"motocross","stage":"targeted_rerun","verdict":"passed","exactPeople":30,"scored":5,"finalists":1,"auditedFinalists":1,"auditedRejected":2,"under21Blocked":4,"findings":0},
+    {"archetype":"precision","sport":"equestrian","stage":"confirmation","verdict":"source_exhausted","exactPeople":4,"scored":0,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0,"resolution":"Four exact people found from 86 sources; none passed source, sport, and public Instagram identity gates."},
+    {"archetype":"racquet","sport":"tennis","stage":"confirmation","verdict":"passed","exactPeople":48,"scored":10,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":2,"findings":0},
+    {"archetype":"strength","sport":"CrossFit","stage":"smoke","verdict":"passed","exactPeople":12,"scored":7,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":1,"findings":0},
+    {"archetype":"team","sport":"soccer","stage":"smoke","verdict":"passed","exactPeople":11,"scored":4,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0},
+    {"archetype":"water","sport":"swimming","stage":"confirmation","verdict":"passed","exactPeople":69,"scored":9,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0},
+    {"archetype":"winter","sport":"skiing","stage":"confirmation","verdict":"source_exhausted","exactPeople":4,"scored":0,"finalists":0,"auditedFinalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0,"resolution":"Four exact people found after 88 sourced results; no scoring dossier survived the evidence funnel."}
+  ],
+  "regressionControls": [
+    {"sport":"volleyball","verdict":"passed","exactPeople":56,"scored":5,"finalists":0,"auditedRejected":2,"under21Blocked":0,"findings":0},
+    {"sport":"surfing","verdict":"passed","exactPeople":73,"scored":6,"finalists":0,"auditedRejected":2,"under21Blocked":1,"findings":0},
+    {"sport":"gymnastics","verdict":"passed","exactPeople":77,"scored":9,"finalists":0,"auditedRejected":2,"under21Blocked":6,"findings":0}
+  ],
+  "safety": {
+    "evaluationOnly": true,
+    "liveMutationCount": 0,
+    "wrongPersonReachedScoring": 0,
+    "wrongSportReachedScoring": 0,
+    "knownUnder21ReachedScoring": 0,
+    "unsupportedMaterialClaims": 0,
+    "unresolvedChallengerFindings": 0,
+    "unresolvedProviderFailures": 0,
+    "prohibitedSurfaces": ["athletes", "activity_notifications", "outreach_drafts", "messages", "outreach_queue", "pipeline_promotions"]
+  },
+  "releaseQualification": {
+    "automaticContinuationDefectFound": true,
+    "fixedByCommit": "1030aa0",
+    "proof": "The untouched esports confirmation resumed with a $9 hard limit and completed at $43 total campaign spend.",
+    "nextProof": "Run the next fresh campaign without owner intervention to close the automatic-continuation qualification."
+  }
 }
