@@ -92,6 +92,11 @@ function summarizeHardeningCaseRows(cases: HardeningSummaryRow[]) {
   // resolved every critical finding from that case.
   const safetyStops = cases.filter((item) => item.verdict === "safety_stop"
     && array(item.defects).map(object).some((defect) => defect.resolved !== true && defect.severity === "critical")).length;
+  // Preserve superseded launch/provider failures in the case ledger without
+  // allowing them to freeze later measured waves forever. A failure is only
+  // non-blocking after an explicit evidence-backed reconciliation marks it.
+  const unresolvedFailed = cases.filter((item) => item.status === "failed"
+    && object(item.metrics).failureResolved !== true).length;
   return {
     totalCost,
     unresolvedDefects,
@@ -100,13 +105,15 @@ function summarizeHardeningCaseRows(cases: HardeningSummaryRow[]) {
     safetyStops,
     queued: cases.filter((item) => item.status === "queued").length,
     running: cases.filter((item) => item.status === "running").length,
-    failed: cases.filter((item) => item.status === "failed").length,
+    failed: unresolvedFailed,
     summary: {
       evaluation_only: true,
       mutation_surfaces: [],
       total_cases: cases.length,
       completed: cases.filter((item) => item.status === "completed").length,
       cancelled: cases.filter((item) => item.status === "cancelled").length,
+      resolved_failures: cases.filter((item) => item.status === "failed"
+        && object(item.metrics).failureResolved === true).length,
       passed: cases.filter((item) => item.verdict === "passed").length,
       needs_fix: cases.filter((item) => item.verdict === "needs_fix").length,
       source_exhausted: cases.filter((item) => item.verdict === "source_exhausted").length,
