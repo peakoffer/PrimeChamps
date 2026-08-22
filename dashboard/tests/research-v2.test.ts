@@ -2576,11 +2576,23 @@ test("V2 evidence citations must match a frozen source URL and source text", () 
   }, sources), false);
 });
 
-test("meaningful audience uses the active minimum with a bounded engagement exception", () => {
-  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 30_000, engagementRate: 1, followerMinimum: 30_000 }), true);
-  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 15_000, engagementRate: 4.2, followerMinimum: 30_000 }), true);
-  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 15_000, engagementRate: 3.9, followerMinimum: 30_000 }), false);
-  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 9_999, engagementRate: 20, followerMinimum: 30_000 }), false);
+test("meaningful audience is independent of the soft recruiting follower preference", () => {
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 30_000, engagementRate: 1 }), true);
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 15_000, engagementRate: 4.2 }), true);
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 15_000, engagementRate: 3.9 }), true);
+  assert.equal(hasMeaningfulPersonalAudience({ followerCount: 9_999, engagementRate: 20 }), false);
+});
+
+test("Instagram enrichment records follower-band fit without rejecting outside-band candidates", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  const preferenceCheck = workflow.indexOf("const audienceInRange =");
+  const privateAccountGate = workflow.indexOf("// Skip private accounts", preferenceCheck);
+  const preferenceBlock = workflow.slice(preferenceCheck, privateAccountGate);
+
+  assert.ok(preferenceCheck >= 0 && privateAccountGate > preferenceCheck);
+  assert.ok(preferenceBlock.includes("continuing in the soft-ranking lane"));
+  assert.equal(preferenceBlock.includes('disposition: "rejected"'), false);
+  assert.equal(preferenceBlock.includes("return null"), false);
 });
 
 test("live research evaluation exits before athlete writes and suppresses notifications", () => {

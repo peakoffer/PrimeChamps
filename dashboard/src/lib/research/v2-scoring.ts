@@ -363,20 +363,17 @@ export function hasSourceBackedResearchV2Signal(
 }
 
 /**
- * The active thesis minimum is the normal audience gate. A smaller account
- * can qualify only through a bounded exceptional-engagement path; raw follower
- * count or an LLM audience score can never qualify a profile on its own.
+ * Confirm that a candidate has a measurable personal audience without turning
+ * the business's preferred follower band into an eligibility filter. The
+ * preferred band belongs in ordering/context; this evidence gate only rejects
+ * absent or genuinely negligible audiences.
  */
 export function hasMeaningfulPersonalAudience(input: {
   followerCount?: number | null;
   engagementRate?: number | null;
-  followerMinimum: number;
 }) {
   const followers = Number(input.followerCount) || 0;
-  const engagement = Number(input.engagementRate) || 0;
-  const normalMinimum = Math.max(10_000, Number(input.followerMinimum) || 0);
-  const exceptionalMinimum = Math.max(10_000, Math.ceil(normalMinimum * 0.5));
-  return followers >= normalMinimum || (followers >= exceptionalMinimum && engagement >= 4);
+  return followers >= 10_000;
 }
 
 export function stableEvidenceSetHash(items: Array<{ url?: string; claim?: string; sourceExcerpt?: string }>) {

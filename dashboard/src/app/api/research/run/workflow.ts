@@ -3136,32 +3136,16 @@ async function enrichAthletesWithInstagram(
         const handle = candidate.handle;
         log(`  Verified @${handle} for ${athlete.name} (${identity.confidence}% identity confidence)`);
 
-        // Filter by follower count
-        // Treat 0 or missing max as "no upper limit"
+        // Follower ranges are business preferences, not eligibility gates. Keep
+        // the preference match in the candidate ledger for ranking and audit,
+        // but never discard an otherwise valid person before scoring.
+        // Treat 0 or missing max as "no upper limit".
         const effectiveMax = config.followerMax > 0 ? config.followerMax : 999999999;
         const effectiveMin = config.followerMin || 0;
 
         const audienceInRange = profile.followers >= effectiveMin && profile.followers <= effectiveMax;
         if (!audienceInRange) {
-          log(`  @${handle} has ${profile.followers.toLocaleString()} followers outside the target range, skipping before scoring`);
-          await supabase.from("research_candidates").update({
-            identity_status: "verified",
-            identity_confidence: identity.confidence,
-            instagram_handle: handle,
-            follower_count: profile.followers,
-            disposition: "rejected",
-            disposition_reason: `Instagram audience ${profile.followers.toLocaleString()} is outside the configured ${effectiveMin.toLocaleString()}–${effectiveMax.toLocaleString()} range`,
-            gate_results: {
-              sport_evidence: athlete.discovery_verification,
-              identity_resolved: true,
-              identity_reasons: identity.reasons,
-              identity_corroborated: true,
-              identity_corroboration_reasons: corroboratedIdentity.reasons,
-              public_account: !profile.isPrivate,
-              audience_in_range: false,
-            },
-          }).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
-          return null;
+          log(`  @${handle} has ${profile.followers.toLocaleString()} followers outside the preferred ${effectiveMin.toLocaleString()}–${effectiveMax.toLocaleString()} range; continuing in the soft-ranking lane`);
         }
 
         // Skip private accounts
@@ -4278,7 +4262,7 @@ function candidateResearchV2EvidenceSources(athlete: ResearchV2EvidenceCandidate
   return sources;
 }
 
-function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCandidate, followerMinimum: number) {
+function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCandidate) {
   const sources = candidateResearchV2EvidenceSources(athlete);
   const creatorActivity = researchV2CreatorActivitySnapshot({ posts: athlete.latest_posts });
   return {
@@ -4286,7 +4270,6 @@ function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCand
     meaningfulAudience: hasMeaningfulPersonalAudience({
       followerCount: athlete.follower_count,
       engagementRate: athlete.engagement_rate,
-      followerMinimum,
     }),
     creatorPotential: hasSourceBackedResearchV2Signal(athlete.creator_evidence, sources)
       && creatorActivity.substantiveCreatorActivity,
@@ -4353,10 +4336,7 @@ async function auditPriorityCandidate(
     .single();
   if (candidateError) throw candidateError;
 
-  const deterministicEvidence = deterministicResearchV2FinalistEvidence(
-    athlete,
-    input.config.profileSnapshot?.parameters.follower_min ?? input.config.followerMin
-  );
+  const deterministicEvidence = deterministicResearchV2FinalistEvidence(athlete);
 
   let independentResults: Array<{ title: string; url: string; snippet: string }> = [];
   let commercialConstraintSearchCompleted = false;
@@ -4871,10 +4851,7 @@ async function auditPriorityCandidates(
     .filter((athlete) => {
       const proposedPriority = athlete.researcher_proposed_score ?? athlete.score;
       if (proposedPriority <= RESEARCH_PRIORITY_THRESHOLD) return false;
-      const evidence = deterministicResearchV2FinalistEvidence(
-        athlete,
-        input.config.profileSnapshot?.parameters.follower_min ?? input.config.followerMin
-      );
+      const evidence = deterministicResearchV2FinalistEvidence(athlete);
       return (athlete.identity_confidence || 0) >= 70
         && athlete.identity_corroborated === true
         && athlete.age_verified === true
@@ -5238,7 +5215,7 @@ Respond with ONLY valid JSON:
             ...athlete,
             momentum_evidence: momentumEvidence,
             creator_evidence: creatorEvidence,
-          }, thesisParams.follower_min);
+          });
           const allCoreEvidenceGatesPassed = researchV2PreAuditEvidenceComplete({
             professionalSportVerified: athlete.discovery_verification?.passed === true,
             identityConfirmed: (athlete.identity_confidence || 0) >= 70
