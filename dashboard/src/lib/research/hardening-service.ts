@@ -86,7 +86,11 @@ function summarizeHardeningCaseRows(cases: HardeningSummaryRow[]) {
   const criticalDefects = cases.flatMap((item) => array(item.defects).map(object))
     .filter((defect) => defect.resolved !== true && defect.severity === "critical").length;
   const providerFailures = cases.reduce((sum, item) => sum + integer(object(item.metrics).providerFailures), 0);
-  const safetyStops = cases.filter((item) => item.verdict === "safety_stop").length;
+  // A historical safety stop remains part of the release record, but it must not
+  // permanently freeze the campaign after an evidence-backed targeted rerun has
+  // resolved every critical finding from that case.
+  const safetyStops = cases.filter((item) => item.verdict === "safety_stop"
+    && array(item.defects).map(object).some((defect) => defect.resolved !== true && defect.severity === "critical")).length;
   return {
     totalCost,
     unresolvedDefects,
@@ -346,6 +350,10 @@ function exactEvidenceRefs(sourceEvidence: unknown[]) {
   });
 }
 
+function candidateKey(value: unknown) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 export async function auditCompletedHardeningCase(input: {
   campaign: HardeningCampaignWorkflowInput;
   prepared: PreparedHardeningCase;
@@ -422,9 +430,13 @@ export async function auditCompletedHardeningCase(input: {
   }
   const existingDefects: HardeningDefect[] = [];
   let knownUnder21ReachedScoring = 0;
+  let under21BlockedBeforeScoring = 0;
   for (const candidate of candidates || []) {
-    if (!scoredIds.has(candidate.id)) continue;
     const gates = object(candidate.gate_results);
+    if (gates.age_safety_blocked_before_scoring === true && !scoredIds.has(candidate.id)) {
+      under21BlockedBeforeScoring += 1;
+    }
+    if (!scoredIds.has(candidate.id)) continue;
     if (candidate.identity_status !== "verified" || gates.identity_resolved === false) existingDefects.push({
       category: "identity", severity: "critical", candidateName: candidate.name,
       summary: "A candidate reached scoring without exact identity verification", evidenceRefs: exactEvidenceRefs(array(candidate.source_evidence)), resolved: false,
@@ -486,6 +498,7 @@ export async function auditCompletedHardeningCase(input: {
     wrongPersonReachedScoring: existingDefects.filter((defect) => defect.category === "identity").length,
     wrongSportReachedScoring: existingDefects.filter((defect) => defect.category === "discovery").length,
     knownUnder21ReachedScoring,
+    under21BlockedBeforeScoring,
     unresolvedChallengerFindings: shadowDefects.filter((defect) => defect.category !== "provider_failure").length,
     providerFailures: Number(log.status === "error") + shadowDefects.filter((defect) => defect.category === "provider_failure").length,
   };
@@ -493,6 +506,55 @@ export async function auditCompletedHardeningCase(input: {
   const knownCostMicrousd = scoreCost + auditCost + shadowCost;
   const reservationMicrousd = HARDENING_STAGE_RESERVATION_MICROUSD[input.prepared.stage];
   const costMicrousd = Math.max(knownCostMicrousd, reservationMicrousd);
+  let resolvedPriorDefects = 0;
+  if (input.prepared.stage !== "smoke") {
+    const currentByName = new Map((candidates || []).map((candidate) => [candidateKey(candidate.name), candidate]));
+    const { data: priorCases, error: priorCaseError } = await admin.from("research_hardening_cases")
+      .select("id,defects")
+      .eq("campaign_id", input.campaign.campaignId)
+      .eq("organization_id", input.campaign.organizationId)
+      .eq("archetype", input.prepared.archetype)
+      .neq("id", input.prepared.caseId);
+    if (priorCaseError) throw priorCaseError;
+    for (const priorCase of priorCases || []) {
+      let changed = false;
+      const reconciledDefects = array(priorCase.defects).map((rawDefect) => {
+        const defect = object(rawDefect);
+        if (defect.resolved === true || !defect.candidateName) return defect;
+        const candidate = currentByName.get(candidateKey(defect.candidateName));
+        if (!candidate) return defect;
+        const gates = object(candidate.gate_results);
+        const summary = String(defect.summary || "");
+        const evidenceRefs = array(defect.evidenceRefs).map(String);
+        const ageSafetyConfirmed = defect.category === "eligibility"
+          && /under-|reached paid scoring|age safety/i.test(summary)
+          && gates.age_safety_blocked_before_scoring === true
+          && !scoredIds.has(candidate.id);
+        const cyclingOntologyConfirmed = input.prepared.archetype === "endurance"
+          && evidenceRefs.some((ref) => /(?:^|\.)uci\.org\//i.test(ref.replace(/^https?:\/\//i, "")))
+          && /bmx|mountain bike|uci|sport_correct|cycling/i.test(summary)
+          && gates.sport_correct === true;
+        if (!ageSafetyConfirmed && !cyclingOntologyConfirmed) return defect;
+        changed = true;
+        resolvedPriorDefects += 1;
+        return {
+          ...defect,
+          resolved: true,
+          resolvedAt: new Date().toISOString(),
+          resolvedByCaseId: input.prepared.caseId,
+          resolutionNote: ageSafetyConfirmed
+            ? "The same athlete was rediscovered and deterministically blocked before scoring by the 21+ safety gate."
+            : "The same UCI cycling athlete was rediscovered with sport_correct=true after the cycling ontology fix.",
+        };
+      });
+      if (changed) {
+        const { error: reconcileError } = await admin.from("research_hardening_cases").update({
+          defects: reconciledDefects,
+        }).eq("id", priorCase.id).eq("organization_id", input.campaign.organizationId);
+        if (reconcileError) throw reconcileError;
+      }
+    }
+  }
   const { error: updateError } = await admin.from("research_hardening_cases").update({
     status: log.status === "cancelled" ? "cancelled" : log.status === "error" ? "failed" : "completed",
     verdict,
@@ -510,11 +572,15 @@ export async function auditCompletedHardeningCase(input: {
         conservative_provider_reservation_microusd: reservationMicrousd,
         accounted_cost_microusd: costMicrousd,
       },
+      resolved_prior_defects: resolvedPriorDefects,
     },
     shadow_audit: shadow,
     defects: allDefects,
     cost_microusd: costMicrousd,
-    resolution_notes: log.error_message,
+    resolution_notes: [
+      log.error_message,
+      resolvedPriorDefects > 0 ? `Evidence-backed rerun resolved ${resolvedPriorDefects} prior defect${resolvedPriorDefects === 1 ? "" : "s"}.` : null,
+    ].filter(Boolean).join(" ") || null,
     completed_at: new Date().toISOString(),
   }).eq("id", input.prepared.caseId).eq("organization_id", input.campaign.organizationId);
   if (updateError) throw updateError;

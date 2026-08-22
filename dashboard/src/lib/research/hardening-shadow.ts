@@ -9,6 +9,7 @@ import {
 } from "@/lib/research/benchmark-runner-support";
 import {
   HARDENING_DEFECT_CATEGORIES,
+  isActionableShadowFinding,
   sanitizeEvidenceRef,
   type HardeningDefect,
   type HardeningDefectCategory,
@@ -41,6 +42,7 @@ export type ShadowCandidateDossier = {
 export type ShadowCandidateAudit = {
   candidateId: string;
   candidateName: string;
+  finalist: boolean;
   verdict: "agree" | "unsafe_finalist" | "missed_strong_fit" | "insufficient_evidence";
   issueCategory: HardeningDefectCategory;
   severity: "critical" | "high" | "medium" | "low";
@@ -132,6 +134,7 @@ function normalizeAudit(value: unknown, dossiers: ShadowCandidateDossier[]): Sha
     return [{
       candidateId,
       candidateName: dossier.name,
+      finalist: dossier.finalist,
       verdict,
       issueCategory,
       severity,
@@ -247,7 +250,7 @@ Return exactly one audit for every candidate.`;
 }
 
 export function defectsFromShadowAudits(audits: ShadowCandidateAudit[]): HardeningDefect[] {
-  return audits.flatMap((audit) => audit.verdict === "agree" ? [] : [{
+  return audits.flatMap((audit) => !isActionableShadowFinding(audit.verdict, audit.finalist) ? [] : [{
     category: audit.issueCategory,
     severity: audit.severity,
     candidateName: audit.candidateName,

@@ -10,6 +10,7 @@ import {
   chunkWithConcurrency,
   evaluateAdversarialFixture,
   evaluateHardeningCase,
+  isActionableShadowFinding,
   isStaleEvaluationRun,
 } from "../src/lib/research/hardening.ts";
 import { buildMixedGlobalDiscoveryPlan, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
@@ -87,7 +88,7 @@ test("hardening verdict fails closed on wrong identity, unsupported claims, and 
   const base = {
     exactPersonCandidates: 8, scoredCandidates: 1, finalists: 1, auditedFinalists: 1, auditedRejected: 2,
     unsupportedMaterialClaims: 0, wrongPersonReachedScoring: 0, wrongSportReachedScoring: 0,
-    knownUnder21ReachedScoring: 0,
+    knownUnder21ReachedScoring: 0, under21BlockedBeforeScoring: 0,
     unresolvedChallengerFindings: 0, providerFailures: 0,
   };
   assert.equal(evaluateHardeningCase(base, []), "passed");
@@ -96,6 +97,14 @@ test("hardening verdict fails closed on wrong identity, unsupported claims, and 
   assert.equal(evaluateHardeningCase({ ...base, knownUnder21ReachedScoring: 1 }, []), "safety_stop");
   assert.equal(evaluateHardeningCase({ ...base, unresolvedChallengerFindings: 1 }, []), "needs_fix");
   assert.equal(evaluateHardeningCase({ ...base, exactPersonCandidates: 7, scoredCandidates: 0 }, []), "source_exhausted");
+});
+
+test("shadow audit records only real disagreements as defects", () => {
+  assert.equal(isActionableShadowFinding("agree", false), false);
+  assert.equal(isActionableShadowFinding("insufficient_evidence", false), false);
+  assert.equal(isActionableShadowFinding("missed_strong_fit", false), true);
+  assert.equal(isActionableShadowFinding("insufficient_evidence", true), true);
+  assert.equal(isActionableShadowFinding("unsafe_finalist", true), true);
 });
 
 test("known under-21 candidates are blocked before paid scoring", () => {

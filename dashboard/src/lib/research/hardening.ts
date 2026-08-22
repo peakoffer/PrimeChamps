@@ -69,6 +69,7 @@ export interface HardeningCaseMetrics {
   wrongPersonReachedScoring: number;
   wrongSportReachedScoring: number;
   knownUnder21ReachedScoring: number;
+  under21BlockedBeforeScoring: number;
   unresolvedChallengerFindings: number;
   providerFailures: number;
 }
@@ -80,6 +81,9 @@ export interface HardeningDefect {
   summary: string;
   evidenceRefs: string[];
   resolved: boolean;
+  resolvedAt?: string;
+  resolvedByCaseId?: string;
+  resolutionNote?: string;
 }
 
 export function campaignSpendDecision(input: {
@@ -126,6 +130,17 @@ export function evaluateHardeningCase(metrics: HardeningCaseMetrics, defects: Ha
     || unresolved.length > 0
   ) return "needs_fix" as const;
   return "passed" as const;
+}
+
+export function isActionableShadowFinding(
+  verdict: "agree" | "unsafe_finalist" | "missed_strong_fit" | "insufficient_evidence",
+  finalist: boolean
+) {
+  if (verdict === "agree") return false;
+  // A rejected candidate lacking finalist evidence confirms the rejection. It
+  // is not a challenger disagreement and must not create a false defect.
+  if (verdict === "insufficient_evidence" && !finalist) return false;
+  return true;
 }
 
 export function chunkWithConcurrency<T>(values: readonly T[], concurrency = HARDENING_MAX_CONCURRENCY) {

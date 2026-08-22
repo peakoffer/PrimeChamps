@@ -235,6 +235,8 @@ export default function HardeningClient() {
             <tbody className="divide-y divide-brand-ink/10">
               {latestCases.map((item) => {
                 const defects = Array.isArray(item.defects) ? item.defects : [];
+                const unresolvedDefects = defects.filter((defect) => defect.resolved !== true);
+                const resolvedDefects = defects.length - unresolvedDefects.length;
                 const canRerun = !active && ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
                 return (
                   <tr key={item.id} className="align-top hover:bg-brand-paper/60">
@@ -245,9 +247,9 @@ export default function HardeningClient() {
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "exactPersonCandidates")} → {metric(item.metrics, "scoredCandidates")} → {metric(item.metrics, "finalists")}</td>
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "auditedRejected")} / 2</td>
                     <td className="max-w-[260px] px-3 py-4">
-                      {defects.length === 0 ? <span className="inline-flex items-center gap-1 text-xs text-brand-success"><Check className="h-3.5 w-3.5" /> None</span> : (
-                        <details><summary className="cursor-pointer text-xs font-semibold text-brand-danger">{defects.length} finding{defects.length === 1 ? "" : "s"}</summary>
-                          <div className="mt-2 space-y-2">{defects.map((defect, index) => <p key={index} className="text-xs leading-5 text-brand-muted"><strong className="text-brand-ink">{String(defect.category || "audit")}:</strong> {String(defect.summary || "Review required")}</p>)}</div>
+                      {unresolvedDefects.length === 0 ? <span className="inline-flex items-center gap-1 text-xs text-brand-success"><Check className="h-3.5 w-3.5" /> None{resolvedDefects > 0 ? ` · ${resolvedDefects} fixed` : ""}</span> : (
+                        <details><summary className="cursor-pointer text-xs font-semibold text-brand-danger">{unresolvedDefects.length} open{resolvedDefects > 0 ? ` · ${resolvedDefects} fixed` : ""}</summary>
+                          <div className="mt-2 space-y-2">{unresolvedDefects.map((defect, index) => <p key={index} className="text-xs leading-5 text-brand-muted"><strong className="text-brand-ink">{String(defect.category || "audit")}:</strong> {String(defect.summary || "Review required")}</p>)}</div>
                         </details>
                       )}
                     </td>
