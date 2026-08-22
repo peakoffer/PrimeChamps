@@ -11,7 +11,7 @@
 
 ## Release conclusion
 
-The production campaign completed all 13 sport archetypes plus three clean release-depth controls. Eight canonical archetypes produced at least one scored candidate. The remaining five were not padded: adaptive track and field, equestrian, skiing, and esports received full-quality source-exhaustion investigations, while esports reached 10 exact people but none cleared the strict sport, source, and public-identity gates.
+The production campaign completed all 13 sport archetypes plus three clean release-depth controls. Nine canonical archetypes produced at least one scored candidate. The remaining four were not padded: adaptive track and field, equestrian, skiing, and esports received full-quality source-exhaustion investigations, while esports reached 10 exact people but none cleared the strict sport, source, and public-identity gates.
 
 The campaign produced one fully gated finalist in motocross. That finalist passed the independent audit; two strongest rejects were also audited. Across the latest canonical cases and controls, zero wrong-person matches, wrong-sport candidates, known under-21 candidates, unsupported material claims, provider failures, or unresolved Opus findings reached or survived scoring.
 
