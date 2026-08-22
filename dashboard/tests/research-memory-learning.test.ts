@@ -50,7 +50,9 @@ test("durable phases never suppress or reuse candidates from their own run", () 
     new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
     "utf8"
   );
+  assert.match(memory, /\.eq\("is_test_data", false\)/);
   assert.match(memory, /\.neq\("research_log_id", currentResearchLogId\)/);
+  assert.match(workflow, /\.eq\("is_test_data", false\)/);
   assert.match(workflow, /\.neq\("research_log_id", input\.researchLogId\)/);
 });
 

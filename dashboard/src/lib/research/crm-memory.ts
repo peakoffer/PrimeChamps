@@ -149,6 +149,10 @@ async function loadAllPriorResearchMemory(
       .from("research_candidates")
       .select("name,sport,instagram_handle,disposition,disposition_reason,is_minor,score,updated_at")
       .eq("organization_id", organizationId)
+      // Evaluation ledgers prove the system without changing production
+      // behavior. They must not create cooldowns for future live research or
+      // make independent hardening replicates suppress one another.
+      .eq("is_test_data", false)
       // Durable workflow phases share one research log. Candidate rows written
       // by discovery/scoring in this run are checkpoints, not historical CRM
       // memory, and must never suppress the same run during persistence.

@@ -724,6 +724,9 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
     .from("research_candidates")
     .select("name,sport,raw_candidate,source_evidence,score,identity_confidence,instagram_handle,is_minor,gate_results,updated_at")
     .eq("organization_id", input.organizationId)
+    // Test-only hardening rows never become production candidate memory and
+    // independent replicates do not suppress one another.
+    .eq("is_test_data", false)
     // Reuse is for earlier runs only. The current durable run already resumes
     // from its own checkpoint and must not rediscover its in-flight rows.
     .neq("research_log_id", input.researchLogId)
