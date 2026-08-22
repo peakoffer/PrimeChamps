@@ -1077,6 +1077,41 @@ export function selectLatestOpenRouterSonnet(models: OpenRouterBenchmarkModel[])
   };
 }
 
+export function selectLatestStandardOpenRouterOpus(models: OpenRouterBenchmarkModel[]) {
+  const model = models.filter((candidate) =>
+    typeof candidate.id === "string"
+    && candidate.id.startsWith("anthropic/")
+    && /opus/i.test(candidate.id)
+    && !/(?:^|[-_/])fast(?:$|[-_/])/i.test(candidate.id)
+    && !/(?:^|[-_/])batch(?:$|[-_/])/i.test(candidate.id)
+    && !candidate.id.includes(":")
+  ).sort((left, right) => Number(right.created || 0) - Number(left.created || 0)
+    || String(right.id).localeCompare(String(left.id)))[0];
+  if (!model?.id) return null;
+  if (!(model.supported_parameters || []).some((parameter) =>
+    parameter === "response_format" || parameter === "structured_outputs"
+  )) return null;
+  const input = openRouterPerMillion(model.pricing?.prompt);
+  const output = openRouterPerMillion(model.pricing?.completion);
+  const cacheRead = openRouterPerMillion(model.pricing?.input_cache_read);
+  const cacheWrite = openRouterPerMillion(model.pricing?.input_cache_write);
+  if (input === null || input <= 0 || output === null || output <= 0) return null;
+  return {
+    model: model.id,
+    releaseCreatedAt: model.created ? new Date(model.created * 1_000).toISOString() : null,
+    price: {
+      provider: "openrouter" as const,
+      model: model.id,
+      inputUsdPerMillion: input,
+      outputUsdPerMillion: output,
+      cacheCreationUsdPerMillion: cacheWrite ?? input,
+      cacheReadUsdPerMillion: cacheRead ?? input,
+      source: "OpenRouter live standard-speed model catalog resolved at hardening-campaign start",
+      effectiveUntil: null,
+    } satisfies BenchmarkPriceSnapshot,
+  };
+}
+
 export function normalizeOpenRouterBenchmarkUsage(value: OpenRouterBenchmarkUsage | undefined) {
   const promptTokens = Math.max(0, Math.round(Number(value?.prompt_tokens) || 0));
   const outputTokens = Math.max(0, Math.round(Number(value?.completion_tokens) || 0));

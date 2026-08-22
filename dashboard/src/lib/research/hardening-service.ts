@@ -139,7 +139,7 @@ export async function resolveHardeningModelSnapshot() {
       resolvedAt: new Date().toISOString(),
       official: { provider: "anthropic", family: "sonnet", model: officialModel },
       challenger,
-      policy: "Sonnet is authoritative. Opus is shadow-only and cannot mutate candidate disposition.",
+      policy: "Sonnet is authoritative. Standard-speed latest Opus runs asynchronously, is shadow-only, and cannot mutate candidate disposition.",
     },
   };
 }
@@ -757,8 +757,13 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
 export async function resumeUntouchedHardeningCases(campaignId: string, organizationId: string) {
   const admin = createAdminClient({ disableRealtime: true });
   const { data: campaign, error: campaignError } = await admin.from("research_hardening_campaigns")
-    .select("id,status,total_cost_microusd").eq("id", campaignId).eq("organization_id", organizationId).single();
+    .select("id,status,total_cost_microusd,official_model_id,challenger_model_id").eq("id", campaignId).eq("organization_id", organizationId).single();
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
+  const currentModels = await resolveHardeningModelSnapshot();
+  if (currentModels.officialModel !== campaign.official_model_id
+    || currentModels.challenger.model !== campaign.challenger_model_id) {
+    throw new Error("The frozen model route has changed. Start a new campaign so results remain comparable and use the current cost-optimized route.");
+  }
   const { count: runningCount, error: runningError } = await admin.from("research_hardening_cases")
     .select("id", { count: "exact", head: true }).eq("campaign_id", campaignId)
     .eq("organization_id", organizationId).eq("status", "running");
@@ -803,6 +808,11 @@ export async function addHardeningRerunCases(input: {
     .select("id,official_model_id,challenger_model_id,total_cost_microusd")
     .eq("id", input.campaignId).eq("organization_id", input.organizationId).single();
   if (error || !campaign) throw error || new Error("Hardening campaign not found");
+  const currentModels = await resolveHardeningModelSnapshot();
+  if (currentModels.officialModel !== campaign.official_model_id
+    || currentModels.challenger.model !== campaign.challenger_model_id) {
+    throw new Error("The frozen model route has changed. Start a new campaign so results remain comparable and use the current cost-optimized route.");
+  }
   const spend = campaignSpendDecision({ totalCostMicrousd: integer(campaign.total_cost_microusd), stage: input.stage });
   if (!spend.allowed) throw new Error(spend.reason);
   const matrix = new Map(RESEARCH_HARDENING_MATRIX.map((entry) => [entry.archetype, entry.sport]));

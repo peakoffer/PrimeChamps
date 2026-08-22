@@ -92,6 +92,7 @@ import {
   normalizeOpenRouterBenchmarkUsage,
   promptContainsBenchmarkLeakage,
   projectedBenchmarkCallCostMicrousd,
+  selectLatestStandardOpenRouterOpus,
   selectLatestOpenRouterSonnet,
   selectLeakageSafeBenchmarkEvidence,
   validateBenchmarkStructuredValue,
@@ -3174,6 +3175,46 @@ test("OpenRouter benchmark selection chooses the latest structured-output Sonnet
     pricing: { prompt: "0.000002", completion: "0.000010" },
     supported_parameters: ["response_format"],
   }]), null, "an incompatible newest release must fail closed instead of silently using an older Sonnet");
+});
+
+test("hardening challenger selects standard Opus and never pays the Fast latency premium", () => {
+  const selected = selectLatestStandardOpenRouterOpus([
+    {
+      id: "anthropic/claude-opus-5-fast",
+      created: 400,
+      pricing: { prompt: "0.000010", completion: "0.000050" },
+      supported_parameters: ["response_format"],
+    },
+    {
+      id: "anthropic/claude-opus-5:batch",
+      created: 350,
+      pricing: { prompt: "0.0000025", completion: "0.0000125" },
+      supported_parameters: ["response_format"],
+    },
+    {
+      id: "anthropic/claude-opus-5",
+      created: 300,
+      pricing: {
+        prompt: "0.000005",
+        completion: "0.000025",
+        input_cache_read: "0.0000005",
+        input_cache_write: "0.00000625",
+      },
+      supported_parameters: ["structured_outputs"],
+    },
+    {
+      id: "anthropic/claude-opus-4.8",
+      created: 200,
+      pricing: { prompt: "0.000005", completion: "0.000025" },
+      supported_parameters: ["response_format"],
+    },
+  ]);
+
+  assert.equal(selected?.model, "anthropic/claude-opus-5");
+  assert.equal(selected?.price.inputUsdPerMillion, 5);
+  assert.equal(selected?.price.outputUsdPerMillion, 25);
+  assert.equal(selected?.price.cacheReadUsdPerMillion, 0.5);
+  assert.equal(selected?.price.cacheCreationUsdPerMillion, 6.25);
 });
 
 test("OpenRouter usage separates cache reads and writes and preserves provider-reported cost", () => {

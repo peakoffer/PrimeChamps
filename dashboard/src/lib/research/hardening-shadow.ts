@@ -3,6 +3,7 @@ import "server-only";
 import {
   estimateBenchmarkCostMicrousd,
   normalizeOpenRouterBenchmarkUsage,
+  selectLatestStandardOpenRouterOpus,
   type BenchmarkPriceSnapshot,
   type OpenRouterBenchmarkModel,
   type OpenRouterBenchmarkUsage,
@@ -58,11 +59,6 @@ export type ShadowAuditResult = {
   outputTokens: number;
 };
 
-function perMillion(value: string | undefined) {
-  const perToken = Number(value);
-  return Number.isFinite(perToken) && perToken > 0 ? perToken * 1_000_000 : null;
-}
-
 export async function resolveLatestOpusChallenger(): Promise<OpusRouteSnapshot> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is required for the Opus shadow challenger");
@@ -75,36 +71,13 @@ export async function resolveLatestOpusChallenger(): Promise<OpusRouteSnapshot> 
     throw new Error(`OpenRouter model discovery failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
   }
   const payload = await response.json() as { data?: OpenRouterBenchmarkModel[] };
-  const model = (payload.data || []).filter((candidate) =>
-    typeof candidate.id === "string"
-      && candidate.id.startsWith("anthropic/")
-      && /opus/i.test(candidate.id)
-      && !candidate.id.includes(":")
-      && (candidate.supported_parameters || []).some((parameter) =>
-        parameter === "response_format" || parameter === "structured_outputs"
-      )
-  ).sort((left, right) => Number(right.created || 0) - Number(left.created || 0)
-    || String(right.id).localeCompare(String(left.id)))[0];
-  if (!model?.id) throw new Error("OpenRouter does not expose a current structured-output Anthropic Opus model");
-  const input = perMillion(model.pricing?.prompt);
-  const output = perMillion(model.pricing?.completion);
-  if (!input || !output) throw new Error(`OpenRouter returned no usable pricing for ${model.id}`);
-  const cacheRead = perMillion(model.pricing?.input_cache_read) || input;
-  const cacheWrite = perMillion(model.pricing?.input_cache_write) || input;
+  const selected = selectLatestStandardOpenRouterOpus(payload.data || []);
+  if (!selected) throw new Error("OpenRouter does not expose a current standard-speed structured-output Anthropic Opus model");
   return {
     provider: "openrouter",
-    model: model.id,
-    releaseCreatedAt: model.created ? new Date(model.created * 1_000).toISOString() : null,
-    price: {
-      provider: "openrouter",
-      model: model.id,
-      inputUsdPerMillion: input,
-      outputUsdPerMillion: output,
-      cacheCreationUsdPerMillion: cacheWrite,
-      cacheReadUsdPerMillion: cacheRead,
-      source: "OpenRouter live model catalog frozen at hardening-campaign start",
-      effectiveUntil: null,
-    },
+    model: selected.model,
+    releaseCreatedAt: selected.releaseCreatedAt,
+    price: selected.price,
   };
 }
 

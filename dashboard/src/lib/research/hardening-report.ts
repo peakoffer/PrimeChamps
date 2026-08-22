@@ -1,4 +1,5 @@
 import { sanitizeEvidenceRef } from "@/lib/research/hardening";
+import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -15,7 +16,10 @@ function dollars(microusd: unknown) {
 }
 
 export function sanitizedHardeningReport(campaign: JsonRecord) {
-  const cases = array(campaign.cases).map(object).map((item) => ({
+  const sourceCases = array(campaign.cases).map(object);
+  const costAccounting = summarizeHardeningCosts(sourceCases);
+  const processStages = researchProcessCostStages(sourceCases);
+  const cases = sourceCases.map((item) => ({
     archetype: item.archetype,
     sport: item.sport,
     stage: item.stage,
@@ -55,7 +59,7 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
     resolutionNotes: item.resolution_notes,
   }));
   return {
-    reportVersion: "research-hardening-v1",
+    reportVersion: "research-hardening-v2",
     generatedAt: new Date().toISOString(),
     campaign: {
       id: campaign.id,
@@ -73,6 +77,11 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
       completedAt: campaign.completed_at,
     },
     cases,
+    costAccounting: {
+      accountingNote: "Measured model spend is provider-token accounting. External OpenAI and Apify values are bounded planning estimates. The reserved ledger is a safety guardrail, not an invoice.",
+      ...costAccounting,
+    },
+    processMap: processStages,
     safety: {
       evaluationOnly: true,
       liveMutationCount: 0,
@@ -91,12 +100,21 @@ export function hardeningReportMarkdown(campaign: JsonRecord) {
   const defects = report.cases.flatMap((item) => item.defects.map((defect) =>
     `- **${item.sport} · ${defect.category} · ${defect.severity}:** ${defect.summary}${defect.evidenceRefs.length ? ` (${defect.evidenceRefs.join(", ")})` : ""}`
   )).join("\n") || "- None documented.";
+  const stageCosts = report.costAccounting.byStage.map((item) =>
+    `| ${item.stage.replaceAll("_", " ")} | ${item.cases} | ${dollars(item.measuredModelMicrousd)} | ${dollars(item.optimizedModelMicrousd)} | ${dollars(item.reservedMicrousd)} |`
+  ).join("\n");
+  const processCosts = report.processMap.map((item, index) =>
+    `| ${index + 1} | ${item.label} | ${item.provider} | ${dollars(item.lowMicrousd)}${item.lowMicrousd === item.highMicrousd ? "" : `–${dollars(item.highMicrousd)}`} | ${item.description} |`
+  ).join("\n");
   return `# Cross-Sport Research Hardening Release Report
 
 - Campaign: ${report.campaign.name}
 - Status: ${report.campaign.status}
 - Models: ${report.campaign.officialModelId} authoritative; ${report.campaign.challengerModelId} shadow-only
-- Spend: ${dollars(report.campaign.totalCostMicrousd)} / ${dollars(report.campaign.budgetLimitMicrousd)}
+- Reserved safety ledger: ${dollars(report.campaign.totalCostMicrousd)} / ${dollars(report.campaign.budgetLimitMicrousd)}
+- Measured model spend: ${dollars(report.costAccounting.measuredModelMicrousd)}
+- Standard Opus model projection: ${dollars(report.costAccounting.optimizedModelMicrousd)} (${dollars(report.costAccounting.modelSavingsMicrousd)} saved)
+- Estimated optimized all-in range: ${dollars(report.costAccounting.estimatedAllInLowMicrousd)}–${dollars(report.costAccounting.estimatedAllInHighMicrousd)}
 - Completed cases: ${summary.completed ?? 0} / ${summary.total_cases ?? report.cases.length}
 - Passed: ${summary.passed ?? 0}
 - Evaluation isolation: passed; zero live CRM or outreach mutations by design
@@ -106,6 +124,34 @@ export function hardeningReportMarkdown(campaign: JsonRecord) {
 | Archetype | Sport | Stage | Status | Verdict | Exact people | Scored | Finalists | Cost |
 |---|---|---|---|---|---:|---:|---:|---:|
 ${rows}
+
+## Research-agent process map
+
+\`\`\`mermaid
+flowchart LR
+  A["Brief + candidate memory"] --> B["Live source-linked discovery"]
+  B -->|exact athlete + current sport proof| C["Instagram identity + audience"]
+  C -->|exact personal account| D["Two-source 21+ + evidence gates"]
+  D -->|all deterministic gates pass| E["Sonnet scoring + independent audit"]
+  E --> F["Standard Opus shadow challenge"]
+  F --> G{"Evidence complete?"}
+  G -->|yes| H["Finalist for human review"]
+  G -->|no| I["Evidence hold / reject"]
+  H -. evaluation only .-> J["No pipeline or outreach mutation"]
+  I -. evaluation only .-> J
+\`\`\`
+
+| # | Stage | Provider | Typical full-run cost | What happens |
+|---:|---|---|---:|---|
+${processCosts}
+
+## Campaign cost by hardening stage
+
+| Test stage | Cases | Measured models | Standard Opus projection | Reserved ledger |
+|---|---:|---:|---:|---:|
+${stageCosts}
+
+The reserved ledger is a safety guardrail, not the provider invoice. OpenAI and Apify costs are shown as bounded planning estimates until final provider-billed usage is ingested.
 
 ## Documented defects
 

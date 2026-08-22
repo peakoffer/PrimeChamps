@@ -18,6 +18,7 @@ import { buildMixedGlobalDiscoveryPlan, getSportResearchStrategy } from "../src/
 import { evaluatePreScoringAgeGate } from "../src/lib/research/scoring.ts";
 import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.ts";
 import { selectFreshPriorUnder21SafetyEvidence } from "../src/lib/research/prior-age-safety.ts";
+import { researchProcessCostStages, summarizeHardeningCosts } from "../src/lib/research/hardening-cost.ts";
 
 test("hardening matrix covers all 13 materially distinct archetypes exactly once", () => {
   assert.equal(RESEARCH_HARDENING_MATRIX.length, 13);
@@ -67,6 +68,49 @@ test("budget policy stops at $40 before confirmation and never permits more than
   assert.equal(campaignSpendDecision({ totalCostMicrousd: 40_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 9_999_999 }).allowed, true);
   assert.equal(campaignSpendDecision({ totalCostMicrousd: 40_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 10_000_001 }).allowed, false);
   assert.equal(HARDENING_BUDGET_LIMIT_MICROUSD, 50_000_000);
+});
+
+test("cost accounting separates measured spend, optimized Opus, external estimates, and reservations", () => {
+  const cases = [{
+    stage: "confirmation",
+    status: "completed",
+    verdict: "passed",
+    challenger_model_id: "anthropic/claude-opus-5-fast",
+    cost_microusd: 2_000_000,
+    metrics: {
+      evidence_accounting: {
+        score_cost_microusd: 300_000,
+        audit_cost_microusd: 100_000,
+        shadow_cost_microusd: 240_000,
+      },
+      provider_costs: {
+        openai: {
+          maximum_discovery_waves: 3,
+          web_search_calls_per_wave: 1,
+          source_linked_age_batch_call_cap: 2,
+        },
+        apify: {
+          instagram_search_runs: 2,
+          instagram_search_maximum_results: 100,
+          instagram_profiles: 10,
+          google_age_batch_query_cap: 10,
+        },
+      },
+    },
+  }];
+  const costs = summarizeHardeningCosts(cases);
+  assert.equal(costs.measuredModelMicrousd, 640_000);
+  assert.equal(costs.optimizedModelMicrousd, 520_000);
+  assert.equal(costs.modelSavingsMicrousd, 120_000);
+  assert.equal(costs.reservedMicrousd, 2_000_000);
+  assert.ok(costs.estimatedAllInLowMicrousd < costs.estimatedAllInHighMicrousd);
+  assert.equal(costs.byStage[0].stage, "confirmation");
+  assert.equal(costs.byStage[0].measuredModelMicrousd, 640_000);
+
+  const stages = researchProcessCostStages(cases);
+  assert.deepEqual(stages.map((stage) => stage.id), ["brief", "discovery", "identity", "eligibility", "score", "challenge"]);
+  assert.equal(stages.at(-1)?.lowMicrousd, 120_000);
+  assert.equal(stages.at(-1)?.basis, "optimized_projection");
 });
 
 test("stale evaluation detection uses a strict 20 minute heartbeat window", () => {

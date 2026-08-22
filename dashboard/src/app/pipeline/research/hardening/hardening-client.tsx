@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Check, Download, FlaskConical, RefreshCw, ShieldCheck, Square } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, FlaskConical, RefreshCw, ShieldCheck, Square } from "lucide-react";
+import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -16,6 +17,7 @@ type HardeningCase = {
   verdict: string | null;
   metrics: JsonRecord;
   defects: JsonRecord[];
+  challenger_model_id: string | null;
   cost_microusd: number;
   research_log_id: string | null;
   resolution_notes: string | null;
@@ -48,6 +50,19 @@ const statusTone: Record<string, string> = {
 
 function money(value: number) {
   return `$${(Math.max(0, value || 0) / 1_000_000).toFixed(2)}`;
+}
+
+function moneyRange(low: number, high: number) {
+  return low === high ? money(low) : `${money(low)}–${money(high)}`;
+}
+
+function record(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function measuredCaseCost(item: HardeningCase) {
+  const accounting = record(record(item.metrics).evidence_accounting);
+  return Number(accounting.known_cost_microusd) || 0;
 }
 
 function metric(metrics: JsonRecord, key: string) {
@@ -109,6 +124,10 @@ export default function HardeningClient() {
     }
     return Array.from(latest.values());
   }, [campaign]);
+  const costSummary = useMemo(() => summarizeHardeningCosts(campaign?.cases || []), [campaign]);
+  const processStages = useMemo(() => researchProcessCostStages(campaign?.cases || []), [campaign]);
+  const standardRunLow = processStages.reduce((sum, item) => sum + item.lowMicrousd, 0);
+  const standardRunHigh = processStages.reduce((sum, item) => sum + item.highMicrousd, 0);
 
   async function startCampaign() {
     setActing("start"); setError(null);
@@ -148,6 +167,7 @@ export default function HardeningClient() {
   const limit = campaign?.budget_limit_microusd || 50_000_000;
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
+  const legacyFastRoute = /(?:^|[-_/])fast(?:$|[-_/])/i.test(campaign?.challenger_model_id || "");
   const untouchedPending = campaign?.cases.filter((item) =>
     ["cancelled", "queued"].includes(item.status) && !item.research_log_id
   ).length || 0;
@@ -195,13 +215,13 @@ export default function HardeningClient() {
             )
           ) : (
             <>
-              {untouchedPending > 0 && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
+              {untouchedPending > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
                 <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
               </button>}
-              {campaign && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
+              {campaign && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 3 regression controls
               </button>}
-              {confirmationArchetypes.length > 0 && confirmationFitsBudget && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={acting !== null}>
+              {confirmationArchetypes.length > 0 && confirmationFitsBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run {confirmationArchetypes.length} full confirmations
               </button>}
               <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null}>
@@ -236,14 +256,39 @@ export default function HardeningClient() {
             <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-brand-success"><ShieldCheck className="h-4 w-4" /> No live mutations</p>
           </div>
         </div>
+        {campaign && <div className="grid gap-px border-t border-brand-ink/10 bg-brand-ink/10 md:grid-cols-3">
+          <div className="bg-brand-paper-bright p-4">
+            <p className="pc-eyebrow">Measured model spend</p>
+            <p className="mt-2 font-mono text-xl font-semibold text-brand-ink">{money(costSummary.measuredModelMicrousd)}</p>
+            <p className="mt-1 text-xs text-brand-muted">Sonnet scoring + audit + the model actually used for shadow review.</p>
+          </div>
+          <div className="bg-brand-paper-bright p-4">
+            <p className="pc-eyebrow">Standard Opus projection</p>
+            <div className="mt-2 flex items-baseline gap-2">
+              <p className="font-mono text-xl font-semibold text-brand-ink">{money(costSummary.optimizedModelMicrousd)}</p>
+              {costSummary.modelSavingsMicrousd > 0 && <span className="font-mono text-[10px] font-semibold text-brand-success">SAVE {money(costSummary.modelSavingsMicrousd)}</span>}
+            </div>
+            <p className="mt-1 text-xs text-brand-muted">Same Opus capability, asynchronous standard-speed route.</p>
+          </div>
+          <div className="bg-brand-paper-bright p-4">
+            <p className="pc-eyebrow">Estimated all-in</p>
+            <p className="mt-2 font-mono text-xl font-semibold text-brand-ink">{moneyRange(costSummary.estimatedAllInLowMicrousd, costSummary.estimatedAllInHighMicrousd)}</p>
+            <p className="mt-1 text-xs text-brand-muted">Optimized models plus bounded OpenAI and Apify usage.</p>
+          </div>
+        </div>}
         <div className="border-t border-brand-ink/10 p-4">
           <div className="mb-2 flex items-center justify-between text-xs">
-            <span className="font-semibold text-brand-ink">Spend {money(spent)} / {money(limit)}</span>
-            <span className="text-brand-muted">Stops at $40 · final $10 reserved for confirmation</span>
+            <span className="font-semibold text-brand-ink">Reserved safety ledger {money(spent)} / {money(limit)}</span>
+            <span className="text-brand-muted">This is a guardrail, not the provider bill · $10 held for confirmation</span>
           </div>
           <div className="h-2 overflow-hidden bg-brand-chrome/30"><div className={`h-full ${spendPercent >= 80 ? "bg-brand-danger" : "bg-brand-blue"}`} style={{ width: `${spendPercent}%` }} /></div>
         </div>
       </section>
+
+      {legacyFastRoute && <div className="flex items-start gap-3 border border-brand-warning/30 bg-brand-warning/10 px-4 py-3 text-sm text-brand-ink">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-brand-warning" />
+        <p><strong>This completed campaign is frozen to Opus Fast for audit integrity.</strong> Start a new campaign to use standard Opus at half the shadow-review price; historical cases remain unchanged.</p>
+      </div>}
 
       {campaign && (
         <div className="flex flex-wrap items-center gap-3 border-b border-brand-ink/10 pb-4">
@@ -256,6 +301,59 @@ export default function HardeningClient() {
           <a className="pc-button-secondary" href={`/api/research/hardening/${campaign.id}/report?format=json`}><Download className="h-4 w-4" /> JSON</a>
         </div>
       )}
+
+      <section className="border border-brand-ink/10 bg-brand-paper-bright">
+        <div className="flex flex-col gap-3 border-b border-brand-ink/10 px-4 py-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="pc-eyebrow">Research agent process map</p>
+            <h2 className="mt-1 text-base font-semibold text-brand-ink">Expensive work only happens after the candidate survives the previous gate.</h2>
+          </div>
+          <div className="shrink-0 text-left md:text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-muted">Typical full-quality run</p>
+            <p className="mt-1 font-mono text-lg font-semibold text-brand-ink">{moneyRange(standardRunLow, standardRunHigh)}</p>
+          </div>
+        </div>
+        <ol className="grid gap-px bg-brand-ink/10 md:grid-cols-2 xl:grid-cols-6">
+          {processStages.map((stage, index) => (
+            <li key={stage.id} className="relative min-h-[260px] bg-brand-paper-bright p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] font-semibold text-brand-muted">0{index + 1}</span>
+                {index < processStages.length - 1 && <ArrowRight className="hidden h-3.5 w-3.5 text-brand-muted/50 xl:block" />}
+              </div>
+              <h3 className="mt-5 text-sm font-semibold text-brand-ink">{stage.label}</h3>
+              <p className="mt-1 font-mono text-[10px] text-brand-blue">{stage.provider}</p>
+              <p className="mt-3 text-xs leading-5 text-brand-muted">{stage.description}</p>
+              <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-2 border-t border-brand-ink/10 pt-3">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-brand-muted">{stage.basis.replaceAll("_", " ")}</span>
+                <span className="font-mono text-xs font-semibold text-brand-ink">{moneyRange(stage.lowMicrousd, stage.highMicrousd)}</span>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="flex flex-col gap-3 border-t border-brand-ink/10 bg-brand-paper px-4 py-3 text-xs text-brand-muted md:flex-row md:items-center md:justify-between">
+          <p className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-success" /> Output is either evidence-complete finalists or an explicit evidence hold. Zero finalists is valid.</p>
+          <p className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-brand-warning" /> No pipeline or outreach mutation occurs in hardening.</p>
+        </div>
+        {campaign && <details className="border-t border-brand-ink/10">
+          <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-brand-ink">Campaign cost by hardening stage</summary>
+          <div className="overflow-x-auto border-t border-brand-ink/10">
+            <table className="w-full min-w-[680px] text-left text-xs">
+              <thead className="bg-brand-paper text-[9px] uppercase tracking-[0.08em] text-brand-muted">
+                <tr><th className="px-4 py-3">Test stage</th><th className="px-3 py-3">Cases</th><th className="px-3 py-3">Measured models</th><th className="px-3 py-3">Standard Opus projection</th><th className="px-4 py-3">Reserved ledger</th></tr>
+              </thead>
+              <tbody className="divide-y divide-brand-ink/10">
+                {costSummary.byStage.map((item) => <tr key={item.stage}>
+                  <td className="px-4 py-3 font-semibold capitalize text-brand-ink">{item.stage.replaceAll("_", " ")}</td>
+                  <td className="px-3 py-3 font-mono text-brand-muted">{item.cases}</td>
+                  <td className="px-3 py-3 font-mono text-brand-ink">{money(item.measuredModelMicrousd)}</td>
+                  <td className="px-3 py-3 font-mono text-brand-ink">{money(item.optimizedModelMicrousd)}</td>
+                  <td className="px-4 py-3 font-mono text-brand-muted">{money(item.reservedMicrousd)}</td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+        </details>}
+      </section>
 
       <section className="border border-brand-ink/10 bg-brand-paper-bright">
         <div className="border-b border-brand-ink/10 px-4 py-3">
@@ -272,7 +370,7 @@ export default function HardeningClient() {
                 const defects = Array.isArray(item.defects) ? item.defects : [];
                 const unresolvedDefects = defects.filter((defect) => defect.resolved !== true);
                 const resolvedDefects = defects.length - unresolvedDefects.length;
-                const canRerun = !active && ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
+                const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
                 return (
                   <tr key={item.id} className="align-top hover:bg-brand-paper/60">
                     <td className="px-4 py-4"><p className="font-semibold capitalize text-brand-ink">{item.archetype}</p><p className="mt-1 text-xs capitalize text-brand-muted">{item.sport}</p></td>
@@ -288,7 +386,10 @@ export default function HardeningClient() {
                         </details>
                       )}
                     </td>
-                    <td className="px-3 py-4 font-mono text-xs text-brand-ink">{money(item.cost_microusd)}</td>
+                    <td className="px-3 py-4">
+                      <p className="font-mono text-xs font-semibold text-brand-ink">{money(measuredCaseCost(item))}</p>
+                      <p className="mt-1 font-mono text-[9px] uppercase text-brand-muted">reserve {money(item.cost_microusd)}</p>
+                    </td>
                     <td className="px-4 py-4 text-right">
                       {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype)} disabled={acting !== null}>Targeted rerun</button>}
                       {!canRerun && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
@@ -302,11 +403,6 @@ export default function HardeningClient() {
         </div>
       </section>
 
-      <section className="grid gap-3 lg:grid-cols-3">
-        <div className="border border-brand-ink/10 bg-brand-paper-bright p-4"><p className="pc-eyebrow">Discovery</p><p className="mt-2 text-sm leading-6 text-brand-muted">Women, men, and neutral/open query lanes are explicit. Candidate gender is never inferred or scored.</p></div>
-        <div className="border border-brand-ink/10 bg-brand-paper-bright p-4"><p className="pc-eyebrow">Challenge</p><p className="mt-2 text-sm leading-6 text-brand-muted">Opus reviews every finalist and up to two strongest rejects. It can only document a disagreement.</p></div>
-        <div className="border border-brand-ink/10 bg-brand-paper-bright p-4"><p className="pc-eyebrow">Automatic stop</p><p className="mt-2 flex gap-2 text-sm leading-6 text-brand-muted"><AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-brand-warning" /> Safety breaches, route changes, repeated provider failures, stale runs, or the $40 threshold stop the wave.</p></div>
-      </section>
     </div>
   );
 }
