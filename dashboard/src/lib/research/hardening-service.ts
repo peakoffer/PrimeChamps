@@ -860,18 +860,27 @@ export async function recoverStaleHardeningRuns(organizationId?: string) {
   return { recovered: recoveredIds.length, runIds: recoveredIds };
 }
 
-export async function getHardeningCampaigns(organizationId: string, campaignId?: string) {
+export async function getHardeningCampaigns(
+  organizationId: string,
+  campaignId?: string,
+  includeReportDetails = false
+) {
   const admin = createAdminClient({ disableRealtime: true });
   let query = admin.from("research_hardening_campaigns").select("*")
-    .eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(campaignId ? 1 : 10);
+    .eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(campaignId ? 1 : 5);
   if (campaignId) query = query.eq("id", campaignId);
   const { data: campaigns, error } = await query;
   if (error) throw error;
   const ids = (campaigns || []).map((campaign) => campaign.id);
   const { data: cases, error: caseError } = ids.length
-    ? await admin.from("research_hardening_cases").select("*")
-      .eq("organization_id", organizationId).in("campaign_id", ids)
-      .order("created_at", { ascending: true })
+    ? includeReportDetails
+      ? await admin.from("research_hardening_cases").select("*")
+        .eq("organization_id", organizationId).in("campaign_id", ids)
+        .order("created_at", { ascending: true })
+      : await admin.from("research_hardening_cases")
+        .select("id,organization_id,campaign_id,archetype,sport,stage,attempt,status,verdict,research_log_id,official_model_id,challenger_model_id,metrics,defects,cost_microusd,resolution_notes,created_at,updated_at,profile_variant,replicate_number")
+        .eq("organization_id", organizationId).in("campaign_id", ids)
+        .order("created_at", { ascending: true })
     : { data: [], error: null };
   if (caseError) throw caseError;
   return (campaigns || []).map((campaign) => ({

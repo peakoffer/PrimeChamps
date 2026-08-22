@@ -10,7 +10,7 @@ export async function GET(
   try {
     const user = await requireOrganizationRole(["owner", "admin"]);
     const { id } = await params;
-    const campaign = (await getHardeningCampaigns(user.organizationId, id))[0];
+    const campaign = (await getHardeningCampaigns(user.organizationId, id, true))[0];
     if (!campaign) return NextResponse.json({ error: "Hardening campaign not found" }, { status: 404 });
     const format = request.nextUrl.searchParams.get("format") === "md" ? "md" : "json";
     const body = format === "md"
