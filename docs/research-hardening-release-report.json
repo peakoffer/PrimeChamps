@@ -1,0 +1,12 @@
+{
+  "reportVersion": "research-hardening-v1",
+  "status": "implementation_in_progress",
+  "archetypeCount": 13,
+  "officialModelFamily": "sonnet",
+  "challengerModelFamily": "opus",
+  "evaluationOnly": true,
+  "maxConcurrency": 3,
+  "preConfirmationStopMicrousd": 40000000,
+  "budgetLimitMicrousd": 50000000,
+  "cases": []
+}

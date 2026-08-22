@@ -22,6 +22,9 @@ export default {
           chrome: "var(--pc-chrome)",
           muted: "var(--pc-muted)",
           line: "var(--pc-line)",
+          success: "var(--pc-success)",
+          warning: "var(--pc-warning)",
+          danger: "var(--pc-danger)",
         },
       },
       fontFamily: {

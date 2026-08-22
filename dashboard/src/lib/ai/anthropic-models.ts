@@ -8,6 +8,8 @@ export type AnthropicScoringModel = {
   createdAt: string | null;
 };
 
+export type AnthropicModelFamily = "sonnet" | "opus";
+
 let modelCache: { expiresAt: number; models: AnthropicScoringModel[] } | null = null;
 
 export async function listAnthropicScoringModels(): Promise<AnthropicScoringModel[]> {
@@ -72,10 +74,21 @@ export async function resolveAnthropicScoringModel(requested?: string) {
     const latestSonnet = models.find((model) => /sonnet/i.test(model.id));
     if (latestSonnet) return latestSonnet.id;
 
-    if (models[0]) return models[0].id;
   } catch (error) {
     console.error("Unable to refresh Anthropic model catalog:", error);
   }
 
   return RESEARCH_SCORING_MODEL;
+}
+
+/**
+ * Resolve an exact, current Anthropic model for a deliberately chosen family.
+ * This fails closed instead of silently crossing model families: Sonnet is the
+ * authoritative scorer and Opus is only the hardening campaign's challenger.
+ */
+export async function resolveAnthropicModelFamily(family: AnthropicModelFamily) {
+  const models = await listAnthropicScoringModels();
+  const model = models.find((candidate) => candidate.id.toLowerCase().includes(family));
+  if (!model) throw new Error(`No current Anthropic ${family} model is available`);
+  return model.id;
 }

@@ -11,6 +11,14 @@ import {
 } from "@/lib/research/evaluation-budget";
 import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
 
+async function assertRunIsNotHardeningCase(runId: string) {
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("research_hardening_cases")
+    .select("id").eq("research_log_id", runId).limit(1).maybeSingle();
+  if (error) throw error;
+  if (data) throw new Error("Hardening campaign runs cannot be manually resumed or forked; create a selective campaign rerun instead");
+}
+
 export function normalizeEvaluationSports(values: unknown[]) {
   return Array.from(new Set(values
     .filter((value): value is string => typeof value === "string")
@@ -206,6 +214,7 @@ export async function launchResearchEvaluations(input: {
 }
 
 export async function resumeResearchEvaluation(runId: string) {
+  await assertRunIsNotHardeningCase(runId);
   const admin = createAdminClient();
   const { data: run, error: runError } = await admin.from("research_logs")
     .select("id,organization_id,requested_by_user_id,status,config_used,raw_results,scoring_details")
@@ -275,6 +284,7 @@ export async function resumeResearchEvaluation(runId: string) {
 }
 
 export async function forkResearchEvaluationFromScoring(sourceRunId: string) {
+  await assertRunIsNotHardeningCase(sourceRunId);
   const admin = createAdminClient();
   const { data: source, error: sourceError } = await admin.from("research_logs")
     .select("id,organization_id,requested_by_user_id,profile_version_id,research_depth,prompt_version,config_used,context_summary,raw_results,stats")
@@ -387,6 +397,7 @@ export async function forkResearchEvaluationFromScoring(sourceRunId: string) {
 }
 
 export async function forkResearchEvaluationFromEnrichment(sourceRunId: string) {
+  await assertRunIsNotHardeningCase(sourceRunId);
   const admin = createAdminClient();
   const { data: source, error: sourceError } = await admin.from("research_logs")
     .select("id,organization_id,requested_by_user_id,profile_version_id,research_depth,prompt_version,config_used,context_summary,raw_results,scoring_details,stats")
@@ -495,6 +506,7 @@ export async function forkResearchEvaluationFromEnrichment(sourceRunId: string) 
 }
 
 export async function forkResearchEvaluationFromDiscovery(sourceRunId: string) {
+  await assertRunIsNotHardeningCase(sourceRunId);
   const admin = createAdminClient();
   const { data: source, error: sourceError } = await admin.from("research_logs")
     .select("id,organization_id,requested_by_user_id,profile_version_id,research_depth,prompt_version,config_used,context_summary,raw_results,stats")

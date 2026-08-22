@@ -816,6 +816,12 @@ function ResearchStageContent() {
           >
             Recruiting thesis
           </Link>
+          <Link
+            href="/pipeline/research/hardening"
+            className="pc-button-secondary"
+          >
+            Hardening
+          </Link>
           <button
             onClick={() => setShowConfigModal(true)}
             disabled={isResearching}

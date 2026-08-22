@@ -24,6 +24,8 @@ export interface SportResearchStrategy {
   authoritativeDomains: string[];
 }
 
+export type ResearchAudienceLane = "women" | "men" | "neutral";
+
 const SPORT_GROUPS: Record<Exclude<SportArchetype, "general">, string[]> = {
   team: [
     "baseball", "basketball", "football", "hockey", "lacrosse", "rugby",
@@ -254,19 +256,58 @@ export function getSportResearchStrategy(sport: string): SportResearchStrategy {
   };
 }
 
-export function buildSportDiscoveryQueries(sport: string, year: number) {
-  const strategy = getSportResearchStrategy(sport);
-  return strategy.queryTemplates.map((template) => template
-    .replaceAll("{sport}", normalizeSport(sport))
-    .replaceAll("{year}", String(year))
-  );
+function neutralizeGenderedQuery(query: string) {
+  return query
+    .replace(/\bwomen(?:'s)?\b/gi, "athlete")
+    .replace(/\bfemale\b/gi, "athlete")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-export function buildCreatorFirstDiscoveryQueries(sport: string, year: number) {
+function queryForAudienceLane(query: string, lane: ResearchAudienceLane) {
+  const neutral = neutralizeGenderedQuery(query);
+  if (lane === "neutral") return neutral;
+  return `${lane === "women" ? "women" : "men"} ${neutral}`;
+}
+
+export function buildSportDiscoveryQueries(
+  sport: string,
+  year: number,
+  options: { audienceScope?: "mixed_global"; lane?: ResearchAudienceLane } = {}
+) {
+  const strategy = getSportResearchStrategy(sport);
+  const lane = options.lane || "neutral";
+  return strategy.queryTemplates.map((template) => queryForAudienceLane(template
+    .replaceAll("{sport}", normalizeSport(sport))
+    .replaceAll("{year}", String(year))
+  , lane));
+}
+
+export function buildCreatorFirstDiscoveryQueries(
+  sport: string,
+  year: number,
+  options: { audienceScope?: "mixed_global"; lane?: ResearchAudienceLane } = {}
+) {
   const normalized = normalizeSport(sport);
+  const lane = options.lane || "neutral";
+  const audience = lane === "neutral" ? "" : `${lane === "women" ? "women" : "men"} `;
   return [
-    `women ${normalized} athlete Instagram creator personal brand rising ${year}`,
-    `women ${normalized} athlete social media followers brand partnership breakout ${year}`,
-    `women ${normalized} athlete creator business inquiries Instagram emerging professional ${year}`,
-  ];
+    `${audience}${normalized} athlete Instagram creator personal brand rising ${year}`,
+    `${audience}${normalized} athlete social media followers brand partnership breakout ${year}`,
+    `${audience}${normalized} athlete creator business inquiries Instagram emerging professional ${year}`,
+  ].map((query) => query.trim());
+}
+
+/**
+ * A deterministic mixed/global plan. Separate lanes make coverage inspectable
+ * without inferring gender from a name, photograph, biography, or model output.
+ */
+export function buildMixedGlobalDiscoveryPlan(sport: string, year: number) {
+  return (["women", "men", "neutral"] as const).map((lane) => ({
+    lane,
+    queries: [
+      ...buildSportDiscoveryQueries(sport, year, { audienceScope: "mixed_global", lane }),
+      ...buildCreatorFirstDiscoveryQueries(sport, year, { audienceScope: "mixed_global", lane }),
+    ],
+  }));
 }

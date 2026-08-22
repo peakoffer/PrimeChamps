@@ -14,6 +14,7 @@ import {
 } from "@/lib/instagram-post-order";
 import {
   buildCreatorFirstDiscoveryQueries,
+  buildMixedGlobalDiscoveryPlan,
   buildSportDiscoveryQueries,
   getSportResearchStrategy,
 } from "@/lib/research/sport-strategy";
@@ -491,6 +492,7 @@ export interface ResearchConfig {
   targetRegions?: string[];
   scoringModel?: string;
   evaluationMode?: boolean;
+  audienceScope?: "mixed_global";
   evaluationBudget?: ResearchEvaluationBudget;
   profileVersionId?: string;
   profileVersion?: number;
@@ -1347,10 +1349,10 @@ AUTHORITATIVE SOURCES: ${strategy.authoritativeSources.join("; ")}
 CURRENT PARTNERSHIP OBJECTIVE: find verified-adult, upcoming talent with strong personal audiences and realistic accessibility for OnlyFans creator recruitment. Focus on breakout, newly professional, roster-promotion, award-watchlist, or fast-growth signals. Deprioritize retired athletes, late-career veterans, and famous multi-cycle icons.
 
 Provide a JSON response with:
-1. Major professional leagues and tours for this sport (especially women's leagues)
+1. Major professional leagues and tours for this sport across women, men, and open/neutral competition lanes
 2. Key competitions and championships
 3. Governing bodies
-4. 6 specific search queries that would find current professional female athletes in this sport
+4. 9 specific search queries: three targeted women, three targeted men, and three neutral/open queries
 
 Focus on finding sources of REAL professional athletes, not amateur or recreational. When a mandatory search brief exists, every query must directly support it.
 
@@ -1360,7 +1362,9 @@ Respond ONLY with valid JSON in this exact format:
   "competitions": ["Competition 1", "Competition 2"],
   "governingBodies": ["Body 1"],
   "searchQueries": [
-    "top female ${sport} athletes ${currentYear}",
+    "women ${sport} athletes ${currentYear}",
+    "men ${sport} athletes ${currentYear}",
+    "professional ${sport} athletes ${currentYear}",
     "rising ${sport} stars to watch",
     "...3 more specific queries..."
   ]
@@ -1425,10 +1429,11 @@ Respond ONLY with valid JSON in this exact format:
     governingBodies: [],
     searchQueries: [
       ...buildSportDiscoveryQueries(sport, currentYear),
-      `top female ${sport} athletes ${currentYear}`,
+      `women ${sport} athletes ${currentYear}`,
+      `men ${sport} athletes ${currentYear}`,
+      `professional ${sport} athletes ${currentYear}`,
       `rising ${sport} stars to watch ${currentYear}`,
-      `best women's ${sport} players current rankings`,
-      `professional female ${sport} competitors official results`,
+      `${sport} competitors official results ${currentYear}`,
     ],
   };
 }
@@ -1917,11 +1922,14 @@ async function discoverAthletesFromOpenAIWebSearch({
   const params = recruitingProfile?.parameters || DEFAULT_RECRUITING_PROFILE.parameters;
   const requestedCount = Math.min(Math.max(targetCount, 5), 50);
   const creatorFirstWave = /wave\s*2|creator-led|personal audiences|nil|social media/i.test(customContext || "");
+  const mixedGlobalQueries = buildMixedGlobalDiscoveryPlan(sport, currentYear)
+    .flatMap((lane) => lane.queries.slice(0, creatorFirstWave ? 3 : 2));
   const suggestedQueries = Array.from(new Set([
+    ...mixedGlobalQueries,
     ...selectSportDiscoveryQueries(sport, customContext),
     ...(creatorFirstWave ? buildCreatorFirstDiscoveryQueries(sport, currentYear) : []),
-  ])).slice(0, 8);
-  const prompt = `Research up to ${requestedCount} real, active female professional ${sport} athletes for a source-verified recruiting candidate pool.
+  ])).slice(0, 12);
+  const prompt = `Research up to ${requestedCount} real, active professional ${sport} athletes for a source-verified recruiting candidate pool. Use separate women, men, and neutral/open search lanes and combine the evidence-backed results.
 
 SEARCH BRIEF:
 ${customContext || "Find current emerging and breakout professional talent."}
@@ -1936,13 +1944,14 @@ BUSINESS THESIS:
 ${formatRecruitingProfileForPrompt(recruitingProfile, customContext)}
 
 HARD RULES:
-- Search the live web. Every candidate needs one direct source URL that supports her current professional ${sport} status, roster place, ranking, result, draft selection, or contract.
+- Search the live web. Every candidate needs one direct source URL that supports the athlete's current professional ${sport} status, roster place, ranking, result, draft selection, or contract.
 - Prefer official federation, league, tour, team, roster, ranking, result, or athlete-profile sources; use reputable sports reporting only when an official source is unavailable.
 - The source must name the athlete and contain concrete competitive evidence. Do not cite a search page, social profile, generic list, Wikipedia page, or invented URL.
 - Prioritize verified adults, ideally age ${params.target_age_min}-${params.target_age_max}, with a recent breakout, roster promotion, new professional contract, ranking jump, award watchlist, or current competition momentum.
 - Deprioritize retired athletes, coaches, late-career veterans, mega-celebrities, and established multi-cycle icons.
 - Exclude youth, junior, U21, U19, team-only accounts, adjacent sports (${strategy.excludedTerms.join(", ") || "none"}), and anyone whose professional identity is ambiguous.
 - Never infer adult-content interest from appearance, clothing, identity, gender expression, or sexuality. The thesis affects commercial ranking only, never factual evidence.
+- Never infer gender from a name, photograph, biography, or model output. Gender-targeted discovery lanes are query labels only and are never stored as inferred candidate facts.
 - Historical OnlyFans outcomes are labels for offline evaluation only and are not available to this research request.
 - Keep the official competition source_url mandatory. If the same bounded search naturally encounters the athlete's exact personal Instagram profile, a public business/agency/contact page, or public evidence of active creator-led content, include those exact URLs too. Do not perform separate per-athlete searches for these optional fields.
 - For instagram_url, business_or_representation_url, and creator_evidence_url, return the exact URL only when it was actually consulted and belongs to this athlete. Return null when unknown. Never guess a handle or URL, and do not reuse the competition source merely to fill a field.
