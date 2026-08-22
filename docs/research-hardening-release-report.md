@@ -1,104 +1,72 @@
-# Cross-Sport Research Hardening Release Report
+# Production Research Memory and Statistical Hardening — Checkpoint Report
 
 - Campaign: Cross-sport hardening 2026-08-22
-- Campaign ID: `bd216e99-b7ac-4b76-b137-2c1ae70af584`
-- Status: completed
-- Audience: global, mixed; explicit women, men, and neutral/open discovery lanes
-- Models: `claude-sonnet-5` authoritative; `anthropic/claude-opus-5-fast` shadow-only
-- Spend: **$43.00 / $50.00**; $7.00 remained unused
-- Concurrency: maximum 3
-- Evaluation isolation: passed; zero live CRM or outreach mutations
+- Campaign ID: `f89a73ff-a93d-4166-9d87-a1dacd78b3f7`
+- Status: **safely stopped — provider funding required before confirmation**
+- Models: `claude-sonnet-5` authoritative; `anthropic/claude-opus-5` standard-speed shadow only
+- Isolation: evaluation only; zero CRM, pipeline, notification, conversation, contract, or outreach mutations
+- Accounted safety reserve: **$43.00 / $100.00**
+- Measured Sonnet, audit, and Opus spend: **$3.20**
+- Estimated all-in provider spend at the stop: **$5.54–$9.18**
+- Concurrency: maximum three
 
-## Release conclusion
+## Outcome
 
-The production campaign completed all 13 sport archetypes plus three clean release-depth controls. Nine canonical archetypes produced at least one scored candidate. The remaining four were not padded: adaptive track and field, equestrian, skiing, and esports received full-quality source-exhaustion investigations, while esports reached 10 exact people but none cleared the strict sport, source, and public-identity gates.
+The production memory, bounded guidance, statistical learning, owner scorecard, stale-run recovery, campaign budget, standard-speed Opus challenge, and evaluation isolation are deployed. Twenty-eight cases completed before the provider stop: the 13-archetype smoke wave, 11 targeted reruns, and four clean controls.
 
-The campaign produced one fully gated finalist in motocross. That finalist passed the independent audit; two strongest rejects were also audited. Across the latest canonical cases and controls, zero wrong-person matches, wrong-sport candidates, known under-21 candidates, unsupported material claims, provider failures, or unresolved Opus findings reached or survived scoring.
+The campaign scored 50 evidence-backed candidates, stopped 135 duplicate identities before premium work, and avoided an estimated 540 paid candidate calls. No finalist survived the deliberately strict 80+ evidence gates; the system did not pad results.
 
-## Latest canonical archetype scorecard
+During post-fix controls, production logs proved that the required OpenAI discovery account returns `credit_balance_exhausted`. Perplexity is also quota-degraded. Three concurrent cases recorded the OpenAI failure and the campaign was cancelled before the 13 confirmation runs. Commit `753f708` now makes required-provider quota/auth failures durable and fail-fast in evaluation mode, preventing paid fallback work from concealing a broken primary route.
 
-| Archetype | Sport | Final stage | Verdict | Exact people | Scored | Finalists | Rejected audits | Safety/provider findings |
+## Latest canonical archetype cases
+
+| Archetype | Sport | Stage | Verdict | Exact people | Scored | Finalists | Duplicate stops | Calls avoided |
 |---|---|---|---|---:|---:|---:|---:|---:|
-| Action | Climbing | Smoke | Passed | 12 | 2 | 0 | 2 | 0 |
-| Adaptive | Adaptive track and field | Confirmation | Source exhausted | 0 | 0 | 0 | 2 | 0 |
-| Combat | Boxing | Confirmation | Passed | 80 | 11 | 0 | 2 | 0 |
-| Endurance | Cycling | Targeted rerun | Passed | 32 | 1 | 0 | 2 | 0 |
-| General/boundary | Esports | Confirmation | Needs fix | 10 | 0 | 0 | 2 | 0 |
-| Judged | Figure skating | Smoke | Passed | 14 | 4 | 0 | 2 | 0 |
-| Motorsport | Motocross | Targeted rerun | Passed | 30 | 5 | 1 | 2 | 0 |
-| Precision | Equestrian | Confirmation | Source exhausted | 4 | 0 | 0 | 2 | 0 |
-| Racquet | Tennis | Confirmation | Passed | 48 | 10 | 0 | 2 | 0 |
-| Strength | CrossFit | Smoke | Passed | 12 | 7 | 0 | 2 | 0 |
-| Team | Soccer | Smoke | Passed | 11 | 4 | 0 | 2 | 0 |
-| Water | Swimming | Confirmation | Passed | 69 | 9 | 0 | 2 | 0 |
-| Winter | Skiing | Confirmation | Source exhausted | 4 | 0 | 0 | 2 | 0 |
+| Action | Climbing | Targeted rerun | Source exhausted | 6 | 0 | 0 | 0 | 0 |
+| Adaptive | Adaptive track and field | Targeted rerun | Source exhausted | 2 | 0 | 0 | 0 | 0 |
+| Combat | Boxing | Smoke | Passed | 40 | 1 | 0 | 11 | 44 |
+| Endurance | Cycling | Smoke | Passed | 26 | 1 | 0 | 11 | 44 |
+| General/boundary | Esports | Targeted rerun | Source exhausted | 0 | 0 | 0 | 0 | 0 |
+| Judged | Figure skating | Targeted rerun | Passed | 14 | 2 | 0 | 8 | 32 |
+| Motorsport | Motocross | Targeted rerun | Needs fix | 21 | 0 | 0 | 0 | 0 |
+| Precision | Equestrian | Targeted rerun | Source exhausted | 4 | 0 | 0 | 0 | 0 |
+| Racquet | Tennis | Targeted rerun | Passed | 35 | 9 | 0 | 33 | 132 |
+| Strength | CrossFit | Targeted rerun | Source exhausted | 5 | 0 | 0 | 0 | 0 |
+| Team | Soccer | Targeted rerun | Needs fix | 9 | 0 | 0 | 0 | 0 |
+| Water | Swimming | Targeted rerun | Passed | 41 | 17 | 0 | 0 | 0 |
+| Winter | Skiing | Targeted rerun | Source exhausted | 4 | 0 | 0 | 0 | 0 |
 
-## Release-depth confirmations
+## Completed clean controls
 
-| Archetype | Sport | Verdict | Exact people | Scored | Finalists | Audited rejects | Cost |
-|---|---|---|---:|---:|---:|---:|---:|
-| Adaptive | Adaptive track and field | Source exhausted | 0 | 0 | 0 | 2 | $2.00 |
-| Combat | Boxing | Passed | 80 | 11 | 0 | 2 | $2.00 |
-| General/boundary | Esports | Needs fix | 10 | 0 | 0 | 2 | $2.00 |
-| Precision | Equestrian | Source exhausted | 4 | 0 | 0 | 2 | $2.00 |
-| Racquet | Tennis | Passed | 48 | 10 | 0 | 2 | $2.00 |
-| Water | Swimming | Passed | 69 | 9 | 0 | 2 | $2.00 |
-| Winter | Skiing | Source exhausted | 4 | 0 | 0 | 2 | $2.00 |
+| Sport | Verdict | Exact people | Scored | Finalists | Findings |
+|---|---|---:|---:|---:|---:|
+| Volleyball | Passed | 52 | 4 | 0 | 0 |
+| Surfing | Passed | 24 | 3 | 0 | 0 |
+| Gymnastics | Passed | 50 | 10 | 0 | 0 |
+| Motorcycle racing | Passed | 18 | 2 | 0 | 0 |
 
-Source-exhaustion notes:
+The gymnastics control exposed a durable replay defect: an earlier phase could be mistaken for prior research from the same run, leaving a successful scored run with a false “No athletes found” message. Commits `f2ed986` and `b3f9c47` exclude the current run and all test-only candidates from production memory, and successful completion now clears stale phase errors.
 
-- Adaptive track and field: 66 sources checked; no exact athlete passed the strict identity funnel.
-- Equestrian: 86 sources checked; four exact people found, but none passed source, sport, and public Instagram identity gates.
-- Skiing: 88 sources checked; four exact people found, but no scoring dossier survived the full evidence funnel.
-- Esports: 64 sources checked; ten exact people found, but none passed source, sport, and public Instagram identity gates.
+## Isolation proof
 
-Shadow-audit observations that did not change a disposition:
+Database checks across every research log linked to this campaign returned:
 
-- Adaptive track: Opus agreed the athletes could not advance, but noted that Paralympic championship evidence was on-sport even where the deterministic sport gate said otherwise.
-- Equestrian: Opus agreed the athletes could not advance, but identified FEI jumping and Global Champions evidence as on-sport; the authoritative-domain classification needs expansion.
-- Esports: Opus agreed the athletes could not advance, but identified a team roster announcement as on-sport while still rejecting it as non-independent and insufficient for identity, age, audience, creator, and contact gates.
+- Athletes created: 0
+- Non-test research candidates: 0
+- Notifications: 0
+- Outreach messages: 0
+- Outreach queue entries: 0
+- Appointments: 0
+- Contracts: 0
+- Conversations: 0
 
-## Clean regression controls
+## What remains before release acceptance
 
-| Sport | Verdict | Exact people | Scored | Finalists | Under-21 blocked before scoring | Findings |
-|---|---|---:|---:|---:|---:|---:|
-| Volleyball | Passed | 56 | 5 | 0 | 0 | 0 |
-| Surfing | Passed | 73 | 6 | 0 | 1 | 0 |
-| Gymnastics | Passed | 77 | 9 | 0 | 6 | 0 |
+1. Add OpenAI API credits to the organization behind `OPENAI_API_KEY` and redeploy Vercel. A ChatGPT subscription does not fund API usage.
+2. Rerun the four controls. The fail-fast provider marker must remain at zero and the self-memory regression must remain fixed.
+3. Run all 13 independent full-quality confirmations.
+4. Run third replicates for adaptive, equestrian, skiing, esports, and any archetype with a verdict mismatch or more than 50% yield variation.
+5. Run paired baseline-versus-guided controls with a synthetic draft profile. Do not activate it.
+6. Re-run isolation, Supabase advisor, deployment health, signed-in UI, and release-report checks.
 
-## Defects found and fixed
-
-- Mixed/global evidence verification no longer reapplies the former women-only gate.
-- Exact-person coverage is measured from athlete-named, sport-matched, source-backed evidence rather than Instagram verification alone.
-- Known under-21 candidates are blocked before paid scoring and reusable safety evidence survives provider misses.
-- Motocross ontology and bounded OnlyFans provider recovery were corrected and confirmed without promoting a false match.
-- Historical provider failures become non-blocking only after evidence-backed recovery; the campaign retains one resolved provider failure and zero unresolved failures.
-- The workflow's outer loop incorrectly stopped confirmation batches after $40 even though batch admission reserved spend through $50. Commit `1030aa0` removed the contradictory stop, gave confirmation runs the correct remaining ceiling, and added resumable untouched cases. The queued esports case then completed at a final campaign spend of $43.
-
-## Sanitized evidence references
-
-Representative public sources retained by the independent audits:
-
-- Finalist confirmation: `https://en.wikipedia.org/wiki/Chance_Hymas`, `https://racerxonline.com/rider/chance-hymas`, `https://honda.racing/ama-sx/profiles/2475`, `https://www.vurbmoto.com/team-honda-signs-chance-hymas/`, `https://results.promotocross.com/results/`, `https://instagram.com/chancehymas_`.
-- Adaptive investigation: `https://www.paralympic.org/news/new-delhi-2025-day-one-medallists`.
-- Equestrian investigation: `https://www.fei.org/jumping`, `https://www.gcglobalchampions.com/en-us/news/from-opportunity-to-impact-the-power-of-gcl-s-u25-rule`.
-- Esports investigation: `https://100thieves.com/blogs/all/2026-valorant-roster-update`.
-- Skiing investigation: `https://www.fis-ski.com/alpine-skiing/news/2025-26/rassat-s-rise-continues-with-adelboden-slalom-victory`, `https://www.fis-ski.com/alpine-skiing/news/2025-26/von-allmen-stuns-on-the-downhill-to-become-first-olympic-champion-of-milano-cortina`.
-
-No private tokens, raw provider payloads, email data, or sensitive internal URLs are included.
-
-## Acceptance status
-
-- Passed: all 13 archetypes have a completed final case; no stale run remains.
-- Passed: all cases either met the 8-exact/1-scored bar or have a documented full-quality source-exhaustion investigation.
-- Passed: the sole finalist has an independent audit; every latest case audits up to two strongest rejected candidates.
-- Passed: zero latest-case safety, identity, unsupported-claim, provider, or challenger findings remain.
-- Passed: three clean release-depth controls completed.
-- Passed: authoritative and shadow model routes remained frozen.
-- Passed: total campaign accounting is $43, below the $50 ceiling.
-- Passed: no athletes, notifications, drafts, messages, queues, outreach records, or pipeline promotions were created by campaign runs.
-- Qualified: one confirmation case required the owner-only resume control after the $40 outer-loop defect was discovered. The defect is fixed and regression-tested; a future fresh campaign should prove fully automatic continuation end to end.
-
-## Safety boundary
-
-This campaign is evaluation-only. It may write research logs, test candidates, scores, audits, campaign cases, and sanitized reports. It cannot create athletes, notifications, drafts, messages, queue entries, outreach records, or pipeline promotions.
+The system is materially safer and more observable, but it is **not yet release-accepted across all 13 archetypes** because the required confirmation and paired-guidance waves correctly stopped on the provider outage.
