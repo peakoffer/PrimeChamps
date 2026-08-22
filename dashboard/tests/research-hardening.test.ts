@@ -191,7 +191,8 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /resolved_failures/);
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
   const client = readFileSync(new URL("../src/app/pipeline/research/hardening/hardening-client.tsx", import.meta.url), "utf8");
-  assert.match(client, /Run \{correctedArchetypes\.length\} full confirmations/);
+  assert.match(client, /weakArchetypes\.length > 0 \? weakArchetypes : correctedArchetypes/);
+  assert.match(client, /Run \{confirmationArchetypes\.length\} full confirmations/);
   assert.match(client, /"confirmation"/);
   assert.doesNotMatch(service, /\.from\(["']athletes["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["']activity_notifications["']\)\.(insert|upsert|update)/);

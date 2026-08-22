@@ -100,6 +100,14 @@ export default function HardeningClient() {
     }
     return Array.from(latest.values()).sort((left, right) => left.archetype.localeCompare(right.archetype));
   }, [campaign]);
+  const latestCanonicalCases = useMemo(() => {
+    if (!campaign) return [];
+    const latest = new Map<string, HardeningCase>();
+    for (const item of campaign.cases.filter((candidate) => candidate.stage !== "control")) {
+      latest.set(item.archetype, item);
+    }
+    return Array.from(latest.values());
+  }, [campaign]);
 
   async function startCampaign() {
     setActing("start"); setError(null);
@@ -150,7 +158,14 @@ export default function HardeningClient() {
       || item.defects.length > 0
       || /coverage reconciled/i.test(item.resolution_notes || "")
   ).map((item) => item.archetype) || [])).filter((archetype) => !confirmedArchetypes.has(archetype));
-  const confirmationFitsBudget = spent + correctedArchetypes.length * 2_000_000 <= limit;
+  const weakArchetypes = latestCanonicalCases.filter((item) =>
+    ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status)
+  ).map((item) => item.archetype).filter((archetype) => !confirmedArchetypes.has(archetype));
+  // Spend the reserved confirmation budget on unresolved archetypes first.
+  // Previously corrected archetypes remain independently covered by their
+  // targeted reruns plus the three clean release-depth regression controls.
+  const confirmationArchetypes = weakArchetypes.length > 0 ? weakArchetypes : correctedArchetypes;
+  const confirmationFitsBudget = spent + confirmationArchetypes.length * 2_000_000 <= limit;
 
   return (
     <div className="space-y-5">
@@ -179,8 +194,8 @@ export default function HardeningClient() {
               {campaign && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 3 regression controls
               </button>}
-              {correctedArchetypes.length > 0 && confirmationFitsBudget && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", correctedArchetypes, "confirmation")} disabled={acting !== null}>
-                <ShieldCheck className="h-4 w-4" /> Run {correctedArchetypes.length} full confirmations
+              {confirmationArchetypes.length > 0 && confirmationFitsBudget && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={acting !== null}>
+                <ShieldCheck className="h-4 w-4" /> Run {confirmationArchetypes.length} full confirmations
               </button>}
               <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null}>
                 <FlaskConical className="h-4 w-4" /> Start 13-archetype smoke wave
