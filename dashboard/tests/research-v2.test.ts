@@ -2596,6 +2596,7 @@ test("live research evaluation exits before athlete writes and suppresses notifi
   assert.match(workflow, /short-window snapshot only/);
   assert.match(workflow, /two independent agreeing public sources/);
   assert.match(workflow, /lookupOnlyFansPlatformSignals/);
+  assert.match(workflow, /APIFY_ONLYFANS_REVERSE_LOOKUP_TIMEOUT_MS = 240_000/);
   assert.match(workflow, /OnlyFans platform check did not complete/);
   assert.ok(!workflow.includes("AVOID: athletes already on OnlyFans"));
 });

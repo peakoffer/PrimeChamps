@@ -126,6 +126,11 @@ const APIFY_GOOGLE_AGE_LOOKUP = process.env.RESEARCH_APIFY_GOOGLE_AGE_LOOKUP !==
 const APIFY_INSTAGRAM_SEARCH_ACTOR = process.env.APIFY_INSTAGRAM_SEARCH_ACTOR || "apify/instagram-search-scraper";
 const APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR = process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR
   || "sentry/onlyfans-reverse-lookup";
+// The reverse-lookup Actor routinely needs more than two minutes for a bounded
+// scoring batch. Let the existing run finish instead of turning a healthy,
+// slow provider into an artificial finalist gate failure. This remains well
+// inside the 20-minute hardening heartbeat cutoff and the $0.50 run charge cap.
+const APIFY_ONLYFANS_REVERSE_LOOKUP_TIMEOUT_MS = 240_000;
 
 const supabase = createAdminClient({ disableRealtime: true });
 const PROVIDER_TIMEOUT_MS = 45_000;
@@ -3878,7 +3883,7 @@ async function lookupOnlyFansPlatformSignals(athletes: EnrichedAthlete[]) {
       { seeds },
       {
         datasetLimit: Math.max(seeds.length, athletes.length * 2),
-        timeoutMs: 120_000,
+        timeoutMs: APIFY_ONLYFANS_REVERSE_LOOKUP_TIMEOUT_MS,
         maxTotalChargeUsd: 0.5,
       }
     );
