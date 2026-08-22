@@ -137,7 +137,11 @@ async function countRowsForAthletes(
   return total;
 }
 
-async function loadAllPriorResearchMemory(admin: SupabaseClient, organizationId: string) {
+async function loadAllPriorResearchMemory(
+  admin: SupabaseClient,
+  organizationId: string,
+  currentResearchLogId: string
+) {
   const rows: PriorResearchMemory[] = [];
   const pageSize = 1_000;
   for (let offset = 0; ; offset += pageSize) {
@@ -145,6 +149,10 @@ async function loadAllPriorResearchMemory(admin: SupabaseClient, organizationId:
       .from("research_candidates")
       .select("name,sport,instagram_handle,disposition,disposition_reason,is_minor,score,updated_at")
       .eq("organization_id", organizationId)
+      // Durable workflow phases share one research log. Candidate rows written
+      // by discovery/scoring in this run are checkpoints, not historical CRM
+      // memory, and must never suppress the same run during persistence.
+      .neq("research_log_id", currentResearchLogId)
       .order("updated_at", { ascending: false })
       .range(offset, offset + pageSize - 1);
     if (error) throw error;
@@ -199,7 +207,7 @@ export async function loadResearchMemorySnapshot(
       .eq("organization_id", organizationId)
       .eq("research_log_id", researchLogId)
       .gt("expires_at", capturedAt),
-    loadAllPriorResearchMemory(admin, organizationId),
+    loadAllPriorResearchMemory(admin, organizationId, researchLogId),
   ]);
   if (overrideResult.error) throw overrideResult.error;
 

@@ -44,6 +44,16 @@ test("an audited override remains pinned to one durable research run after consu
   assert.match(memory, /if \(override\.consumed_at\) return override\.id/);
 });
 
+test("durable phases never suppress or reuse candidates from their own run", () => {
+  const memory = readFileSync(new URL("../src/lib/research/crm-memory.ts", import.meta.url), "utf8");
+  const workflow = readFileSync(
+    new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(memory, /\.neq\("research_log_id", currentResearchLogId\)/);
+  assert.match(workflow, /\.neq\("research_log_id", input\.researchLogId\)/);
+});
+
 test("directional recommendations require a non-overlapping 90 percent lift interval", () => {
   const cases = Array.from({ length: 80 }, (_, index) => ({
     id: String(index),

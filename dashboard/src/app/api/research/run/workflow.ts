@@ -724,6 +724,9 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
     .from("research_candidates")
     .select("name,sport,raw_candidate,source_evidence,score,identity_confidence,instagram_handle,is_minor,gate_results,updated_at")
     .eq("organization_id", input.organizationId)
+    // Reuse is for earlier runs only. The current durable run already resumes
+    // from its own checkpoint and must not rediscover its in-flight rows.
+    .neq("research_log_id", input.researchLogId)
     .ilike("sport", sport)
     .or("score.gte.80,score.is.null")
     .order("updated_at", { ascending: false })
@@ -6444,6 +6447,11 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         await supabase.from("research_logs").update({
           status: "completed",
           phase: "completed",
+          // A durable phase can record a recoverable error before a later
+          // replay finishes successfully. Do not leave that stale message on
+          // a completed run; it makes a healthy case look source-exhausted in
+          // history and in the hardening report.
+          error_message: null,
           context_summary: {
             sport: config.sportFocus,
             partnershipGoal: config.partnershipGoal,

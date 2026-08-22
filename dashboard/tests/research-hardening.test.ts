@@ -258,6 +258,20 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.doesNotMatch(service, /\.from\(["'](?:outreach_drafts|messages|outreach_queue)["']\)\.(insert|upsert|update)/);
 });
 
+test("a successful durable research replay clears any stale phase error", () => {
+  const source = readFileSync(
+    new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
+    "utf8"
+  );
+  const successfulCompletion = source.slice(
+    source.indexOf('await updateResearchProgress(researchLogId, "completed"'),
+    source.indexOf("// Create notification", source.indexOf('await updateResearchProgress(researchLogId, "completed"'))
+  );
+  assert.match(successfulCompletion, /status:\s*"completed"/);
+  assert.match(successfulCompletion, /phase:\s*"completed"/);
+  assert.match(successfulCompletion, /error_message:\s*null/);
+});
+
 test("database migration enforces organization scope, RLS, server-only access, and the $100 ceiling", () => {
   const sql = readFileSync(new URL("../../supabase/migrations/20260822143130_production_research_memory_and_learning.sql", import.meta.url), "utf8");
   assert.match(sql, /organization_id uuid not null/);
