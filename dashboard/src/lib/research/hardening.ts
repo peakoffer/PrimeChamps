@@ -143,6 +143,17 @@ export function isActionableShadowFinding(
   return true;
 }
 
+export function isExactPersonSourcedCandidate(gateResults: unknown) {
+  if (!gateResults || typeof gateResults !== "object" || Array.isArray(gateResults)) return false;
+  const gates = gateResults as Record<string, unknown>;
+  const sportEvidence = gates.sport_evidence;
+  if (!sportEvidence || typeof sportEvidence !== "object" || Array.isArray(sportEvidence)) return false;
+  const evidence = sportEvidence as Record<string, unknown>;
+  return evidence.athleteNamed === true
+    && evidence.sportMatched === true
+    && evidence.sourcePresent === true;
+}
+
 export function chunkWithConcurrency<T>(values: readonly T[], concurrency = HARDENING_MAX_CONCURRENCY) {
   const size = Math.min(HARDENING_MAX_CONCURRENCY, Math.max(1, Math.floor(concurrency)));
   const chunks: T[][] = [];

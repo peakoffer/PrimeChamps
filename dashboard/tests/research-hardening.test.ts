@@ -11,6 +11,7 @@ import {
   evaluateAdversarialFixture,
   evaluateHardeningCase,
   isActionableShadowFinding,
+  isExactPersonSourcedCandidate,
   isStaleEvaluationRun,
 } from "../src/lib/research/hardening.ts";
 import { buildMixedGlobalDiscoveryPlan, getSportResearchStrategy } from "../src/lib/research/sport-strategy.ts";
@@ -105,6 +106,16 @@ test("shadow audit records only real disagreements as defects", () => {
   assert.equal(isActionableShadowFinding("missed_strong_fit", false), true);
   assert.equal(isActionableShadowFinding("insufficient_evidence", true), true);
   assert.equal(isActionableShadowFinding("unsafe_finalist", true), true);
+});
+
+test("exact-person sourcing is measured independently from Instagram verification", () => {
+  assert.equal(isExactPersonSourcedCandidate({
+    sport_evidence: { athleteNamed: true, sportMatched: true, sourcePresent: true },
+  }), true);
+  assert.equal(isExactPersonSourcedCandidate({
+    sport_evidence: { athleteNamed: true, sportMatched: false, sourcePresent: true },
+  }), false);
+  assert.equal(isExactPersonSourcedCandidate({ sport_evidence: { athleteNamed: false } }), false);
 });
 
 test("known under-21 candidates are blocked before paid scoring", () => {

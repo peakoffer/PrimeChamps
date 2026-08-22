@@ -16,6 +16,7 @@ import {
   RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE,
   campaignSpendDecision,
   evaluateHardeningCase,
+  isExactPersonSourcedCandidate,
   type HardeningArchetype,
   type HardeningCaseMetrics,
   type HardeningDefect,
@@ -486,7 +487,12 @@ export async function auditCompletedHardeningCase(input: {
   const scoreCost = (scores || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const auditCost = (audits || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const metrics: HardeningCaseMetrics = {
-    exactPersonCandidates: (candidates || []).filter((candidate) => candidate.identity_status === "verified").length,
+    // Archetype sourcing asks whether an exact named athlete was found in a
+    // sport-matching public source. Instagram identity corroboration remains a
+    // separate, stricter requirement before scoring and for every finalist.
+    exactPersonCandidates: (candidates || []).filter((candidate) =>
+      isExactPersonSourcedCandidate(candidate.gate_results)
+    ).length,
     scoredCandidates: new Set((scores || []).filter((score) => score.score_stage === "researcher").map((score) => score.research_candidate_id)).size,
     finalists: finalists.length,
     auditedFinalists: shadow.audits.filter((audit) => finalists.some((candidate) => candidate.id === audit.candidateId)).length,
