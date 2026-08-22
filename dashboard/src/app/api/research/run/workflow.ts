@@ -145,6 +145,7 @@ const supabase = createAdminClient({ disableRealtime: true });
 const PROVIDER_TIMEOUT_MS = 45_000;
 const PREFETCH_INSTAGRAM_PHOTOS = process.env.RESEARCH_PREFETCH_PHOTOS === "true";
 let perplexityDisabledReason: string | null = null;
+let openAiDisabledReason: string | null = null;
 
 const RESEARCH_PHASE_ORDER = [
   "queued",
@@ -451,6 +452,37 @@ async function updateResearchProgress(
     .eq("id", researchLogId)
     .eq("status", "running");
   if (error) log(`Warning: Could not update research heartbeat: ${error.message}`);
+}
+
+async function recordResearchProviderDegradation(
+  researchLogId: string | undefined,
+  provider: string,
+  reason: string
+) {
+  if (!researchLogId) return;
+  const { data } = await supabase.from("research_logs")
+    .select("provider_costs")
+    .eq("id", researchLogId)
+    .maybeSingle();
+  const current = data?.provider_costs && typeof data.provider_costs === "object" && !Array.isArray(data.provider_costs)
+    ? data.provider_costs as Record<string, unknown>
+    : {};
+  const currentHealth = current.provider_health && typeof current.provider_health === "object" && !Array.isArray(current.provider_health)
+    ? current.provider_health as Record<string, unknown>
+    : {};
+  await supabase.from("research_logs").update({
+    provider_costs: {
+      ...current,
+      provider_health: {
+        ...currentHealth,
+        [provider]: {
+          status: "degraded",
+          reason: reason.slice(0, 500),
+          observed_at: new Date().toISOString(),
+        },
+      },
+    },
+  }).eq("id", researchLogId);
 }
 
 function researchCandidateKey(name: string, sport: string) {
@@ -1316,7 +1348,8 @@ async function discoverAthletes(
   targetCount: number = 20,
   targetRegions?: string[],
   extractionModel?: string,
-  recruitingProfile?: RecruitingProfile
+  recruitingProfile?: RecruitingProfile,
+  researchLogId?: string
 ): Promise<DiscoveredAthlete[]> {
   log(`Step 2: Discovering athletes for "${sport}"`);
 
@@ -1344,6 +1377,7 @@ async function discoverAthletes(
     customContext,
     targetRegions,
     recruitingProfile,
+    researchLogId,
   });
   const resilienceAthletes = groundedAthletes.length > 0 ? [] : await discoverAthletesFromPerplexitySearch({
     sport,
@@ -1774,6 +1808,7 @@ async function discoverAthletesFromOpenAIWebSearch({
   customContext,
   targetRegions,
   recruitingProfile,
+  researchLogId,
 }: {
   sport: string;
   sportContext: SportContext;
@@ -1781,8 +1816,9 @@ async function discoverAthletesFromOpenAIWebSearch({
   customContext?: string;
   targetRegions?: string[];
   recruitingProfile?: RecruitingProfile;
+  researchLogId?: string;
 }): Promise<DiscoveredAthlete[]> {
-  if (!OPENAI_API_KEY) return [];
+  if (!OPENAI_API_KEY || openAiDisabledReason) return [];
 
   const currentYear = new Date().getUTCFullYear();
   const strategy = getSportResearchStrategy(sport);
@@ -1829,6 +1865,7 @@ ${creatorFirstWave ? `- This is the creator-first discovery lane. Locate candida
 
 Return a JSON object matching the schema. Each context must start with the athlete's exact full name and state the specific, dated evidence in one concise sentence. Use the exact consulted source URL and title.`;
 
+  let failureRecorded = false;
   try {
     log(`Discovering athletes with OpenAI web search (${OPENAI_RESEARCH_MODEL})`);
     const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
@@ -1865,7 +1902,13 @@ Return a JSON object matching the schema. Each context must start with the athle
     }, 180_000);
     if (!response.ok) {
       const details = (await response.text()).slice(0, 1_000);
-      throw new Error(`OpenAI web search failed (${response.status}): ${details}`);
+      const reason = `OpenAI web search failed (${response.status}): ${details}`;
+      if (response.status === 401 || response.status === 429 || /quota|credit_balance_exhausted|insufficient_quota/i.test(details)) {
+        openAiDisabledReason = reason;
+      }
+      await recordResearchProviderDegradation(researchLogId, "openai", reason);
+      failureRecorded = true;
+      throw new Error(reason);
     }
 
     const data = await response.json() as {
@@ -1942,6 +1985,9 @@ Return a JSON object matching the schema. Each context must start with the athle
     });
     return verified;
   } catch (error) {
+    if (!failureRecorded) {
+      await recordResearchProviderDegradation(researchLogId, "openai", describeError(error));
+    }
     log(`Grounded OpenAI discovery failed: ${error}`);
     return [];
   }
@@ -5516,7 +5562,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
 
     const { data: checkpoint, error: checkpointError } = await supabase
       .from("research_logs")
-      .select("status,phase,raw_results,scoring_details,final_results,context_summary")
+      .select("status,phase,raw_results,scoring_details,final_results,context_summary,provider_costs")
       .eq("id", researchLogId)
       .eq("organization_id", input.organizationId)
       .maybeSingle();
@@ -5634,7 +5680,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         discoveryWaveTarget,
         config.targetRegions,
         scoringModel,
-        config.profileSnapshot
+        config.profileSnapshot,
+        researchLogId
       );
       const discoveryWaves = [
         candidateMemory,
@@ -5659,7 +5706,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           discoveryWaveTarget,
           config.targetRegions,
           scoringModel,
-          config.profileSnapshot
+          config.profileSnapshot,
+          researchLogId
         );
         discoveryWaves.push(secondWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
         const secondWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
@@ -5681,7 +5729,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             discoveryWaveTarget,
             config.targetRegions,
             scoringModel,
-            config.profileSnapshot
+            config.profileSnapshot,
+            researchLogId
           );
           discoveryWaves.push(thirdWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
           const thirdWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
@@ -6501,6 +6550,9 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             reasoning: a.reasoning,
           })),
           provider_costs: {
+            provider_health: checkpoint.provider_costs && typeof checkpoint.provider_costs === "object" && !Array.isArray(checkpoint.provider_costs)
+              ? ((checkpoint.provider_costs as Record<string, unknown>).provider_health || {})
+              : {},
             evaluation_budget: config.evaluationBudget || {
               profile: "production",
               resultCount: config.resultCount,
@@ -6512,6 +6564,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
               note: "Database reuse has no external provider charge; every remembered candidate still passes current evidence, identity, activity, age, and scoring checks.",
             },
             openai: {
+              status: openAiDisabledReason ? "degraded" : "configured",
+              degraded_reason: openAiDisabledReason,
               model: OPENAI_RESEARCH_MODEL,
               maximum_discovery_waves: config.evaluationBudget?.maxDiscoveryWaves
                 ?? (config.depth === "extended" ? 3 : 2),

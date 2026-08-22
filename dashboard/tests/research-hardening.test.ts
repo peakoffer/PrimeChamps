@@ -238,6 +238,8 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /cancel_requested_at:\s*null/);
   assert.match(service, /onlyFansProviderRecoveryConfirmed/);
   assert.match(service, /onlyfans_platform_check_completed === true/);
+  assert.match(service, /providerCosts\.provider_health/);
+  assert.match(service, /degradedProviders\.size/);
   assert.match(service, /failureResolved !== true/);
   assert.match(service, /resolved_failures/);
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
@@ -256,6 +258,13 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.doesNotMatch(service, /\.from\(["']athletes["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["']activity_notifications["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["'](?:outreach_drafts|messages|outreach_queue)["']\)\.(insert|upsert|update)/);
+  const researchWorkflow = readFileSync(
+    new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(researchWorkflow, /recordResearchProviderDegradation/);
+  assert.match(researchWorkflow, /credit_balance_exhausted/);
+  assert.match(researchWorkflow, /provider_health:/);
 });
 
 test("a successful durable research replay clears any stale phase error", () => {

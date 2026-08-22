@@ -600,6 +600,16 @@ export async function auditCompletedHardeningCase(input: {
   }
   const allDefects = [...existingDefects, ...shadowDefects];
   const lifecycleMemory = object(object(log.context_summary).lifecycle_memory);
+  const providerCosts = object(log.provider_costs);
+  const providerHealth = object(providerCosts.provider_health);
+  const degradedProviders = new Set(
+    Object.entries(providerHealth)
+      .filter(([, value]) => object(value).status === "degraded")
+      .map(([provider]) => provider)
+  );
+  for (const provider of ["openai", "perplexity"]) {
+    if (object(providerCosts[provider]).status === "degraded") degradedProviders.add(provider);
+  }
   const alignedCandidates = (candidates || []).filter((candidate) => object(candidate.raw_candidate).guidance_lane === "aligned").length;
   const explorationCandidates = (candidates || []).filter((candidate) => object(candidate.raw_candidate).guidance_lane === "exploration").length;
   const highScoreCandidates = (candidates || []).filter((candidate) => Number(candidate.score) >= 80).length;
@@ -625,7 +635,9 @@ export async function auditCompletedHardeningCase(input: {
     knownUnder21ReachedScoring,
     under21BlockedBeforeScoring,
     unresolvedChallengerFindings: shadowDefects.filter((defect) => defect.category !== "provider_failure").length,
-    providerFailures: Number(log.status === "error") + shadowDefects.filter((defect) => defect.category === "provider_failure").length,
+    providerFailures: Number(log.status === "error")
+      + shadowDefects.filter((defect) => defect.category === "provider_failure").length
+      + degradedProviders.size,
     duplicatesSuppressedBeforeEnrichment: integer(lifecycleMemory.duplicatesSuppressedBeforeEnrichment),
     paidCallsAvoided: integer(lifecycleMemory.paidCallsAvoided),
     alignedCandidates,
