@@ -187,6 +187,9 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /cancel_requested_at:\s*null/);
   assert.match(service, /onlyFansProviderRecoveryConfirmed/);
   assert.match(service, /onlyfans_platform_check_completed === true/);
+  const client = readFileSync(new URL("../src/app/pipeline/research/hardening/hardening-client.tsx", import.meta.url), "utf8");
+  assert.match(client, /Run \{correctedArchetypes\.length\} full confirmations/);
+  assert.match(client, /"confirmation"/);
   assert.doesNotMatch(service, /\.from\(["']athletes["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["']activity_notifications["']\)\.(insert|upsert|update)/);
   assert.doesNotMatch(service, /\.from\(["'](?:outreach_drafts|messages|outreach_queue)["']\)\.(insert|upsert|update)/);

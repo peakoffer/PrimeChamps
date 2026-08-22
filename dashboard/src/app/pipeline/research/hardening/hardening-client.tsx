@@ -18,6 +18,7 @@ type HardeningCase = {
   defects: JsonRecord[];
   cost_microusd: number;
   research_log_id: string | null;
+  resolution_notes: string | null;
 };
 
 type Campaign = {
@@ -141,6 +142,15 @@ export default function HardeningClient() {
   const untouchedCancelled = campaign?.cases.filter((item) =>
     item.stage === "smoke" && item.status === "cancelled" && !item.research_log_id
   ).length || 0;
+  const confirmedArchetypes = new Set(campaign?.cases.filter((item) =>
+    item.stage === "confirmation" && item.status === "completed" && item.verdict === "passed"
+  ).map((item) => item.archetype) || []);
+  const correctedArchetypes = Array.from(new Set(campaign?.cases.filter((item) =>
+    item.stage === "targeted_rerun"
+      || item.defects.length > 0
+      || /coverage reconciled/i.test(item.resolution_notes || "")
+  ).map((item) => item.archetype) || [])).filter((archetype) => !confirmedArchetypes.has(archetype));
+  const confirmationFitsBudget = spent + correctedArchetypes.length * 2_000_000 <= limit;
 
   return (
     <div className="space-y-5">
@@ -168,6 +178,9 @@ export default function HardeningClient() {
               </button>}
               {campaign && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 3 regression controls
+              </button>}
+              {correctedArchetypes.length > 0 && confirmationFitsBudget && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", correctedArchetypes, "confirmation")} disabled={acting !== null}>
+                <ShieldCheck className="h-4 w-4" /> Run {correctedArchetypes.length} full confirmations
               </button>}
               <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null}>
                 <FlaskConical className="h-4 w-4" /> Start 13-archetype smoke wave
