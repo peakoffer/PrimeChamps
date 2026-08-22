@@ -139,8 +139,8 @@ export default function HardeningClient() {
   const limit = campaign?.budget_limit_microusd || 50_000_000;
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
-  const untouchedCancelled = campaign?.cases.filter((item) =>
-    item.stage === "smoke" && item.status === "cancelled" && !item.research_log_id
+  const untouchedPending = campaign?.cases.filter((item) =>
+    item.stage === "smoke" && ["cancelled", "queued"].includes(item.status) && !item.research_log_id
   ).length || 0;
   const confirmedArchetypes = new Set(campaign?.cases.filter((item) =>
     item.stage === "confirmation" && item.status === "completed" && item.verdict === "passed"
@@ -173,8 +173,8 @@ export default function HardeningClient() {
             </button>
           ) : (
             <>
-              {untouchedCancelled > 0 && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
-                <FlaskConical className="h-4 w-4" /> Resume {untouchedCancelled} untouched smoke cases
+              {untouchedPending > 0 && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
+                <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished smoke cases
               </button>}
               {campaign && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 3 regression controls

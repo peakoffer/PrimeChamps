@@ -759,21 +759,24 @@ export async function resumeUntouchedHardeningSmokeCases(campaignId: string, org
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
   if (["queued", "running", "paused"].includes(campaign.status)) throw new Error("The hardening campaign is already active");
   const { data: untouched, error } = await admin.from("research_hardening_cases")
-    .select("id").eq("campaign_id", campaignId).eq("organization_id", organizationId)
-    .eq("stage", "smoke").eq("status", "cancelled").is("research_log_id", null);
+    .select("id,status").eq("campaign_id", campaignId).eq("organization_id", organizationId)
+    .eq("stage", "smoke").in("status", ["cancelled", "queued"]).is("research_log_id", null);
   if (error) throw error;
   const caseIds = (untouched || []).map((item) => item.id);
-  if (caseIds.length === 0) throw new Error("No untouched smoke cases remain");
+  if (caseIds.length === 0) throw new Error("No unfinished untouched smoke cases remain");
   const spend = campaignSpendDecision({
     totalCostMicrousd: integer(campaign.total_cost_microusd),
     stage: "smoke",
     nextEstimatedCostMicrousd: caseIds.length * HARDENING_STAGE_RESERVATION_MICROUSD.smoke,
   });
   if (!spend.allowed) throw new Error(spend.reason);
-  const { error: resetError } = await admin.from("research_hardening_cases").update({
-    status: "queued", verdict: null, resolution_notes: null, completed_at: null,
-  }).in("id", caseIds).eq("organization_id", organizationId).eq("status", "cancelled").is("research_log_id", null);
-  if (resetError) throw resetError;
+  const cancelledIds = (untouched || []).filter((item) => item.status === "cancelled").map((item) => item.id);
+  if (cancelledIds.length > 0) {
+    const { error: resetError } = await admin.from("research_hardening_cases").update({
+      status: "queued", verdict: null, resolution_notes: null, completed_at: null,
+    }).in("id", cancelledIds).eq("organization_id", organizationId).eq("status", "cancelled").is("research_log_id", null);
+    if (resetError) throw resetError;
+  }
   await admin.from("research_hardening_campaigns").update({
     status: "queued", cancel_requested_at: null, completed_at: null, error_message: null,
   }).eq("id", campaignId).eq("organization_id", organizationId);
