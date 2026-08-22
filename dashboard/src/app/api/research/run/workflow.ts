@@ -483,6 +483,28 @@ async function recordResearchProviderDegradation(
       },
     },
   }).eq("id", researchLogId);
+  const providerNames = Array.from(new Set([...Object.keys(currentHealth), provider]));
+  const { data: hardeningCase } = await supabase.from("research_hardening_cases")
+    .select("id,metrics")
+    .eq("research_log_id", researchLogId)
+    .in("status", ["queued", "running"])
+    .maybeSingle();
+  if (hardeningCase) {
+    const currentMetrics = hardeningCase.metrics && typeof hardeningCase.metrics === "object" && !Array.isArray(hardeningCase.metrics)
+      ? hardeningCase.metrics as Record<string, unknown>
+      : {};
+    await supabase.from("research_hardening_cases").update({
+      metrics: {
+        ...currentMetrics,
+        providerFailures: providerNames.length,
+        providerStatus: {
+          ...currentHealth,
+          [provider]: { status: "degraded", reason: reason.slice(0, 500) },
+        },
+      },
+      resolution_notes: `Required research provider degraded: ${provider}`,
+    }).eq("id", hardeningCase.id);
+  }
 }
 
 function researchCandidateKey(name: string, sport: string) {
@@ -571,6 +593,13 @@ class ResearchCancelledError extends Error {
   constructor() {
     super("Research run was cancelled");
     this.name = "ResearchCancelledError";
+  }
+}
+
+class RequiredResearchProviderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RequiredResearchProviderError";
   }
 }
 
@@ -1349,7 +1378,8 @@ async function discoverAthletes(
   targetRegions?: string[],
   extractionModel?: string,
   recruitingProfile?: RecruitingProfile,
-  researchLogId?: string
+  researchLogId?: string,
+  evaluationMode = false
 ): Promise<DiscoveredAthlete[]> {
   log(`Step 2: Discovering athletes for "${sport}"`);
 
@@ -1378,6 +1408,7 @@ async function discoverAthletes(
     targetRegions,
     recruitingProfile,
     researchLogId,
+    evaluationMode,
   });
   const resilienceAthletes = groundedAthletes.length > 0 ? [] : await discoverAthletesFromPerplexitySearch({
     sport,
@@ -1809,6 +1840,7 @@ async function discoverAthletesFromOpenAIWebSearch({
   targetRegions,
   recruitingProfile,
   researchLogId,
+  evaluationMode,
 }: {
   sport: string;
   sportContext: SportContext;
@@ -1817,8 +1849,16 @@ async function discoverAthletesFromOpenAIWebSearch({
   targetRegions?: string[];
   recruitingProfile?: RecruitingProfile;
   researchLogId?: string;
+  evaluationMode?: boolean;
 }): Promise<DiscoveredAthlete[]> {
-  if (!OPENAI_API_KEY || openAiDisabledReason) return [];
+  if (!OPENAI_API_KEY || openAiDisabledReason) {
+    if (evaluationMode) {
+      throw new RequiredResearchProviderError(
+        openAiDisabledReason || "Required OpenAI discovery provider is not configured"
+      );
+    }
+    return [];
+  }
 
   const currentYear = new Date().getUTCFullYear();
   const strategy = getSportResearchStrategy(sport);
@@ -1989,6 +2029,9 @@ Return a JSON object matching the schema. Each context must start with the athle
       await recordResearchProviderDegradation(researchLogId, "openai", describeError(error));
     }
     log(`Grounded OpenAI discovery failed: ${error}`);
+    if (evaluationMode && openAiDisabledReason) {
+      throw new RequiredResearchProviderError(openAiDisabledReason);
+    }
     return [];
   }
 }
@@ -5681,7 +5724,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         config.targetRegions,
         scoringModel,
         config.profileSnapshot,
-        researchLogId
+        researchLogId,
+        config.evaluationMode === true
       );
       const discoveryWaves = [
         candidateMemory,
@@ -5707,7 +5751,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           config.targetRegions,
           scoringModel,
           config.profileSnapshot,
-          researchLogId
+          researchLogId,
+          config.evaluationMode === true
         );
         discoveryWaves.push(secondWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
         const secondWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
@@ -5730,7 +5775,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             config.targetRegions,
             scoringModel,
             config.profileSnapshot,
-            researchLogId
+            researchLogId,
+            config.evaluationMode === true
           );
           discoveryWaves.push(thirdWave.map((candidate) => ({ ...candidate, discovery_lane: "fresh" as const })));
           const thirdWaveEvidenceCount = discoveryWaves.flat().filter((athlete) =>
@@ -6706,6 +6752,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     const failureMessage = describeError(error);
     log(`Research error: ${failureMessage}`, error);
     const cancelled = error instanceof ResearchCancelledError;
+    const providerBlocked = error instanceof RequiredResearchProviderError;
 
     // A durable step can retry transient provider failures. Preserve the last
     // successful phase and its artifacts until the workflow exhausts retries.
@@ -6714,6 +6761,12 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         await supabase.from("research_logs").update(cancelled ? {
           status: "cancelled",
           phase: "cancelled",
+          error_message: failureMessage,
+          heartbeat_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        } : providerBlocked ? {
+          status: "error",
+          phase: "error",
           error_message: failureMessage,
           heartbeat_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
@@ -6733,7 +6786,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
       error: failureMessage,
       runId: researchLogId,
       logs: [],
-      statusCode: cancelled ? 409 : 500,
+      statusCode: cancelled ? 409 : providerBlocked ? 424 : 500,
     };
   }
 }
@@ -6742,7 +6795,7 @@ async function executeResearchStage(input: ResearchWorkflowInput) {
   "use step";
 
   const result = await executeResearchRun(input);
-  if (result.statusCode && result.statusCode >= 400 && result.statusCode !== 409) {
+  if (result.statusCode && result.statusCode >= 400 && result.statusCode !== 409 && result.statusCode !== 424) {
     throw new Error(result.error || "Research execution failed");
   }
   return result;

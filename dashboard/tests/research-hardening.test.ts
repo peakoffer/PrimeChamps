@@ -265,6 +265,11 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(researchWorkflow, /recordResearchProviderDegradation/);
   assert.match(researchWorkflow, /credit_balance_exhausted/);
   assert.match(researchWorkflow, /provider_health:/);
+  assert.match(researchWorkflow, /Required research provider degraded:/);
+  assert.match(researchWorkflow, /providerStatus:/);
+  assert.match(researchWorkflow, /RequiredResearchProviderError/);
+  assert.match(researchWorkflow, /config\.evaluationMode === true/);
+  assert.match(researchWorkflow, /statusCode: cancelled \? 409 : providerBlocked \? 424 : 500/);
 });
 
 test("a successful durable research replay clears any stale phase error", () => {
