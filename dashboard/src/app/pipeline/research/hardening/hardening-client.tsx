@@ -85,6 +85,7 @@ export default function HardeningClient() {
   useEffect(() => { void load(); }, [load]);
   const campaign = campaigns.find((item) => item.id === selectedId) || campaigns[0] || null;
   const active = campaign && ["queued", "running", "paused"].includes(campaign.status);
+  const hasRunningCase = campaign?.cases.some((item) => item.status === "running") || false;
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => void load(), 10_000);
@@ -148,7 +149,7 @@ export default function HardeningClient() {
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
   const untouchedPending = campaign?.cases.filter((item) =>
-    item.stage === "smoke" && ["cancelled", "queued"].includes(item.status) && !item.research_log_id
+    ["cancelled", "queued"].includes(item.status) && !item.research_log_id
   ).length || 0;
   const confirmedArchetypes = new Set(campaign?.cases.filter((item) =>
     item.stage === "confirmation" && item.status === "completed" && item.verdict === "passed"
@@ -183,13 +184,19 @@ export default function HardeningClient() {
             <RefreshCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Refresh
           </button>
           {active ? (
-            <button className="pc-button-secondary !border-brand-danger/40 !text-brand-danger" onClick={() => void campaignAction("cancel")} disabled={acting !== null}>
-              <Square className="h-3.5 w-3.5" /> Stop campaign
-            </button>
+            untouchedPending > 0 && !hasRunningCase ? (
+              <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
+                <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
+              </button>
+            ) : (
+              <button className="pc-button-secondary !border-brand-danger/40 !text-brand-danger" onClick={() => void campaignAction("cancel")} disabled={acting !== null}>
+                <Square className="h-3.5 w-3.5" /> Stop campaign
+              </button>
+            )
           ) : (
             <>
               {untouchedPending > 0 && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
-                <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished smoke cases
+                <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
               </button>}
               {campaign && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged"], "control")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run 3 regression controls

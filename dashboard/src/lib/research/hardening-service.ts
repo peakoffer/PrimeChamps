@@ -307,7 +307,9 @@ export async function prepareHardeningBatch(input: {
       config_used: config,
       is_evaluation: true,
       scoring_model: campaign.official_model_id,
-      cost_limit_microusd: Math.max(0, HARDENING_PRE_CONFIRMATION_STOP_MICROUSD - integer(campaign.total_cost_microusd)),
+      cost_limit_microusd: Math.max(0, (
+        stage === "confirmation" ? HARDENING_BUDGET_LIMIT_MICROUSD : HARDENING_PRE_CONFIRMATION_STOP_MICROUSD
+      ) - integer(campaign.total_cost_microusd)),
       prompt_version: RESEARCH_PROMPT_VERSION,
       context_summary: {
         sport: item.sport,
@@ -752,24 +754,31 @@ export async function cancelHardeningCampaign(campaignId: string, organizationId
   return campaign;
 }
 
-export async function resumeUntouchedHardeningSmokeCases(campaignId: string, organizationId: string) {
+export async function resumeUntouchedHardeningCases(campaignId: string, organizationId: string) {
   const admin = createAdminClient({ disableRealtime: true });
   const { data: campaign, error: campaignError } = await admin.from("research_hardening_campaigns")
     .select("id,status,total_cost_microusd").eq("id", campaignId).eq("organization_id", organizationId).single();
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
-  if (["queued", "running", "paused"].includes(campaign.status)) throw new Error("The hardening campaign is already active");
+  const { count: runningCount, error: runningError } = await admin.from("research_hardening_cases")
+    .select("id", { count: "exact", head: true }).eq("campaign_id", campaignId)
+    .eq("organization_id", organizationId).eq("status", "running");
+  if (runningError) throw runningError;
+  if ((runningCount || 0) > 0) throw new Error("The hardening campaign still has an active case");
   const { data: untouched, error } = await admin.from("research_hardening_cases")
-    .select("id,status").eq("campaign_id", campaignId).eq("organization_id", organizationId)
-    .eq("stage", "smoke").in("status", ["cancelled", "queued"]).is("research_log_id", null);
+    .select("id,status,stage").eq("campaign_id", campaignId).eq("organization_id", organizationId)
+    .in("status", ["cancelled", "queued"]).is("research_log_id", null)
+    .order("created_at", { ascending: true });
   if (error) throw error;
   const caseIds = (untouched || []).map((item) => item.id);
-  if (caseIds.length === 0) throw new Error("No unfinished untouched smoke cases remain");
-  const spend = campaignSpendDecision({
-    totalCostMicrousd: integer(campaign.total_cost_microusd),
-    stage: "smoke",
-    nextEstimatedCostMicrousd: caseIds.length * HARDENING_STAGE_RESERVATION_MICROUSD.smoke,
-  });
-  if (!spend.allowed) throw new Error(spend.reason);
+  if (caseIds.length === 0) throw new Error("No unfinished untouched hardening cases remain");
+  let projectedCost = integer(campaign.total_cost_microusd);
+  for (const item of untouched || []) {
+    const stage = item.stage as HardeningStage;
+    const reservation = HARDENING_STAGE_RESERVATION_MICROUSD[stage];
+    const spend = campaignSpendDecision({ totalCostMicrousd: projectedCost, stage, nextEstimatedCostMicrousd: reservation });
+    if (!spend.allowed) throw new Error(spend.reason);
+    projectedCost += reservation;
+  }
   const cancelledIds = (untouched || []).filter((item) => item.status === "cancelled").map((item) => item.id);
   if (cancelledIds.length > 0) {
     const { error: resetError } = await admin.from("research_hardening_cases").update({

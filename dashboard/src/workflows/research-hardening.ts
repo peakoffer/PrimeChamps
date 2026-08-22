@@ -19,7 +19,10 @@ export async function runResearchHardeningCampaign(input: HardeningCampaignWorkf
       await Promise.all(prepared.map((item) => runResearchWorkflow(item.workflowInput)));
       await Promise.all(prepared.map((item) => auditCompletedHardeningCase({ campaign: input, prepared: item })));
       const campaign = await refreshHardeningCampaign(input);
-      if (campaign.status !== "running" || campaign.totalCostMicrousd >= 40_000_000) break;
+      // Batch admission already applies the $40 pre-confirmation stop and the
+      // absolute $50 ceiling with stage awareness. Do not strand later
+      // confirmation batches after an earlier batch crosses $40.
+      if (campaign.status !== "running") break;
     }
     return await refreshHardeningCampaign(input);
   } catch (error) {

@@ -190,6 +190,8 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /failureResolved !== true/);
   assert.match(service, /resolved_failures/);
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
+  assert.match(service, /stage === "confirmation" \? HARDENING_BUDGET_LIMIT_MICROUSD : HARDENING_PRE_CONFIRMATION_STOP_MICROUSD/);
+  assert.doesNotMatch(workflow, /totalCostMicrousd >= 40_000_000/);
   const client = readFileSync(new URL("../src/app/pipeline/research/hardening/hardening-client.tsx", import.meta.url), "utf8");
   assert.match(client, /weakArchetypes\.length > 0 \? weakArchetypes : correctedArchetypes/);
   assert.match(client, /Run \{confirmationArchetypes\.length\} full confirmations/);

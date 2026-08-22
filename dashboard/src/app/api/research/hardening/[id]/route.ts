@@ -8,7 +8,7 @@ import {
   getHardeningCampaigns,
   linkCampaignWorkflow,
   recoverStaleHardeningRuns,
-  resumeUntouchedHardeningSmokeCases,
+  resumeUntouchedHardeningCases,
 } from "@/lib/research/hardening-service";
 import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
 
@@ -48,7 +48,7 @@ export async function POST(
       return NextResponse.json({ ok: true, campaignId: id, status: "cancelled" });
     }
     if (body.action === "resume_remaining") {
-      const caseIds = await resumeUntouchedHardeningSmokeCases(id, user.organizationId);
+      const caseIds = await resumeUntouchedHardeningCases(id, user.organizationId);
       const workflow = await start(runResearchHardeningCampaign, [{
         campaignId: id, organizationId: user.organizationId, requestedByUserId: user.id, caseIds,
       }]);
