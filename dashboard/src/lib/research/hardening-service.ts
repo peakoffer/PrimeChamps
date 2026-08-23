@@ -15,6 +15,7 @@ import {
   RESEARCH_HARDENING_MATRIX,
   RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE,
   campaignSpendDecision,
+  classifyHardeningProviderFailures,
   evaluateHardeningCase,
   isExactPersonSourcedCandidate,
   isStaleEvaluationRun,
@@ -117,7 +118,10 @@ function summarizeHardeningCaseRows(
     .filter((defect) => defect.resolved !== true).length;
   const criticalDefects = cases.flatMap((item) => array(item.defects).map(object))
     .filter((defect) => defect.resolved !== true && defect.severity === "critical").length;
-  const providerFailures = cases.reduce((sum, item) => sum + integer(object(item.metrics).providerFailures), 0);
+  const providerFailures = cases.reduce((sum, item) => {
+    const metrics = object(item.metrics);
+    return sum + (metrics.failureResolved === true ? 0 : integer(metrics.providerFailures));
+  }, 0);
   // A historical safety stop remains part of the release record, but it must not
   // permanently freeze the campaign after an evidence-backed targeted rerun has
   // resolved every critical finding from that case.
@@ -143,8 +147,7 @@ function summarizeHardeningCaseRows(
       total_cases: cases.length,
       completed: cases.filter((item) => item.status === "completed").length,
       cancelled: cases.filter((item) => item.status === "cancelled").length,
-      resolved_failures: cases.filter((item) => item.status === "failed"
-        && object(item.metrics).failureResolved === true).length,
+      resolved_failures: cases.filter((item) => object(item.metrics).failureResolved === true).length,
       passed: cases.filter((item) => item.verdict === "passed").length,
       needs_fix: cases.filter((item) => item.verdict === "needs_fix").length,
       source_exhausted: cases.filter((item) => item.verdict === "source_exhausted").length,
@@ -610,6 +613,11 @@ export async function auditCompletedHardeningCase(input: {
   for (const provider of ["openai", "perplexity"]) {
     if (object(providerCosts[provider]).status === "degraded") degradedProviders.add(provider);
   }
+  const providerFailureCounts = classifyHardeningProviderFailures({
+    runFailed: log.status === "error",
+    shadowProviderFailures: shadowDefects.filter((defect) => defect.category === "provider_failure").length,
+    degradedProviders: Array.from(degradedProviders),
+  });
   const alignedCandidates = (candidates || []).filter((candidate) => object(candidate.raw_candidate).guidance_lane === "aligned").length;
   const explorationCandidates = (candidates || []).filter((candidate) => object(candidate.raw_candidate).guidance_lane === "exploration").length;
   const highScoreCandidates = (candidates || []).filter((candidate) => Number(candidate.score) >= 80).length;
@@ -635,9 +643,8 @@ export async function auditCompletedHardeningCase(input: {
     knownUnder21ReachedScoring,
     under21BlockedBeforeScoring,
     unresolvedChallengerFindings: shadowDefects.filter((defect) => defect.category !== "provider_failure").length,
-    providerFailures: Number(log.status === "error")
-      + shadowDefects.filter((defect) => defect.category === "provider_failure").length
-      + degradedProviders.size,
+    providerFailures: providerFailureCounts.blocking,
+    optionalProviderDegradations: providerFailureCounts.optional,
     duplicatesSuppressedBeforeEnrichment: integer(lifecycleMemory.duplicatesSuppressedBeforeEnrichment),
     paidCallsAvoided: integer(lifecycleMemory.paidCallsAvoided),
     alignedCandidates,
@@ -710,6 +717,40 @@ export async function auditCompletedHardeningCase(input: {
       }
     }
   }
+  let resolvedPriorProviderFailures = 0;
+  const openAiRecovered = log.status === "completed"
+    && object(providerCosts.openai).status === "configured"
+    && !degradedProviders.has("openai");
+  if (openAiRecovered) {
+    const { data: priorProviderCases, error: priorProviderCaseError } = await admin.from("research_hardening_cases")
+      .select("id,metrics")
+      .eq("campaign_id", input.campaign.campaignId)
+      .eq("organization_id", input.campaign.organizationId)
+      .neq("id", input.prepared.caseId);
+    if (priorProviderCaseError) throw priorProviderCaseError;
+    const resolvedAt = new Date().toISOString();
+    for (const priorCase of priorProviderCases || []) {
+      const priorMetrics = object(priorCase.metrics);
+      const priorCosts = object(priorMetrics.provider_costs);
+      const priorHealth = object(priorCosts.provider_health);
+      const legacyHealth = object(priorMetrics.providerStatus);
+      const requiredOpenAiFailure = object(priorHealth.openai).status === "degraded"
+        || object(legacyHealth.openai).status === "degraded";
+      if (!requiredOpenAiFailure || priorMetrics.failureResolved === true) continue;
+      const { error: recoveryError } = await admin.from("research_hardening_cases").update({
+        metrics: {
+          ...priorMetrics,
+          failureResolved: true,
+          failureResolvedAt: resolvedAt,
+          failureResolvedByCaseId: input.prepared.caseId,
+          failureResolutionNote: "A later full evaluation case completed with the required OpenAI discovery route configured and healthy.",
+        },
+      }).eq("id", priorCase.id).eq("organization_id", input.campaign.organizationId);
+      if (recoveryError) throw recoveryError;
+      resolvedPriorProviderFailures += 1;
+    }
+  }
+  metrics.resolvedPriorProviderFailures = resolvedPriorProviderFailures;
   const { error: updateError } = await admin.from("research_hardening_cases").update({
     status: log.status === "cancelled" ? "cancelled" : log.status === "error" ? "failed" : "completed",
     verdict,
@@ -728,6 +769,7 @@ export async function auditCompletedHardeningCase(input: {
         accounted_cost_microusd: costMicrousd,
       },
       resolved_prior_defects: resolvedPriorDefects,
+      resolved_prior_provider_failures: resolvedPriorProviderFailures,
     },
     shadow_audit: shadow,
     defects: allDefects,
@@ -735,6 +777,9 @@ export async function auditCompletedHardeningCase(input: {
     resolution_notes: [
       log.error_message,
       resolvedPriorDefects > 0 ? `Evidence-backed rerun resolved ${resolvedPriorDefects} prior defect${resolvedPriorDefects === 1 ? "" : "s"}.` : null,
+      resolvedPriorProviderFailures > 0
+        ? `A healthy required OpenAI discovery run resolved ${resolvedPriorProviderFailures} prior outage case${resolvedPriorProviderFailures === 1 ? "" : "s"}.`
+        : null,
     ].filter(Boolean).join(" ") || null,
     completed_at: new Date().toISOString(),
   }).eq("id", input.prepared.caseId).eq("organization_id", input.campaign.organizationId);

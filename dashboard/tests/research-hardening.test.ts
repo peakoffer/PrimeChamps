@@ -7,6 +7,7 @@ import {
   HARDENING_MAX_CONCURRENCY,
   RESEARCH_HARDENING_MATRIX,
   campaignSpendDecision,
+  classifyHardeningProviderFailures,
   chunkWithConcurrency,
   evaluateAdversarialFixture,
   evaluateHardeningCase,
@@ -152,6 +153,19 @@ test("hardening verdict fails closed on wrong identity, unsupported claims, and 
   assert.equal(evaluateHardeningCase({ ...base, exactPersonCandidates: 7, scoredCandidates: 0 }, []), "source_exhausted");
 });
 
+test("optional provider degradation stays visible without failing a healthy required route", () => {
+  assert.deepEqual(classifyHardeningProviderFailures({
+    runFailed: false,
+    shadowProviderFailures: 0,
+    degradedProviders: ["perplexity"],
+  }), { blocking: 0, optional: 1 });
+  assert.deepEqual(classifyHardeningProviderFailures({
+    runFailed: false,
+    shadowProviderFailures: 0,
+    degradedProviders: ["openai", "perplexity"],
+  }), { blocking: 1, optional: 1 });
+});
+
 test("shadow audit records only real disagreements as defects", () => {
   assert.equal(isActionableShadowFinding("agree", false), false);
   assert.equal(isActionableShadowFinding("insufficient_evidence", false), false);
@@ -239,7 +253,9 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /onlyFansProviderRecoveryConfirmed/);
   assert.match(service, /onlyfans_platform_check_completed === true/);
   assert.match(service, /providerCosts\.provider_health/);
-  assert.match(service, /degradedProviders\.size/);
+  assert.match(service, /classifyHardeningProviderFailures/);
+  assert.match(service, /optionalProviderDegradations/);
+  assert.match(service, /failureResolvedByCaseId/);
   assert.match(service, /failureResolved !== true/);
   assert.match(service, /resolved_failures/);
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);

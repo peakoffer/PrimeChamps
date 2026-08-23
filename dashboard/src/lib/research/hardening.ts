@@ -72,6 +72,8 @@ export interface HardeningCaseMetrics {
   under21BlockedBeforeScoring: number;
   unresolvedChallengerFindings: number;
   providerFailures: number;
+  optionalProviderDegradations?: number;
+  resolvedPriorProviderFailures?: number;
   duplicatesSuppressedBeforeEnrichment?: number;
   paidCallsAvoided?: number;
   alignedCandidates?: number;
@@ -82,6 +84,21 @@ export interface HardeningCaseMetrics {
   heldOutPrecision80Plus?: number;
   profileVariant?: "baseline" | "guided";
   repeatabilityVariance?: number;
+}
+
+export function classifyHardeningProviderFailures(input: {
+  runFailed: boolean;
+  shadowProviderFailures: number;
+  degradedProviders: string[];
+}) {
+  const requiredProviders = new Set(["openai"]);
+  const degraded = new Set(input.degradedProviders.map((provider) => provider.toLowerCase()));
+  return {
+    blocking: Number(input.runFailed)
+      + input.shadowProviderFailures
+      + Array.from(degraded).filter((provider) => requiredProviders.has(provider)).length,
+    optional: Array.from(degraded).filter((provider) => !requiredProviders.has(provider)).length,
+  };
 }
 
 export interface HardeningDefect {
