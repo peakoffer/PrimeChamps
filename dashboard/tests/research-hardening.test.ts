@@ -275,6 +275,7 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(client, /Run 4 regression controls/);
   assert.match(client, /Control rerun/);
   assert.match(client, /campaignAction\("rerun", item\.archetype, "control"\)/);
+  assert.match(client, /item\.stage === "control" \? "control" : "targeted_rerun"/);
   assert.match(client, /Run \{thirdReplicateArchetypes\.length\} stability replicates/);
   assert.match(client, /"confirmation"/);
   assert.doesNotMatch(service, /\.from\(["']athletes["']\)\.(insert|upsert|update)/);

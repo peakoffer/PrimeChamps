@@ -426,7 +426,7 @@ export default function HardeningClient() {
                       <p className="mt-1 font-mono text-[9px] uppercase text-brand-muted">reserve {money(item.cost_microusd)}</p>
                     </td>
                     <td className="px-4 py-4 text-right">
-                      {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype)} disabled={acting !== null}>Targeted rerun</button>}
+                      {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype, item.stage === "control" ? "control" : "targeted_rerun")} disabled={acting !== null}>{item.stage === "control" ? "Control rerun" : "Targeted rerun"}</button>}
                       {canRunControl && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype, "control")} disabled={acting !== null}>Control rerun</button>}
                       {!canRerun && !canRunControl && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
                     </td>
