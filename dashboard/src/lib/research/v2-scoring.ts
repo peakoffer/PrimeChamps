@@ -362,6 +362,59 @@ export function hasSourceBackedResearchV2Signal(
   return Array.isArray(claims) && claims.some((claim) => researchV2CitedSignalIsSourceBacked(claim, sources));
 }
 
+const RESEARCH_V2_MOMENTUM_MAX_AGE_DAYS = 365;
+
+function researchV2EvidenceDates(value: string) {
+  const dates: Date[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: string) => {
+    const timestamp = Date.parse(candidate);
+    if (!Number.isFinite(timestamp)) return;
+    const date = new Date(timestamp);
+    const key = date.toISOString().slice(0, 10);
+    if (seen.has(key)) return;
+    seen.add(key);
+    dates.push(date);
+  };
+  const month = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  for (const match of value.matchAll(/\b(20\d{2}-\d{1,2}-\d{1,2})\b/g)) add(match[1]);
+  for (const match of value.matchAll(new RegExp(`\\b(${month}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,)?\\s+20\\d{2})\\b`, "gi"))) {
+    add(match[1].replace(/(\d)(?:st|nd|rd|th)/i, "$1"));
+  }
+  for (const match of value.matchAll(new RegExp(`\\b(\\d{1,2}(?:st|nd|rd|th)?\\s+${month}\\s+20\\d{2})\\b`, "gi"))) {
+    add(match[1].replace(/(\d)(?:st|nd|rd|th)/i, "$1"));
+  }
+  for (const match of value.matchAll(new RegExp(`\\b(${month}\\s+20\\d{2})\\b`, "gi"))) add(`${match[1]} 1`);
+  if (!dates.length) {
+    for (const match of value.matchAll(/\b(20\d{2})\b/g)) add(`${match[1]}-01-01`);
+  }
+  return dates;
+}
+
+/**
+ * Momentum is a time-bound eligibility gate, not merely a source-presence
+ * check. A cited result must be in the frozen dossier and carry an explicit
+ * date inside the last year. Undated rankings and stale career highlights can
+ * still inform scoring, but cannot qualify a finalist as currently active.
+ */
+export function hasCurrentSourceBackedResearchV2Momentum(
+  claims: ResearchV2CitedSignal[] | undefined,
+  sources: ResearchV2EvidenceSource[],
+  options: { now?: Date; maxAgeDays?: number } = {}
+) {
+  const now = options.now || new Date();
+  const maxAgeDays = options.maxAgeDays ?? RESEARCH_V2_MOMENTUM_MAX_AGE_DAYS;
+  const earliest = now.getTime() - maxAgeDays * 24 * 60 * 60 * 1_000;
+  const latest = now.getTime() + 24 * 60 * 60 * 1_000;
+  return Array.isArray(claims) && claims.some((claim) => {
+    if (!researchV2CitedSignalIsSourceBacked(claim, sources)) return false;
+    return researchV2EvidenceDates(`${claim.signal} ${claim.source_excerpt}`).some((date) => {
+      const timestamp = date.getTime();
+      return timestamp >= earliest && timestamp <= latest;
+    });
+  });
+}
+
 /**
  * Confirm that a candidate has a measurable personal audience without turning
  * the business's preferred follower band into an eligibility filter. The

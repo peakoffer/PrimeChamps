@@ -54,6 +54,7 @@ import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
   calibrateResearchV2QualifiedBand,
+  hasCurrentSourceBackedResearchV2Momentum,
   hasMeaningfulPersonalAudience,
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
@@ -4361,7 +4362,7 @@ function deterministicResearchV2FinalistEvidence(athlete: ResearchV2EvidenceCand
   const sources = candidateResearchV2EvidenceSources(athlete);
   const creatorActivity = researchV2CreatorActivitySnapshot({ posts: athlete.latest_posts });
   return {
-    currentMomentum: hasSourceBackedResearchV2Signal(athlete.momentum_evidence, sources),
+    currentMomentum: hasCurrentSourceBackedResearchV2Momentum(athlete.momentum_evidence, sources),
     meaningfulAudience: hasMeaningfulPersonalAudience({
       followerCount: athlete.follower_count,
       engagementRate: athlete.engagement_rate,

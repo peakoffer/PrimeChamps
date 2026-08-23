@@ -38,6 +38,7 @@ import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
   calibrateResearchV2QualifiedBand,
+  hasCurrentSourceBackedResearchV2Momentum,
   hasMeaningfulPersonalAudience,
   hasSourceBackedResearchV2Signal,
   holdResearchV2PriorityForIndependentAudit,
@@ -2574,6 +2575,29 @@ test("V2 evidence citations must match a frozen source URL and source text", () 
     ...supported,
     source_excerpt: "launched a daily lifestyle vlog and paid subscription community",
   }, sources), false);
+});
+
+test("V2 finalist momentum must be source-backed and dated within one year", () => {
+  const sources = [{
+    url: "https://league.test/athletes/example",
+    text: "Example Athlete ranked 19th on June 14, 2025 and won the August 20, 2026 final.",
+  }];
+  const now = new Date("2026-08-23T12:00:00.000Z");
+  assert.equal(hasCurrentSourceBackedResearchV2Momentum([{
+    signal: "Ranked 19th on June 14, 2025",
+    source_url: sources[0].url,
+    source_excerpt: "ranked 19th on June 14, 2025",
+  }], sources, { now }), false);
+  assert.equal(hasCurrentSourceBackedResearchV2Momentum([{
+    signal: "Won the August 20, 2026 final",
+    source_url: sources[0].url,
+    source_excerpt: "won the August 20, 2026 final",
+  }], sources, { now }), true);
+  assert.equal(hasCurrentSourceBackedResearchV2Momentum([{
+    signal: "Currently ranked in the top 20",
+    source_url: sources[0].url,
+    source_excerpt: "Example Athlete ranked 19th",
+  }], sources, { now }), false);
 });
 
 test("meaningful audience is independent of the soft recruiting follower preference", () => {
