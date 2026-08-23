@@ -4144,8 +4144,8 @@ async function scoreAthletes(
           log(`    ⚠️ Could not verify age for ${athlete.name}`);
       }
 
-      // The Researcher may propose an above-80 priority for audit selection,
-      // but the candidate's visible/durable score cannot cross 80 until the
+      // The Researcher may propose an 80+ priority for audit selection,
+      // but the candidate cannot qualify at 80+ until the
       // independent audit completes. The proposal is retained separately so
       // the audit can evaluate it without prematurely qualifying the person.
       const researcherProposedScore = score.score;
@@ -4951,7 +4951,7 @@ async function auditPriorityCandidates(
       // finish only the missing ones before the run can finalize.
       if (hasCompletedResearchV2Audit(athlete.audit_verdict)) return false;
       const proposedPriority = athlete.researcher_proposed_score ?? athlete.score;
-      if (proposedPriority <= RESEARCH_PRIORITY_THRESHOLD) return false;
+      if (proposedPriority < RESEARCH_PRIORITY_THRESHOLD) return false;
       const evidence = deterministicResearchV2FinalistEvidence(athlete);
       return (athlete.identity_confidence || 0) >= 70
         && athlete.identity_corroborated === true

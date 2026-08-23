@@ -154,7 +154,7 @@ export function calculateResearchV2Priority(input: {
     + researchConfidence * 0.20
   ) * 100) / 100;
 
-  // Above-80 is a compound gate, not a score the model can reach by making
+  // The 80+ band is a compound gate, not a score the model can reach by making
   // one dimension extreme. Missing confidence, access, or core fit keeps the
   // profile below the final-candidate threshold.
   if (onlyfansFit < 80 || commercialAchievability < 70 || researchConfidence < 80) {
@@ -293,7 +293,7 @@ export function passesResearchV2FinalGate(input: ResearchV2Score & {
   auditorVerdict: "pass" | "corrected" | "fail";
   criticalGapCount: number;
 }) {
-  return input.priority > 80
+  return input.priority >= 80
     && input.onlyfansFit >= 80
     && input.commercialAchievability >= 70
     && input.researchConfidence >= 80

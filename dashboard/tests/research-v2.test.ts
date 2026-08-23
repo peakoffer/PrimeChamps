@@ -2335,6 +2335,7 @@ test("persistence reuses completed audits and finishes missing audits after a du
   assert.match(workflow, /if \(hasCompletedResearchV2Audit\(athlete\.audit_verdict\)\) return false/);
   assert.match(workflow, /const baseAuditedAthletes = await auditPriorityCandidates/);
   assert.match(workflow, /const auditedAthletes = baseAuditedAthletes\.map/);
+  assert.match(workflow, /if \(proposedPriority < RESEARCH_PRIORITY_THRESHOLD\) return false/);
 });
 
 test("V2 final gate requires independent audit and every evidence gate", () => {
@@ -2382,6 +2383,25 @@ test("V2 final gate requires independent audit and every evidence gate", () => {
     auditorVerdict: "pass",
     criticalGapCount: 0,
   }), false);
+});
+
+test("V2 final gate treats an independently audited score of exactly 80 as 80+", () => {
+  assert.equal(passesResearchV2FinalGate({
+    priority: 80,
+    onlyfansFit: 80,
+    commercialAchievability: 70,
+    researchConfidence: 80,
+    identityConfirmed: true,
+    adultEligibilityVerified: true,
+    currentAthleticMomentumVerified: true,
+    meaningfulAudienceVerified: true,
+    creatorPotentialVerified: true,
+    onlyFansPlatformActivityCompatible: true,
+    commercialConstraintsComplete: true,
+    materialClaimsVerified: true,
+    auditorVerdict: "pass",
+    criticalGapCount: 0,
+  }), true);
 });
 
 test("V2 final gate fails closed on audience, creator, and commercial evidence", () => {
