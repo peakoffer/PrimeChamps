@@ -2,10 +2,10 @@
 
 - Campaign: Cross-sport hardening 2026-08-22
 - Campaign ID: `f89a73ff-a93d-4166-9d87-a1dacd78b3f7`
-- Status: **safely stopped — provider funding required before confirmation**
+- Status: **failed closed — provider funding required before confirmation**
 - Models: `claude-sonnet-5` authoritative; `anthropic/claude-opus-5` standard-speed shadow only
 - Isolation: evaluation only; zero CRM, pipeline, notification, conversation, contract, or outreach mutations
-- Accounted safety reserve: **$43.00 / $100.00**
+- Accounted safety reserve: **$45.00 / $100.00**
 - Measured Sonnet, audit, and Opus spend: **$3.20**
 - Estimated all-in provider spend at the stop: **$5.54–$9.18**
 - Concurrency: maximum three
@@ -17,6 +17,8 @@ The production memory, bounded guidance, statistical learning, owner scorecard, 
 The campaign scored 50 evidence-backed candidates, stopped 135 duplicate identities before premium work, and avoided an estimated 540 paid candidate calls. No finalist survived the deliberately strict 80+ evidence gates; the system did not pad results.
 
 During post-fix controls, production logs proved that the required OpenAI discovery account returns `credit_balance_exhausted`. Perplexity is also quota-degraded. Three concurrent cases recorded the OpenAI failure and the campaign was cancelled before the 13 confirmation runs. Commit `753f708` now makes required-provider quota/auth failures durable and fail-fast in evaluation mode, preventing paid fallback work from concealing a broken primary route.
+
+On 2026-08-23, an owner-authenticated resume probe ran only the single untouched motorcycle-racing control. It pinned fresh lifecycle memory for 327 live athletes and 319 verified aliases, then received the same OpenAI `429 credit_balance_exhausted` response during discovery. The run stopped before enrichment or scoring, the case became `technical_failure`, and the campaign became `failed`. The safety ledger now accounts for $45.00, with $55.00 remaining and the $20.00 confirmation reserve untouched. This second dated probe confirms that the blocker is still the provider account rather than stale campaign state or deployment code.
 
 ## Latest canonical archetype cases
 
@@ -59,6 +61,8 @@ Database checks across every research log linked to this campaign returned:
 - Appointments: 0
 - Contracts: 0
 - Conversations: 0
+
+The 2026-08-23 resume probe repeated the same isolation query and again returned zero across all nine mutation surfaces, including message drafts.
 
 ## What remains before release acceptance
 

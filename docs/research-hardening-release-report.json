@@ -1,16 +1,16 @@
 {
-  "reportVersion": 2,
-  "generatedAt": "2026-08-22T16:50:00.000Z",
+  "reportVersion": 3,
+  "generatedAt": "2026-08-23T13:55:00.000Z",
   "campaign": {
     "id": "f89a73ff-a93d-4166-9d87-a1dacd78b3f7",
     "name": "Cross-sport hardening 2026-08-22",
-    "status": "cancelled",
+    "status": "failed",
     "releaseAccepted": false,
-    "stopReason": "The required OpenAI discovery provider returned credit_balance_exhausted during post-fix controls.",
+    "stopReason": "The required OpenAI discovery provider returned credit_balance_exhausted during post-fix controls and again during the 2026-08-23 single-case resume probe.",
     "budgetLimitMicrousd": 100000000,
     "preconfirmationStopMicrousd": 80000000,
     "confirmationReserveMicrousd": 20000000,
-    "accountedReserveMicrousd": 43000000,
+    "accountedReserveMicrousd": 45000000,
     "measuredModelMicrousd": 3203950,
     "estimatedAllInUsd": { "low": 5.54, "high": 9.18 },
     "maximumConcurrency": 3,
@@ -20,12 +20,13 @@
   },
   "summary": {
     "completedCases": 28,
-    "cancelledCases": 4,
+    "cancelledCases": 3,
+    "failedCases": 1,
     "scoredCandidates": 50,
     "finalists": 0,
     "duplicateSuppressions": 135,
     "paidCallsAvoided": 540,
-    "providerFailuresAtStop": 3,
+    "providerFailuresAtStop": 5,
     "liveMutations": 0
   },
   "canonicalCases": [
@@ -53,11 +54,24 @@
     "athletes": 0,
     "liveCandidates": 0,
     "notifications": 0,
+    "messageDrafts": 0,
     "outreachMessages": 0,
     "queueEntries": 0,
     "appointments": 0,
     "contracts": 0,
     "conversations": 0
+  },
+  "resumeProbe": {
+    "attemptedAt": "2026-08-23T13:53:01.000Z",
+    "archetype": "motorsport",
+    "sport": "motorcycle racing",
+    "stage": "control",
+    "result": "technical_failure",
+    "provider": "openai",
+    "providerCode": "credit_balance_exhausted",
+    "reachedEnrichment": false,
+    "reachedScoring": false,
+    "liveMutations": 0
   },
   "fixes": [
     { "commit": "f2ed986", "summary": "Prevent durable research phases from suppressing their own checkpoints and clear stale completion errors." },
