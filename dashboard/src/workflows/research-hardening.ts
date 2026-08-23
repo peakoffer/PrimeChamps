@@ -16,7 +16,11 @@ export async function runResearchHardeningCampaign(input: HardeningCampaignWorkf
     const caseIds = await loadHardeningCaseIds(input);
     for (const batch of chunkWithConcurrency(caseIds, HARDENING_MAX_CONCURRENCY)) {
       const prepared = await prepareHardeningBatch({ campaign: input, caseIds: batch });
-      await Promise.all(prepared.map((item) => runResearchWorkflow(item.workflowInput)));
+      // A single child failure must not strand successful siblings without an
+      // audit or leave their reservations invisible. Each research log records
+      // its own terminal status; audit every prepared case after all children
+      // settle, then let campaign reconciliation decide the batch outcome.
+      await Promise.allSettled(prepared.map((item) => runResearchWorkflow(item.workflowInput)));
       await Promise.all(prepared.map((item) => auditCompletedHardeningCase({ campaign: input, prepared: item })));
       const campaign = await refreshHardeningCampaign(input);
       // Batch admission applies the campaign's persisted pre-confirmation stop

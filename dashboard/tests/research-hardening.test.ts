@@ -249,6 +249,7 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /evaluationMode:\s*true/);
   assert.match(service, /mutation_surfaces:\s*\[\]/);
   assert.match(workflow, /HARDENING_MAX_CONCURRENCY/);
+  assert.match(workflow, /Promise\.allSettled/);
   assert.match(service, /cancel_requested_at:\s*null/);
   assert.match(service, /onlyFansProviderRecoveryConfirmed/);
   assert.match(service, /onlyfans_platform_check_completed === true/);
@@ -261,6 +262,9 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
   assert.match(service, /campaign\.preconfirmation_stop_microusd/);
   assert.match(service, /campaign\.budget_limit_microusd/);
+  assert.match(service, /cost_microusd:\s*HARDENING_STAGE_RESERVATION_MICROUSD\[stage\]/);
+  assert.match(service, /The hardening campaign still has an active case/);
+  assert.match(service, /HARDENING_STAGE_RESERVATION_MICROUSD\[input\.stage\] \* input\.archetypes\.length/);
   assert.match(service, /campaignType === "profile_validation"/);
   assert.match(service, /\["baseline", "guided"\]/);
   assert.match(service, /evaluateProfileActivation\(baseline, guided\)/);

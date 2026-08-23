@@ -348,11 +348,16 @@ export async function prepareHardeningBatch(input: {
     .eq("campaign_id", input.campaign.campaignId).eq("organization_id", input.campaign.organizationId)
     .in("id", input.caseIds);
   if (casesError) throw casesError;
+  const { data: spendRows, error: spendRowsError } = await admin.from("research_hardening_cases")
+    .select("cost_microusd").eq("campaign_id", input.campaign.campaignId)
+    .eq("organization_id", input.campaign.organizationId);
+  if (spendRowsError) throw spendRowsError;
+  const persistedCaseCost = (spendRows || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const batchStage = ((cases || [])[0]?.stage || "smoke") as HardeningStage;
   const projectedReservation = (cases || []).reduce((sum, item) =>
     sum + HARDENING_STAGE_RESERVATION_MICROUSD[item.stage as HardeningStage], 0);
   const spend = campaignSpendDecision({
-    totalCostMicrousd: integer(campaign.total_cost_microusd),
+    totalCostMicrousd: Math.max(integer(campaign.total_cost_microusd), persistedCaseCost),
     stage: batchStage,
     nextEstimatedCostMicrousd: projectedReservation,
     budgetLimitMicrousd: integer(campaign.budget_limit_microusd),
@@ -440,6 +445,11 @@ export async function prepareHardeningBatch(input: {
       research_log_id: log.id,
       status: "running",
       started_at: now,
+      // Reserve the bounded stage cost at launch. The audit later replaces
+      // this with the same conservative accounting value plus measured model
+      // detail, but a crashed workflow can no longer make committed work look
+      // free to a concurrent rerun.
+      cost_microusd: HARDENING_STAGE_RESERVATION_MICROUSD[stage],
     }).eq("id", item.id).eq("organization_id", input.campaign.organizationId)
       .eq("status", "queued").is("research_log_id", null).select("id").maybeSingle();
     if (claimError || !claimed) throw claimError || new Error(`Hardening case ${item.id} changed before launch`);
@@ -1016,9 +1026,15 @@ export async function resumeUntouchedHardeningCases(campaignId: string, organiza
     .in("status", ["cancelled", "queued"]).is("research_log_id", null)
     .order("created_at", { ascending: true });
   if (error) throw error;
+  const { data: spendRows, error: spendRowsError } = await admin.from("research_hardening_cases")
+    .select("cost_microusd").eq("campaign_id", campaignId).eq("organization_id", organizationId);
+  if (spendRowsError) throw spendRowsError;
   const caseIds = (untouched || []).map((item) => item.id);
   if (caseIds.length === 0) throw new Error("No unfinished untouched hardening cases remain");
-  let projectedCost = integer(campaign.total_cost_microusd);
+  let projectedCost = Math.max(
+    integer(campaign.total_cost_microusd),
+    (spendRows || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0)
+  );
   for (const item of untouched || []) {
     const stage = item.stage as HardeningStage;
     const reservation = HARDENING_STAGE_RESERVATION_MICROUSD[stage];
@@ -1062,9 +1078,18 @@ export async function addHardeningRerunCases(input: {
     || currentModels.challenger.model !== campaign.challenger_model_id) {
     throw new Error("The frozen model route has changed. Start a new campaign so results remain comparable and use the current cost-optimized route.");
   }
+  const { data: caseSpendRows, error: caseSpendError } = await admin.from("research_hardening_cases")
+    .select("status,cost_microusd").eq("campaign_id", input.campaignId)
+    .eq("organization_id", input.organizationId);
+  if (caseSpendError) throw caseSpendError;
+  if ((caseSpendRows || []).some((item) => item.status === "running")) {
+    throw new Error("The hardening campaign still has an active case");
+  }
+  const persistedCaseCost = (caseSpendRows || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const spend = campaignSpendDecision({
-    totalCostMicrousd: integer(campaign.total_cost_microusd),
+    totalCostMicrousd: Math.max(integer(campaign.total_cost_microusd), persistedCaseCost),
     stage: input.stage,
+    nextEstimatedCostMicrousd: HARDENING_STAGE_RESERVATION_MICROUSD[input.stage] * input.archetypes.length,
     budgetLimitMicrousd: integer(campaign.budget_limit_microusd),
     preConfirmationStopMicrousd: integer(campaign.preconfirmation_stop_microusd),
     confirmationReserveMicrousd: integer(campaign.confirmation_reserve_microusd),
