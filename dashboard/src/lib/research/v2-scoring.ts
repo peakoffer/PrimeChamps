@@ -247,6 +247,10 @@ export function holdResearchV2PriorityForIndependentAudit(priority: number) {
   return normalized > 80 ? 79 : normalized;
 }
 
+export function hasCompletedResearchV2Audit(verdict: unknown) {
+  return verdict === "pass" || verdict === "corrected" || verdict === "fail";
+}
+
 /**
  * The audit is a veto/ceiling, never a second opportunity to inflate a weak
  * proposal. Each final dimension is bounded by the Researcher, the blind

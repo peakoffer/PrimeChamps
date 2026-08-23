@@ -38,6 +38,7 @@ import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
   calibrateResearchV2QualifiedBand,
+  hasCompletedResearchV2Audit,
   hasCurrentSourceBackedResearchV2Momentum,
   hasMeaningfulPersonalAudience,
   hasSourceBackedResearchV2Signal,
@@ -2327,11 +2328,12 @@ test("production audit treats free-form blind limitations as diagnostic rather t
   assert.ok(!workflow.includes("...unsupportedBlindClaims.map((claim) => `Unsupported material claim:"));
 });
 
-test("persistence reuses the completed audit checkpoint instead of auditing candidates twice", () => {
+test("persistence reuses completed audits and finishes missing audits after a durable replay", () => {
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
   assert.match(workflow, /"scoring",\s+"auditing",\s+"saving_candidates"/);
   assert.match(workflow, /const scoredAthletes = reachedPhase\("auditing"\)/);
-  assert.match(workflow, /const baseAuditedAthletes = reachedPhase\("saving_candidates"\)\s+\? scoredAthletes\s+: await auditPriorityCandidates/);
+  assert.match(workflow, /if \(hasCompletedResearchV2Audit\(athlete\.audit_verdict\)\) return false/);
+  assert.match(workflow, /const baseAuditedAthletes = await auditPriorityCandidates/);
   assert.match(workflow, /const auditedAthletes = baseAuditedAthletes\.map/);
 });
 
@@ -2518,6 +2520,15 @@ test("blind and review scores are hard ceilings and can never inflate the resear
   assert.equal(constrained.priority, 79, "sub-70 independent achievability must cap the candidate below 80");
   assert.equal(holdResearchV2PriorityForIndependentAudit(88.4), 79);
   assert.equal(holdResearchV2PriorityForIndependentAudit(80), 80);
+});
+
+test("durable scoring replays complete only missing independent audits", () => {
+  assert.equal(hasCompletedResearchV2Audit("pass"), true);
+  assert.equal(hasCompletedResearchV2Audit("corrected"), true);
+  assert.equal(hasCompletedResearchV2Audit("fail"), true);
+  assert.equal(hasCompletedResearchV2Audit(undefined), false);
+  assert.equal(hasCompletedResearchV2Audit(null), false);
+  assert.equal(hasCompletedResearchV2Audit("pending"), false);
 });
 
 test("verified age above the recruiting profile maximum cannot become a finalist", () => {

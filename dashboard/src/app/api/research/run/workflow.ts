@@ -54,6 +54,7 @@ import {
   buildAuditorConstrainedResearchV2Score,
   buildResearchV2Score,
   calibrateResearchV2QualifiedBand,
+  hasCompletedResearchV2Audit,
   hasCurrentSourceBackedResearchV2Momentum,
   hasMeaningfulPersonalAudience,
   hasSourceBackedResearchV2Signal,
@@ -4945,6 +4946,10 @@ async function auditPriorityCandidates(
   const artifacts = await ensureResearchV2Artifacts(input, scoringModel);
   const priorityCandidates = athletes
     .filter((athlete) => {
+      // A durable replay may resume after some, but not all, priority dossiers
+      // have completed their independent audit. Reuse completed audits and
+      // finish only the missing ones before the run can finalize.
+      if (hasCompletedResearchV2Audit(athlete.audit_verdict)) return false;
       const proposedPriority = athlete.researcher_proposed_score ?? athlete.score;
       if (proposedPriority <= RESEARCH_PRIORITY_THRESHOLD) return false;
       const evidence = deterministicResearchV2FinalistEvidence(athlete);
@@ -6052,18 +6057,15 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // candidate then receives an independent blind audit before it can become
     // a finalist. The Auditor sees the Researcher's score only after completing
     // its own evidence review, so it cannot simply ratify the proposal.
-    // The scoring step already persisted the complete audited candidates at
-    // saving_candidates. The following persistence step must reuse that
-    // checkpoint instead of buying a second blind/review audit and allowing a
-    // second stochastic verdict to overwrite the first.
-    const baseAuditedAthletes = reachedPhase("saving_candidates")
-      ? scoredAthletes
-      : await auditPriorityCandidates(
-          input,
-          scoredAthletes,
-          scoringModel,
-          config.evaluationBudget?.maxAuditCandidates
-        );
+    // Completed audits are persisted on each candidate. A replay reuses those
+    // verdicts while finishing any eligible dossier that reached the scoring
+    // checkpoint before its independent audit was durably stored.
+    const baseAuditedAthletes = await auditPriorityCandidates(
+      input,
+      scoredAthletes,
+      scoringModel,
+      config.evaluationBudget?.maxAuditCandidates
+    );
     const auditedAthletes = baseAuditedAthletes.map((athlete) => {
       const matchedSignalKeys = matchedRecruitingSignalKeys(config.profileSnapshot, {
         sport: athlete.sport,
