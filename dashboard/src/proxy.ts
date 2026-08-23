@@ -17,6 +17,9 @@ const PUBLIC_ROUTES = [
   "/api/email/webhook",
   "/api/internal/website-email",
   "/api/internal/research-evaluations",
+  // Vercel Cron cannot carry a browser session. Each cron route performs its
+  // own fail-closed CRON_SECRET bearer check, so let it reach that check.
+  "/api/cron",
   "/api/webhooks/instagram",
   "/api/webhooks/microsoft",
 ];

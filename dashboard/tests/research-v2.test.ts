@@ -50,7 +50,7 @@ import {
   researchV2CitedSignalIsSourceBacked,
   stableEvidenceSetHash,
 } from "../src/lib/research/v2-scoring.ts";
-import { sanitizeUnicodeForJson } from "../src/lib/research/text-safety.ts";
+import { sanitizeJsonForStorage, sanitizeUnicodeForJson } from "../src/lib/research/text-safety.ts";
 import { applyResearchObjectiveScoreGuardrails } from "../src/lib/research/scoring.ts";
 import {
   historicalOutcomeGroundTruth,
@@ -2649,6 +2649,20 @@ test("model prompts replace lone Unicode surrogates without damaging valid emoji
   const cleaned = sanitizeUnicodeForJson(`source \ud83d text \udc00 valid \ud83c\udfc4`);
   assert.equal(cleaned, "source � text � valid 🏄");
   assert.doesNotThrow(() => JSON.stringify({ prompt: cleaned }));
+});
+
+test("durable research checkpoints sanitize malformed Unicode recursively", () => {
+  const cleaned = sanitizeJsonForStorage({
+    name: "valid \ud83c\udfc4",
+    evidence: [{ excerpt: "bad \ud83d source" }, "bad \udc00 tail"],
+    score: 82,
+  });
+  assert.deepEqual(cleaned, {
+    name: "valid \ud83c\udfc4",
+    evidence: [{ excerpt: "bad \ufffd source" }, "bad \ufffd tail"],
+    score: 82,
+  });
+  assert.doesNotThrow(() => JSON.stringify(cleaned));
 });
 
 const BENCHMARK_CASE: BenchmarkGoldenCase = {

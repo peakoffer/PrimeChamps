@@ -90,7 +90,7 @@ import {
   type RecruitingProfile,
   type ResearchDepth,
 } from "@/lib/research/intelligence";
-import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
+import { sanitizeJsonForStorage, sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
   selectOnlyFansPlatformSignal,
   type OnlyFansPlatformSignal,
@@ -440,7 +440,7 @@ async function updateResearchProgress(
     : { ...stats, phase: nextPhase };
   const { error } = await supabase
     .from("research_logs")
-    .update({
+    .update(sanitizeJsonForStorage({
       heartbeat_at: new Date().toISOString(),
       phase: nextPhase,
       phase_history: nextHistory,
@@ -448,7 +448,7 @@ async function updateResearchProgress(
       ...(checkpoint?.rawResults !== undefined ? { raw_results: checkpoint.rawResults } : {}),
       ...(checkpoint?.scoringDetails !== undefined ? { scoring_details: checkpoint.scoringDetails } : {}),
       ...(checkpoint?.finalResults !== undefined ? { final_results: checkpoint.finalResults } : {}),
-    })
+    }))
     .eq("id", researchLogId)
     .eq("status", "running");
   if (error) log(`Warning: Could not update research heartbeat: ${error.message}`);
@@ -517,7 +517,7 @@ async function persistDiscoveredCandidates(
 ) {
   if (candidates.length === 0) return;
   const { error } = await supabase.from("research_candidates").upsert(
-    candidates.map((candidate, index) => ({
+    sanitizeJsonForStorage(candidates.map((candidate, index) => ({
       organization_id: input.organizationId,
       research_log_id: input.researchLogId,
       candidate_key: researchCandidateKey(candidate.name, candidate.sport),
@@ -547,7 +547,7 @@ async function persistDiscoveredCandidates(
           : candidate.discovery_verification?.reasons.join("; ") || "Discovery evidence did not pass quality gates",
       prompt_version: RESEARCH_PROMPT_VERSION,
       is_test_data: input.config.evaluationMode === true,
-    })),
+    }))),
     // Durable workflow replays re-enter this function from the top. Ignore an
     // existing row so a replay cannot erase identity, rejection, age, or score
     // evidence that a later phase has already persisted.
@@ -3077,7 +3077,7 @@ async function captureCandidateSignalSnapshot(
 
   const { data: snapshot, error: snapshotError } = await supabase
     .from("candidate_signal_snapshots")
-    .upsert({
+    .upsert(sanitizeJsonForStorage({
       organization_id: input.organizationId,
       research_log_id: input.researchLogId,
       instagram_handle: normalizedHandle,
@@ -3091,7 +3091,7 @@ async function captureCandidateSignalSnapshot(
       average_comments: athlete.average_comments ?? null,
       provider: "apify/instagram-profile-scraper",
       raw_profile: rawProfile,
-    }, { onConflict: "organization_id,instagram_handle,snapshot_date" })
+    }), { onConflict: "organization_id,instagram_handle,snapshot_date" })
     .select("id")
     .single();
   if (snapshotError) throw snapshotError;
@@ -3294,7 +3294,7 @@ async function enrichAthletesWithInstagram(
           account_active: profile.isActive,
         };
 
-        await supabase.from("research_candidates").update({
+        await supabase.from("research_candidates").update(sanitizeJsonForStorage({
           identity_status: "verified",
           identity_confidence: identity.confidence,
           instagram_handle: handle,
@@ -3311,7 +3311,7 @@ async function enrichAthletesWithInstagram(
             last_posted_at: profile.lastPostedAt,
             audience_in_range: audienceInRange,
           },
-        }).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
+        })).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
 
         log(`  ✓ ${athlete.name}: @${handle} (${profile.followers.toLocaleString()} followers)`);
         return captureCandidateSignalSnapshot(input, enrichedAthlete, profile.rawProfile);
@@ -3842,7 +3842,7 @@ async function persistPartialScoringCheckpoint(
   scoringModel: string
 ) {
   await Promise.all(candidates.map(async (candidate) => {
-    const { error } = await supabase.from("research_candidates").update({
+    const { error } = await supabase.from("research_candidates").update(sanitizeJsonForStorage({
       raw_candidate: candidate,
       source_evidence: candidate.evidence || [],
       identity_status: (candidate.identity_confidence || 0) >= 70 && candidate.identity_corroborated === true ? "verified" : "probable",
@@ -3859,7 +3859,7 @@ async function persistPartialScoringCheckpoint(
       scoring_model: scoringModel,
       prompt_version: RESEARCH_PROMPT_VERSION,
       is_minor: candidate.is_minor ?? null,
-    }).eq("research_log_id", input.researchLogId)
+    })).eq("research_log_id", input.researchLogId)
       .eq("candidate_key", researchCandidateKey(candidate.name, candidate.sport));
     if (error) throw error;
   }));
@@ -3999,7 +3999,7 @@ async function scoreAthletes(
       });
       if (!preScoringAgeGate.allowed) {
         log(`    ⛔ AGE SAFETY GATE: ${athlete.name} was blocked before scoring (${preScoringAgeGate.reason})`);
-        const { error: ageGateError } = await supabase.from("research_candidates").update({
+        const { error: ageGateError } = await supabase.from("research_candidates").update(sanitizeJsonForStorage({
           raw_candidate: athleteForScoring,
           source_evidence: athleteForScoring.evidence || [],
           identity_status: (athleteForScoring.identity_confidence || 0) >= 70
@@ -4021,7 +4021,7 @@ async function scoreAthletes(
             age_safety_blocked_before_scoring: true,
             scoring_completed: false,
           },
-        }).eq("research_log_id", input.researchLogId)
+        })).eq("research_log_id", input.researchLogId)
           .eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
         if (ageGateError) throw ageGateError;
         return null;
@@ -4032,7 +4032,7 @@ async function scoreAthletes(
       } catch (error) {
         const message = error instanceof Error ? error.message : "Scoring provider failed";
         log(`  Rejected ${athlete.name} after an isolated scoring failure: ${message}`);
-        await supabase.from("research_candidates").update({
+        await supabase.from("research_candidates").update(sanitizeJsonForStorage({
           // Preserve the paid enrichment/eligibility dossier even when the
           // model response fails. Enrichment-checkpoint forks can then retry
           // this exact candidate instead of silently dropping it or buying
@@ -4056,7 +4056,7 @@ async function scoreAthletes(
             identity_corroborated: athlete.identity_corroborated === true,
             scoring_completed: false,
           },
-        }).eq("research_log_id", input.researchLogId)
+        })).eq("research_log_id", input.researchLogId)
           .eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
         return null;
       }
@@ -4994,7 +4994,7 @@ async function persistScoringAudit(
         : audited?.passed
           ? "Passed every priority gate; retained as a qualified reserve until finalist persistence"
           : audited?.failures.join("; ") || "Candidate did not pass the priority quality contract";
-      const { error } = await supabase.from("research_candidates").update({
+      const { error } = await supabase.from("research_candidates").update(sanitizeJsonForStorage({
         raw_candidate: athlete,
         source_evidence: athlete.evidence || [],
         identity_status: (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true ? "verified" : "probable",
@@ -5037,7 +5037,7 @@ async function persistScoringAudit(
           priority_score: athlete.score >= RESEARCH_PRIORITY_THRESHOLD,
           quality_audit: audited || null,
         },
-      }).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
+      })).eq("research_log_id", input.researchLogId).eq("candidate_key", researchCandidateKey(athlete.name, athlete.sport));
       if (error) throw error;
     }));
   }

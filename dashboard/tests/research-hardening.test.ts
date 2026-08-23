@@ -284,8 +284,17 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(researchWorkflow, /Required research provider degraded:/);
   assert.match(researchWorkflow, /providerStatus:/);
   assert.match(researchWorkflow, /RequiredResearchProviderError/);
+  assert.match(researchWorkflow, /sanitizeJsonForStorage/);
   assert.match(researchWorkflow, /config\.evaluationMode === true/);
   assert.match(researchWorkflow, /statusCode: cancelled \? 409 : providerBlocked \? 424 : 500/);
+  const proxy = readFileSync(new URL("../src/proxy.ts", import.meta.url), "utf8");
+  assert.match(proxy, /"\/api\/cron"/);
+  const staleRecoveryRoute = readFileSync(
+    new URL("../src/app/api/cron/research-stale-recovery/route.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(staleRecoveryRoute, /authorization/);
+  assert.match(staleRecoveryRoute, /Bearer \$\{secret\}/);
 });
 
 test("a successful durable research replay clears any stale phase error", () => {
