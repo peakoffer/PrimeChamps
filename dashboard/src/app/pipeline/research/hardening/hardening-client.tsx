@@ -398,6 +398,10 @@ export default function HardeningClient() {
                 const unresolvedDefects = defects.filter((defect) => defect.resolved !== true);
                 const resolvedDefects = defects.length - unresolvedDefects.length;
                 const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
+                const canRunControl = !active
+                  && !legacyFastRoute
+                  && item.verdict === "passed"
+                  && spent + 2_000_000 < (campaign?.preconfirmation_stop_microusd || 80_000_000);
                 return (
                   <tr key={item.id} className="align-top hover:bg-brand-paper/60">
                     <td className="px-4 py-4"><p className="font-semibold capitalize text-brand-ink">{item.archetype}</p><p className="mt-1 text-xs capitalize text-brand-muted">{item.sport}</p></td>
@@ -423,7 +427,8 @@ export default function HardeningClient() {
                     </td>
                     <td className="px-4 py-4 text-right">
                       {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype)} disabled={acting !== null}>Targeted rerun</button>}
-                      {!canRerun && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
+                      {canRunControl && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype, "control")} disabled={acting !== null}>Control rerun</button>}
+                      {!canRerun && !canRunControl && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
                     </td>
                   </tr>
                 );
