@@ -1,55 +1,49 @@
 {
-  "reportVersion": 3,
-  "generatedAt": "2026-08-23T13:55:00.000Z",
+  "reportVersion": 4,
+  "generatedAt": "2026-08-23T22:36:00.000Z",
   "campaign": {
     "id": "f89a73ff-a93d-4166-9d87-a1dacd78b3f7",
     "name": "Cross-sport hardening 2026-08-22",
     "status": "failed",
+    "statusReason": "Historical provider failures remain in the immutable campaign record; the latest regression cases passed.",
     "releaseAccepted": false,
-    "stopReason": "The required OpenAI discovery provider returned credit_balance_exhausted during post-fix controls and again during the 2026-08-23 single-case resume probe.",
+    "latestRegressionWave": "passed",
     "budgetLimitMicrousd": 100000000,
     "preconfirmationStopMicrousd": 80000000,
     "confirmationReserveMicrousd": 20000000,
-    "accountedReserveMicrousd": 45000000,
-    "measuredModelMicrousd": 3203950,
-    "estimatedAllInUsd": { "low": 5.54, "high": 9.18 },
+    "accountedReserveMicrousd": 79000000,
+    "measuredModelMicrousd": 14327333,
+    "estimatedAllInUsd": { "low": 38.39, "high": 63.26 },
     "maximumConcurrency": 3,
     "officialModel": "claude-sonnet-5",
     "challengerModel": "anthropic/claude-opus-5",
     "challengerSpeed": "standard"
   },
   "summary": {
-    "completedCases": 28,
-    "cancelledCases": 3,
-    "failedCases": 1,
-    "scoredCandidates": 50,
-    "finalists": 0,
-    "duplicateSuppressions": 135,
-    "paidCallsAvoided": 540,
-    "providerFailuresAtStop": 5,
+    "completedCases": 42,
+    "passedCases": 20,
+    "scoredCandidates": 270,
+    "historicalFinalists": 4,
+    "duplicateSuppressions": 138,
+    "paidCallsAvoided": 552,
+    "criticalDefects": 0,
+    "safetyStops": 0,
     "liveMutations": 0
   },
-  "canonicalCases": [
-    { "archetype": "action", "sport": "climbing", "stage": "targeted_rerun", "verdict": "source_exhausted", "exactPeople": 6, "scored": 0, "finalists": 0 },
-    { "archetype": "adaptive", "sport": "adaptive track and field", "stage": "targeted_rerun", "verdict": "source_exhausted", "exactPeople": 2, "scored": 0, "finalists": 0 },
-    { "archetype": "combat", "sport": "boxing", "stage": "smoke", "verdict": "passed", "exactPeople": 40, "scored": 1, "finalists": 0 },
-    { "archetype": "endurance", "sport": "cycling", "stage": "smoke", "verdict": "passed", "exactPeople": 26, "scored": 1, "finalists": 0 },
-    { "archetype": "general", "sport": "esports", "stage": "targeted_rerun", "verdict": "source_exhausted", "exactPeople": 0, "scored": 0, "finalists": 0 },
-    { "archetype": "judged", "sport": "figure skating", "stage": "targeted_rerun", "verdict": "passed", "exactPeople": 14, "scored": 2, "finalists": 0 },
-    { "archetype": "motorsport", "sport": "motocross", "stage": "targeted_rerun", "verdict": "needs_fix", "exactPeople": 21, "scored": 0, "finalists": 0 },
-    { "archetype": "precision", "sport": "equestrian", "stage": "targeted_rerun", "verdict": "source_exhausted", "exactPeople": 4, "scored": 0, "finalists": 0 },
-    { "archetype": "racquet", "sport": "tennis", "stage": "targeted_rerun", "verdict": "passed", "exactPeople": 35, "scored": 9, "finalists": 0 },
-    { "archetype": "strength", "sport": "CrossFit", "stage": "targeted_rerun", "verdict": "source_exhausted", "exactPeople": 5, "scored": 0, "finalists": 0 },
-    { "archetype": "team", "sport": "soccer", "stage": "targeted_rerun", "verdict": "needs_fix", "exactPeople": 9, "scored": 0, "finalists": 0 },
-    { "archetype": "water", "sport": "swimming", "stage": "targeted_rerun", "verdict": "passed", "exactPeople": 41, "scored": 17, "finalists": 0 },
-    { "archetype": "winter", "sport": "skiing", "stage": "targeted_rerun", "verdict": "source_exhausted", "exactPeople": 4, "scored": 0, "finalists": 0 }
+  "latestValidations": [
+    { "sport": "surfing", "stage": "control", "attempt": 6, "verdict": "passed", "exactPeople": 73, "scored": 24, "finalists": 1, "providerFailures": 0, "challengerFindings": 0, "knownCostMicrousd": 1275492 },
+    { "sport": "figure skating", "stage": "targeted_rerun", "attempt": 2, "verdict": "passed", "exactPeople": 23, "scored": 7, "finalists": 0, "providerFailures": 0, "challengerFindings": 0, "knownCostMicrousd": 547329 },
+    { "sport": "gymnastics", "stage": "control", "attempt": 7, "verdict": "passed", "exactPeople": 72, "scored": 12, "finalists": 0, "providerFailures": 0, "challengerFindings": 0, "knownCostMicrousd": 491057 },
+    { "sport": "volleyball", "stage": "control", "attempt": 7, "verdict": "passed", "exactPeople": 71, "scored": 19, "finalists": 0, "providerFailures": 0, "challengerFindings": 0, "knownCostMicrousd": 865557 }
   ],
-  "completedControls": [
-    { "sport": "volleyball", "verdict": "passed", "exactPeople": 52, "scored": 4, "finalists": 0 },
-    { "sport": "surfing", "verdict": "passed", "exactPeople": 24, "scored": 3, "finalists": 0 },
-    { "sport": "gymnastics", "verdict": "passed", "exactPeople": 50, "scored": 10, "finalists": 0 },
-    { "sport": "motorcycle racing", "verdict": "passed", "exactPeople": 18, "scored": 2, "finalists": 0 }
-  ],
+  "boundaryAudit": {
+    "proposed80PlusAudited": 3,
+    "finalPriorities": [74, 70, 71],
+    "unsafePromotions": 0,
+    "unsupportedClaimsSurvived": 0,
+    "unresolvedChallengerFindings": 0,
+    "verifiedRule": "Final audited priority >= 80 is eligible; every researcher proposal >= 80 receives authoritative audit."
+  },
   "isolation": {
     "athletes": 0,
     "liveCandidates": 0,
@@ -61,30 +55,38 @@
     "contracts": 0,
     "conversations": 0
   },
-  "resumeProbe": {
-    "attemptedAt": "2026-08-23T13:53:01.000Z",
-    "archetype": "motorsport",
-    "sport": "motorcycle racing",
-    "stage": "control",
-    "result": "technical_failure",
-    "provider": "openai",
-    "providerCode": "credit_balance_exhausted",
-    "reachedEnrichment": false,
-    "reachedScoring": false,
-    "liveMutations": 0
+  "production": {
+    "deploymentId": "dpl_J66s5EmBz7Kmp6eU7KuRf9C2xHrZ",
+    "deploymentState": "READY",
+    "domain": "crm.prime-champs.com",
+    "commit": "f2d35c6",
+    "signedInUiVerified": true,
+    "recoveredWorkflowTimeouts": 2,
+    "manualRecoveries": 0,
+    "supabaseSecurityErrors": 0,
+    "supabasePerformanceErrors": 0
   },
-  "fixes": [
-    { "commit": "f2ed986", "summary": "Prevent durable research phases from suppressing their own checkpoints and clear stale completion errors." },
-    { "commit": "b3f9c47", "summary": "Exclude test-only candidates from production memory and independent replicate suppression." },
-    { "commit": "b333a14", "summary": "Persist provider degradation and include it in hardening metrics." },
-    { "commit": "753f708", "summary": "Fail evaluation runs immediately when a required discovery provider has an auth or quota outage." }
+  "canonicalCases": [
+    { "archetype": "action", "sport": "climbing", "verdict": "source_exhausted", "exactPeople": 6, "scored": 0, "finalists": 0 },
+    { "archetype": "adaptive", "sport": "adaptive track and field", "verdict": "source_exhausted", "exactPeople": 2, "scored": 0, "finalists": 0 },
+    { "archetype": "combat", "sport": "boxing", "verdict": "passed", "exactPeople": 40, "scored": 1, "finalists": 0 },
+    { "archetype": "endurance", "sport": "cycling", "verdict": "passed", "exactPeople": 26, "scored": 1, "finalists": 0 },
+    { "archetype": "general", "sport": "esports", "verdict": "source_exhausted", "exactPeople": 0, "scored": 0, "finalists": 0 },
+    { "archetype": "judged", "sport": "gymnastics", "verdict": "passed", "exactPeople": 72, "scored": 12, "finalists": 0 },
+    { "archetype": "motorsport", "sport": "motorcycle racing", "verdict": "prior_control_passed_later_rows_queued", "exactPeople": null, "scored": null, "finalists": null },
+    { "archetype": "precision", "sport": "equestrian", "verdict": "source_exhausted", "exactPeople": 4, "scored": 0, "finalists": 0 },
+    { "archetype": "racquet", "sport": "tennis", "verdict": "passed", "exactPeople": 35, "scored": 9, "finalists": 0 },
+    { "archetype": "strength", "sport": "CrossFit", "verdict": "source_exhausted", "exactPeople": 5, "scored": 0, "finalists": 0 },
+    { "archetype": "team", "sport": "volleyball", "verdict": "passed", "exactPeople": 71, "scored": 19, "finalists": 0 },
+    { "archetype": "water", "sport": "surfing", "verdict": "passed", "exactPeople": 73, "scored": 24, "finalists": 1 },
+    { "archetype": "winter", "sport": "skiing", "verdict": "source_exhausted", "exactPeople": 4, "scored": 0, "finalists": 0 }
   ],
   "remaining": [
-    "Fund the OpenAI API organization used by OPENAI_API_KEY and redeploy.",
-    "Repeat four post-fix controls with zero provider failures.",
-    "Complete all 13 confirmation runs.",
-    "Complete required stability replicates.",
-    "Complete paired synthetic baseline-versus-guided profile validation.",
-    "Repeat final isolation, deployment, advisor, and signed-in UI verification."
+    "Bound scoring and audit work so each Vercel workflow step remains below 800 seconds without relying on replay.",
+    "Complete independent full-quality confirmations for all 13 archetypes under an explicitly approved confirmation budget.",
+    "Complete required third replicates for sparse or unstable archetypes.",
+    "Complete paired synthetic baseline-versus-soft-guidance validation before activating a real meeting profile.",
+    "Investigate six source-exhausted archetypes with targeted provider and query evidence.",
+    "Enable Supabase leaked-password protection as a separate auth-hardening task."
   ]
 }
