@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-24",
+  "status": "blocked_provider_quota_not_quality_certified",
+  "applicationCommit": "2c1476dccbee0d25157efcea80763bdfc506faa2",
+  "verifiedDeploymentId": "dpl_HiazVtmPhocKiPTwhJuvwsLuCreJ",
+  "productionUrl": "https://crm.prime-champs.com/pipeline/research/hardening",
+  "probe": {
+    "id": "1b91fc6a-f21a-4803-b74c-0908ae0a2224",
+    "researchLogId": "3ea7acd5-4e6e-41df-a4e9-173fab4658f8",
+    "parentCampaignId": "f89a73ff-a93d-4166-9d87-a1dacd78b3f7",
+    "startedAt": "2026-09-24T21:19:57.758761Z",
+    "manifestVersion": "weak-archetype-raw-search-v1",
+    "status": "failed",
+    "classification": "discovery_transport_only",
+    "failureType": "insufficient_quota",
+    "httpStatus": 401,
+    "attempted": 3,
+    "notRun": 3,
+    "successful": 0,
+    "sourceLinks": 0,
+    "modelCalls": 0,
+    "apifyRuns": 0,
+    "automaticRetries": 0,
+    "results": [
+      {
+        "sport": "climbing",
+        "status": "provider_failure",
+        "httpStatus": 401,
+        "sourceCount": 0
+      },
+      {
+        "sport": "adaptive track and field",
+        "status": "provider_failure",
+        "httpStatus": 401,
+        "sourceCount": 0
+      },
+      {
+        "sport": "esports",
+        "status": "provider_failure",
+        "httpStatus": 401,
+        "sourceCount": 0
+      },
+      {
+        "sport": "equestrian",
+        "status": "not_run",
+        "httpStatus": null,
+        "sourceCount": 0
+      },
+      {
+        "sport": "CrossFit",
+        "status": "not_run",
+        "httpStatus": null,
+        "sourceCount": 0
+      },
+      {
+        "sport": "skiing",
+        "status": "not_run",
+        "httpStatus": null,
+        "sourceCount": 0
+      }
+    ]
+  },
+  "cost": {
+    "currency": "USD",
+    "publishedRateSettled": 0,
+    "estimated": 0,
+    "unsettledOperationExposure": 0,
+    "retainedProbeAuthorization": 0.03,
+    "legacyParentAuthorization": 79,
+    "combinedRetainedAuthorization": 79.03,
+    "originalCeiling": 100,
+    "normalTestingStop": 80,
+    "confirmationReserve": 20,
+    "remainingOrdinaryAuthorization": 0.97,
+    "invoiceReconciled": false,
+    "legacyActualSpendReconciled": false
+  },
+  "verification": {
+    "unitTests": 382,
+    "failedTests": 0,
+    "skippedTests": 0,
+    "typecheck": "passed",
+    "lintErrors": 0,
+    "existingLintWarnings": 54,
+    "coreProductionBuild": "passed",
+    "quotaHintFollowupBuild": "passed",
+    "databaseMigrations": [
+      "20260924211229_research_discovery_probe",
+      "20260924211426_research_discovery_probe_parent_index"
+    ],
+    "databaseBrowserRolesDenied": true,
+    "liveCrmFullRowDigestsEqual": true,
+    "liveCrmTablesChecked": 14,
+    "signedInOwnerUi": "passed: disabled full campaigns, failed probe receipts, refresh only",
+    "runtimeErrors": "none reported since 2026-09-24T21:15:00Z; expected provider failures captured as diagnostic data"
+  },
+  "isolation": {
+    "athletes": {
+      "count": 327,
+      "digest": "6b1f1e6f16f8783f4a92d9d5611d9662"
+    },
+    "contracts": {
+      "count": 2,
+      "digest": "b9ed9a8bf2afcd45173d05c0e3dbd8cf"
+    },
+    "appointments": {
+      "count": 2,
+      "digest": "eb78ed0361e1d6da0dac616e4d986aad"
+    },
+    "conversations": {
+      "count": 3,
+      "digest": "4c9f99ecd94d54cdb9af982e5e6072a6"
+    },
+    "email_messages": {
+      "count": 0,
+      "digest": "d751713988987e9331980363e24189ce"
+    },
+    "message_drafts": {
+      "count": 0,
+      "digest": "d751713988987e9331980363e24189ce"
+    },
+    "outreach_queue": {
+      "count": 0,
+      "digest": "d751713988987e9331980363e24189ce"
+    },
+    "channel_messages": {
+      "count": 663,
+      "digest": "07be8afc0ef273084363b9f26890e151"
+    },
+    "outreach_messages": {
+      "count": 5,
+      "digest": "aabb24ffed030a2c216ad0aa324c88f9"
+    },
+    "instagram_messages": {
+      "count": 0,
+      "digest": "d751713988987e9331980363e24189ce"
+    },
+    "outreach_campaigns": {
+      "count": 0,
+      "digest": "d751713988987e9331980363e24189ce"
+    },
+    "outreach_templates": {
+      "count": 10,
+      "digest": "04ca263757cdca205de24ea36882367b"
+    },
+    "conversation_messages": {
+      "count": 8,
+      "digest": "1dfc24f6cb205fe3e58cf14f4aabf91b"
+    },
+    "activity_notifications": {
+      "count": 50,
+      "digest": "c322d257b944fc085eec140610e9f70a"
+    }
+  },
+  "remaining": [
+    "Fund or resolve quota on the Perplexity API project owning the production key. No key rotation indicated by this response.",
+    "Do not reset or rerun this immutable diagnostic. A subsequent verification must use an explicit separately accounted attempt.",
+    "Resolve Apify execution/retrieval versus post-run storage boundary with the owner; no new Apify run yet.",
+    "Reconcile historical exposure and get any new budget authorized without silently resetting the original ceiling.",
+    "Validate end-to-end source-first candidate yield, durable phase timing, exact identity and age evidence, authoritative Sonnet and independent Opus audits.",
+    "Finish affected-archetype confirmations and genuine held-out precision before all-sport production certification."
+  ]
+}

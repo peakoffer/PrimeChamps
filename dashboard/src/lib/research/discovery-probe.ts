@@ -4,7 +4,7 @@ import { researchPaidFetch } from "./paid-provider-fetch";
 import { getResearchPaidContext, withResearchPaidContext } from "./paid-operations";
 import { summarizeResearchPaidOperations } from "./paid-operation-policy";
 import { assertStrictDiscoveryProbeContext, DISCOVERY_PROBE_ALLOCATION_MICROUSD, DISCOVERY_PROBE_ENDPOINT,
-  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_VERSION, discoveryProbePayload, discoveryProbeSourceSummary, runFixedDiscoveryProbe } from "./discovery-probe-policy";
+  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_VERSION, discoveryProbeFailureHint, discoveryProbePayload, discoveryProbeSourceSummary, runFixedDiscoveryProbe } from "./discovery-probe-policy";
 
 type Actor = { id: string; organizationId: string };
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value)
@@ -47,13 +47,15 @@ export async function inspectDiscoveryProbe(actor: Actor, campaignId: string) {
     if (row?.status === "completed" && Number(raw.status) >= 200 && Number(raw.status) < 300 && typeof raw.body === "string") {
       try { summary = discoveryProbeSourceSummary(JSON.parse(raw.body)); resultStatus = "retrieved"; } catch { resultStatus = "invalid_response"; }
     } else if (row?.status === "completed") resultStatus = "provider_failure";
-    return { sport: query.sport, status: resultStatus, httpStatus, ...summary };
+    return { sport: query.sport, status: resultStatus, httpStatus,
+      failureReason: discoveryProbeFailureHint(httpStatus, raw.body), ...summary };
   });
   return { eligible: false, explanation: "This once-only diagnostic is allocated. It cannot restart or release its allowance; full research hardening remains blocked.", canary: {
     id: probe.id, status, classification: "discovery_transport_only" as const,
     allocationMicrousd: Number(probe.allocation_microusd), ...costs, results,
     authorizationSnapshot: probe.authorization_snapshot,
-    error: probe.error_message || (status === "interrupted" ? "Diagnostic interrupted; unknown charges and the original allocation remain reserved. No automatic retry." : null),
+    error: results.find((result) => result.failureReason)?.failureReason || probe.error_message
+      || (status === "interrupted" ? "Diagnostic interrupted; unknown charges and the original allocation remain reserved. No automatic retry." : null),
   } };
 }
 

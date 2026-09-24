@@ -32,6 +32,20 @@ export function assertStrictDiscoveryProbeContext(context: {
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value)
   ? value as Record<string, unknown> : {};
+
+/** Only fixed, reviewed hints reach the UI; never echo provider response text. */
+export function discoveryProbeFailureHint(httpStatus: number | null, body: unknown): string | null {
+  if (httpStatus === null || httpStatus < 400) return null;
+  let error: Record<string, unknown> = {};
+  if (typeof body === "string") {
+    try { error = object(object(JSON.parse(body)).error); } catch { /* Non-JSON failures remain generic. */ }
+  }
+  if (error.type === "insufficient_quota") return "Perplexity reports insufficient API credits or quota. Check billing for the project attached to the production key; this response does not require a key rotation. No automatic retry.";
+  if (httpStatus === 401 || httpStatus === 403) return "Perplexity rejected API access. Check the production project's key and permissions. No automatic retry.";
+  if (httpStatus === 429) return "Perplexity rate-limited the diagnostic. No automatic retry.";
+  return "The search provider failed. Inspect the saved receipt before authorizing another diagnostic; no automatic retry.";
+}
+
 function safeSourceUrl(value: unknown) {
   if (typeof value !== "string" || value.length > 2_000) return null;
   try {

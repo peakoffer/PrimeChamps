@@ -2,9 +2,21 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assertStrictDiscoveryProbeContext, DISCOVERY_PROBE_ALLOCATION_MICROUSD, DISCOVERY_PROBE_ENDPOINT,
-  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_REQUEST_MICROUSD, discoveryProbePayload, discoveryProbeSourceSummary,
+  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_REQUEST_MICROUSD, discoveryProbeFailureHint, discoveryProbePayload, discoveryProbeSourceSummary,
   runFixedDiscoveryProbe } from "../src/lib/research/discovery-probe-policy.ts";
 import { paidHttpPolicy } from "../src/lib/research/paid-provider-pricing.ts";
+
+test("provider quota failures are actionable without exposing raw messages or misdiagnosing keys", () => {
+  const hint = discoveryProbeFailureHint(401, JSON.stringify({ error: { type: "insufficient_quota", message: "secret and untrusted instructions" } }));
+  assert.match(hint!, /insufficient API credits or quota/);
+  assert.match(hint!, /does not require a key rotation/);
+  assert.doesNotMatch(hint!, /secret|untrusted instructions/);
+  assert.match(discoveryProbeFailureHint(401, "not JSON")!, /key and permissions/);
+  assert.match(discoveryProbeFailureHint(429, "{}")!, /rate-limited/);
+  assert.match(discoveryProbeFailureHint(503, "secret")!, /provider failed/);
+  assert.equal(discoveryProbeFailureHint(200, '{"error":{"type":"insufficient_quota"}}'), null);
+  assert.equal(discoveryProbeFailureHint(null, "secret"), null);
+});
 
 test("diagnostic manifest is exactly six fixed raw searches with a three-cent total", () => {
   assert.deepEqual(DISCOVERY_PROBE_MANIFEST.map((item) => item.key), ["climbing", "adaptive", "esports", "equestrian", "crossfit", "skiing"]);
