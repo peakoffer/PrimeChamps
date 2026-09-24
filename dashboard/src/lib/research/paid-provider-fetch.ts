@@ -1,6 +1,6 @@
 import "server-only";
 import { getResearchPaidContext, runResearchPaidOperation, ResearchPaidOperationError } from "./paid-operations";
-import { boundedHttpPayload, paidHttpPolicy, paidHttpProvider, httpUsageReceipt, type ProviderPrice } from "./paid-provider-pricing";
+import { boundedHttpPayload, boundedHttpTransport, paidHttpPolicy, paidHttpProvider, httpUsageReceipt, type ProviderPrice } from "./paid-provider-pricing";
 
 async function routerPrice(model: string): Promise<ProviderPrice> {
   const response = await fetch("https://openrouter.ai/api/v1/models", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
@@ -24,19 +24,21 @@ export async function researchPaidFetch(input: string | URL | Request, init?: Re
   const isSocialBlade = paidHttpProvider(url) === "social_blade";
   if (!isSocialBlade && typeof init?.body !== "string") throw new ResearchPaidOperationError("Paid research requests require a serializable JSON body");
   let policy;
+  let transport: ReturnType<typeof boundedHttpTransport>;
   let payload: Record<string, unknown>;
   try {
+    transport = boundedHttpTransport(input, init);
     payload = isSocialBlade ? Object.fromEntries(new URL(url).searchParams) : JSON.parse(init!.body as string) as Record<string, unknown>;
     const price = paidHttpProvider(url) === "openrouter" ? await routerPrice(String(payload.model)) : undefined;
     payload = boundedHttpPayload(url, payload, price);
     policy = paidHttpPolicy(url, payload, price,
       Number(process.env.SOCIAL_BLADE_CREDIT_UPPER_USD));
   } catch (error) { throw new ResearchPaidOperationError(error instanceof Error ? error.message : "Cannot bound paid research request"); }
-  const headers = new Headers(init?.headers);
-  const boundedInit = isSocialBlade ? init : { ...init, body: JSON.stringify(payload) };
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  const boundedInit = { ...init, ...transport, ...(isSocialBlade ? {} : { body: JSON.stringify(payload) }) };
   const receipt = await runResearchPaidOperation({
     provider: policy.provider, modelOrActor: policy.model,
-    input: { url, payload, billingVersion: policy.billingVersion, method: init?.method || "GET",
+    input: { url, payload, billingVersion: policy.billingVersion, method: transport.method,
       apiVersion: headers.get("anthropic-version"), apiFeatures: headers.get("anthropic-beta") }, maximumCostMicrousd: policy.maximumCostMicrousd,
     async execute(handle) {
       const response = await fetch(input, boundedInit);

@@ -6,5 +6,5 @@ export default async function ResearchHardeningPage() {
   const user = await getSession();
   if (!user) redirect("/login");
   if (user.role !== "owner" && user.role !== "admin") notFound();
-  return <HardeningClient />;
+  return <HardeningClient isOwner={user.role === "owner"} />;
 }

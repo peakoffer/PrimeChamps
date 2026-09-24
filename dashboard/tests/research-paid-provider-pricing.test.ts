@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { boundedActorPolicy } from "../src/lib/research/apify-spending-policy.ts";
-import { boundedHttpPayload, httpUsageReceipt, paidHttpPolicy, paidHttpProvider } from "../src/lib/research/paid-provider-pricing.ts";
+import { boundedHttpPayload, boundedHttpTransport, httpUsageReceipt, paidHttpPolicy, paidHttpProvider } from "../src/lib/research/paid-provider-pricing.ts";
 
 const anthropic = "https://api.anthropic.com/v1/messages";
 const text = { model: "claude-sonnet-5", max_tokens: 5_000, messages: [{ role: "user", content: "athlete evidence" }] };
@@ -9,6 +9,29 @@ const text = { model: "claude-sonnet-5", max_tokens: 5_000, messages: [{ role: "
 test("unknown endpoints cannot masquerade as metered provider traffic", () => {
   assert.equal(paidHttpProvider("https://api.anthropic.com.attacker.test/v1/messages"), null);
   assert.equal(paidHttpProvider(anthropic), "anthropic");
+});
+
+test("strict paid transport pins HTTPS, method and redirects before reservation", () => {
+  const url = "https://api.perplexity.ai/search";
+  assert.deepEqual(boundedHttpTransport(url, { method: "post", redirect: "follow" }), { method: "POST", redirect: "error" });
+  assert.deepEqual(boundedHttpTransport(anthropic, { method: "POST" }), { method: "POST", redirect: "error" });
+  assert.deepEqual(boundedHttpTransport("https://matrix.sbapis.com/b/instagram/statistics?query=athlete"), { method: "GET", redirect: "error" });
+  assert.throws(() => boundedHttpTransport(url), /require POST/);
+  assert.throws(() => boundedHttpTransport(url, { method: "GET" }), /require POST/);
+  assert.throws(() => boundedHttpTransport("https://matrix.sbapis.com/b/instagram/statistics", { method: "POST" }), /require GET/);
+  for (const invalid of ["http://api.perplexity.ai/search", "https://api.perplexity.ai:444/search",
+    "https://user:secret@api.perplexity.ai/search", "https://api.perplexity.ai.attacker.test/search"])
+    assert.throws(() => boundedHttpTransport(invalid, { method: "POST" }), /exact HTTPS/);
+});
+
+test("the method hashed and sent follows Request inheritance and init overrides", () => {
+  const url = "https://api.perplexity.ai/search";
+  const request = new Request(url, { method: "POST", body: "{}" });
+  assert.equal(boundedHttpTransport(request).method, "POST");
+  assert.equal(boundedHttpTransport(new Request(url), { method: "post" }).method, "POST");
+  assert.throws(() => boundedHttpTransport(request, { method: "GET" }), /require POST/);
+  const signal = new AbortController().signal;
+  assert.deepEqual(boundedHttpTransport(request, { signal }), boundedHttpTransport(request));
 });
 
 test("reserve multilingual bytes, schema framing and maximum cache writes without Fast mode", () => {

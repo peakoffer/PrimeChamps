@@ -4,10 +4,11 @@ export function hardeningPaidReadiness() {
     ready: false,
     code: "BOUNDED_DISCOVERY_REQUIRED",
     blockers: [
-      "The current discovery plan uses hosted web search without a verified per-request maximum charge.",
-      "Apify run caps exclude later storage and dataset charges; a bounded retention and retrieval policy is still required.",
+      "The bounded source-first research route still needs end-to-end quality confirmation; a source retrieval diagnostic is not certification.",
+      "Apify run caps do not establish an all-future storage limit; a verified retention policy is still required before full paid campaigns.",
+      "A future full campaign must reconcile earlier budget exposure rather than silently add another $75 allowance.",
     ],
-    nextStep: "Validate a bounded source-first discovery route and actor billing controls against saved evidence before starting paid canaries. Existing API keys do not need to be replaced.",
+    nextStep: "The separate one-time discovery diagnostic can test six sports for at most $0.03 within an existing eligible allowance. Full research remains locked until provider retention and budget reconciliation are resolved. Existing API keys do not need to be replaced.",
   } as const;
 }
 

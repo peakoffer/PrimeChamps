@@ -262,6 +262,7 @@ export type VerifiedAthleteAge = ParsedAgeEvidence & {
   hostname: string;
   evidence: string;
   corroborated: boolean;
+  conflicting?: boolean;
   corroboratingSources: Array<{
     source: string;
     hostname: string;
@@ -326,6 +327,24 @@ export function selectVerifiedAthleteAge(
       corroboratingSources: [],
     };
     candidates.push({ ...candidate, trusted: isTrusted(candidate.source) });
+  }
+
+  // Explicit, person-attributable DOB contradictions cannot be outvoted by
+  // two agreeing older pages. Approximate birth years and stated ages are
+  // deliberately excluded: publication timing can explain those differences.
+  const exactDates = candidates.filter((candidate) => candidate.precision === "birth_date");
+  const exactConflict = exactDates.some((left, index) => exactDates.slice(index + 1).some((right) =>
+    left.birthYear !== right.birthYear || left.age !== right.age));
+  if (exactConflict) {
+    const youngest = [...exactDates].sort((left, right) => left.age - right.age)[0];
+    return {
+      age: youngest.age, birthYear: youngest.birthYear, precision: youngest.precision,
+      isMinor: youngest.isMinor, source: youngest.source, hostname: youngest.hostname,
+      evidence: `Conflicting exact-person birth dates; adult clearance withheld. ${youngest.evidence}`,
+      corroborated: false, conflicting: true,
+      corroboratingSources: exactDates.map(({ source, hostname, evidence, age, birthYear, precision }) =>
+        ({ source, hostname, evidence, age, birthYear, precision })),
+    };
   }
 
   for (const candidate of candidates) {

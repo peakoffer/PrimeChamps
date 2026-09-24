@@ -12,6 +12,21 @@ export function paidHttpProvider(url: string) {
   return null;
 }
 
+/** Pin the priced endpoint: a followed redirect is a different, unpriced operation. */
+export function boundedHttpTransport(input: string | URL | Request, init?: RequestInit) {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+  const provider = paidHttpProvider(url.toString());
+  if (!provider || url.protocol !== "https:" || url.port || url.username || url.password) {
+    throw new Error("Paid research transport requires an exact HTTPS provider endpoint");
+  }
+  // Fetch inherits a Request's method unless init explicitly overrides it.
+  // Resolve once, then use this exact value both for hashing and for sending.
+  const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+  const expected = provider === "social_blade" ? "GET" : "POST";
+  if (method !== expected) throw new Error(`Paid ${provider} requests require ${expected}`);
+  return { method, redirect: "error" as const };
+}
+
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value)
   ? value as Record<string, unknown> : {};
 const amount = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;

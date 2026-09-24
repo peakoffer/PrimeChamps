@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, FlaskConical, RefreshCw, ShieldCheck, Square } from "lucide-react";
 import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
 import { latestCompletedHardeningCases, RESEARCH_HARDENING_MATRIX } from "@/lib/research/hardening";
+import DiscoveryCanaryPanel from "./discovery-canary-panel";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -82,7 +83,7 @@ function StatusPill({ value }: { value: string | null }) {
   return <span className={`inline-flex border px-2 py-1 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] ${statusTone[value || ""] || statusTone.queued}`}>{label}</span>;
 }
 
-export default function HardeningClient() {
+export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -233,7 +234,7 @@ export default function HardeningClient() {
           </Link>
           <p className="pc-eyebrow">Owner controls · evaluation only</p>
           <h1 className="pc-page-title">Research Hardening</h1>
-          <p className="pc-page-description">Explicit tests, preserved evidence, and a campaign-owned allowance. New release campaigns start with three canaries and a $75 maximum.</p>
+          <p className="pc-page-description">Preserved evidence, explicit spending limits, and separate discovery and quality checks. Historical results are not certification for this release.</p>
         </div>
         <div className="pc-header-actions">
           <button className="pc-button-secondary" onClick={() => void load()} disabled={acting !== null}>
@@ -276,10 +277,11 @@ export default function HardeningClient() {
 
       {error && <div className="border border-brand-danger/30 bg-brand-danger/10 px-4 py-3 text-sm text-brand-danger">{error}</div>}
       {paidReadiness && !paidReadiness.ready && <div className="border border-brand-warning/30 bg-brand-warning/10 px-4 py-3 text-sm text-brand-ink">
-        <p className="font-semibold">Paid testing is waiting on verified spending limits</p>
+        <p className="font-semibold">Full-quality testing is waiting on verified spending limits</p>
         <p className="mt-1">{paidReadiness.nextStep}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-brand-muted">{paidReadiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
       </div>}
+      {campaign && isOwner && <DiscoveryCanaryPanel key={campaign.id} campaignId={campaign.id} isOwner={isOwner} />}
       {campaign && !usesOperationLedger && <div className="border border-brand-ink/10 bg-brand-paper px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Historical campaign · reference only</p>
         <p className="mt-1">Past verdicts are preserved as development evidence, not certification for the current release. This campaign cannot resume paid work; new release testing requires a separate campaign with verified spending limits.</p>
