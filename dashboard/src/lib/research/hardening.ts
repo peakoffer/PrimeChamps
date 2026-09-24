@@ -49,6 +49,56 @@ export type HardeningArchetype = typeof RESEARCH_HARDENING_MATRIX[number]["arche
 export type HardeningDefectCategory = typeof HARDENING_DEFECT_CATEGORIES[number];
 export type HardeningStage = "smoke" | "targeted_rerun" | "confirmation" | "control";
 
+export type HardeningManifestCase = {
+  archetype: HardeningArchetype;
+  sport: string;
+  stage: HardeningStage;
+  replicateNumber: number;
+  caseBudgetMicrousd: number;
+  useConfirmationReserve: boolean;
+};
+
+export function parseHardeningManifest(value: unknown): HardeningManifestCase[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 60) {
+    throw new Error("Select an explicit manifest of 1–60 cases; no smoke runs are added automatically");
+  }
+  const seen = new Set<string>();
+  return value.map((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid hardening case");
+    const row = raw as Record<string, unknown>;
+    const canonical = RESEARCH_HARDENING_MATRIX.find((entry) => entry.archetype === row.archetype);
+    const stage = row.stage as HardeningStage;
+    if (!canonical || !["smoke", "targeted_rerun", "confirmation", "control"].includes(stage)) {
+      throw new Error("Every case needs a supported archetype and explicit stage");
+    }
+    const sport = stage === "control"
+      ? RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE[canonical.archetype as keyof typeof RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE]
+      : canonical.sport;
+    if (!sport || (row.sport !== undefined && row.sport !== sport)) throw new Error("Case sport does not match its canonical or control archetype");
+    const replicateNumber = Number(row.replicateNumber ?? 1);
+    const caseBudgetMicrousd = Number(row.caseBudgetMicrousd ?? (stage === "smoke" ? 1_000_000 : 3_000_000));
+    if (!Number.isSafeInteger(replicateNumber) || replicateNumber < 1 || replicateNumber > 20
+      || !Number.isSafeInteger(caseBudgetMicrousd) || caseBudgetMicrousd <= 0 || caseBudgetMicrousd > 25_000_000) {
+      throw new Error("Invalid replicate number or per-case allowance");
+    }
+    const key = `${canonical.archetype}:${stage}:${replicateNumber}`;
+    if (seen.has(key)) throw new Error("Duplicate case in hardening manifest");
+    seen.add(key);
+    if (row.useConfirmationReserve !== undefined && typeof row.useConfirmationReserve !== "boolean") throw new Error("Invalid reserve designation");
+    return { archetype: canonical.archetype, sport, stage, replicateNumber, caseBudgetMicrousd, useConfirmationReserve: row.useConfirmationReserve === true };
+  });
+}
+
+export function latestCompletedHardeningCases<T extends { archetype: string; sport: string; status: string }>(cases: T[]) {
+  const latest = new Map<string, T>();
+  for (const item of cases) {
+    const key = `${item.archetype}:${item.sport}`;
+    const previous = latest.get(key);
+    if (!previous || item.status === "completed" || previous.status !== "completed") latest.set(key, item);
+  }
+  return Array.from(latest.values());
+}
+
 export const HARDENING_STAGE_RESERVATION_MICROUSD: Record<HardeningStage, number> = {
   // The first live wave measured known model spend at $0.00-$0.54 per case.
   // These still leave a material allowance for unmetered Apify/search calls
@@ -79,11 +129,25 @@ export interface HardeningCaseMetrics {
   alignedCandidates?: number;
   explorationCandidates?: number;
   explorationRatio?: number;
-  costPerScoredCandidateMicrousd?: number;
+  costPerScoredCandidateMicrousd?: number | null;
   highScoreCandidates?: number;
-  heldOutPrecision80Plus?: number;
+  auditRetention80Plus?: number | null;
+  heldOutPrecision80Plus?: number | null;
+  sourceInvestigations?: Array<{ runId: string; queryPlanHash: string; providerVerified: boolean; completed: boolean; evidenceRefs: string[] }>;
   profileVariant?: "baseline" | "guided";
   repeatabilityVariance?: number;
+}
+
+export function normalizedHardeningMetrics(value: unknown) {
+  const metrics = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return {
+    ...metrics,
+    auditRetention80Plus: metrics.auditRetention80Plus ?? metrics.heldOutPrecision80Plus ?? null,
+    // Historical live cases used this name for audit retention. No hardening
+    // case yet carries linked independent ground-truth precision evidence.
+    heldOutPrecision80Plus: null,
+    costPerScoredCandidateMicrousd: Number(metrics.scoredCandidates) > 0 ? metrics.costPerScoredCandidateMicrousd ?? null : null,
+  };
 }
 
 export function classifyHardeningProviderFailures(input: {
@@ -120,6 +184,7 @@ export function campaignSpendDecision(input: {
   budgetLimitMicrousd?: number;
   preConfirmationStopMicrousd?: number;
   confirmationReserveMicrousd?: number;
+  useConfirmationReserve?: boolean;
 }) {
   const budgetLimit = Math.max(1, input.budgetLimitMicrousd ?? HARDENING_BUDGET_LIMIT_MICROUSD);
   const confirmationReserve = Math.max(0, input.confirmationReserveMicrousd ?? HARDENING_CONFIRMATION_RESERVE_MICROUSD);
@@ -132,7 +197,8 @@ export function campaignSpendDecision(input: {
   if (absoluteProjected > budgetLimit) {
     return { allowed: false, reason: `The $${(budgetLimit / 1_000_000).toFixed(0)} campaign ceiling would be exceeded` } as const;
   }
-  if (input.stage !== "confirmation" && absoluteProjected >= preConfirmationStop) {
+  const mayUseReserve = input.useConfirmationReserve ?? input.stage === "confirmation";
+  if (!mayUseReserve && absoluteProjected > preConfirmationStop) {
     return {
       allowed: false,
       reason: `The $${(preConfirmationStop / 1_000_000).toFixed(0)} pre-confirmation stop preserves $${(confirmationReserve / 1_000_000).toFixed(0)}`,
@@ -160,7 +226,13 @@ export function evaluateHardeningCase(metrics: HardeningCaseMetrics, defects: Ha
   if (safetyFailure) return "safety_stop" as const;
   if (metrics.providerFailures > 1) return "technical_failure" as const;
   if (metrics.exactPersonCandidates < 8) {
-    return "source_exhausted" as const;
+    const valid = (metrics.sourceInvestigations || []).filter((investigation) =>
+      investigation.runId && investigation.queryPlanHash && investigation.providerVerified
+      && investigation.completed && investigation.evidenceRefs.length > 0);
+    const independentPlans = new Set(valid.map((investigation) => investigation.queryPlanHash));
+    const independentRuns = new Set(valid.map((investigation) => investigation.runId));
+    return independentPlans.size >= 2 && independentRuns.size >= 2
+      ? "source_exhausted" as const : "source_inconclusive" as const;
   }
   if (
     metrics.scoredCandidates < 1

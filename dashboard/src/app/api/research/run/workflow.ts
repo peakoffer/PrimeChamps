@@ -1,4 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fixedResearchBatches, reusablePrecheckedProfile, unfinishedResearchBatch } from "@/lib/research/workflow-batches";
+import { researchRunAcceptsWork, researchWorkflowFailurePatch } from "@/lib/research/workflow-state";
+import { discoveryEvidenceForMemory, providerDiscoveryEvidence } from "@/lib/research/workflow-evidence";
+import { ResearchPaidOperationError, withResearchPaidContext } from "@/lib/research/paid-operations";
+import { researchPaidFetch } from "@/lib/research/paid-provider-fetch";
 import {
   runApifyActor,
   runApifyGoogleSearch,
@@ -385,7 +390,7 @@ async function fetchWithTimeout(
   if (requestUrl.startsWith("https://api.perplexity.ai/") && perplexityDisabledReason) {
     throw new Error(`Perplexity disabled for this worker: ${perplexityDisabledReason}`);
   }
-  const response = await fetch(input, {
+  const response = await researchPaidFetch(input, {
     ...init,
     signal: init?.signal || AbortSignal.timeout(timeoutMs),
   });
@@ -589,6 +594,7 @@ export interface ResearchWorkflowInput {
   requestedByUserId: string;
   config: ResearchConfig;
   targetPhase?: "discovery" | "enrichment" | "scoring" | "persistence";
+  durableScoringComplete?: boolean;
 }
 
 class ResearchCancelledError extends Error {
@@ -605,15 +611,20 @@ class RequiredResearchProviderError extends Error {
   }
 }
 
+function rethrowResearchControlError(error: unknown) {
+  if (error instanceof ResearchPaidOperationError || error instanceof ResearchCancelledError
+    || (error instanceof Error && /^Research paid ledger:/.test(error.message))) throw error;
+}
+
 async function assertRunNotCancelled(researchLogId: string) {
   const { data, error } = await supabase
     .from("research_logs")
-    .select("cancel_requested_at")
+    .select("status,cancel_requested_at")
     .eq("id", researchLogId)
     .maybeSingle();
 
   if (error) throw error;
-  if (data?.cancel_requested_at) throw new ResearchCancelledError();
+  if (!researchRunAcceptsWork(data)) throw new ResearchCancelledError();
 }
 
 interface DiscoveredAthlete {
@@ -635,9 +646,17 @@ interface DiscoveredAthlete {
   guidance_lane?: "aligned" | "exploration";
   crm_memory_match?: LifecycleMemoryMatch;
   crm_memory_blocked?: boolean;
+  prechecked_instagram_profile?: ApifyInstagramProfile;
+  prechecked_instagram_captured_at?: string;
 }
 
 interface EnrichedAthlete extends DiscoveredAthlete {
+  scoring_preparation?: {
+    onlyfans?: OnlyFansPlatformSignal;
+    apifyAge?: AthleteAgeLookupResult;
+    openAiAge?: AthleteAgeLookupResult;
+    ageInfo?: AthleteAgeLookupResult;
+  };
   instagram_handle?: string;
   instagram_url?: string;
   profile_pic_url?: string;
@@ -832,7 +851,9 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
       sport: typeof raw.sport === "string" ? raw.sport : row.sport,
       context: typeof raw.context === "string" ? raw.context : "Previously audited strong-fit candidate",
       source: typeof raw.source === "string" ? raw.source : "Prime Champs candidate memory",
-      evidence: Array.isArray(evidence) ? evidence : [],
+      // Keep historical dossiers untouched, but old citation summaries cannot
+      // become fresh discovery proof. Only retrieved provider snippets survive.
+      evidence: discoveryEvidenceForMemory(Array.isArray(evidence) ? evidence : []),
       known_instagram_handle: Number(row.identity_confidence || 0) >= 70
         && raw.identity_corroborated === true
         && typeof row.instagram_handle === "string"
@@ -865,7 +886,40 @@ async function loadReusableCandidateMemory(input: ResearchWorkflowInput, sport: 
   return Array.from(new Map(remembered.map((candidate) => [researchCandidateKey(candidate.name, candidate.sport), candidate])).values()).slice(0, 40);
 }
 
+type BlindAuditAssessment = {
+  identity_passed: boolean;
+  eligibility_passed: boolean;
+  source_verification_passed: boolean;
+  current_momentum_passed: boolean;
+  audience_evidence_passed: boolean;
+  creator_evidence_passed: boolean;
+  commercial_constraints_complete: boolean;
+  independent_fit_score: number;
+  independent_achievability_score: number;
+  independent_confidence_score: number;
+  critical_gaps: string[];
+  contradictions: string[];
+  unsupported_claims: string[];
+  failure_types: string[];
+  summary: string;
+};
+
+type CandidateAuditStage = "sources" | "blind" | "review";
+
 interface ScoredAthlete extends EnrichedAthlete {
+  audit_preparation?: {
+    sources?: {
+      independentResults: Array<{ title: string; url: string; snippet: string }>;
+      commercialConstraintSearchCompleted: boolean;
+      claimSample: Awaited<ReturnType<typeof refetchMaterialClaimSample>>;
+      socialBladeAudience: SocialBladeAuditSignal;
+    };
+    blindCall?: {
+      value: BlindAuditAssessment;
+      usage: ReturnType<typeof normalizedAnthropicUsage>;
+      latencyMs: number;
+    };
+  };
   score: number;
   researcher_proposed_score?: number;
   onlyfans_fit_score: number;
@@ -1349,6 +1403,7 @@ Respond ONLY with valid JSON in this exact format:
       return context;
     }
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Sport context discovery error: ${error}`);
   }
 
@@ -1564,6 +1619,7 @@ Return at least ${targetCount} athletes. Only include athletes you are confident
     log(`Discovered ${athletes.length} unique athletes`, athletes.slice(0, 5));
 
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Athlete discovery error: ${error}`);
   }
 
@@ -1630,14 +1686,15 @@ Respond with JSON array:
             }
           }
         }
-      } catch {
+      } catch (error) {
+        rethrowResearchControlError(error);
         // Continue with other queries
       }
     }
   }
 
-  // OpenAI already returns citation-bound, source-verified candidates. Do not
-  // invoke the slower Google Actor merely to fill an arbitrary discovery-wave
+  // OpenAI returns citation-bound discovery hints; exact-source repair below
+  // must verify their raw evidence. Do not invoke the slower Google Actor merely to fill an arbitrary discovery-wave
   // quota when at least two thirds of the requested pool (and at least ten
   // people) is already available for the downstream identity and quality
   // gates. The final result contract is enforced after scoring and audit.
@@ -1733,13 +1790,8 @@ async function repairDiscoveryEvidenceWithExactSearch(
           const snippet = typeof result.snippet === "string" ? result.snippet : "";
           const evidenceText = `${title} ${snippet} ${url}`;
           if (!url.startsWith("http") || !evidenceNamesAthlete(athlete.name, evidenceText)) return [];
-          const evidence = [{
-            url,
-            title,
-            claim: `${athlete.name}: ${snippet || title}`.slice(0, 1_400),
-            provider: "Perplexity Search exact-name verification",
-            sourceExcerpt: snippet || title,
-          }];
+          const evidence = [providerDiscoveryEvidence({ url, title, snippet },
+            `${athlete.name}: ${snippet || title}`.slice(0, 1_400), "Perplexity Search exact-name verification")];
           const evidenceOnlyQuality = evaluateDiscoveryEvidence({
             name: athlete.name,
             sport,
@@ -1760,6 +1812,7 @@ async function repairDiscoveryEvidenceWithExactSearch(
         );
         return verifiedSources[0] || null;
       } catch (error) {
+        rethrowResearchControlError(error);
         log(`Exact-source verification failed for ${athlete.name}: ${error}`);
         return null;
       }
@@ -2006,13 +2059,8 @@ Return a JSON object matching the schema. Each context must start with the athle
         sport,
         context,
         source: typeof candidate.source === "string" ? candidate.source : "OpenAI Web Search",
-        evidence: [{
-          url: source.url,
-          title: typeof candidate.source_title === "string" ? candidate.source_title : source.title,
-          claim: context,
-          provider: `OpenAI ${OPENAI_RESEARCH_MODEL} web search`,
-          sourceExcerpt: [source.title, context].filter(Boolean).join(" — "),
-        }],
+        evidence: [providerDiscoveryEvidence({ url: source.url, title: source.title },
+          context, `OpenAI ${OPENAI_RESEARCH_MODEL} web search`)],
         known_instagram_handle: precheck.instagramHandle,
         discovery_precheck: precheck.discoveryPrecheck,
       })];
@@ -2027,6 +2075,7 @@ Return a JSON object matching the schema. Each context must start with the athle
     });
     return verified;
   } catch (error) {
+    rethrowResearchControlError(error);
     if (!failureRecorded) {
       await recordResearchProviderDegradation(researchLogId, "openai", describeError(error));
     }
@@ -2104,6 +2153,7 @@ async function discoverAthletesFromPerplexitySearch({
       return response.json() as Promise<{ results?: PerplexitySearchResult[] }>;
     }));
     const searchFailures = searchResponses.filter((result) => result.status === "rejected");
+    for (const failure of searchFailures) rethrowResearchControlError(failure.reason);
     if (searchFailures.length === searchResponses.length) {
       throw searchFailures[0].reason;
     }
@@ -2198,18 +2248,14 @@ Return one JSON object matching the requested schema. Put the rows in the "candi
         sport,
         context,
         source: typeof candidate.source === "string" ? candidate.source : "Perplexity Search",
-        evidence: [{
-          url,
-          title: typeof candidate.source_title === "string" ? candidate.source_title : undefined,
-          claim: `${context}. Source excerpt: ${sourceResult?.snippet || sourceResult?.title || ""}`.slice(0, 1_400),
-          provider: "Perplexity Search + Anthropic extraction",
-          sourceExcerpt: sourceResult?.snippet || sourceResult?.title || "",
-        }],
+        evidence: [providerDiscoveryEvidence({ url, title: sourceResult?.title, snippet: sourceResult?.snippet },
+          context, "Perplexity Search + Anthropic extraction")],
         known_instagram_handle: precheck.instagramHandle,
         discovery_precheck: precheck.discoveryPrecheck,
       })];
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Grounded Perplexity discovery failed: ${error}`);
     return [];
   }
@@ -2236,6 +2282,7 @@ async function discoverAthletesFromApify(
   );
   const sourceResults = sourcePages.flatMap((result) => {
     if (result.status === "fulfilled") return result.value.results;
+    rethrowResearchControlError(result.reason);
     log(`Apify discovery query failed: ${result.reason}`);
     return [];
   });
@@ -2302,24 +2349,22 @@ Return one JSON object matching the requested schema. The context must start wit
       const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
       const url = typeof candidate.source_url === "string" ? candidate.source_url : "";
       if (!name || !allowedUrls.has(url)) return [];
+      const sourceResult = sourceByUrl.get(canonicalResearchUrl(url));
       const precheck = validatedDiscoveryPrecheck(candidate, sourceByUrl);
       return [verifyDiscoveredAthlete({
         name,
         sport,
         context: typeof candidate.context === "string" ? candidate.context : "Professional competition evidence",
         source: typeof candidate.source === "string" ? candidate.source : "Apify Google Search",
-        evidence: [{
-          url,
-          title: typeof candidate.source_title === "string" ? candidate.source_title : undefined,
-          claim: typeof candidate.context === "string" ? candidate.context : `Professional ${sport} athlete`,
-          provider: "Apify Google Search + Anthropic extraction",
-          sourceExcerpt: sourceByUrl.get(canonicalResearchUrl(url))?.snippet || sourceByUrl.get(canonicalResearchUrl(url))?.title || "",
-        }],
+        evidence: [providerDiscoveryEvidence({ url, title: sourceResult?.title, snippet: sourceResult?.snippet },
+          typeof candidate.context === "string" ? candidate.context : `Professional ${sport} athlete`,
+          "Apify Google Search + Anthropic extraction")],
         known_instagram_handle: precheck.instagramHandle,
         discovery_precheck: precheck.discoveryPrecheck,
       })];
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Apify discovery extraction failed: ${error}`);
     return [];
   }
@@ -2479,6 +2524,7 @@ async function findInstagramCandidatesWithOpenAI(athletes: DiscoveredAthlete[]) 
       outputTokens: data.usage?.output_tokens || 0,
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Grounded OpenAI Instagram identity search failed: ${describeError(error)}`);
   }
   return byCandidateKey;
@@ -2625,6 +2671,7 @@ async function findInstagramCandidatesWithOpenRouter(athletes: DiscoveredAthlete
       reportedCost: data.usage?.cost,
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Grounded OpenRouter Instagram identity search failed: ${describeError(error)}`);
   }
   return byCandidateKey;
@@ -2649,6 +2696,7 @@ async function findInstagramCandidatesWithApifySearch(athletes: DiscoveredAthlet
       maximumRows: resolution.maximumRows,
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Apify live Instagram identity search failed: ${describeError(error)}`);
   }
 
@@ -2689,6 +2737,7 @@ async function addInstagramPrechecksForEnrichment(
       });
     }
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Apify discovery identity precheck failed safely: ${describeError(error)}`);
   }
 
@@ -2717,6 +2766,7 @@ async function addInstagramPrechecksForEnrichment(
         profiles: profiles.length,
       });
     } catch (error) {
+      rethrowResearchControlError(error);
       log(`Apify discovery profile precheck failed safely: ${describeError(error)}`);
     }
   }
@@ -2740,6 +2790,10 @@ async function addInstagramPrechecksForEnrichment(
     const creatorSignal = /\b(?:creator|content creator|youtube|youtuber|tiktok|podcast|podcaster|vlog|vlogger|newsletter|storefront|shop|founder|brand partner|brand ambassador|ambassador)\b/i.test(profileText);
     return {
       ...athlete,
+      ...(profile ? {
+        prechecked_instagram_profile: profile,
+        prechecked_instagram_captured_at: new Date().toISOString(),
+      } : {}),
       discovery_precheck: {
         ...athlete.discovery_precheck,
         instagramUrl,
@@ -2860,10 +2914,14 @@ async function findInstagramCandidatesBatch(athletes: DiscoveredAthlete[]) {
     );
     pooledResults = searches.flatMap((search) => search.status === "fulfilled" ? search.value.results : []);
     for (const search of searches) {
-      if (search.status === "rejected") log(`Batched Instagram identity search partition failed: ${search.reason}`);
+      if (search.status === "rejected") {
+        rethrowResearchControlError(search.reason);
+        log(`Batched Instagram identity search partition failed: ${search.reason}`);
+      }
     }
     }
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Batched Instagram identity search failed: ${error}`);
   }
 
@@ -3026,6 +3084,7 @@ async function scrapeInstagramProfiles(usernames: string[]): Promise<Map<string,
           if (profile && repairedPosts.length > 0) profile.latestPosts = repairedPosts;
         }
       } catch (error) {
+        rethrowResearchControlError(error);
         log(`Instagram activity repair failed; retaining strict inactive gate: ${describeError(error)}`);
       }
     }
@@ -3034,6 +3093,7 @@ async function scrapeInstagramProfiles(usernames: string[]): Promise<Map<string,
       [username, normalizeScrapedInstagramProfile(profile)] as const
     ));
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Profile batch scrape error: ${error}`);
     return new Map();
   }
@@ -3166,9 +3226,22 @@ async function enrichAthletesWithInstagram(
         : unknownIdentityCandidates.get(researchCandidateKey(athlete.name, athlete.sport)) || [];
       return { athlete, candidates: candidates.slice(0, 3) };
     });
+    const reusableProfiles = new Map<string, ScrapedProfile>();
+    for (const { athlete, candidates } of resolved) {
+      for (const candidate of candidates) {
+        const profile = reusablePrecheckedProfile(
+          athlete.prechecked_instagram_profile,
+          candidate.handle,
+          athlete.prechecked_instagram_captured_at,
+        );
+        if (profile) reusableProfiles.set(candidate.handle.toLowerCase(), normalizeScrapedInstagramProfile(profile));
+      }
+    }
     const profileByHandle = await scrapeInstagramProfiles(
       Array.from(new Set(resolved.flatMap(({ candidates }) => candidates.slice(0, 3).map((candidate) => candidate.handle))))
+        .filter((handle) => !reusableProfiles.has(handle.toLowerCase()))
     );
+    for (const [handle, profile] of reusableProfiles) profileByHandle.set(handle, profile);
 
     const batchResults = await Promise.all(
       resolved.map(async ({ athlete, candidates }) => {
@@ -3496,6 +3569,7 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
       results: search.results.length,
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Batched Apify Google age search failed: ${describeError(error)}`);
   }
   return byCandidateKey;
@@ -3653,6 +3727,7 @@ Return only the strict JSON object.`,
       outputTokens: data.usage?.output_tokens || 0,
     });
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`Grounded OpenAI age search failed: ${describeError(error)}`);
   }
   return byCandidateKey;
@@ -3719,6 +3794,7 @@ async function lookupAthleteAge(
           verifiedAge = selectAge(organicResults) || verifiedAge;
         }
       } catch (error) {
+        rethrowResearchControlError(error);
         log(`    Perplexity age lookup failed for ${athleteName}: ${error}`);
       }
     }
@@ -3770,6 +3846,7 @@ async function lookupAthleteAge(
     };
 
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`    Age lookup error for ${athleteName}: ${error}`);
     return emptyAge;
   }
@@ -3826,6 +3903,7 @@ async function lookupOnlyFansPlatformSignals(athletes: EnrichedAthlete[]) {
       }));
     }
   } catch (error) {
+    rethrowResearchControlError(error);
     const reason = `The OnlyFans platform check failed safely: ${describeError(error)}`;
     log(reason);
     for (const athlete of athletes) {
@@ -3918,11 +3996,21 @@ async function scoreAthletes(
     const targetAgeMin = config.profileSnapshot?.parameters.target_age_min
       ?? DEFAULT_RECRUITING_PROFILE.parameters.target_age_min;
     const priorUnder21ByCandidate = await loadPriorUnder21SafetyEvidence(batch, input, targetAgeMin);
-    const onlyFansPlatformByCandidate = await lookupOnlyFansPlatformSignals(batch);
-    const apifyAgeByCandidate = await lookupAthleteAgesWithApify(batch);
+    const optionalLookupBatch = batch.filter((athlete) => !priorUnder21ByCandidate.has(researchCandidateKey(athlete.name, athlete.sport))
+      && evaluatePreScoringAgeGate({ age: athlete.scoring_preparation?.ageInfo?.age ?? athlete.age,
+        isMinor: athlete.scoring_preparation?.ageInfo?.isMinor ?? athlete.is_minor, targetAgeMin }).allowed);
+    const onlyFansPlatformByCandidate = await lookupOnlyFansPlatformSignals(optionalLookupBatch.filter((athlete) => !athlete.scoring_preparation?.onlyfans));
+    const apifyAgeByCandidate = await lookupAthleteAgesWithApify(optionalLookupBatch.filter((athlete) => !athlete.scoring_preparation?.apifyAge));
+    for (const athlete of batch) {
+      const key = researchCandidateKey(athlete.name, athlete.sport);
+      if (athlete.scoring_preparation?.onlyfans) onlyFansPlatformByCandidate.set(key, athlete.scoring_preparation.onlyfans);
+      if (athlete.scoring_preparation?.apifyAge) apifyAgeByCandidate.set(key, athlete.scoring_preparation.apifyAge);
+    }
     const openAiAgeByCandidate = await lookupAthleteAgesWithOpenAI(
-      batch.filter((athlete) =>
-        apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))?.corroborated !== true
+      optionalLookupBatch.filter((athlete) =>
+        !athlete.scoring_preparation?.openAiAge
+        && !athlete.scoring_preparation?.ageInfo
+        && apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport))?.corroborated !== true
       ).map((athlete) => {
         const apifyAge = apifyAgeByCandidate.get(researchCandidateKey(athlete.name, athlete.sport));
         return {
@@ -3934,6 +4022,9 @@ async function scoreAthletes(
         };
       })
     );
+    for (const athlete of batch) {
+      if (athlete.scoring_preparation?.openAiAge) openAiAgeByCandidate.set(researchCandidateKey(athlete.name, athlete.sport), athlete.scoring_preparation.openAiAge);
+    }
     const batchScores = await Promise.all(batch.map(async (athlete) => {
       // Verify age before semantic scoring. Otherwise Claude is asked to score
       // a profile with "age unknown" and the verified source is attached only
@@ -3947,16 +4038,21 @@ async function scoreAthletes(
         : openAiAge?.corroborated
           ? openAiAge
           : apifyAge || openAiAge;
-      const fallbackAge = preferredAge?.corroborated
+      const preparedAge = priorUnder21ByCandidate.get(candidateKey) || athlete.scoring_preparation?.ageInfo
+        || (!evaluatePreScoringAgeGate({ age: athlete.age, isMinor: athlete.is_minor, targetAgeMin }).allowed
+          ? { ...emptyPreparedAge(), age: athlete.age ?? null, isMinor: athlete.is_minor ?? null,
+              corroborated: athlete.age_corroborated === true, source: athlete.age_source || null,
+              corroboratingSources: athlete.age_sources || [] } : undefined);
+      const fallbackAge = preparedAge || preferredAge?.corroborated
         ? null
         : await lookupAthleteAge(athlete.name, athlete.sport, [
             ...(athlete.evidence || []),
             ...(apifyAge?.researchEvidence || []),
             ...(openAiAge?.researchEvidence || []),
           ]);
-      const freshAgeInfo = fallbackAge?.corroborated
+      const freshAgeInfo = preparedAge || (fallbackAge?.corroborated
         ? fallbackAge
-        : preferredAge || fallbackAge || await lookupAthleteAge(athlete.name, athlete.sport, athlete.evidence);
+        : preferredAge || fallbackAge || await lookupAthleteAge(athlete.name, athlete.sport, athlete.evidence));
       // Fresh exact-identity, two-source under-21 evidence is a durable safety
       // fact during a hardening wave. A temporary provider miss must never turn
       // it back into "unknown" and allow paid scoring.
@@ -4032,6 +4128,7 @@ async function scoreAthletes(
       try {
         score = await scoreAthlete(athleteForScoring, scoringModel, config);
       } catch (error) {
+        rethrowResearchControlError(error);
         const message = error instanceof Error ? error.message : "Scoring provider failed";
         log(`  Rejected ${athlete.name} after an isolated scoring failure: ${message}`);
         await supabase.from("research_candidates").update(sanitizeJsonForStorage({
@@ -4225,6 +4322,7 @@ function estimatedSonnetCostMicrousd(model: string, usage: {
   try {
     return estimateBenchmarkCostMicrousd(usage, sonnetPriceSnapshot(model));
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`    Sonnet cost estimate unavailable for ${model}: ${describeError(error)}`);
     return 0;
   }
@@ -4307,6 +4405,7 @@ async function lookupSocialBladeAuditSignal(athlete: ScoredAthlete): Promise<Soc
       token: SOCIAL_BLADE_TOKEN,
       handle: athlete.instagram_handle,
       history: "default",
+      request: researchPaidFetch,
     });
     const trend = prepareSocialBladeAudienceTrend({
       expectedHandle: athlete.instagram_handle,
@@ -4325,6 +4424,7 @@ async function lookupSocialBladeAuditSignal(athlete: ScoredAthlete): Promise<Soc
         : "Exact-handle lookup completed, but no two dated rows at least 30 days apart were returned",
     };
   } catch (error) {
+    rethrowResearchControlError(error);
     const reason = `Social Blade audit history failed safely: ${describeError(error)}`;
     log(`    ${reason}`);
     return { lookupCompleted: false, creditsRemaining: null, trend: null, reason };
@@ -4408,6 +4508,7 @@ async function refetchMaterialClaimSample(athlete: ScoredAthlete) {
         detail: `${item.url} matched ${matched.length}/${evidenceTokens.length} material tokens`,
       };
     } catch (error) {
+      rethrowResearchControlError(error);
       return { passed: false, detail: `${item.url} could not be re-fetched: ${describeError(error)}` };
     }
   }));
@@ -4422,7 +4523,8 @@ async function auditPriorityCandidate(
   input: ResearchWorkflowInput,
   athlete: ScoredAthlete,
   scoringModel: string,
-  artifacts: ResearchV2Artifacts
+  artifacts: ResearchV2Artifacts,
+  targetStage: CandidateAuditStage = "review"
 ): Promise<ScoredAthlete> {
   if (athlete.audit_verdict) return athlete;
   if (!athlete.research_score_id) throw new Error(`Research V2 score was not persisted for ${athlete.name}`);
@@ -4435,9 +4537,9 @@ async function auditPriorityCandidate(
 
   const deterministicEvidence = deterministicResearchV2FinalistEvidence(athlete);
 
-  let independentResults: Array<{ title: string; url: string; snippet: string }> = [];
-  let commercialConstraintSearchCompleted = false;
-  try {
+  let independentResults = athlete.audit_preparation?.sources?.independentResults || [];
+  let commercialConstraintSearchCompleted = athlete.audit_preparation?.sources?.commercialConstraintSearchCompleted || false;
+  if (!athlete.audit_preparation?.sources) try {
     const currentYear = new Date().getUTCFullYear();
     const auditSearch = await runApifyGoogleSearchQueries([
       `"${athlete.name}" ${athlete.sport} ${currentYear} results ranking roster award breakout`,
@@ -4451,10 +4553,21 @@ async function auditPriorityCandidate(
       evidenceNamesAthlete(athlete.name, `${result.title} ${result.snippet}`)
     );
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`    Independent audit search failed for ${athlete.name}: ${describeError(error)}`);
   }
-  const claimSample = await refetchMaterialClaimSample(athlete);
-  const socialBladeAudience = await lookupSocialBladeAuditSignal(athlete);
+  const [claimSample, socialBladeAudience] = athlete.audit_preparation?.sources
+    ? [athlete.audit_preparation.sources.claimSample, athlete.audit_preparation.sources.socialBladeAudience]
+    : await Promise.all([refetchMaterialClaimSample(athlete), lookupSocialBladeAuditSignal(athlete)]);
+  athlete = {
+    ...athlete,
+    audit_preparation: {
+      ...athlete.audit_preparation,
+      sources: { independentResults, commercialConstraintSearchCompleted, claimSample, socialBladeAudience },
+    },
+  };
+  await persistPartialScoringCheckpoint(input, [athlete], scoringModel);
+  if (targetStage === "sources") return athlete;
   const commercialAccess = researchV2CommercialAccessSnapshot({
     athleteName: athlete.name,
     bio: athlete.bio,
@@ -4504,23 +4617,12 @@ CANDIDATE (NO PROPOSED SCORE):
 - Random claim re-fetch: ${claimSample.sampled} sampled; ${claimSample.unsupported} failed; ${claimSample.failures.join(" | ") || "no failures"}
 
 Return the strict JSON assessment. Independent fit, achievability, and confidence must be evidence-based; missing required public commercial evidence lowers achievability, while ordinary private pre-contact unknowns do not lower research confidence.`;
-  const blindCall = await callStructuredAuditModel<{
-    identity_passed: boolean;
-    eligibility_passed: boolean;
-    source_verification_passed: boolean;
-    current_momentum_passed: boolean;
-    audience_evidence_passed: boolean;
-    creator_evidence_passed: boolean;
-    commercial_constraints_complete: boolean;
-    independent_fit_score: number;
-    independent_achievability_score: number;
-    independent_confidence_score: number;
-    critical_gaps: string[];
-    contradictions: string[];
-    unsupported_claims: string[];
-    failure_types: string[];
-    summary: string;
-  }>(scoringModel, blindPrompt, RESEARCH_AUDIT_BLIND_SCHEMA as unknown as Record<string, unknown>);
+  const blindCall = athlete.audit_preparation?.blindCall || await callStructuredAuditModel<BlindAuditAssessment>(
+    scoringModel, blindPrompt, RESEARCH_AUDIT_BLIND_SCHEMA as unknown as Record<string, unknown>
+  );
+  athlete = { ...athlete, audit_preparation: { ...athlete.audit_preparation, blindCall } };
+  await persistPartialScoringCheckpoint(input, [athlete], scoringModel);
+  if (targetStage === "blind") return athlete;
   const blind = blindCall.value;
 
   const reviewPrompt = `You are completing the second stage of a blind research audit. First you independently reviewed the candidate without seeing the proposed score. Now compare that blind assessment with the Researcher's proposed assessment.
@@ -4972,6 +5074,7 @@ async function auditPriorityCandidates(
       try {
         return await auditPriorityCandidate(input, athlete, scoringModel, artifacts);
       } catch (error) {
+        rethrowResearchControlError(error);
         return persistAuditExecutionFailure(input, athlete, artifacts, error);
       }
     }));
@@ -5548,6 +5651,7 @@ async function fetchInstagramPhotosForAthlete(
     return { success: true, photoCount: savedCount };
 
   } catch (error) {
+    rethrowResearchControlError(error);
     log(`    Photo fetch error: ${error}`);
     return { success: false, photoCount: 0, error: String(error) };
   }
@@ -5563,7 +5667,7 @@ interface ResearchRunResult extends Record<string, unknown> {
   statusCode?: number;
 }
 
-export async function executeResearchRun(input: ResearchWorkflowInput): Promise<ResearchRunResult> {
+async function executeResearchRun(input: ResearchWorkflowInput): Promise<ResearchRunResult> {
   const startedAt = Date.now();
   const researchLogId = input.researchLogId;
 
@@ -5611,7 +5715,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
 
     const { data: checkpoint, error: checkpointError } = await supabase
       .from("research_logs")
-      .select("status,phase,raw_results,scoring_details,final_results,context_summary,provider_costs")
+      .select("status,phase,cancel_requested_at,raw_results,scoring_details,final_results,context_summary,provider_costs")
       .eq("id", researchLogId)
       .eq("organization_id", input.organizationId)
       .maybeSingle();
@@ -5625,6 +5729,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         resumed: true,
       };
     }
+    if (!researchRunAcceptsWork(checkpoint)) throw new ResearchCancelledError();
 
     const checkpointPhase = typeof checkpoint.phase === "string" ? checkpoint.phase : "queued";
     const reachedPhase = (phase: string) => RESEARCH_PHASE_ORDER.indexOf(
@@ -5678,7 +5783,9 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
         completed_at: null,
       })
       .eq("id", researchLogId)
-      .eq("organization_id", input.organizationId);
+      .eq("organization_id", input.organizationId)
+      .in("status", ["queued", "running"])
+      .is("cancel_requested_at", null);
     if (startError) throw startError;
     await assertRunNotCancelled(researchLogId);
 
@@ -5955,7 +6062,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
 
     // STEP 3: Enrich with Instagram
     let enrichedAthletes: EnrichedAthlete[];
-    if (reachedPhase("scoring") && Array.isArray(checkpoint.scoring_details) && checkpoint.scoring_details.length > 0) {
+    if ((input.durableScoringComplete || reachedPhase("scoring")) && Array.isArray(checkpoint.scoring_details) && checkpoint.scoring_details.length > 0) {
       enrichedAthletes = checkpoint.scoring_details as unknown as EnrichedAthlete[];
       log(`Resuming from Instagram checkpoint with ${enrichedAthletes.length} enriched candidates`);
     } else {
@@ -6041,8 +6148,8 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
             && typeof value.research_confidence_score === "number";
         })
       : [];
-    const scoredAthletes = reachedPhase("auditing")
-      && checkpointedScores.length > 0
+    const scoredAthletes = input.durableScoringComplete || (reachedPhase("auditing")
+      && checkpointedScores.length > 0)
       ? checkpointedScores
       : await scoreAthletes(enrichedAthletes, scoringModel, config, input, {
         sourced: allDiscoveredAthletes.length,
@@ -6060,7 +6167,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     // Completed audits are persisted on each candidate. A replay reuses those
     // verdicts while finishing any eligible dossier that reached the scoring
     // checkpoint before its independent audit was durably stored.
-    const baseAuditedAthletes = await auditPriorityCandidates(
+    const baseAuditedAthletes = input.durableScoringComplete ? scoredAthletes : await auditPriorityCandidates(
       input,
       scoredAthletes,
       scoringModel,
@@ -6693,7 +6800,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
           },
           heartbeat_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
-        }).eq("id", researchLogId);
+        }).eq("id", researchLogId).in("status", ["queued", "running"]).is("cancel_requested_at", null);
       } catch (logError) {
         log(`Warning: Could not update research log: ${logError}`);
       }
@@ -6752,6 +6859,7 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
     };
 
   } catch (error) {
+    rethrowResearchControlError(error);
     const failureMessage = describeError(error);
     log(`Research error: ${failureMessage}`, error);
     const cancelled = error instanceof ResearchCancelledError;
@@ -6794,10 +6902,11 @@ export async function executeResearchRun(input: ResearchWorkflowInput): Promise<
   }
 }
 
-async function executeResearchStage(input: ResearchWorkflowInput) {
+export async function executeResearchStage(input: ResearchWorkflowInput) {
   "use step";
 
-  const result = await executeResearchRun(input);
+  const result = await withResearchPaidContext({ researchLogId: input.researchLogId, stage: input.targetPhase || "research" },
+    () => executeResearchRun(input));
   if (result.statusCode && result.statusCode >= 400 && result.statusCode !== 409 && result.statusCode !== 424) {
     throw new Error(result.error || "Research execution failed");
   }
@@ -6805,36 +6914,272 @@ async function executeResearchStage(input: ResearchWorkflowInput) {
 }
 executeResearchStage.maxRetries = 2;
 
-async function markResearchWorkflowFailed(researchLogId: string, organizationId: string, message: string) {
+type ResearchScoringPlan = {
+  researchLogId: string;
+  candidateIds: string[];
+  scoringModel: string;
+  config: ResearchConfig;
+  counts: { sourced: number; discovered: number; enriched: number };
+};
+
+type PreparationStage = "onlyfans" | "age_apify" | "age_openai" | "age_fallback";
+
+function emptyPreparedAge(): AthleteAgeLookupResult {
+  return { age: null, birthYear: null, isMinor: null, source: null, evidence: null, precision: null,
+    corroborated: false, corroboratingSources: [], researchEvidence: [] };
+}
+
+async function loadWorkCandidates(input: ResearchWorkflowInput, ids: string[]) {
+  if (!ids.length) return [];
+  await assertRunNotCancelled(input.researchLogId);
+  const { data, error } = await supabase.from("research_candidates")
+    .select("id,candidate_key,raw_candidate,score,gate_results,prompt_version")
+    .eq("organization_id", input.organizationId).eq("research_log_id", input.researchLogId).in("id", ids);
+  if (error) throw error;
+  const byId = new Map((data || []).map((row) => [row.id, row]));
+  return ids.map((id) => {
+    const row = byId.get(id);
+    if (!row || !row.raw_candidate || typeof row.raw_candidate !== "object") throw new Error(`Research work candidate ${id} is missing`);
+    if (row.prompt_version !== RESEARCH_PROMPT_VERSION) throw new Error("The research prompt changed during a bounded run");
+    return { ...row, athlete: row.raw_candidate as EnrichedAthlete };
+  });
+}
+
+async function saveWorkCandidate(input: ResearchWorkflowInput, id: string, athlete: EnrichedAthlete) {
+  const { error } = await supabase.from("research_candidates").update(sanitizeJsonForStorage({ raw_candidate: athlete }))
+    .eq("id", id).eq("research_log_id", input.researchLogId).eq("organization_id", input.organizationId);
+  if (error) throw error;
+}
+
+async function heartbeatScoringWork(input: ResearchWorkflowInput) {
+  const { error } = await supabase.from("research_logs").update({ heartbeat_at: new Date().toISOString() })
+    .eq("id", input.researchLogId).eq("organization_id", input.organizationId).eq("status", "running");
+  if (error) throw error;
+}
+
+export async function prepareResearchScoringPlan(input: ResearchWorkflowInput): Promise<ResearchScoringPlan> {
+  "use step";
+  await assertRunNotCancelled(input.researchLogId);
+  const { data: run, error } = await supabase.from("research_logs")
+    .select("scoring_details,context_summary,stats,scoring_model,config_used")
+    .eq("id", input.researchLogId).eq("organization_id", input.organizationId).single();
+  if (error) throw error;
+  const { data: rows, error: candidateError } = await supabase.from("research_candidates")
+    .select("id,candidate_key,raw_candidate,score")
+    .eq("research_log_id", input.researchLogId).eq("organization_id", input.organizationId);
+  if (candidateError) throw candidateError;
+  const byKey = new Map((rows || []).map((row) => [row.candidate_key, row]));
+  const enriched = (Array.isArray(run.scoring_details) ? run.scoring_details : []) as EnrichedAthlete[];
+  const context = run.context_summary && typeof run.context_summary === "object" ? run.context_summary : {};
+  const oldPlan = (context as Record<string, unknown>).bounded_scoring_plan as ResearchScoringPlan | undefined;
+  if (oldPlan?.candidateIds && oldPlan.researchLogId === input.researchLogId) return oldPlan;
+  const ids: string[] = [];
+  for (const athlete of enriched) {
+    const row = byKey.get(researchCandidateKey(athlete.name, athlete.sport));
+    if (!row) throw new Error(`Enriched candidate ${athlete.name} was not persisted`);
+    ids.push(row.id);
+    // Do not erase a partial score/audit when upgrading an existing checkpoint.
+    if (row.score === null) {
+      const scored = athlete as Partial<ScoredAthlete>;
+      if (typeof scored.research_score_id === "string" && typeof scored.score === "number"
+        && typeof scored.onlyfans_fit_score === "number" && typeof scored.commercial_achievability_score === "number"
+        && typeof scored.research_confidence_score === "number") {
+        await persistPartialScoringCheckpoint(input, [athlete as ScoredAthlete], run.scoring_model || input.config.scoringModel || "");
+      } else await saveWorkCandidate(input, row.id, athlete);
+    }
+  }
+  const stats = (run.stats || {}) as Record<string, number>;
+  const plan: ResearchScoringPlan = {
+    researchLogId: input.researchLogId,
+    candidateIds: fixedResearchBatches(ids).flat(),
+    scoringModel: run.scoring_model || input.config.scoringModel || "",
+    config: (run.config_used || input.config) as ResearchConfig,
+    counts: { sourced: stats.sourced || 0, discovered: stats.discovered || 0, enriched: enriched.length },
+  };
+  if (!plan.scoringModel) throw new Error("The scoring model was not pinned before candidate work");
+  const { error: saveError } = await supabase.from("research_logs")
+    .update(sanitizeJsonForStorage({ context_summary: { ...context, bounded_scoring_plan: plan } }))
+    .eq("id", input.researchLogId).eq("organization_id", input.organizationId);
+  if (saveError) throw saveError;
+  return plan;
+}
+prepareResearchScoringPlan.maxRetries = 1;
+
+export async function prepareResearchScoringBatch(input: ResearchWorkflowInput, plan: ResearchScoringPlan, ids: string[]) {
+  "use step";
+  const rows = await loadWorkCandidates(input, ids);
+  const { data: scoredRows, error: scoreError } = await supabase.from("research_candidates").select("raw_candidate")
+    .eq("research_log_id", input.researchLogId).eq("organization_id", input.organizationId).not("score", "is", null);
+  if (scoreError) throw scoreError;
+  const inputTokens = (scoredRows || []).reduce((sum, row) => sum + (Number((row.raw_candidate as ScoredAthlete)?.researcher_input_tokens) || 0), 0);
+  const outputTokens = (scoredRows || []).reduce((sum, row) => sum + (Number((row.raw_candidate as ScoredAthlete)?.researcher_output_tokens) || 0), 0);
+  if (plan.config.evaluationBudget && (inputTokens >= plan.config.evaluationBudget.maxResearcherInputTokens
+    || outputTokens >= plan.config.evaluationBudget.maxResearcherOutputTokens)) return [];
+  const targetAgeMin = plan.config.profileSnapshot?.parameters.target_age_min || 21;
+  const prior = await loadPriorUnder21SafetyEvidence(rows.map((row) => row.athlete), input, targetAgeMin);
+  const pending: string[] = [];
+  for (const row of rows) {
+    if (row.score !== null) continue;
+    const athlete = row.athlete;
+    const knownAge = prior.get(row.candidate_key) || athlete.scoring_preparation?.ageInfo;
+    const gate = evaluatePreScoringAgeGate({ age: knownAge?.age ?? athlete.age, isMinor: knownAge?.isMinor ?? athlete.is_minor, targetAgeMin });
+    if (!gate.allowed) {
+      const blockedAthlete: EnrichedAthlete = {
+        ...athlete,
+        evidence: Array.from(new Map([...(athlete.evidence || []), ...(knownAge?.researchEvidence || [])]
+          .map((item) => [item.url || `${item.title}:${item.claim}`, item])).values()),
+        age: knownAge?.age ?? athlete.age,
+        age_verified: knownAge?.corroborated || athlete.age_verified || false,
+        age_corroborated: knownAge?.corroborated || athlete.age_corroborated || false,
+        age_sources: knownAge?.corroboratingSources || athlete.age_sources,
+        age_source: knownAge?.source || athlete.age_source,
+        is_minor: knownAge?.isMinor ?? athlete.is_minor,
+        scoring_preparation: { ...athlete.scoring_preparation, ageInfo: knownAge },
+      };
+      const { error } = await supabase.from("research_candidates").update(sanitizeJsonForStorage({
+        raw_candidate: blockedAthlete,
+        source_evidence: blockedAthlete.evidence,
+        age: knownAge?.age ?? athlete.age,
+        age_source: blockedAthlete.age_source || null,
+        age_verified: knownAge?.corroborated || athlete.age_verified || false,
+        disposition: "rejected", disposition_reason: gate.reason,
+        gate_results: { ...(row.gate_results || {}), adult_age_verified: false, age_safety_blocked_before_scoring: true, scoring_completed: false },
+      })).eq("id", row.id).eq("organization_id", input.organizationId);
+      if (error) throw error;
+      continue;
+    }
+    pending.push(row.id);
+  }
+  await heartbeatScoringWork(input);
+  return pending;
+}
+prepareResearchScoringBatch.maxRetries = 1;
+
+export async function prepareResearchCandidateEvidence(input: ResearchWorkflowInput, ids: string[], stage: PreparationStage) {
+  "use step";
+  return withResearchPaidContext({ researchLogId: input.researchLogId, stage: `scoring_${stage}` }, async () => {
+    const rows = (await loadWorkCandidates(input, ids)).filter((row) => row.score === null);
+    const field = stage === "onlyfans" ? "onlyfans" : stage === "age_apify" ? "apifyAge" : stage === "age_openai" ? "openAiAge" : "ageInfo";
+    const { requestRows, saveRows: pending } = unfinishedResearchBatch(rows, (row) => Boolean(row.athlete.scoring_preparation?.[field]));
+    if (!pending.length) return;
+    // Reuse the exact paid request fingerprint even if the process died after
+    // saving only part of a response. Completed rows are not saved again.
+    const athletes = requestRows.map((row) => row.athlete);
+    let results: Map<string, OnlyFansPlatformSignal | AthleteAgeLookupResult>;
+    if (stage === "onlyfans") results = await lookupOnlyFansPlatformSignals(athletes);
+    else if (stage === "age_apify") results = await lookupAthleteAgesWithApify(athletes);
+    else if (stage === "age_openai") results = await lookupAthleteAgesWithOpenAI(athletes
+      .filter((athlete) => !athlete.scoring_preparation?.apifyAge?.corroborated
+        && evaluatePreScoringAgeGate({ age: athlete.scoring_preparation?.apifyAge?.age, isMinor: athlete.scoring_preparation?.apifyAge?.isMinor }).allowed)
+      .map((athlete) => ({ ...athlete, evidence: [...(athlete.evidence || []), ...(athlete.scoring_preparation?.apifyAge?.researchEvidence || [])] })));
+    else {
+      if (pending.length !== 1) throw new Error("Fallback age research must be one candidate per durable step");
+      const athlete = athletes[0];
+      const apifyAge = athlete.scoring_preparation?.apifyAge;
+      const openAiAge = athlete.scoring_preparation?.openAiAge;
+      const preferred = apifyAge?.corroborated ? apifyAge : openAiAge?.corroborated ? openAiAge : apifyAge || openAiAge;
+      const fallback = preferred?.corroborated || !evaluatePreScoringAgeGate({ age: preferred?.age, isMinor: preferred?.isMinor }).allowed
+        ? null : await lookupAthleteAge(athlete.name, athlete.sport,
+        [...(athlete.evidence || []), ...(apifyAge?.researchEvidence || []), ...(openAiAge?.researchEvidence || [])]);
+      results = new Map([[pending[0].candidate_key, fallback?.corroborated ? fallback : preferred || fallback || emptyPreparedAge()]]);
+    }
+    for (const row of pending) {
+      const result = results.get(row.candidate_key) || (stage === "onlyfans"
+        ? unavailableOnlyFansPlatformSignal("The bounded platform lookup returned no result") : emptyPreparedAge());
+      await saveWorkCandidate(input, row.id, { ...row.athlete, scoring_preparation: { ...row.athlete.scoring_preparation, [field]: result } });
+    }
+    await heartbeatScoringWork(input);
+  });
+}
+prepareResearchCandidateEvidence.maxRetries = 1;
+
+export async function scorePreparedResearchCandidate(input: ResearchWorkflowInput, plan: ResearchScoringPlan, id: string) {
+  "use step";
+  return withResearchPaidContext({ researchLogId: input.researchLogId, stage: "scoring_model" }, async () => {
+    const [row] = await loadWorkCandidates(input, [id]);
+    if (row.score !== null) return;
+    const { data: saved, error } = await supabase.from("research_candidates").select("raw_candidate")
+      .eq("research_log_id", input.researchLogId).eq("organization_id", input.organizationId).not("score", "is", null);
+    if (error) throw error;
+    const usedInput = (saved || []).reduce((sum, item) => sum + (Number((item.raw_candidate as ScoredAthlete)?.researcher_input_tokens) || 0), 0);
+    const usedOutput = (saved || []).reduce((sum, item) => sum + (Number((item.raw_candidate as ScoredAthlete)?.researcher_output_tokens) || 0), 0);
+    const budget = plan.config.evaluationBudget;
+    if (budget && (usedInput >= budget.maxResearcherInputTokens || usedOutput >= budget.maxResearcherOutputTokens)) return;
+    await scoreAthletes([row.athlete], plan.scoringModel, plan.config, input, plan.counts);
+    await heartbeatScoringWork(input);
+  });
+}
+scorePreparedResearchCandidate.maxRetries = 1;
+
+export async function prepareResearchAuditPlan(input: ResearchWorkflowInput, plan: ResearchScoringPlan) {
+  "use step";
+  const rows = await loadWorkCandidates(input, plan.candidateIds);
+  return rows.filter((row) => {
+    const athlete = row.athlete as ScoredAthlete;
+    if (row.score === null || hasCompletedResearchV2Audit(athlete.audit_verdict)) return false;
+    if ((athlete.researcher_proposed_score ?? athlete.score) < RESEARCH_PRIORITY_THRESHOLD) return false;
+    const evidence = deterministicResearchV2FinalistEvidence(athlete);
+    return (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true
+      && athlete.age_verified === true && athlete.age_corroborated === true && typeof athlete.age === "number" && athlete.age >= 21
+      && evidence.currentMomentum && evidence.meaningfulAudience && evidence.creatorPotential;
+  }).sort((left, right) => Number(right.score) - Number(left.score))
+    .slice(0, plan.config.evaluationBudget?.maxAuditCandidates ?? Number.POSITIVE_INFINITY).map((row) => row.id);
+}
+prepareResearchAuditPlan.maxRetries = 1;
+
+export async function auditPreparedResearchCandidate(input: ResearchWorkflowInput, plan: ResearchScoringPlan, id: string, stage: CandidateAuditStage) {
+  "use step";
+  return withResearchPaidContext({ researchLogId: input.researchLogId, stage: `audit_${stage}` }, async () => {
+    const [row] = await loadWorkCandidates(input, [id]);
+    const athlete = row.athlete as ScoredAthlete;
+    if (hasCompletedResearchV2Audit(athlete.audit_verdict)) return;
+    const artifacts = await ensureResearchV2Artifacts(input, plan.scoringModel);
+    let audited: ScoredAthlete;
+    try { audited = await auditPriorityCandidate(input, athlete, plan.scoringModel, artifacts, stage); }
+    catch (error) {
+      rethrowResearchControlError(error);
+      audited = await persistAuditExecutionFailure(input, athlete, artifacts, error);
+    }
+    await persistPartialScoringCheckpoint(input, [audited], plan.scoringModel);
+    await heartbeatScoringWork(input);
+  });
+}
+auditPreparedResearchCandidate.maxRetries = 1;
+
+export async function finishPreparedResearchScoring(input: ResearchWorkflowInput, plan: ResearchScoringPlan) {
+  "use step";
+  const rows = await loadWorkCandidates(input, plan.candidateIds);
+  const { error } = await supabase.from("research_logs").update(sanitizeJsonForStorage({
+    // Retain unscored/rejected enrichment dossiers as well as finished scores.
+    // An all-held result must never look like a missing enrichment checkpoint.
+    scoring_details: rows.map((row) => row.athlete), phase: "auditing", heartbeat_at: new Date().toISOString(),
+  })).eq("id", input.researchLogId).eq("organization_id", input.organizationId);
+  if (error) throw error;
+}
+finishPreparedResearchScoring.maxRetries = 1;
+
+export async function markResearchWorkflowFailed(researchLogId: string, organizationId: string, message: string, errorName = "Error") {
   "use step";
 
-  await supabase.from("research_logs").update({
-    status: "error",
-    phase: "error",
-    error_message: message,
-    heartbeat_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
-  }).eq("id", researchLogId).eq("organization_id", organizationId);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: current, error: readError } = await supabase.from("research_logs")
+      .select("status,cancel_requested_at").eq("id", researchLogId).eq("organization_id", organizationId).maybeSingle();
+    if (readError) throw readError;
+    if (!current) return;
+    const patch = researchWorkflowFailurePatch(current, { name: errorName, message }, new Date().toISOString());
+    if (!patch) return;
+    // A concurrent cancellation/completion must not be replaced by this failure.
+    let update = supabase.from("research_logs").update(patch)
+      .eq("id", researchLogId).eq("organization_id", organizationId).eq("status", current.status);
+    update = current.cancel_requested_at
+      ? update.eq("cancel_requested_at", current.cancel_requested_at)
+      : update.is("cancel_requested_at", null);
+    const { data: updated, error: updateError } = await update.select("id");
+    if (updateError) throw updateError;
+    if (updated?.length) return;
+  }
+  throw new Error("Research terminal state changed while recording failure; retry the terminal checkpoint");
 }
 markResearchWorkflowFailed.maxRetries = 1;
 
-export async function runResearchWorkflow(input: ResearchWorkflowInput) {
-  "use workflow";
-
-  try {
-    const discovery = await executeResearchStage({ ...input, targetPhase: "discovery" });
-    if (!discovery.success) return discovery;
-
-    const enrichment = await executeResearchStage({ ...input, targetPhase: "enrichment" });
-    if (!enrichment.success) return enrichment;
-
-    const scoring = await executeResearchStage({ ...input, targetPhase: "scoring" });
-    if (!scoring.success) return scoring;
-
-    return await executeResearchStage({ ...input, targetPhase: "persistence" });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Research workflow failed";
-    await markResearchWorkflowFailed(input.researchLogId, input.organizationId, message);
-    throw error;
-  }
-}
+export { runResearchWorkflow } from "@/workflows/research-run";

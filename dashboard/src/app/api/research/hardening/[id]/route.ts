@@ -11,6 +11,7 @@ import {
   resumeUntouchedHardeningCases,
 } from "@/lib/research/hardening-service";
 import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
+import { hardeningPaidReadiness, HardeningReadinessError } from "@/lib/research/hardening-readiness";
 
 const archetypes = new Set(RESEARCH_HARDENING_MATRIX.map((entry) => entry.archetype));
 
@@ -36,9 +37,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await requireOrganizationRole(["owner", "admin"]);
+    const user = await requireOrganizationRole(["owner"]);
     const { id } = await params;
-    const body = await request.json() as { action?: unknown; archetypes?: unknown; stage?: unknown };
+    const body = await request.json() as { action?: unknown; archetypes?: unknown; stage?: unknown; caseBudgetUsd?: unknown; useConfirmationReserve?: unknown };
     if (body.action === "cancel") {
       const campaign = await cancelHardeningCampaign(id, user.organizationId);
       if (campaign.workflow_run_id) {
@@ -68,6 +69,8 @@ export async function POST(
       organizationId: user.organizationId,
       archetypes: selected,
       stage,
+      caseBudgetMicrousd: body.caseBudgetUsd === undefined ? undefined : Math.round(Number(body.caseBudgetUsd) * 1_000_000),
+      useConfirmationReserve: body.useConfirmationReserve === true,
     });
     const workflow = await start(runResearchHardeningCampaign, [{
       campaignId: id,
@@ -79,6 +82,7 @@ export async function POST(
     return NextResponse.json({ ok: true, campaignId: id, caseIds, workflowRunId: workflow.runId }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update hardening campaign";
+    if (error instanceof HardeningReadinessError) return NextResponse.json({ error: message, paidReadiness: hardeningPaidReadiness() }, { status: 409 });
     return NextResponse.json({ error: message }, { status: message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 400 });
   }
 }

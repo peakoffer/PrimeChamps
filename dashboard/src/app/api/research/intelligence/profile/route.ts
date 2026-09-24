@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { start } from "workflow/api";
 import { requireOrganizationRole } from "@/lib/auth";
-import { createHardeningCampaign, linkCampaignWorkflow } from "@/lib/research/hardening-service";
+import { createHardeningCampaign, linkCampaignWorkflow, refreshHardeningCampaign } from "@/lib/research/hardening-service";
 import { compileRecruitingProfile, type StoredIntelligenceItem } from "@/lib/research/intelligence";
-import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
 
@@ -78,19 +77,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function profileMetrics(value: unknown): ProfileComparisonMetrics | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const source = value as Record<string, unknown>;
-  const metrics: ProfileComparisonMetrics = {
-    safetyRegressions: Number(source.safetyRegressions),
-    scoredCandidateYield: Number(source.scoredCandidateYield),
-    costPerScoredCandidate: Number(source.costPerScoredCandidate),
-    explorationShare: Number(source.explorationShare),
-    heldOutPrecision80Plus: Number(source.heldOutPrecision80Plus),
-  };
-  return Object.values(metrics).every(Number.isFinite) ? metrics : null;
-}
-
 export async function PATCH(request: NextRequest) {
   try {
     const user = await requireOrganizationRole(["owner"]);
@@ -103,7 +89,7 @@ export async function PATCH(request: NextRequest) {
     }
     const admin = createAdminClient();
     const { data: profile, error: profileError } = await admin.from("research_profile_versions")
-      .select("id,status,validation_status,source_meeting_ids")
+      .select("id,status,validation_status,validation_metrics,source_meeting_ids")
       .eq("id", profileId).eq("organization_id", user.organizationId).maybeSingle();
     if (profileError) throw profileError;
     if (!profile) return NextResponse.json({ error: "Draft profile not found" }, { status: 404 });
@@ -140,25 +126,33 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === "validate") {
-      const baseline = profileMetrics(body.baseline);
-      const guided = profileMetrics(body.guided);
-      if (!baseline || !guided) {
-        return NextResponse.json({ error: "Paired baseline and guided metrics are required" }, { status: 400 });
+      if (body.baseline !== undefined || body.guided !== undefined || body.metrics !== undefined) {
+        return NextResponse.json({ error: "Supplied aggregate metrics cannot validate a profile. Validation is derived from its linked completed campaign." }, { status: 400 });
       }
-      const decision = evaluateProfileActivation(baseline, guided);
-      const now = new Date().toISOString();
-      const { data, error } = await admin.from("research_profile_versions").update({
-        validation_status: decision.allowed ? "passed" : "failed",
-        validation_metrics: { baseline, guided, blockers: decision.blockers },
-        validated_at: now,
-        validated_by_user_id: user.id,
-      }).eq("id", profileId).eq("organization_id", user.organizationId)
-        .eq("status", "draft").select("*").maybeSingle();
+      const campaignId = profile.validation_metrics?.campaignId;
+      if (typeof campaignId !== "string" || profile.status !== "draft") {
+        return NextResponse.json({ error: "A linked paired validation campaign is required for this draft" }, { status: 409 });
+      }
+      const { data: campaign, error: campaignError } = await admin.from("research_hardening_campaigns")
+        .select("id,status").eq("id", campaignId).eq("organization_id", user.organizationId)
+        .eq("campaign_type", "profile_validation").eq("profile_version_id", profileId).maybeSingle();
+      if (campaignError) throw campaignError;
+      if (!campaign || campaign.status !== "completed") return NextResponse.json({ error: "The linked paired campaign has not completed" }, { status: 409 });
+      await refreshHardeningCampaign({ campaignId, organizationId: user.organizationId, requestedByUserId: user.id });
+      const { data, error } = await admin.from("research_profile_versions").select("*")
+        .eq("id", profileId).eq("organization_id", user.organizationId).single();
       if (error) throw error;
-      if (!data) return NextResponse.json({ error: "Only a draft profile can be validated" }, { status: 409 });
-      return NextResponse.json({ profile: data, decision });
+      return NextResponse.json({ profile: data });
     }
 
+    if (profile.validation_status !== "passed" || profile.validation_metrics?.source !== "server_campaign_v1") {
+      return NextResponse.json({ error: "Activation requires completed server-derived paired validation and independent precision evidence" }, { status: 409 });
+    }
+    const { data: validationCampaign, error: validationCampaignError } = await admin.from("research_hardening_campaigns")
+      .select("id").eq("id", profile.validation_metrics?.campaignId).eq("organization_id", user.organizationId)
+      .eq("campaign_type", "profile_validation").eq("profile_version_id", profileId).eq("status", "completed").maybeSingle();
+    if (validationCampaignError) throw validationCampaignError;
+    if (!validationCampaign) return NextResponse.json({ error: "The validating campaign is missing or no longer complete" }, { status: 409 });
     const { data, error } = await admin.rpc("activate_validated_research_profile", {
       requested_profile_id: profileId,
       profile_organization_id: user.organizationId,

@@ -65,7 +65,7 @@ test("campaign batching never exceeds three concurrent evaluations", () => {
 
 test("budget policy stops at $80 before confirmation and never permits more than $100", () => {
   assert.equal(campaignSpendDecision({ totalCostMicrousd: 79_999_999, stage: "smoke" }).allowed, true);
-  assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "smoke" }).allowed, false);
+  assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "smoke", nextEstimatedCostMicrousd: 1 }).allowed, false);
   assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 19_999_999 }).allowed, true);
   assert.equal(campaignSpendDecision({ totalCostMicrousd: 80_000_000, stage: "confirmation", nextEstimatedCostMicrousd: 20_000_001 }).allowed, false);
   assert.equal(HARDENING_BUDGET_LIMIT_MICROUSD, 100_000_000);
@@ -150,7 +150,7 @@ test("hardening verdict fails closed on wrong identity, unsupported claims, and 
   assert.equal(evaluateHardeningCase({ ...base, unsupportedMaterialClaims: 1 }, []), "safety_stop");
   assert.equal(evaluateHardeningCase({ ...base, knownUnder21ReachedScoring: 1 }, []), "safety_stop");
   assert.equal(evaluateHardeningCase({ ...base, unresolvedChallengerFindings: 1 }, []), "needs_fix");
-  assert.equal(evaluateHardeningCase({ ...base, exactPersonCandidates: 7, scoredCandidates: 0 }, []), "source_exhausted");
+  assert.equal(evaluateHardeningCase({ ...base, exactPersonCandidates: 7, scoredCandidates: 0 }, []), "source_inconclusive");
 });
 
 test("optional provider degradation stays visible without failing a healthy required route", () => {
@@ -248,7 +248,7 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   const workflow = readFileSync(new URL("../src/workflows/research-hardening.ts", import.meta.url), "utf8");
   assert.match(service, /evaluationMode:\s*true/);
   assert.match(service, /mutation_surfaces:\s*\[\]/);
-  assert.match(workflow, /HARDENING_MAX_CONCURRENCY/);
+  assert.match(workflow, /loadHardeningConcurrency/);
   assert.match(workflow, /Promise\.allSettled/);
   assert.match(service, /cancel_requested_at:\s*null/);
   assert.match(service, /onlyFansProviderRecoveryConfirmed/);
@@ -262,9 +262,9 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
   assert.match(service, /campaign\.preconfirmation_stop_microusd/);
   assert.match(service, /campaign\.budget_limit_microusd/);
-  assert.match(service, /cost_microusd:\s*HARDENING_STAGE_RESERVATION_MICROUSD\[stage\]/);
+  assert.match(service, /operationExposure\(admin/);
   assert.match(service, /The hardening campaign still has an active case/);
-  assert.match(service, /HARDENING_STAGE_RESERVATION_MICROUSD\[input\.stage\] \* input\.archetypes\.length/);
+  assert.match(service, /allowance \* input\.archetypes\.length/);
   assert.match(service, /campaignType === "profile_validation"/);
   assert.match(service, /\["baseline", "guided"\]/);
   assert.match(service, /evaluateProfileActivation\(baseline, guided\)/);

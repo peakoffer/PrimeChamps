@@ -169,7 +169,7 @@ export interface ProfileComparisonMetrics {
   scoredCandidateYield: number;
   costPerScoredCandidate: number;
   explorationShare: number;
-  heldOutPrecision80Plus: number;
+  heldOutPrecision80Plus: number | null;
 }
 
 export function evaluateProfileActivation(
@@ -177,10 +177,19 @@ export function evaluateProfileActivation(
   guided: ProfileComparisonMetrics
 ) {
   const blockers: string[] = [];
+  const finiteNonnegative = (value: number | null) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  if (![baseline.scoredCandidateYield, guided.scoredCandidateYield].every((value) => finiteNonnegative(value) && value > 0)
+    || ![baseline.costPerScoredCandidate, guided.costPerScoredCandidate, baseline.safetyRegressions, guided.safetyRegressions].every(finiteNonnegative)
+    || ![baseline.explorationShare, guided.explorationShare].every((value) => finiteNonnegative(value) && value <= 1)) {
+    blockers.push("insufficient_comparison_evidence");
+  }
   if (guided.safetyRegressions > baseline.safetyRegressions) blockers.push("safety_regression");
   if (guided.scoredCandidateYield < baseline.scoredCandidateYield * 0.8) blockers.push("yield_reduction_over_20_percent");
   if (guided.costPerScoredCandidate > baseline.costPerScoredCandidate * 1.25) blockers.push("cost_increase_over_25_percent");
   if (guided.explorationShare < 0.15) blockers.push("exploration_below_15_percent");
-  if (guided.heldOutPrecision80Plus < baseline.heldOutPrecision80Plus) blockers.push("held_out_precision_regression");
+  if (!finiteNonnegative(baseline.heldOutPrecision80Plus) || !finiteNonnegative(guided.heldOutPrecision80Plus)
+    || Number(baseline.heldOutPrecision80Plus) > 1 || Number(guided.heldOutPrecision80Plus) > 1) {
+    blockers.push("held_out_precision_unavailable");
+  } else if (guided.heldOutPrecision80Plus! < baseline.heldOutPrecision80Plus!) blockers.push("held_out_precision_regression");
   return { allowed: blockers.length === 0, blockers };
 }

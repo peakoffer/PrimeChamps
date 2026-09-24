@@ -139,6 +139,7 @@ export async function fetchSocialBladeInstagramHistory(input: {
   handle: string;
   history?: SocialBladeHistoryTier;
   timeoutMs?: number;
+  request?: typeof fetch;
 }) {
   const handle = normalizeHandle(input.handle);
   if (!input.clientId.trim() || !input.token.trim()) throw new Error("Social Blade credentials are not configured");
@@ -147,7 +148,7 @@ export async function fetchSocialBladeInstagramHistory(input: {
   url.searchParams.set("query", handle);
   url.searchParams.set("history", input.history || "default");
   url.searchParams.set("allow-stale", "true");
-  const response = await fetch(url, {
+  const response = await (input.request || fetch)(url, {
     headers: { clientid: input.clientId.trim(), token: input.token.trim() },
     cache: "no-store",
     signal: AbortSignal.timeout(input.timeoutMs ?? 30_000),

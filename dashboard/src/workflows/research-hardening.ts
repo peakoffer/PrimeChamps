@@ -1,9 +1,10 @@
 import { runResearchWorkflow } from "@/app/api/research/run/workflow";
-import { HARDENING_MAX_CONCURRENCY, chunkWithConcurrency } from "@/lib/research/hardening";
+import { chunkWithConcurrency } from "@/lib/research/hardening";
 import {
   auditCompletedHardeningCase,
   failHardeningCampaign,
   loadHardeningCaseIds,
+  loadHardeningConcurrency,
   prepareHardeningBatch,
   refreshHardeningCampaign,
   type HardeningCampaignWorkflowInput,
@@ -14,7 +15,8 @@ export async function runResearchHardeningCampaign(input: HardeningCampaignWorkf
 
   try {
     const caseIds = await loadHardeningCaseIds(input);
-    for (const batch of chunkWithConcurrency(caseIds, HARDENING_MAX_CONCURRENCY)) {
+    const concurrency = await loadHardeningConcurrency(input);
+    for (const batch of chunkWithConcurrency(caseIds, concurrency)) {
       const prepared = await prepareHardeningBatch({ campaign: input, caseIds: batch });
       // A single child failure must not strand successful siblings without an
       // audit or leave their reservations invisible. Each research log records

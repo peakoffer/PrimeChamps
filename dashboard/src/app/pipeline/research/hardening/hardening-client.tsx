@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, FlaskConical, RefreshCw, ShieldCheck, Square } from "lucide-react";
 import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
+import { latestCompletedHardeningCases, RESEARCH_HARDENING_MATRIX } from "@/lib/research/hardening";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -34,6 +35,7 @@ type Campaign = {
   confirmation_reserve_microusd: number;
   preconfirmation_stop_microusd: number;
   campaign_type: string;
+  accounting_version?: string;
   summary: JsonRecord;
   cases: HardeningCase[];
 };
@@ -45,6 +47,8 @@ const statusTone: Record<string, string> = {
   queued: "border-brand-line bg-brand-paper text-brand-muted",
   needs_fix: "border-brand-warning/30 bg-brand-warning/10 text-brand-warning",
   source_exhausted: "border-brand-warning/30 bg-brand-warning/10 text-brand-warning",
+  source_inconclusive: "border-brand-warning/30 bg-brand-warning/10 text-brand-warning",
+  paused_budget: "border-brand-warning/30 bg-brand-warning/10 text-brand-warning",
   failed: "border-brand-danger/30 bg-brand-danger/10 text-brand-danger",
   safety_stop: "border-brand-danger/30 bg-brand-danger/10 text-brand-danger",
   technical_failure: "border-brand-danger/30 bg-brand-danger/10 text-brand-danger",
@@ -84,6 +88,7 @@ export default function HardeningClient() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paidReadiness, setPaidReadiness] = useState<{ ready: boolean; blockers: string[]; nextStep: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -91,6 +96,7 @@ export default function HardeningClient() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not load hardening campaigns");
       setCampaigns(body.campaigns || []);
+      setPaidReadiness(body.paidReadiness || null);
       setSelectedId((current) => current || body.campaigns?.[0]?.id || null);
       setError(null);
     } catch (loadError) {
@@ -102,7 +108,7 @@ export default function HardeningClient() {
 
   useEffect(() => { void load(); }, [load]);
   const campaign = campaigns.find((item) => item.id === selectedId) || campaigns[0] || null;
-  const active = campaign && ["queued", "running", "paused"].includes(campaign.status);
+  const active = campaign && ["queued", "running", "paused", "paused_budget"].includes(campaign.status);
   const hasRunningCase = campaign?.cases.some((item) => item.status === "running") || false;
   useEffect(() => {
     if (!active) return;
@@ -112,20 +118,11 @@ export default function HardeningClient() {
 
   const latestCases = useMemo(() => {
     if (!campaign) return [];
-    const latest = new Map<string, HardeningCase>();
-    for (const item of campaign.cases) {
-      const previous = latest.get(item.archetype);
-      if (!previous || item.attempt > previous.attempt || item.stage !== "smoke") latest.set(item.archetype, item);
-    }
-    return Array.from(latest.values()).sort((left, right) => left.archetype.localeCompare(right.archetype));
+    return latestCompletedHardeningCases(campaign.cases).sort((left, right) => left.archetype.localeCompare(right.archetype));
   }, [campaign]);
   const latestCanonicalCases = useMemo(() => {
     if (!campaign) return [];
-    const latest = new Map<string, HardeningCase>();
-    for (const item of campaign.cases.filter((candidate) => candidate.stage !== "control")) {
-      latest.set(item.archetype, item);
-    }
-    return Array.from(latest.values());
+    return latestCompletedHardeningCases(campaign.cases.filter((candidate) => candidate.stage !== "control"));
   }, [campaign]);
   const costSummary = useMemo(() => summarizeHardeningCosts(campaign?.cases || []), [campaign]);
   const processStages = useMemo(() => researchProcessCostStages(campaign?.cases || []), [campaign]);
@@ -133,10 +130,14 @@ export default function HardeningClient() {
   const standardRunHigh = processStages.reduce((sum, item) => sum + item.highMicrousd, 0);
 
   async function startCampaign() {
+    if (!paidReadiness?.ready) return;
     setActing("start"); setError(null);
     try {
       const response = await fetch("/api/research/hardening", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ budgetUsd: 100 }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          budgetUsd: 75, maxConcurrency: 1,
+          cases: ["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "confirmation", caseBudgetMicrousd: 3_000_000 })),
+        }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not start campaign");
@@ -146,8 +147,11 @@ export default function HardeningClient() {
     finally { setActing(null); }
   }
 
-  async function campaignAction(action: "cancel" | "rerun" | "resume_remaining", archetype?: string | string[], stage = "targeted_rerun") {
+  async function campaignAction(action: "cancel" | "rerun" | "resume_remaining", archetype?: string | string[], stage = "targeted_rerun", useConfirmationReserve = false) {
     if (!campaign) return;
+    if (action !== "cancel" && !paidReadiness?.ready) {
+      setError(paidReadiness?.nextStep || "Paid campaign prerequisites have not been verified"); return;
+    }
     setActing(`${action}:${archetype || "campaign"}`); setError(null);
     try {
       const response = await fetch(`/api/research/hardening/${campaign.id}`, {
@@ -155,7 +159,7 @@ export default function HardeningClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action === "cancel" || action === "resume_remaining"
           ? { action }
-          : { action, archetypes: Array.isArray(archetype) ? archetype : [archetype], stage }),
+          : { action, archetypes: Array.isArray(archetype) ? archetype : [archetype], stage, useConfirmationReserve }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || `Could not ${action} campaign`);
@@ -167,10 +171,12 @@ export default function HardeningClient() {
   if (loading) return <div className="h-72 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />;
 
   const spent = campaign?.total_cost_microusd || 0;
-  const limit = campaign?.budget_limit_microusd || 100_000_000;
-  const confirmationReserve = campaign?.confirmation_reserve_microusd || 20_000_000;
+  const limit = campaign?.budget_limit_microusd || 75_000_000;
+  const confirmationReserve = campaign?.confirmation_reserve_microusd || 15_000_000;
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
+  const operationsAccounting = record(summary.operation_accounting);
+  const usesOperationLedger = campaign?.accounting_version === "operations_v1";
   const legacyFastRoute = /(?:^|[-_/])fast(?:$|[-_/])/i.test(campaign?.challenger_model_id || "");
   const untouchedPending = campaign?.cases.filter((item) =>
     ["cancelled", "queued"].includes(item.status) && !item.research_log_id
@@ -181,14 +187,14 @@ export default function HardeningClient() {
   // Every archetype receives an independent full-quality confirmation. A
   // short or zero-result run is still valid, but it must be reproduced and
   // investigated rather than silently treated as coverage.
-  const confirmationArchetypes = Array.from(new Set(latestCanonicalCases.map((item) => item.archetype)))
+  const confirmationArchetypes = RESEARCH_HARDENING_MATRIX.map((item) => item.archetype)
     .filter((archetype) => !confirmedArchetypes.has(archetype));
-  const confirmationFitsBudget = spent + confirmationArchetypes.length * 2_000_000 <= limit;
+  const confirmationFitsBudget = spent + confirmationArchetypes.length * 3_000_000 <= limit - confirmationReserve;
   const weakRerunArchetypes = latestCanonicalCases
     .filter((item) => item.status === "completed" && item.verdict !== "passed")
     .map((item) => item.archetype);
-  const weakRerunsFitBudget = spent + weakRerunArchetypes.length * 1_000_000
-    <= (campaign?.preconfirmation_stop_microusd || 80_000_000);
+  const weakRerunsFitBudget = spent + weakRerunArchetypes.length * 3_000_000
+    <= (campaign?.preconfirmation_stop_microusd || 60_000_000);
   const thirdReplicateArchetypes = Array.from(new Set([
     "adaptive", "precision", "winter", "general",
     ...Array.from(new Set(latestCanonicalCases.map((item) => item.archetype))).filter((archetype) => {
@@ -216,7 +222,7 @@ export default function HardeningClient() {
           </Link>
           <p className="pc-eyebrow">Owner controls · evaluation only</p>
           <h1 className="pc-page-title">Research Hardening</h1>
-          <p className="pc-page-description">Thirteen materially different sport archetypes, one fixed safety policy, and a campaign-owned $100 ceiling.</p>
+          <p className="pc-page-description">Explicit tests, preserved evidence, and a campaign-owned allowance. New release campaigns start with three canaries and a $75 maximum.</p>
         </div>
         <div className="pc-header-actions">
           <button className="pc-button-secondary" onClick={() => void load()} disabled={acting !== null}>
@@ -246,11 +252,11 @@ export default function HardeningClient() {
               {confirmationArchetypes.length > 0 && confirmationFitsBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run {confirmationArchetypes.length} full confirmations
               </button>}
-              {thirdReplicateArchetypes.length > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", thirdReplicateArchetypes, "confirmation")} disabled={acting !== null}>
+              {thirdReplicateArchetypes.length > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", thirdReplicateArchetypes, "confirmation", true)} disabled={acting !== null}>
                 <ShieldCheck className="h-4 w-4" /> Run {thirdReplicateArchetypes.length} stability replicates
               </button>}
-              <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null}>
-                <FlaskConical className="h-4 w-4" /> Start 13-archetype smoke wave
+              <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null || !paidReadiness?.ready}>
+                <FlaskConical className="h-4 w-4" /> Start three release canaries
               </button>
             </>
           )}
@@ -258,6 +264,11 @@ export default function HardeningClient() {
       </div>
 
       {error && <div className="border border-brand-danger/30 bg-brand-danger/10 px-4 py-3 text-sm text-brand-danger">{error}</div>}
+      {paidReadiness && !paidReadiness.ready && <div className="border border-brand-warning/30 bg-brand-warning/10 px-4 py-3 text-sm text-brand-ink">
+        <p className="font-semibold">Paid testing is waiting on verified spending limits</p>
+        <p className="mt-1">{paidReadiness.nextStep}</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-brand-muted">{paidReadiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+      </div>}
 
       <section className="border border-brand-ink/10 bg-brand-paper-bright">
         <div className="grid gap-px bg-brand-ink/10 lg:grid-cols-[1.2fr_1fr_1fr_1fr]">
@@ -278,32 +289,32 @@ export default function HardeningClient() {
           </div>
           <div className="bg-brand-paper-bright p-4">
             <p className="pc-eyebrow">Isolation</p>
-            <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-brand-success"><ShieldCheck className="h-4 w-4" /> No live mutations</p>
+            <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-brand-ink"><ShieldCheck className="h-4 w-4" /> Evaluation only</p>
           </div>
         </div>
         {campaign && <div className="grid gap-px border-t border-brand-ink/10 bg-brand-ink/10 md:grid-cols-3">
           <div className="bg-brand-paper-bright p-4">
-            <p className="pc-eyebrow">Measured model spend</p>
-            <p className="mt-2 font-mono text-xl font-semibold text-brand-ink">{money(costSummary.measuredModelMicrousd)}</p>
-            <p className="mt-1 text-xs text-brand-muted">Sonnet scoring + audit + the model actually used for shadow review.</p>
+            <p className="pc-eyebrow">{usesOperationLedger ? "Provider-reported charges" : "Recorded model usage"}</p>
+            <p className="mt-2 font-mono text-xl font-semibold text-brand-ink">{money(usesOperationLedger ? Number(operationsAccounting.settledMicrousd) : costSummary.measuredModelMicrousd)}</p>
+            <p className="mt-1 text-xs text-brand-muted">{usesOperationLedger ? "Charges reported by the provider; other exposure stays reserved." : "Historical token-based accounting; not a reconciled provider invoice."}</p>
           </div>
           <div className="bg-brand-paper-bright p-4">
-            <p className="pc-eyebrow">Standard Opus projection</p>
+            <p className="pc-eyebrow">{usesOperationLedger ? "Unsettled exposure" : "Legacy standard-route projection"}</p>
             <div className="mt-2 flex items-baseline gap-2">
-              <p className="font-mono text-xl font-semibold text-brand-ink">{money(costSummary.optimizedModelMicrousd)}</p>
-              {costSummary.modelSavingsMicrousd > 0 && <span className="font-mono text-[10px] font-semibold text-brand-success">SAVE {money(costSummary.modelSavingsMicrousd)}</span>}
+              <p className="font-mono text-xl font-semibold text-brand-ink">{money(usesOperationLedger ? Number(operationsAccounting.unsettledReservedMicrousd) : costSummary.optimizedModelMicrousd)}</p>
+              {!usesOperationLedger && costSummary.modelSavingsMicrousd > 0 && <span className="font-mono text-[10px] font-semibold text-brand-muted">PROJECTED {money(costSummary.modelSavingsMicrousd)} LESS</span>}
             </div>
-            <p className="mt-1 text-xs text-brand-muted">Same Opus capability, asynchronous standard-speed route.</p>
+            <p className="mt-1 text-xs text-brand-muted">{usesOperationLedger ? "Held request maxima or verified priced-usage upper bounds until settled." : "Comparison at historical recorded prices; current routes are re-priced before admission."}</p>
           </div>
           <div className="bg-brand-paper-bright p-4">
-            <p className="pc-eyebrow">Estimated all-in</p>
-            <p className="mt-2 font-mono text-xl font-semibold text-brand-ink">{moneyRange(costSummary.estimatedAllInLowMicrousd, costSummary.estimatedAllInHighMicrousd)}</p>
-            <p className="mt-1 text-xs text-brand-muted">Optimized models plus bounded OpenAI and Apify usage.</p>
+            <p className="pc-eyebrow">{usesOperationLedger ? "Usage estimates" : "Partial legacy estimate"}</p>
+            <p className="mt-2 font-mono text-xl font-semibold text-brand-ink">{usesOperationLedger ? money(Number(operationsAccounting.estimatedMicrousd)) : moneyRange(costSummary.estimatedAllInLowMicrousd, costSummary.estimatedAllInHighMicrousd)}</p>
+            <p className="mt-1 text-xs text-brand-muted">{usesOperationLedger ? "Shown separately; do not add estimates to charges and reserved exposure." : "Some calls were omitted. This range is not a verified upper spending bound."}</p>
           </div>
         </div>}
         <div className="border-t border-brand-ink/10 p-4">
           <div className="mb-2 flex items-center justify-between text-xs">
-            <span className="font-semibold text-brand-ink">Reserved safety ledger {money(spent)} / {money(limit)}</span>
+            <span className="font-semibold text-brand-ink">{usesOperationLedger ? "Charges + unsettled exposure" : "Legacy safety ledger"} {money(spent)} / {money(limit)}</span>
             <span className="text-brand-muted">This is a guardrail, not the provider bill · {money(confirmationReserve)} held for confirmation</span>
           </div>
           <div className="h-2 overflow-hidden bg-brand-chrome/30"><div className={`h-full ${spendPercent >= 80 ? "bg-brand-danger" : "bg-brand-blue"}`} style={{ width: `${spendPercent}%` }} /></div>
@@ -336,7 +347,7 @@ export default function HardeningClient() {
             <h2 className="mt-1 text-base font-semibold text-brand-ink">Expensive work only happens after the candidate survives the previous gate.</h2>
           </div>
           <div className="shrink-0 text-left md:text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-muted">Typical full-quality run</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-muted">Historical planning range</p>
             <p className="mt-1 font-mono text-lg font-semibold text-brand-ink">{moneyRange(standardRunLow, standardRunHigh)}</p>
           </div>
         </div>
@@ -359,7 +370,7 @@ export default function HardeningClient() {
         </ol>
         <div className="flex flex-col gap-3 border-t border-brand-ink/10 bg-brand-paper px-4 py-3 text-xs text-brand-muted md:flex-row md:items-center md:justify-between">
           <p className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-success" /> Output is either evidence-complete finalists or an explicit evidence hold. Zero finalists is valid.</p>
-          <p className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-brand-warning" /> No pipeline or outreach mutation occurs in hardening.</p>
+          <p className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-brand-warning" /> Evaluation policy prohibits CRM and outreach mutations; isolation is verified separately.</p>
         </div>
         {campaign && <details className="border-t border-brand-ink/10">
           <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-brand-ink">Campaign cost by hardening stage</summary>
@@ -397,16 +408,18 @@ export default function HardeningClient() {
                 const defects = Array.isArray(item.defects) ? item.defects : [];
                 const unresolvedDefects = defects.filter((defect) => defect.resolved !== true);
                 const resolvedDefects = defects.length - unresolvedDefects.length;
-                const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
+                const pending = campaign?.cases.filter((candidate) => candidate.archetype === item.archetype && candidate.sport === item.sport
+                  && candidate.id !== item.id && ["queued", "running"].includes(candidate.status)) || [];
+                const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
                 const canRunControl = !active
                   && !legacyFastRoute
                   && item.verdict === "passed"
-                  && spent + 2_000_000 < (campaign?.preconfirmation_stop_microusd || 80_000_000);
+                  && spent + 3_000_000 <= (campaign?.preconfirmation_stop_microusd || 60_000_000);
                 return (
                   <tr key={item.id} className="align-top hover:bg-brand-paper/60">
                     <td className="px-4 py-4"><p className="font-semibold capitalize text-brand-ink">{item.archetype}</p><p className="mt-1 text-xs capitalize text-brand-muted">{item.sport}</p></td>
                     <td className="px-3 py-4"><span className="font-mono text-[10px] uppercase text-brand-muted">{item.stage.replaceAll("_", " ")} · {item.attempt}</span></td>
-                    <td className="px-3 py-4"><StatusPill value={item.status} /></td>
+                    <td className="px-3 py-4"><StatusPill value={item.status} />{pending.length > 0 && <p className="mt-2 text-xs text-brand-muted">{pending.length} newer run{pending.length === 1 ? "" : "s"} pending</p>}</td>
                     <td className="px-3 py-4"><StatusPill value={item.verdict} /></td>
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "exactPersonCandidates")} → {metric(item.metrics, "scoredCandidates")} → {metric(item.metrics, "finalists")}</td>
                     <td className="px-3 py-4 text-xs text-brand-ink">
@@ -433,7 +446,7 @@ export default function HardeningClient() {
                   </tr>
                 );
               })}
-              {latestCases.length === 0 && <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-brand-muted">Start the bounded smoke wave to create the 13-case scorecard.</td></tr>}
+              {latestCases.length === 0 && <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-brand-muted">Start the three release canaries or submit an explicit case manifest.</td></tr>}
             </tbody>
           </table>
         </div>

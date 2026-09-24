@@ -1,4 +1,4 @@
-import { sanitizeEvidenceRef } from "@/lib/research/hardening";
+import { normalizedHardeningMetrics, sanitizeEvidenceRef } from "@/lib/research/hardening";
 import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
 
 type JsonRecord = Record<string, unknown>;
@@ -19,6 +19,8 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
   const sourceCases = array(campaign.cases).map(object);
   const costAccounting = summarizeHardeningCosts(sourceCases);
   const processStages = researchProcessCostStages(sourceCases);
+  const isolation = object(object(campaign.summary).isolation_verification);
+  const verifiedIsolation = typeof isolation.verified_at === "string" && Number.isSafeInteger(isolation.live_mutation_count);
   const cases = sourceCases.map((item) => ({
     archetype: item.archetype,
     sport: item.sport,
@@ -29,7 +31,7 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
     researchLogId: item.research_log_id,
     officialModelId: item.official_model_id,
     challengerModelId: item.challenger_model_id,
-    metrics: item.metrics,
+    metrics: normalizedHardeningMetrics(item.metrics),
     defects: array(item.defects).map(object).map((defect) => ({
       category: defect.category,
       severity: defect.severity,
@@ -59,7 +61,7 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
     resolutionNotes: item.resolution_notes,
   }));
   return {
-    reportVersion: "research-hardening-v3",
+    reportVersion: "research-hardening-v4",
     generatedAt: new Date().toISOString(),
     campaign: {
       id: campaign.id,
@@ -76,20 +78,23 @@ export function sanitizedHardeningReport(campaign: JsonRecord) {
       baselineProfileVersionId: campaign.baseline_profile_version_id,
       totalCostMicrousd: campaign.total_cost_microusd,
       maxConcurrency: campaign.max_concurrency,
+      accountingVersion: campaign.accounting_version || "legacy",
+      operationAccounting: object(object(campaign.summary).operation_accounting),
       summary: campaign.summary,
       startedAt: campaign.started_at,
       completedAt: campaign.completed_at,
     },
     cases,
     costAccounting: {
-      accountingNote: "Measured model spend is provider-token accounting. External OpenAI and Apify values are bounded planning estimates. The reserved ledger is a safety guardrail, not an invoice.",
+      accountingNote: "Legacy model spend uses token accounting. Legacy external estimates omit some operations and are not verified upper bounds. Operation-ledger exposure is settled charges plus unsettled reservations; usage estimates are reported separately.",
       ...costAccounting,
     },
     processMap: processStages,
     safety: {
       evaluationOnly: true,
-      liveMutationCount: 0,
-      prohibitedSurfaces: ["athletes", "activity_notifications", "outreach_drafts", "messages", "outreach_queue", "pipeline promotions"],
+      isolationVerifiedAt: verifiedIsolation ? isolation.verified_at : null,
+      liveMutationCount: verifiedIsolation ? Number(isolation.live_mutation_count) : null,
+      prohibitedSurfaces: ["athletes", "activity_notifications", "outreach_drafts", "messages", "outreach_queue", "outreach records", "appointments", "contracts", "conversations", "pipeline promotions"],
     },
   };
 }
@@ -99,7 +104,7 @@ export function hardeningReportMarkdown(campaign: JsonRecord) {
   const summary = object(report.campaign.summary);
   const rows = report.cases.map((item) => {
     const metrics = object(item.metrics);
-    return `| ${item.archetype} | ${item.sport} | ${item.stage} | ${item.status} | ${item.verdict || "—"} | ${metrics.exactPersonCandidates ?? 0} | ${metrics.duplicatesSuppressedBeforeEnrichment ?? 0} | ${Math.round(Number(metrics.explorationRatio || 0) * 100)}% | ${metrics.scoredCandidates ?? 0} | ${metrics.finalists ?? 0} | ${dollars(metrics.costPerScoredCandidateMicrousd)} | ${dollars(item.costMicrousd)} |`;
+    return `| ${item.archetype} | ${item.sport} | ${item.stage} | ${item.status} | ${item.verdict || "—"} | ${metrics.exactPersonCandidates ?? 0} | ${metrics.duplicatesSuppressedBeforeEnrichment ?? 0} | ${Math.round(Number(metrics.explorationRatio || 0) * 100)}% | ${metrics.scoredCandidates ?? 0} | ${metrics.finalists ?? 0} | ${metrics.costPerScoredCandidateMicrousd == null ? "—" : dollars(metrics.costPerScoredCandidateMicrousd)} | ${dollars(item.costMicrousd)} |`;
   }).join("\n");
   const defects = report.cases.flatMap((item) => item.defects.map((defect) =>
     `- **${item.sport} · ${defect.category} · ${defect.severity}:** ${defect.summary}${defect.evidenceRefs.length ? ` (${defect.evidenceRefs.join(", ")})` : ""}`
@@ -121,7 +126,7 @@ export function hardeningReportMarkdown(campaign: JsonRecord) {
 - Estimated optimized all-in range: ${dollars(report.costAccounting.estimatedAllInLowMicrousd)}–${dollars(report.costAccounting.estimatedAllInHighMicrousd)}
 - Completed cases: ${summary.completed ?? 0} / ${summary.total_cases ?? report.cases.length}
 - Passed: ${summary.passed ?? 0}
-- Evaluation isolation: passed; zero live CRM or outreach mutations by design
+- Evaluation isolation: ${report.safety.liveMutationCount === null ? "not independently verified in this report" : `${report.safety.liveMutationCount} measured live mutations; checked ${report.safety.isolationVerifiedAt}`}
 
 ## Archetype scorecard
 
@@ -165,6 +170,6 @@ ${defects}
 
 ## Safety boundary
 
-This campaign is evaluation-only. It may write research logs, test candidates, scores, audits, campaign cases, and sanitized reports. It cannot create athletes, notifications, drafts, messages, queue entries, outreach records, or pipeline promotions.
+This campaign is evaluation-only. It may write research logs, test candidates, scores, audits, campaign cases, and sanitized reports. It cannot create or change athletes, notifications, drafts, messages, queue entries, outreach records, appointments, contracts, conversations, or pipeline positions. The policy is separate from measured isolation verification.
 `;
 }

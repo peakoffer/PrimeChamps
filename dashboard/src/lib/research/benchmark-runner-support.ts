@@ -1132,7 +1132,8 @@ export function normalizeOpenRouterBenchmarkUsage(value: OpenRouterBenchmarkUsag
   };
 }
 
-export function sonnetPriceSnapshot(model: string, now = new Date()): BenchmarkPriceSnapshot {
+export function sonnetPriceSnapshot(model: string, _now = new Date()): BenchmarkPriceSnapshot {
+  void _now; // Retain the caller-compatible historical-date argument; current pricing is verified, not inferred.
   const overrideInput = Number(process.env.RESEARCH_SONNET_INPUT_USD_PER_MTOK);
   const overrideOutput = Number(process.env.RESEARCH_SONNET_OUTPUT_USD_PER_MTOK);
   if (overrideInput > 0 && overrideOutput > 0) {
@@ -1150,16 +1151,15 @@ export function sonnetPriceSnapshot(model: string, now = new Date()): BenchmarkP
   if (model !== "claude-sonnet-5") {
     throw new Error(`Pricing is not configured for the latest resolved Sonnet model (${model})`);
   }
-  const introductory = now.getTime() < Date.parse("2026-09-01T00:00:00Z");
   return {
     provider: "anthropic",
     model,
-    inputUsdPerMillion: introductory ? 2 : 3,
-    outputUsdPerMillion: introductory ? 10 : 15,
-    cacheCreationUsdPerMillion: introductory ? 2.5 : 3.75,
-    cacheReadUsdPerMillion: introductory ? 0.2 : 0.3,
-    source: "Anthropic Claude Sonnet 5 pricing, retrieved 2026-08-11",
-    effectiveUntil: introductory ? "2026-08-31T23:59:59Z" : null,
+    inputUsdPerMillion: 2,
+    outputUsdPerMillion: 10,
+    cacheCreationUsdPerMillion: 2.5,
+    cacheReadUsdPerMillion: 0.2,
+    source: "https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-24)",
+    effectiveUntil: null,
   };
 }
 

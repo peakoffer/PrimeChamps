@@ -145,8 +145,8 @@ test("discovery recognizes sourced rookie language but never trusts model contex
   });
   assert.equal(unrelated.passed, false);
   assert.equal(unrelated.athleteNamed, false);
-  assert.equal(unrelated.sportMatched, true);
-  assert.equal(unrelated.competitiveAthlete, true);
+  assert.equal(unrelated.sportMatched, false, "another person's sport is not the candidate's sport evidence");
+  assert.equal(unrelated.competitiveAthlete, false);
   assert.ok(unrelated.reasons.some((reason) => reason.includes("does not clearly name")));
 });
 
@@ -159,6 +159,7 @@ test("surfing evidence rejects wakesurfing and accepts a named WSL competitor", 
       url: "https://thecwsa.org/results",
       title: "Competitive Wake Surf Association results",
       claim: "Bailey Example won a wakesurf event",
+      sourceExcerpt: "Bailey Example won a wakesurf event",
       provider: "search",
     }],
   });
@@ -173,6 +174,7 @@ test("surfing evidence rejects wakesurfing and accepts a named WSL competitor", 
       url: "https://www.worldsurfleague.com/athletes/alyssa-spencer",
       title: "Alyssa Spencer - World Surf League",
       claim: "Alyssa Spencer is a WSL surfing competitor",
+      sourceExcerpt: "Alyssa Spencer is a WSL surfing competitor",
       provider: "search",
     }],
   });
@@ -195,6 +197,56 @@ test("surfing evidence rejects wakesurfing and accepts a named WSL competitor", 
   assert.ok(inventedAttribution.reasons.some((reason) => reason.includes("does not clearly name")));
 });
 
+test("generated sport and adult claims cannot override the retrieved source excerpt", () => {
+  const base = { name: "Synthetic Avery", sport: "soccer", audienceScope: "mixed_global" as const,
+    context: "Synthetic Avery is an eligible adult soccer athlete." };
+  const source = { url: "https://fixture.example/synthetic-avery", title: "Synthetic Avery biography",
+    provider: "synthetic_fixture", claim: "Synthetic Avery is a 25-year-old professional soccer champion." };
+  const unprovedSport = evaluateDiscoveryEvidence({ ...base,
+    evidence: [{ ...source, sourceExcerpt: "Synthetic Avery is a public personality." }] });
+  assert.equal(unprovedSport.passed, false);
+  assert.equal(unprovedSport.sportMatched, false);
+  assert.equal(unprovedSport.competitiveAthlete, false);
+
+  const minor = evaluateDiscoveryEvidence({ ...base,
+    evidence: [{ ...source, sourceExcerpt: "Synthetic Avery was born in 2009 and is a soccer player." }] });
+  assert.equal(minor.passed, false);
+  assert.equal(minor.targetAgeEligible, false);
+  assert.ok(minor.reasons.some((reason) => reason.includes("under 21")));
+});
+
+test("matching source titles and athlete URL paths cannot attribute another person's snippet", () => {
+  const request = { name: "Synthetic Avery", sport: "soccer", audienceScope: "mixed_global" as const, context: "" };
+  const evidence = { url: "https://fixture.example/synthetic-avery", title: "Synthetic Avery soccer biography",
+    provider: "synthetic_fixture", claim: "Synthetic Avery is a soccer champion." };
+  for (const sourceExcerpt of [
+    "Unrelated Parker is a soccer athlete and 2026 championship finalist.",
+    "They are a soccer athlete and 2026 championship finalist.",
+  ]) {
+    const result = evaluateDiscoveryEvidence({ ...request, evidence: [{ ...evidence, sourceExcerpt }] });
+    assert.equal(result.passed, false);
+    assert.equal(result.athleteNamed, false);
+  }
+});
+
+test("explicit men and women search scopes use their own competition category without inferring gender", () => {
+  const check = (audienceScope: "men" | "women" | "mixed_global", category: string) => evaluateDiscoveryEvidence({
+    name: "Synthetic Avery", sport: "soccer", context: "", audienceScope,
+    evidence: [{ url: "https://fixture.example/synthetic-avery", title: "Synthetic Avery biography",
+      provider: "synthetic_fixture", claim: "", sourceExcerpt: `Synthetic Avery is a ${category}soccer athlete and championship finalist.` }],
+  });
+  for (const [scope, matching, conflicting] of [["men", "men's ", "women's "], ["women", "women's ", "men's "]] as const) {
+    assert.equal(check(scope, matching).passed, true);
+    assert.equal(check(scope, conflicting).passed, false);
+    assert.equal(check(scope, conflicting).targetCategoryMatched, false);
+    assert.ok(check(scope, conflicting).reasons.some((reason) => reason.includes(`${scope}'s competition category`)));
+    assert.equal(check(scope, "").passed, true, "Absence of a source-explicit category is not inferred from a name");
+  }
+  for (const category of ["men's ", "women's ", ""]) {
+    assert.equal(check("mixed_global", category).passed, true);
+  }
+});
+
 test("motorcycle racing recognizes WorldWCR evidence and rejects adjacent car racing", () => {
   const worldWcr = evaluateDiscoveryEvidence({
     name: "Beatriz Neila",
@@ -204,6 +256,7 @@ test("motorcycle racing recognizes WorldWCR evidence and rejects adjacent car ra
       url: "https://www.worldsbk.com/en/news/2026/beatriz-neila-worldwcr-win",
       title: "Beatriz Neila victorious in WorldWCR",
       claim: "Beatriz Neila won WorldWCR Race 2 and remains a championship contender.",
+      sourceExcerpt: "Beatriz Neila won WorldWCR Race 2 and remains a championship contender.",
       provider: "search",
     }],
   });
@@ -219,6 +272,7 @@ test("motorcycle racing recognizes WorldWCR evidence and rejects adjacent car ra
       url: "https://example.com/example-driver",
       title: "Example Driver car racing profile",
       claim: "Example Driver is a professional automobile racing driver.",
+      sourceExcerpt: "Example Driver is a professional automobile racing driver.",
       provider: "search",
     }],
   });
@@ -233,6 +287,7 @@ test("motorcycle racing recognizes WorldWCR evidence and rejects adjacent car ra
       url: "https://www.worldsbk.com/en/news/2026/lucie-boudesseul-podium",
       title: "Lucie Boudesseul returns to the WorldWCR podium",
       claim: "Lucie Boudesseul secured her third career WorldWCR podium at Assen.",
+      sourceExcerpt: "Lucie Boudesseul secured her third career WorldWCR podium at Assen.",
       provider: "search",
     }],
   });
@@ -249,6 +304,7 @@ test("discovery rejects a source-explicit under-21 athlete before paid enrichmen
       url: "https://volleyballworld.com/athletes/young-athlete",
       title: "Young Athlete - Volleyball World",
       claim: "Young Athlete was born in 2009 and competes in volleyball.",
+      sourceExcerpt: "Young Athlete was born in 2009 and competes in volleyball.",
       provider: "search",
     }],
   });
@@ -263,6 +319,7 @@ test("discovery rejects a source-explicit under-21 athlete before paid enrichmen
       url: "https://usagym.org/athlete/junior-gymnast",
       title: "Junior Gymnast - USA Gymnastics",
       claim: "Junior Gymnast Birthdate: 12/9/2007 Program: Women's Artistic Level: Senior competition results",
+      sourceExcerpt: "Junior Gymnast Birthdate: 12/9/2007 Program: Women's Artistic Level: Senior competition results",
       provider: "search",
     }],
   });
@@ -431,6 +488,7 @@ test("discovery rejects compact age fields, legacy careers, non-athletes, and me
       url: "https://www.worldsurfleague.com/athletes/young-surfer",
       title: "Young Surfer - World Surf League",
       claim: "Young Surfer Women's CT 2026 Age20Mar 22, 2005",
+      sourceExcerpt: "Young Surfer Women's CT 2026 Age20Mar 22, 2005",
       provider: "search",
     }],
   });
@@ -445,6 +503,7 @@ test("discovery rejects compact age fields, legacy careers, non-athletes, and me
       url: "https://www.worldsurfleague.com/athletes/legacy-surfer",
       title: "Legacy Surfer - World Surf League",
       claim: "Legacy Surfer Women's CT First season2008 Age34",
+      sourceExcerpt: "Legacy Surfer Women's CT First season2008 Age34",
       provider: "search",
     }],
   });
@@ -459,6 +518,7 @@ test("discovery rejects compact age fields, legacy careers, non-athletes, and me
       url: "https://example.com/surfing-influencers",
       title: "Surfing influencers",
       claim: "Camera Person is a big-wave cinematographer documenting surfing.",
+      sourceExcerpt: "Camera Person is a big-wave cinematographer documenting surfing.",
       provider: "search",
     }],
   });
@@ -473,6 +533,7 @@ test("discovery rejects compact age fields, legacy careers, non-athletes, and me
       url: "https://www.worldsurfleague.com/athletes/male-surfer",
       title: "Male Surfer - World Surf League",
       claim: "Male Surfer Men's CT 2026 ranking results",
+      sourceExcerpt: "Male Surfer Men's CT 2026 ranking results",
       provider: "search",
     }],
   });
@@ -1099,7 +1160,7 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   const workflowSource = readFileSync(
     new URL("../src/app/api/research/run/workflow.ts", import.meta.url),
     "utf8"
-  );
+  ) + readFileSync(new URL("../src/workflows/research-run.ts", import.meta.url), "utf8");
   const adminClientSource = readFileSync(
     new URL("../src/lib/supabase/admin.ts", import.meta.url),
     "utf8"
@@ -1120,7 +1181,8 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(workflowSource, /"use step"/);
   assert.match(workflowSource, /targetPhase: "discovery"/);
   assert.match(workflowSource, /targetPhase: "enrichment"/);
-  assert.match(workflowSource, /targetPhase: "scoring"/);
+  assert.match(workflowSource, /scorePreparedResearchCandidate\(input, plan, id\)/);
+  assert.match(workflowSource, /prepareResearchCandidateEvidence\(input, pending, "age_apify"\)/);
   assert.match(workflowSource, /targetPhase: "persistence"/);
   assert.match(workflowSource, /persistPartialScoringCheckpoint/);
   assert.match(workflowSource, /Resuming.*candidate scores from durable batch checkpoints/);
@@ -1165,6 +1227,17 @@ test("durable workflow code stays isolated from the Next.js request runtime", ()
   assert.match(instagramProviderSource, /searchType: "user"/);
   assert.match(instagramProviderSource, /liveSearch: true/);
   assert.match(workflowSource, /findInstagramCandidatesWithApifySearch/);
+});
+
+test("a generated source title cannot supply competitive status or sport missing from the raw snippet", () => {
+  const quality = evaluateDiscoveryEvidence({
+    name: "Avery Example", sport: "soccer", context: "generated soccer champion claim", audienceScope: "mixed_global",
+    evidence: [{ url: "https://example.com/avery-example", title: "Avery Example soccer champion athlete",
+      provider: "search", claim: "Soccer champion", sourceExcerpt: "Avery Example attended the community event." }],
+  });
+  assert.equal(quality.passed, false);
+  assert.equal(quality.sportMatched, false);
+  assert.equal(quality.competitiveAthlete, false);
 });
 
 test("Anthropic scoring requests remain compatible with the latest Sonnet API", () => {

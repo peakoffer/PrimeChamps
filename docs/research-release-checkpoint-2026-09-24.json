@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-24",
+  "phase": "A_safety_accounting_checkpoint",
+  "all_sport_production_ready": false,
+  "paid_research_spend_usd": 0,
+  "new_paid_campaigns": 0,
+  "paid_dispatch_ready": false,
+  "readiness_blockers": [
+    "hosted_search_input_exposure_not_bounded",
+    "apify_post_run_retention_policy_not_bounded"
+  ],
+  "legacy_campaigns_preserved": [
+    { "campaign_id": "f89a73ff-a93d-4166-9d87-a1dacd78b3f7", "reservation_usd": 79 },
+    { "campaign_id": "bd216e99-b7ac-4b76-b137-2c1ae70af584", "reservation_usd": 43 }
+  ],
+  "new_orchestration_scope": "evaluation_only",
+  "normal_research_orchestration": "existing_phase_sequence",
+  "migration": {
+    "file": "supabase/migrations/20260924173421_research_paid_operation_ledger.sql",
+    "production_applied": true,
+    "rls_enabled": true,
+    "browser_table_access": false,
+    "browser_rpc_access": false,
+    "ledger_rows_after_migration": 0
+  },
+  "checks": {
+    "typecheck": "passed",
+    "lint": { "errors": 0, "existing_warnings": 54 },
+    "unit_tests": { "passed": 335, "failed": 0, "skipped": 0, "includes_local_database_migration_tests": true },
+    "production_build": { "status": "passed", "workflow_steps": 32, "workflows": 4, "pages": 125 },
+    "deployment": "pending",
+    "signed_in_ui": "pending",
+    "crm_row_digest_comparison": "pending"
+  },
+  "advisor_findings": {
+    "ledger_security_errors": 0,
+    "ledger_info": ["server_only_rls_without_browser_policies", "new_unused_indexes"],
+    "existing_warnings": ["leaked_password_protection_disabled", "auth_rls_initplan", "duplicate_system_log_indexes"]
+  },
+  "evidence_limitations": [
+    "synthetic_fixtures_are_not_live_archetype_validation",
+    "true_held_out_precision_not_yet_linked",
+    "source_exhaustion_investigation_ingestion_not_yet_implemented",
+    "no_new_live_candidate_yield_measurement",
+    "downstream_age_provenance_requires_separate_verification"
+  ]
+}

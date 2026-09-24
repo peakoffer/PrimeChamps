@@ -10,6 +10,7 @@ import {
   type ResearchEvaluationProfile,
 } from "@/lib/research/evaluation-budget";
 import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+import { resetEnrichedCandidateForRescoring } from "@/lib/research/workflow-state";
 
 async function assertRunIsNotHardeningCase(runId: string) {
   const admin = createAdminClient();
@@ -27,41 +28,12 @@ export function normalizeEvaluationSports(values: unknown[]) {
   )).slice(0, 10);
 }
 
-const DOWNSTREAM_RESEARCH_ARTIFACT_KEYS = new Set([
-  "age",
-  "is_minor",
-  "score",
-  "score_breakdown",
-  "reasoning",
-  "concerns",
-  "career_stage",
-  "objective_fit",
-  "creator_signals",
-  "momentum_evidence",
-  "creator_evidence",
-  "onlyfans_fit_score",
-  "commercial_achievability_score",
-  "research_confidence_score",
-  "research_score_id",
-  "audit_id",
-]);
-
 const AUDIT_RESEARCH_ARTIFACT_KEYS = new Set([
   "audit_id",
   "audit_findings",
   "audit_summary",
   "audit_verdict",
 ]);
-
-function resetEnrichedCandidateForRescoring(candidate: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(candidate).filter(([key]) =>
-    !DOWNSTREAM_RESEARCH_ARTIFACT_KEYS.has(key)
-      && !key.startsWith("age_")
-      && !key.startsWith("onlyfans_")
-      && !key.startsWith("researcher_")
-      && !key.startsWith("audit_")
-  ));
-}
 
 function resetScoredCandidateForReaudit(
   candidate: Record<string, unknown>,

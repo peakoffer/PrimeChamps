@@ -1001,7 +1001,8 @@ test("blind audit critical gaps cannot contradict passed gates or treat expected
 });
 
 test("enrichment checkpoint forks discard prior scoring and audit artifacts", () => {
-  const source = readFileSync(new URL("../src/lib/research/evaluation-runs.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/lib/research/evaluation-runs.ts", import.meta.url), "utf8")
+    + readFileSync(new URL("../src/lib/research/workflow-state.ts", import.meta.url), "utf8");
   assert.match(source, /DOWNSTREAM_RESEARCH_ARTIFACT_KEYS/);
   assert.match(source, /!key\.startsWith\("age_"\)/);
   assert.match(source, /!key\.startsWith\("onlyfans_"\)/);
@@ -2329,11 +2330,16 @@ test("production audit treats free-form blind limitations as diagnostic rather t
 });
 
 test("persistence reuses completed audits and finishes missing audits after a durable replay", () => {
-  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8")
+    + readFileSync(new URL("../src/workflows/research-run.ts", import.meta.url), "utf8");
   assert.match(workflow, /"scoring",\s+"auditing",\s+"saving_candidates"/);
-  assert.match(workflow, /const scoredAthletes = reachedPhase\("auditing"\)/);
+  assert.match(workflow, /const scoredAthletes = input\.durableScoringComplete \|\| \(reachedPhase\("auditing"\)/);
   assert.match(workflow, /if \(hasCompletedResearchV2Audit\(athlete\.audit_verdict\)\) return false/);
-  assert.match(workflow, /const baseAuditedAthletes = await auditPriorityCandidates/);
+  assert.match(workflow, /const baseAuditedAthletes = input\.durableScoringComplete \? scoredAthletes : await auditPriorityCandidates/);
+  assert.match(workflow, /await auditPreparedResearchCandidate\(input, plan, id, "sources"\)/);
+  assert.match(workflow, /await auditPreparedResearchCandidate\(input, plan, id, "blind"\)/);
+  assert.match(workflow, /await auditPreparedResearchCandidate\(input, plan, id, "review"\)/);
+  assert.match(workflow, /await finishPreparedResearchScoring\(input, plan\)/);
   assert.match(workflow, /const auditedAthletes = baseAuditedAthletes\.map/);
   assert.match(workflow, /if \(proposedPriority < RESEARCH_PRIORITY_THRESHOLD\) return false/);
 });
