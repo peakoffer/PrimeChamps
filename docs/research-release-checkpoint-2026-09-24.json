@@ -26,11 +26,22 @@
   "checks": {
     "typecheck": "passed",
     "lint": { "errors": 0, "existing_warnings": 54 },
-    "unit_tests": { "passed": 335, "failed": 0, "skipped": 0, "includes_local_database_migration_tests": true },
+    "unit_tests": { "passed": 336, "failed": 0, "skipped": 0, "includes_local_database_migration_tests": true },
     "production_build": { "status": "passed", "workflow_steps": 32, "workflows": 4, "pages": 125 },
-    "deployment": "pending",
-    "signed_in_ui": "pending",
-    "crm_row_digest_comparison": "pending"
+    "deployment": {
+      "status": "ready",
+      "application_commit": "4d2e307cd459063c195bb38bba9382b0d32c4971",
+      "id": "dpl_5GVLZoSp2J3wiNDyVZJhLTwjeQmm",
+      "production_domain": "crm.prime-champs.com"
+    },
+    "signed_in_ui": "owner_readiness_banner_and_legacy_accounting_verified_secondary_button_fix_in_followup",
+    "runtime_errors_last_checked_hour": 0,
+    "crm_row_digest_comparison": { "unchanged": true, "tables": 14 },
+    "stale_evaluation_recovery": "cancelled_interrupted",
+    "remaining_running_evaluations": 0,
+    "new_paid_operations": 0,
+    "research_logs": 200,
+    "campaigns": 2
   },
   "advisor_findings": {
     "ledger_security_errors": 0,

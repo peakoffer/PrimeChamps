@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import ts from "typescript";
 import { buildShadowEvidencePacket, validateShadowAuditRows } from "../src/lib/research/hardening-audit-policy.ts";
 import { campaignSpendDecision, evaluateHardeningCase, latestCompletedHardeningCases, normalizedHardeningMetrics, parseHardeningManifest, RESEARCH_HARDENING_MATRIX } from "../src/lib/research/hardening.ts";
 import { evaluateProfileActivation } from "../src/lib/research/statistical-learning.ts";
@@ -10,6 +12,38 @@ test("paid campaign preflight blocks the current unbounded discovery plan before
   assert.equal(hardeningPaidReadiness().ready, false);
   assert.equal(hardeningPaidReadiness().code, "BOUNDED_DISCOVERY_REQUIRED");
   assert.throws(assertHardeningPaidReadiness, HardeningReadinessError);
+});
+
+test("every paid hardening UI action shares readiness and historical-campaign guards", () => {
+  const source = readFileSync(new URL("../src/app/pipeline/research/hardening/hardening-client.tsx", import.meta.url), "utf8");
+  const parsed = ts.createSourceFile("hardening-client.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let paidButtons = 0;
+  let cancelButtons = 0;
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === "button") {
+      const attributes = new Map(node.attributes.properties.flatMap((attribute) => ts.isJsxAttribute(attribute)
+        ? [[attribute.name.getText(parsed), attribute.initializer?.getText(parsed) || ""]] : []));
+      const onClick = attributes.get("onClick") || "";
+      if (/startCampaign\(\)|campaignAction\("(?:rerun|resume_remaining)"/.test(onClick)) {
+        paidButtons++;
+        const prefix = onClick.includes("startCampaign") ? "paidAction" : "campaignPaidAction";
+        assert.equal(attributes.get("disabled"), `{${prefix}Disabled}`, onClick);
+        assert.equal(attributes.get("title"), `{${prefix}Title}`, onClick);
+      }
+      if (onClick.includes('campaignAction("cancel")')) {
+        cancelButtons++;
+        assert.equal(attributes.get("disabled"), "{acting !== null}", "Cancellation must remain available when paid testing is blocked");
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  assert.equal(paidButtons, 9, "All resume, rerun, control, confirmation, replicate and start controls are covered");
+  assert.equal(cancelButtons, 1);
+  assert.match(source, /const paidActionDisabled = acting !== null \|\| !paidReadiness\?\.ready/);
+  assert.match(source, /const campaignPaidActionDisabled = paidActionDisabled \|\| !usesOperationLedger/);
+  assert.match(source, /campaign && !usesOperationLedger && <div[\s\S]*?not certification for the current release/);
+  assert.match(source, /estimated paid calls avoided/);
 });
 
 test("full shadow packets retain late age evidence and contradictions, and citations cannot cross dossiers", () => {

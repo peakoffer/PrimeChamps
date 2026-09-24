@@ -2,7 +2,7 @@
 
 Date: September 24, 2026
 
-Status: local verification passed; production migration applied; application deployment verification pending. **Not an all-sport production-readiness certificate.**
+Status: safety/accounting code deployed and verified at `crm.prime-champs.com`; paid dispatch remains intentionally blocked. **Not an all-sport production-readiness certificate.**
 
 ## Result and spending
 
@@ -37,9 +37,13 @@ No environment variable bypass was added. A paid campaign cannot start merely be
 
 ## Verification record
 
-Local typecheck and production build passed (32 workflow steps, four workflows, 125 pages). All **335 tests passed with zero skipped**, including execution of the migration and budget controls in a local PostgreSQL-compatible engine. Lint reports zero errors and 54 existing warnings. Synthetic tests verify behavior; they do not establish real-world candidate yield or held-out precision.
+Local typecheck and production build passed (32 workflow steps, four workflows, 125 pages). All **336 tests passed with zero skipped**, including execution of the migration and budget controls in a local PostgreSQL-compatible engine and the secondary-button regression. Lint reports zero errors and 54 existing warnings. Synthetic tests verify behavior; they do not establish real-world candidate yield or held-out precision.
 
 Production migration applied successfully. Verified RLS enabled, no anonymous/authenticated table access or RPC execution, service-role access available, zero ledger rows, and both legacy campaign reservations unchanged. Supabase advisors show intentional server-only RLS/no-browser-policy and new-unused-index informational notices; unrelated existing warnings remain for leaked-password protection, one RLS performance policy, and duplicate system-log indexes. These warnings were not silently treated as a clean advisor report.
+
+Application commit `4d2e307cd459063c195bb38bba9382b0d32c4971` deployed successfully as `dpl_5GVLZoSp2J3wiNDyVZJhLTwjeQmm`, with the production domain attached. Signed-in owner verification confirmed the readiness explanation, disabled new-campaign action, preserved legacy accounting, and all 13 canonical sports plus four distinct controls. An attempted legacy resume showed the blocking explanation without creating any run. Secondary paid buttons were still visually enabled; the follow-up UI correction disables them and marks old verdicts as historical rather than current certification. Runtime error lookup found no errors in the checked hour.
+
+The stale evaluation `b047a517-26ac-4fc5-bba3-a6891ed58d50` was atomically marked cancelled/interrupted. No running evaluations remain. Full row digests—not just counts—matched across **14 live CRM/message tables** before and after verification. There are still 200 research logs, two campaigns, and zero paid-operation rows. This proves no live-row mutation during this release verification, not the safety of future unexecuted paid tests.
 
 Before-release isolation baseline:
 

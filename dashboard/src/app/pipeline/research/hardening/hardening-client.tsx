@@ -152,6 +152,9 @@ export default function HardeningClient() {
     if (action !== "cancel" && !paidReadiness?.ready) {
       setError(paidReadiness?.nextStep || "Paid campaign prerequisites have not been verified"); return;
     }
+    if (action !== "cancel" && campaign.accounting_version !== "operations_v1") {
+      setError("Historical campaigns are read-only. Start a new release campaign when paid testing is ready."); return;
+    }
     setActing(`${action}:${archetype || "campaign"}`); setError(null);
     try {
       const response = await fetch(`/api/research/hardening/${campaign.id}`, {
@@ -177,6 +180,14 @@ export default function HardeningClient() {
   const summary = campaign?.summary || {};
   const operationsAccounting = record(summary.operation_accounting);
   const usesOperationLedger = campaign?.accounting_version === "operations_v1";
+  const paidActionDisabled = acting !== null || !paidReadiness?.ready;
+  const paidActionTitle = !paidReadiness?.ready
+    ? paidReadiness?.nextStep || "Paid campaign prerequisites have not been verified"
+    : acting !== null ? "Another action is in progress" : undefined;
+  const campaignPaidActionDisabled = paidActionDisabled || !usesOperationLedger;
+  const campaignPaidActionTitle = !usesOperationLedger
+    ? "Historical campaigns are read-only. Start a new release campaign when paid testing is ready."
+    : paidActionTitle;
   const legacyFastRoute = /(?:^|[-_/])fast(?:$|[-_/])/i.test(campaign?.challenger_model_id || "");
   const untouchedPending = campaign?.cases.filter((item) =>
     ["cancelled", "queued"].includes(item.status) && !item.research_log_id
@@ -230,7 +241,7 @@ export default function HardeningClient() {
           </button>
           {active ? (
             untouchedPending > 0 && !hasRunningCase ? (
-              <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
+              <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>
                 <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
               </button>
             ) : (
@@ -240,22 +251,22 @@ export default function HardeningClient() {
             )
           ) : (
             <>
-              {untouchedPending > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={acting !== null}>
+              {untouchedPending > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("resume_remaining")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>
                 <FlaskConical className="h-4 w-4" /> Resume {untouchedPending} unfinished case{untouchedPending === 1 ? "" : "s"}
               </button>}
-              {weakRerunArchetypes.length > 0 && weakRerunsFitBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", weakRerunArchetypes, "targeted_rerun")} disabled={acting !== null}>
+              {weakRerunArchetypes.length > 0 && weakRerunsFitBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", weakRerunArchetypes, "targeted_rerun")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>
                 <RefreshCw className="h-4 w-4" /> Rerun {weakRerunArchetypes.length} weak archetypes
               </button>}
-              {campaign && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged", "motorsport"], "control")} disabled={acting !== null}>
+              {campaign && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", ["team", "water", "judged", "motorsport"], "control")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>
                 <ShieldCheck className="h-4 w-4" /> Run 4 regression controls
               </button>}
-              {confirmationArchetypes.length > 0 && confirmationFitsBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={acting !== null}>
+              {confirmationArchetypes.length > 0 && confirmationFitsBudget && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", confirmationArchetypes, "confirmation")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>
                 <ShieldCheck className="h-4 w-4" /> Run {confirmationArchetypes.length} full confirmations
               </button>}
-              {thirdReplicateArchetypes.length > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", thirdReplicateArchetypes, "confirmation", true)} disabled={acting !== null}>
+              {thirdReplicateArchetypes.length > 0 && !legacyFastRoute && <button className="pc-button-secondary" onClick={() => void campaignAction("rerun", thirdReplicateArchetypes, "confirmation", true)} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>
                 <ShieldCheck className="h-4 w-4" /> Run {thirdReplicateArchetypes.length} stability replicates
               </button>}
-              <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={acting !== null || !paidReadiness?.ready}>
+              <button className="pc-button-primary" onClick={() => void startCampaign()} disabled={paidActionDisabled} title={paidActionTitle}>
                 <FlaskConical className="h-4 w-4" /> Start three release canaries
               </button>
             </>
@@ -268,6 +279,10 @@ export default function HardeningClient() {
         <p className="font-semibold">Paid testing is waiting on verified spending limits</p>
         <p className="mt-1">{paidReadiness.nextStep}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-brand-muted">{paidReadiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+      </div>}
+      {campaign && !usesOperationLedger && <div className="border border-brand-ink/10 bg-brand-paper px-4 py-3 text-sm text-brand-ink">
+        <p className="font-semibold">Historical campaign · reference only</p>
+        <p className="mt-1">Past verdicts are preserved as development evidence, not certification for the current release. This campaign cannot resume paid work; new release testing requires a separate campaign with verified spending limits.</p>
       </div>}
 
       <section className="border border-brand-ink/10 bg-brand-paper-bright">
@@ -333,7 +348,7 @@ export default function HardeningClient() {
             <span><strong>{String(summary.passed || 0)}</strong> passed</span>
             <span><strong>{String(summary.unresolved_defects || 0)}</strong> open defects</span>
             <span><strong>{String(summary.duplicate_suppressions || 0)}</strong> duplicates stopped</span>
-            <span><strong>{String(summary.paid_calls_avoided || 0)}</strong> paid calls avoided</span>
+            <span title="Heuristic estimate, not measured provider calls or dollar savings"><strong>{String(summary.paid_calls_avoided || 0)}</strong> estimated paid calls avoided</span>
           </div>
           <a className="pc-button-secondary" href={`/api/research/hardening/${campaign.id}/report?format=md`}><Download className="h-4 w-4" /> Markdown</a>
           <a className="pc-button-secondary" href={`/api/research/hardening/${campaign.id}/report?format=json`}><Download className="h-4 w-4" /> JSON</a>
@@ -424,7 +439,7 @@ export default function HardeningClient() {
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "exactPersonCandidates")} → {metric(item.metrics, "scoredCandidates")} → {metric(item.metrics, "finalists")}</td>
                     <td className="px-3 py-4 text-xs text-brand-ink">
                       <p><span className="font-mono font-semibold">{metric(item.metrics, "duplicatesSuppressedBeforeEnrichment")}</span> stopped</p>
-                      <p className="mt-1 text-brand-muted"><span className="font-mono">{Math.round(metric(item.metrics, "explorationRatio") * 100)}%</span> explore · <span className="font-mono">{metric(item.metrics, "paidCallsAvoided")}</span> calls saved</p>
+                      <p className="mt-1 text-brand-muted" title="Calls avoided is a heuristic estimate, not measured provider usage"><span className="font-mono">{Math.round(metric(item.metrics, "explorationRatio") * 100)}%</span> explore · <span className="font-mono">{metric(item.metrics, "paidCallsAvoided")}</span> estimated calls avoided</p>
                     </td>
                     <td className="px-3 py-4 font-mono text-xs text-brand-ink">{metric(item.metrics, "auditedRejected")} / 2</td>
                     <td className="max-w-[260px] px-3 py-4">
@@ -439,8 +454,8 @@ export default function HardeningClient() {
                       <p className="mt-1 font-mono text-[9px] uppercase text-brand-muted">reserve {money(item.cost_microusd)}</p>
                     </td>
                     <td className="px-4 py-4 text-right">
-                      {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype, item.stage === "control" ? "control" : "targeted_rerun")} disabled={acting !== null}>{item.stage === "control" ? "Control rerun" : "Targeted rerun"}</button>}
-                      {canRunControl && <button className="text-xs font-semibold text-brand-blue hover:underline" onClick={() => void campaignAction("rerun", item.archetype, "control")} disabled={acting !== null}>Control rerun</button>}
+                      {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline" onClick={() => void campaignAction("rerun", item.archetype, item.stage === "control" ? "control" : "targeted_rerun")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>{item.stage === "control" ? "Control rerun" : "Targeted rerun"}</button>}
+                      {canRunControl && <button className="text-xs font-semibold text-brand-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline" onClick={() => void campaignAction("rerun", item.archetype, "control")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>Control rerun</button>}
                       {!canRerun && !canRunControl && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
                     </td>
                   </tr>
