@@ -15,6 +15,7 @@ function assertSafeResult(result: Result) {
   assert.ok(result.message.length > 0);
   assert.equal(JSON.stringify(result).includes(syntheticKey), false);
   assert.equal(JSON.stringify(result).includes("provider-secret-body"), false);
+  assert.ok([null, "invalid_api_key", "insufficient_quota", "permission_denied"].includes(result.providerErrorCode));
 }
 
 function responseFetcher(response: Response) {
@@ -73,8 +74,49 @@ test("401 and 403 reject credentials without exposing provider errors or retryin
     const result = await checkPerplexityCredential(syntheticKey, fetcher);
     assert.equal(result.credentialStatus, "rejected");
     assert.equal(result.providerHttpStatus, status);
+    assert.equal(result.providerErrorCode, null);
     assertSafeResult(result);
     assert.equal(calls.length, 1);
+  }
+});
+
+test("allowlisted provider error codes distinguish quota from rejected keys and permissions", async () => {
+  for (const status of [401, 403]) {
+    for (const field of ["type", "code"]) {
+      for (const code of ["insufficient_quota", "invalid_api_key", "permission_denied"] as const) {
+        const { calls, fetcher } = responseFetcher(Response.json({
+          error: { [field]: code, message: `${syntheticKey} provider-secret-body`, key: syntheticKey },
+        }, { status }));
+        const result = await checkPerplexityCredential(syntheticKey, fetcher);
+        assert.equal(result.providerErrorCode, code);
+        assert.equal(result.providerHttpStatus, status);
+        assert.equal(result.credentialStatus, code === "insufficient_quota" ? "unavailable" : "rejected");
+        assert.match(result.message, code === "insufficient_quota" ? /quota|credit/i
+          : code === "invalid_api_key" ? /invalid|key|reject/i : /permission|access/i);
+        assertSafeResult(result);
+        assert.equal(calls.length, 1);
+      }
+    }
+  }
+});
+
+test("unknown, malformed and secret-bearing error bodies use a sanitized generic rejection", async () => {
+  const bodies = ["<html>provider-secret-body</html>", '{"error":', "null", "[]", "{}",
+    JSON.stringify({ error: null }), JSON.stringify({ error: "provider-secret-body" }),
+    JSON.stringify({ error: { type: "some_new_provider_error", message: syntheticKey } }),
+    JSON.stringify({ error: { code: `invalid_api_key ${syntheticKey}` } }),
+    JSON.stringify({ error: { type: "INSUFFICIENT_QUOTA" } }),
+    JSON.stringify({ error: { type: 401, code: { secret: syntheticKey } } })];
+  for (const status of [401, 403]) {
+    for (const body of bodies) {
+      const { calls, fetcher } = responseFetcher(new Response(body, { status }));
+      const result = await checkPerplexityCredential(syntheticKey, fetcher);
+      assert.equal(result.credentialStatus, "rejected");
+      assert.equal(result.providerHttpStatus, status);
+      assert.equal(result.providerErrorCode, null);
+      assertSafeResult(result);
+      assert.equal(calls.length, 1);
+    }
   }
 });
 
