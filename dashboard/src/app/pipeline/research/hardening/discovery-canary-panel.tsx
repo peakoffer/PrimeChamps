@@ -27,6 +27,27 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
   const [starting, setStarting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const submitLock = useRef(false);
+  const [credentialCheck, setCredentialCheck] = useState<{ message: string; checkedAt?: string } | null>(null);
+  const [checkingCredential, setCheckingCredential] = useState(false);
+  const credentialLock = useRef(false);
+
+  async function checkCredential() {
+    if (!isOwner || credentialLock.current) return;
+    credentialLock.current = true;
+    setCheckingCredential(true);
+    setCredentialCheck(null);
+    try {
+      const response = await fetch("/api/providers/perplexity/health", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok) throw new Error("Could not check the saved credential. Confirm you are signed in as the workspace owner.");
+      setCredentialCheck({ message: body.message, checkedAt: body.checkedAt });
+    } catch {
+      setCredentialCheck({ message: "The credential check could not finish. No research run or automatic retry was started." });
+    } finally {
+      credentialLock.current = false;
+      setCheckingCredential(false);
+    }
+  }
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -80,12 +101,20 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
         <p className="mt-1 max-w-3xl text-sm text-brand-muted">Six searches, at most $0.030 from the existing campaign allowance. No athlete creation, scoring, or outreach. This does not certify candidate quality.</p>
       </div>
       <div className="flex flex-wrap gap-2">
+        {isOwner && <button className="pc-button-secondary" onClick={() => void checkCredential()} disabled={checkingCredential}>
+          {checkingCredential ? "Checking saved key…" : "Check saved key · no search"}
+        </button>}
         <button className="pc-button-secondary" onClick={() => void load()}>Refresh diagnostic</button>
         {isOwner && !view?.canary && <button className="pc-button-primary" onClick={() => void start()} disabled={!view?.eligible || starting || submitted}>
           {starting ? "Checking sources…" : submitted ? "Submitted · inspect receipt" : "Run six discovery checks · max $0.03"}
         </button>}
       </div>
     </div>
+    {credentialCheck && <div role="status" className="mt-3 border border-brand-ink/10 p-3 text-sm text-brand-ink">
+      <p className="font-semibold">Current Perplexity credential</p>
+      <p className="mt-1">{credentialCheck.message}</p>
+      <p className="mt-1 text-xs text-brand-muted">{credentialCheck.checkedAt ? `Checked ${new Date(credentialCheck.checkedAt).toLocaleString()}. ` : ""}No search or AI generation. Previous research receipts below remain unchanged.</p>
+    </div>}
     {error && <p role="alert" className="mt-3 text-sm text-brand-danger">{error}</p>}
     <p className="mt-3 text-xs text-brand-muted">{view?.explanation || "Checking the existing budget allocation…"}</p>
     {view?.canary && <div aria-live="polite" className="mt-3 space-y-3">

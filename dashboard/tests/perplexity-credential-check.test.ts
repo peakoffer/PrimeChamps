@@ -162,3 +162,47 @@ test("production route is owner-only before checking the server key, non-cacheab
   assert.doesNotMatch(source, /researchPaidFetch|runResearchPaidOperation|launchDiscoveryProbe|createAdminClient|\.insert\s*\(|\.update\s*\(|\.delete\s*\(/);
   assert.doesNotMatch(source, /request\.(?:json|text)\(|searchParams|console\.(?:log|error|warn)/);
 });
+
+test("saved-key UI requires an owner click and keeps credential status separate from paid diagnostic receipts", async () => {
+  const source = await readFile(new URL("../src/app/pipeline/research/hardening/discovery-canary-panel.tsx", import.meta.url), "utf8");
+  const file = ts.createSourceFile("panel.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let handler: ts.FunctionDeclaration | undefined;
+  let explicitClicks = 0;
+  let credentialFetches = 0;
+  function visit(node: ts.Node) {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "checkCredential") handler = node;
+    if (ts.isCallExpression(node) && node.expression.getText(file) === "checkCredential") {
+      let parent: ts.Node | undefined = node.parent;
+      while (parent && !ts.isJsxAttribute(parent)) parent = parent.parent;
+      assert.ok(parent && ts.isJsxAttribute(parent));
+      assert.equal(parent.name.getText(file), "onClick", "Credential checks must only start from an explicit click");
+      explicitClicks += 1;
+    }
+    if (ts.isCallExpression(node) && node.expression.getText(file) === "fetch"
+      && node.arguments[0]?.getText(file).includes("/api/providers/perplexity/health")) {
+      let parent: ts.Node | undefined = node.parent;
+      while (parent && !ts.isFunctionDeclaration(parent)) parent = parent.parent;
+      assert.equal(parent && ts.isFunctionDeclaration(parent) ? parent.name?.text : null, "checkCredential");
+      credentialFetches += 1;
+    }
+    if (ts.isCallExpression(node) && node.expression.getText(file) === "useEffect") {
+      assert.doesNotMatch(node.getText(file), /checkCredential|perplexity\/health/);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  assert.equal(explicitClicks, 1);
+  assert.equal(credentialFetches, 1);
+  assert.ok(handler?.body);
+  const body = handler.body.getText(file);
+  assert.match(body, /if\s*\(\s*!isOwner\s*\|\|\s*credentialLock\.current\s*\)\s*return/);
+  assert.ok(body.indexOf("!isOwner") < body.indexOf("fetch("));
+  assert.match(body, /cache:\s*["']no-store["']/);
+  assert.match(body, /setCredentialCheck\(/);
+  assert.doesNotMatch(body, /setView\(|\bstart\(|\bload\(|method:\s*["']POST["']|discovery-canary|researchPaid|launchDiscovery/);
+  assert.match(source, /\{isOwner\s*&&\s*<button[^>]*onClick=\{\(\)\s*=>\s*void checkCredential\(\)\}[^>]*disabled=\{checkingCredential\}/);
+  assert.match(source, /\{credentialCheck\s*&&\s*<div\s+role="status"/);
+  assert.match(source, /\{credentialCheck\.message\}/);
+  assert.match(source, /Previous research receipts below remain unchanged/);
+  assert.match(source, /\{view\?\.canary\s*&&/);
+});
