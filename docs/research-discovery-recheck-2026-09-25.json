@@ -1,0 +1,60 @@
+{
+  "date": "2026-09-25",
+  "status": "blocked_invalid_api_key",
+  "codeCommit": "17b88956fc2cc5876da103dd73e446e509835cf0",
+  "deployment": "dpl_CWMtRBhiZs4QdCa2ZTTtmeFhvyhV",
+  "url": "https://crm.prime-champs.com/pipeline/research/hardening",
+  "probeId": "bfa35303-efe2-4498-ac90-f2d44fc8c017",
+  "researchLogId": "87972522-016b-439d-823b-5bcdb7646207",
+  "manifest": "weak-archetype-raw-search-recheck-20260925",
+  "startedAt": "2026-09-25T16:20:46.051419Z",
+  "completedAt": "2026-09-25T16:20:48.234666Z",
+  "providerErrorType": "invalid_api_key",
+  "httpStatus": 401,
+  "attemptedRequests": 3,
+  "successfulRequests": 0,
+  "notRun": 3,
+  "sourceLinks": 0,
+  "modelCalls": 0,
+  "apifyRuns": 0,
+  "publishedRateCostUsd": 0,
+  "invoiceReconciled": false,
+  "unsettledOperationExposureUsd": 0,
+  "thisRetainedAllocationUsd": 0.03,
+  "bothRetainedAllocationsUsd": 0.06,
+  "legacyParentReservationUsd": 79,
+  "combinedRetainedAuthorizationUsd": 79.06,
+  "ordinaryAuthorizationRemainingUsd": 0.94,
+  "originalCeilingUsd": 100,
+  "confirmationReserveUsd": 20,
+  "liveCrmFullRowDigestsUnchanged": true,
+  "liveCrmTablesVerified": 14,
+  "originalProbeLogAndReceiptsUnchanged": true,
+  "automaticRetries": 0,
+  "thirdAttemptAvailable": false,
+  "tests": {
+    "passed": 388,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 54
+    },
+    "build": "passed",
+    "migration": "20260925161813_research_discovery_quota_recheck",
+    "rlsEnabled": true,
+    "browserTableAndRpcAccess": false,
+    "advisors": "security findings unchanged"
+  },
+  "vercelMetadata": {
+    "key": "PERPLEXITY_API_KEY",
+    "type": "Secret",
+    "environments": [
+      "Production",
+      "Preview"
+    ],
+    "valueInspected": false
+  },
+  "nextStep": "Owner must verify complete active Perplexity key in the existing Vercel production variable and redeploy. No API retry until corrected and separately bounded. Full research stays locked."
+}
