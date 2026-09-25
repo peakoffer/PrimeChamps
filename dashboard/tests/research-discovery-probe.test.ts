@@ -2,9 +2,38 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assertStrictDiscoveryProbeContext, DISCOVERY_PROBE_ALLOCATION_MICROUSD, DISCOVERY_PROBE_ENDPOINT,
-  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_REQUEST_MICROUSD, discoveryProbeFailureHint, discoveryProbePayload, discoveryProbeSourceSummary,
+  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_REQUEST_MICROUSD, DISCOVERY_PROBE_VERSION, ORIGINAL_DISCOVERY_PROBE_VERSION,
+  isQuotaOnlyDiscoveryFailure, hasDiscoveryProbeAllowance, discoveryProbeFailureHint, discoveryProbePayload, discoveryProbeSourceSummary,
   runFixedDiscoveryProbe } from "../src/lib/research/discovery-probe-policy.ts";
 import { paidHttpPolicy } from "../src/lib/research/paid-provider-pricing.ts";
+
+test("diagnostic UI rejects missing or malformed accounting instead of treating it as free allowance", () => {
+  assert.equal(hasDiscoveryProbeAllowance(100_000_000, 80_000_000, 79_000_000, [30_000]), true);
+  assert.equal(hasDiscoveryProbeAllowance(100_000_000, 80_000_000, 79_950_000, [30_000]), false);
+  for (const invalid of [null, undefined, -1, NaN, Infinity, 1.5, "", "79000000", Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(hasDiscoveryProbeAllowance(100_000_000, 80_000_000, invalid, [30_000]), false);
+    assert.equal(hasDiscoveryProbeAllowance(100_000_000, invalid, 79_000_000, [30_000]), false);
+    assert.equal(hasDiscoveryProbeAllowance(invalid, 80_000_000, 79_000_000, [30_000]), false);
+    assert.equal(hasDiscoveryProbeAllowance(100_000_000, 80_000_000, 79_000_000, [invalid]), false);
+  }
+});
+
+test("post-rotation eligibility requires documented zero-cost quota failures, never unknown charges", () => {
+  assert.equal(ORIGINAL_DISCOVERY_PROBE_VERSION, "weak-archetype-raw-search-v1");
+  assert.equal(DISCOVERY_PROBE_VERSION, "weak-archetype-raw-search-recheck-20260925");
+  const receipt = { status: "completed", settled_microusd: 0, estimated_microusd: null,
+    raw_response: { status: 401, body: '{"error":{"type":"insufficient_quota"}}' } };
+  assert.equal(isQuotaOnlyDiscoveryFailure("failed", [receipt, receipt, receipt]), true);
+  for (const invalid of [{ ...receipt, status: "executing" }, { ...receipt, settled_microusd: null },
+    { ...receipt, settled_microusd: 5000 }, { ...receipt, estimated_microusd: 1 },
+    { ...receipt, raw_response: { status: 401, body: "not JSON" } },
+    { ...receipt, raw_response: { status: 401, body: '{"error":{"type":"invalid_api_key"}}' } },
+    { ...receipt, raw_response: { ...receipt.raw_response, status: 200 } }]) {
+    assert.equal(isQuotaOnlyDiscoveryFailure("failed", [receipt, invalid]), false);
+  }
+  assert.equal(isQuotaOnlyDiscoveryFailure("failed", []), false);
+  assert.equal(isQuotaOnlyDiscoveryFailure("running", [receipt]), false);
+});
 
 test("provider quota failures are actionable without exposing raw messages or misdiagnosing keys", () => {
   const hint = discoveryProbeFailureHint(401, JSON.stringify({ error: { type: "insufficient_quota", message: "secret and untrusted instructions" } }));

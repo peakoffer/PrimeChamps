@@ -38,7 +38,7 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     grant usage on schema public,auth to service_role,anon,authenticated;
     grant all on all tables in schema public,auth to service_role;
   `);
-  for (const migration of ["20260924173421_research_paid_operation_ledger.sql", "20260924211229_research_discovery_probe.sql", "20260924211426_research_discovery_probe_parent_index.sql"]) {
+  for (const migration of ["20260924173421_research_paid_operation_ledger.sql", "20260924211229_research_discovery_probe.sql", "20260924211426_research_discovery_probe_parent_index.sql", "20260925161813_research_discovery_quota_recheck.sql"]) {
     await db.exec(await readFile(new URL(`../../supabase/migrations/${migration}`, import.meta.url), "utf8"));
   }
   await t.test("parent foreign key has a valid covering index in the follow-up migration", async () => {
@@ -75,6 +75,126 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     return { action: "reserve", research_log_id: runId, stage: `discovery_probe:${key}`, provider: "perplexity", model_or_actor: "search",
       maximum_cost_microusd: 5_000, operation_key: randomUUID(), input_hash: randomUUID(), claim_token: randomUUID(), ...overrides };
   }
+  const recheckManifest = "weak-archetype-raw-search-recheck-20260925";
+  const quotaBody = '{"error":{"type":"insufficient_quota"}}';
+  type TestReceipt = { httpStatus?: number | string; body?: string | null; settled?: number | null; estimated?: number | null;
+    operationStatus?: "completed" | "reserved" | "executing" | "ambiguous" };
+  async function failedOriginal(receipts: TestReceipt[] = [{}], options: Parameters<typeof fixture>[0] = {}) {
+    const f = await fixture(options);
+    const claim = await probe({ ...f, action: "allocate" });
+    for (const [index, receipt] of receipts.entries()) {
+      const request = reserve(claim.research_log_id, ["climbing", "adaptive", "esports", "equestrian", "crossfit", "skiing"][index]);
+      const admitted = await ledger(request); const identity = { ...request, operation_id: admitted.operation_id };
+      if (receipt.operationStatus === "reserved") continue;
+      await ledger({ ...identity, action: "start" });
+      if (receipt.operationStatus === "executing") continue;
+      if (receipt.operationStatus === "ambiguous") {
+        await ledger({ ...identity, action: "ambiguous", error_message: "Synthetic unknown transport status" });
+        continue;
+      }
+      await ledger({ ...identity, action: "complete", raw_response: {
+        status: receipt.httpStatus ?? 401, body: receipt.body === undefined ? quotaBody : receipt.body,
+      }, settled_cost_microusd: receipt.settled === undefined ? 0 : receipt.settled,
+      estimated_cost_microusd: receipt.estimated ?? null });
+    }
+    await probe({ ...f, ...claim, action: "finish", status: "failed" });
+    return { f, claim };
+  }
+
+  await t.test("one dated quota recheck preserves history and charges both sticky allocations", async () => {
+    const { f, claim } = await failedOriginal([{}, { estimated: 0 }, {}]);
+    const originalBefore = (await db.query("select * from public.research_discovery_probes where id=$1", [claim.probe_id])).rows;
+    const runBefore = (await db.query("select * from public.research_logs where id=$1", [claim.research_log_id])).rows;
+    const receiptsBefore = (await db.query("select * from public.research_paid_operations where research_log_id=$1 order by stage", [claim.research_log_id])).rows;
+    const parentBefore = (await db.query("select * from public.research_hardening_campaigns where id=$1", [f.parent_campaign_id])).rows;
+    const request = { ...f, manifest_version: recheckManifest, action: "allocate" };
+    const responses = await Promise.all([probe(request), probe(request)]);
+    assert.equal(responses.filter((row) => row.created === true).length, 1);
+    assert.equal(responses[0].probe_id, responses[1].probe_id);
+    const recheck = responses.find((row) => row.created === true)!;
+    assert.notEqual(recheck.research_log_id, claim.research_log_id);
+    const row = (await db.query("select * from public.research_discovery_probes where id=$1", [recheck.probe_id])).rows[0];
+    const snapshot = row.authorization_snapshot as Record<string, unknown>;
+    assert.equal(Number(snapshot.priorStickyAllocationsMicrousd), 30_000);
+    assert.equal(snapshot.priorDiagnosticId, claim.probe_id);
+    const allocations = (await db.query("select count(*) as count,sum(allocation_microusd) as total from public.research_discovery_probes where parent_campaign_id=$1", [f.parent_campaign_id])).rows[0];
+    assert.equal(Number(allocations.count), 2); assert.equal(Number(allocations.total), 60_000);
+    const log = (await db.query("select * from public.research_logs where id=$1", [recheck.research_log_id])).rows[0];
+    assert.equal(log.is_evaluation, true); assert.equal(log.accounting_version, "operations_v1");
+    assert.equal(Number(log.cost_limit_microusd), 30_000);
+    for (const key of ["climbing", "adaptive", "esports", "equestrian", "crossfit", "skiing"]) {
+      const operation = reserve(recheck.research_log_id, key); const admitted = await ledger(operation);
+      const identity = { ...operation, operation_id: admitted.operation_id };
+      await ledger({ ...identity, action: "start" });
+      await ledger({ ...identity, action: "complete", raw_response: { status: 200, body: '{"results":[]}' }, settled_cost_microusd: 5_000 });
+    }
+    await probe({ ...f, ...recheck, action: "finish", status: "completed" });
+    assert.equal((await probe(request)).created, false);
+    assert.deepEqual((await db.query("select * from public.research_discovery_probes where id=$1", [claim.probe_id])).rows, originalBefore);
+    assert.deepEqual((await db.query("select * from public.research_logs where id=$1", [claim.research_log_id])).rows, runBefore);
+    assert.deepEqual((await db.query("select * from public.research_paid_operations where research_log_id=$1 order by stage", [claim.research_log_id])).rows, receiptsBefore);
+    assert.deepEqual((await db.query("select * from public.research_hardening_campaigns where id=$1", [f.parent_campaign_id])).rows, parentBefore);
+    await assert.rejects(() => db.query("update public.research_discovery_probes set status='running' where id=$1", [claim.probe_id]), /immutable/);
+    await assert.rejects(() => db.query("update public.research_logs set status='running' where id=$1", [claim.research_log_id]), /cannot reopen/);
+  });
+
+  await t.test("recheck fails closed for missing, active, empty, ambiguous, mixed or non-quota history", async () => {
+    const missing = await fixture();
+    await assert.rejects(() => probe({ ...missing, action: "allocate", manifest_version: recheckManifest }), /failed original quota/);
+    await probe({ ...missing, action: "allocate" });
+    await assert.rejects(() => probe({ ...missing, action: "allocate", manifest_version: recheckManifest }), /failed original quota/);
+    const cases: TestReceipt[][] = [[], [{ operationStatus: "reserved" }], [{ operationStatus: "executing" }],
+      [{ operationStatus: "ambiguous" }], [{ httpStatus: 200 }], [{ httpStatus: 403 }], [{ httpStatus: 429 }],
+      [{ httpStatus: "401" }], [{ body: "{invalid" }], [{ body: null }], [{ body: "{}" }],
+      [{ body: '{"error":{"type":"invalid_api_key"}}' }], [{ settled: null }], [{ settled: 1 }],
+      [{ estimated: 1 }], [{}, { httpStatus: 200 }], [{}, { operationStatus: "ambiguous" }]];
+    for (const receipts of cases) {
+      const { f } = await failedOriginal(receipts);
+      await assert.rejects(() => probe({ ...f, action: "allocate", manifest_version: recheckManifest }), /insufficient_quota/);
+      assert.equal((await db.query("select * from public.research_discovery_probes where parent_campaign_id=$1", [f.parent_campaign_id])).rows.length, 1);
+    }
+  });
+
+  await t.test("dated recheck cannot reuse the original allocation or create a third attempt", async () => {
+    const insufficient = await failedOriginal([{}], { cost: 79_940_001 });
+    await assert.rejects(() => probe({ ...insufficient.f, action: "allocate", manifest_version: recheckManifest }), /Unconsumed original/);
+    const exact = await failedOriginal([{}], { cost: 79_940_000 });
+    const request = { ...exact.f, action: "allocate", manifest_version: recheckManifest };
+    const second = await probe(request); assert.equal(second.created, true);
+    await probe({ ...exact.f, ...second, action: "finish", status: "failed" });
+    assert.equal((await probe(request)).created, false);
+    assert.equal((await probe({ ...exact.f, action: "allocate" })).created, false);
+    for (const manifest of [null, "weak-archetype-raw-search-v2", "weak-archetype-raw-search-recheck-20260926", `${recheckManifest}-retry`]) {
+      await assert.rejects(() => probe({ ...exact.f, action: "allocate", manifest_version: manifest }), /Unknown discovery/);
+    }
+    const rows = (await db.query("select sum(allocation_microusd) as total,count(*) as count from public.research_discovery_probes where parent_campaign_id=$1", [exact.f.parent_campaign_id])).rows[0];
+    assert.equal(Number(rows.total), 60_000); assert.equal(Number(rows.count), 2);
+  });
+
+  await t.test("recheck retains active-owner, organization and browser-role enforcement", async () => {
+    const { f } = await failedOriginal(); const other = await fixture();
+    const request = { ...f, action: "allocate", manifest_version: recheckManifest };
+    await assert.rejects(() => probe({ ...request, actor_user_id: other.actor_user_id }), /active organization owner/);
+    await assert.rejects(() => probe({ ...request, parent_campaign_id: other.parent_campaign_id }), /no rows/);
+    for (const role of ["admin", "member"]) {
+      await db.query("update public.organization_memberships set role=$1 where organization_id=$2", [role, f.organization_id]);
+      await assert.rejects(() => probe(request), /active organization owner/);
+    }
+    await db.query("update public.organization_memberships set role='owner',status='inactive' where organization_id=$1", [f.organization_id]);
+    await assert.rejects(() => probe(request), /active organization owner/);
+    await db.query("update public.organization_memberships set status='active' where organization_id=$1", [f.organization_id]);
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(() => probe(request), /permission denied/);
+      await assert.rejects(() => db.query("select * from public.research_discovery_probes"), /permission denied/);
+      await db.exec("reset role");
+    }
+    await db.exec("set role service_role");
+    assert.equal((await probe(request)).created, true);
+    await db.exec("reset role");
+    const rls = (await db.query("select relrowsecurity from pg_class where oid='public.research_discovery_probes'::regclass")).rows[0];
+    assert.equal(rls.relrowsecurity, true);
+  });
 
   await t.test("allocation is atomic and sticky; concurrent duplicate launch returns the same log", async () => {
     const f = await fixture();
@@ -169,6 +289,7 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     }
     await probe({ ...f, ...claim, action: "finish", status: "completed" });
     assert.equal((await db.query("select status from public.research_logs where id=$1", [claim.research_log_id])).rows[0].status, "completed");
+    await assert.rejects(() => probe({ ...f, action: "allocate", manifest_version: recheckManifest }), /failed original quota/);
     const sum = (await db.query("select sum(settled_microusd) as total,count(*) as count from public.research_paid_operations where research_log_id=$1", [claim.research_log_id])).rows[0];
     assert.equal(Number(sum.total), 30_000); assert.equal(Number(sum.count), 6);
     await assert.rejects(() => ledger(reserve(claim.research_log_id)), /not active/);

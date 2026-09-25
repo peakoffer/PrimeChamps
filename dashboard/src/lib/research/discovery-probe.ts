@@ -3,8 +3,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { researchPaidFetch } from "./paid-provider-fetch";
 import { getResearchPaidContext, withResearchPaidContext } from "./paid-operations";
 import { summarizeResearchPaidOperations } from "./paid-operation-policy";
-import { assertStrictDiscoveryProbeContext, DISCOVERY_PROBE_ALLOCATION_MICROUSD, DISCOVERY_PROBE_ENDPOINT,
-  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_VERSION, discoveryProbeFailureHint, discoveryProbePayload, discoveryProbeSourceSummary, runFixedDiscoveryProbe } from "./discovery-probe-policy";
+import { assertStrictDiscoveryProbeContext, DISCOVERY_PROBE_ENDPOINT,
+  DISCOVERY_PROBE_MANIFEST, DISCOVERY_PROBE_VERSION, ORIGINAL_DISCOVERY_PROBE_VERSION, isQuotaOnlyDiscoveryFailure, hasDiscoveryProbeAllowance,
+  discoveryProbeFailureHint, discoveryProbePayload, discoveryProbeSourceSummary, runFixedDiscoveryProbe } from "./discovery-probe-policy";
 
 type Actor = { id: string; organizationId: string };
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value)
@@ -21,16 +22,25 @@ export async function inspectDiscoveryProbe(actor: Actor, campaignId: string) {
     .select("id,status,manifest_version,allocation_microusd,research_log_id,deadline_at,error_message,authorization_snapshot")
     .eq("parent_campaign_id", campaignId).eq("organization_id", actor.organizationId);
   if (probeError) throw probeError;
-  const priorAllocation = (probes || []).reduce((sum, row) => sum + Number(row.allocation_microusd), 0);
   const probe = probes?.find((row) => row.manifest_version === DISCOVERY_PROBE_VERSION);
   if (!probe) {
+    const previous = probes?.find((row) => row.manifest_version === ORIGINAL_DISCOVERY_PROBE_VERSION);
+    let quotaFailure = false;
+    if (previous?.status === "failed") {
+      const { data: receipts, error: receiptError } = await admin.from("research_paid_operations")
+        .select("status,raw_response,settled_microusd,estimated_microusd")
+        .eq("research_log_id", previous.research_log_id).eq("organization_id", actor.organizationId);
+      if (receiptError) throw receiptError;
+      quotaFailure = isQuotaOnlyDiscoveryFailure(previous.status, receipts || []);
+    }
     const eligible = Boolean(process.env.PERPLEXITY_API_KEY)
+      && quotaFailure
       && parent.accounting_version === "legacy" && ["completed", "failed", "cancelled"].includes(parent.status)
-      && Math.min(Number(parent.preconfirmation_stop_microusd), Number(parent.budget_limit_microusd))
-        - Number(parent.total_cost_microusd) - priorAllocation >= DISCOVERY_PROBE_ALLOCATION_MICROUSD;
+      && hasDiscoveryProbeAllowance(parent.budget_limit_microusd, parent.preconfirmation_stop_microusd,
+        parent.total_cost_microusd, (probes || []).map((row) => row.allocation_microusd));
     return { canary: null, eligible, explanation: eligible
-      ? "One fixed six-search diagnostic can use $0.03 of the original unconsumed ordinary allowance. No new budget or candidate-quality certification."
-      : "A terminal legacy campaign with $0.03 of unconsumed ordinary authorization and a configured raw-search provider is required." };
+      ? "The earlier quota-failed diagnostic and its $0.03 reservation are preserved. One separate post-rotation recheck can use another $0.03 of the original ordinary allowance. No new campaign budget or quality certification."
+      : "A documented quota-only failed diagnostic, $0.03 of remaining original ordinary authorization, and a configured search provider are required for this one-time recheck. Earlier receipts remain unchanged." };
   }
   const { data: operations, error: operationsError } = await admin.from("research_paid_operations")
     .select("stage,status,raw_response,reserved_microusd,settled_microusd,estimated_microusd,usage")
@@ -50,7 +60,7 @@ export async function inspectDiscoveryProbe(actor: Actor, campaignId: string) {
     return { sport: query.sport, status: resultStatus, httpStatus,
       failureReason: discoveryProbeFailureHint(httpStatus, raw.body), ...summary };
   });
-  return { eligible: false, explanation: "This once-only diagnostic is allocated. It cannot restart or release its allowance; full research hardening remains blocked.", canary: {
+  return { eligible: false, explanation: "This once-only recheck is allocated. It cannot restart or release its allowance. The original quota-failed diagnostic and both reservations remain preserved; full research hardening remains blocked.", canary: {
     id: probe.id, status, classification: "discovery_transport_only" as const,
     allocationMicrousd: Number(probe.allocation_microusd), ...costs, results,
     authorizationSnapshot: probe.authorization_snapshot,

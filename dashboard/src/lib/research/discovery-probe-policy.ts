@@ -1,7 +1,17 @@
-export const DISCOVERY_PROBE_VERSION = "weak-archetype-raw-search-v1";
+export const ORIGINAL_DISCOVERY_PROBE_VERSION = "weak-archetype-raw-search-v1";
+// One explicit post-rotation check, not an automatically incremented retry key.
+export const DISCOVERY_PROBE_VERSION = "weak-archetype-raw-search-recheck-20260925";
 export const DISCOVERY_PROBE_ALLOCATION_MICROUSD = 30_000;
 export const DISCOVERY_PROBE_REQUEST_MICROUSD = 5_000;
 export const DISCOVERY_PROBE_ENDPOINT = "https://api.perplexity.ai/search";
+
+export function hasDiscoveryProbeAllowance(hard: unknown, ordinary: unknown, priorCost: unknown, allocations: unknown[]) {
+  const amounts = [hard, ordinary, priorCost, ...allocations];
+  if (!amounts.every((amount) => typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0)) return false;
+  const held = (allocations as number[]).reduce((sum, amount) => sum + amount, 0);
+  return Number.isSafeInteger(held) && Math.min(hard as number, ordinary as number) - (priorCost as number) - held
+    >= DISCOVERY_PROBE_ALLOCATION_MICROUSD;
+}
 
 // Frozen diagnostic queries, not a release-quality search strategy. No gender or
 // geography is inferred; no language filter silently excludes international pages.
@@ -32,6 +42,16 @@ export function assertStrictDiscoveryProbeContext(context: {
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value)
   ? value as Record<string, unknown> : {};
+
+export function isQuotaOnlyDiscoveryFailure(status: unknown, operations: unknown[]) {
+  return status === "failed" && operations.length > 0 && operations.every((value) => {
+    const row = object(value); const raw = object(row.raw_response);
+    if (row.status !== "completed" || raw.status !== 401 || row.settled_microusd == null
+      || Number(row.settled_microusd) !== 0 || (row.estimated_microusd != null && Number(row.estimated_microusd) !== 0)
+      || typeof raw.body !== "string") return false;
+    try { return object(object(JSON.parse(raw.body)).error).type === "insufficient_quota"; } catch { return false; }
+  });
+}
 
 /** Only fixed, reviewed hints reach the UI; never echo provider response text. */
 export function discoveryProbeFailureHint(httpStatus: number | null, body: unknown): string | null {
