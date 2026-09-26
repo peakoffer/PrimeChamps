@@ -1,8 +1,10 @@
 import "server-only";
 
 import { inspectApifyCredentials } from "@/lib/provider-credential-validation";
+import { checkApifyAccount } from "@/lib/apify-account-check";
 import { assertResearchPaidWorkAllowed, getResearchPaidContext, runResearchPaidOperation, ResearchPaidOperationError, type ResearchPaidOperationHandle } from "@/lib/research/paid-operations";
 import { assertTerminalApifyReceipt, boundedActorPolicy, boundedApifyChargeMicrousd, boundedApifyDatasetReadPolicy, newApifyRunBlockReason, type ActorBillingMetadata } from "@/lib/research/apify-spending-policy";
+import { apifyDefaultStorageDeletePaths, assertApifyAccountHeadroom, verifiedApifyDefaultStorageDeletes } from "@/lib/research/apify-storage-policy";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
@@ -24,6 +26,8 @@ type ApifyRun = {
   status?: ApifyRunStatus;
   statusMessage?: string;
   defaultDatasetId?: string;
+  defaultKeyValueStoreId?: string;
+  defaultRequestQueueId?: string;
   usageTotalUsd?: number;
   chargedEventCounts?: Record<string, number>;
 };
@@ -386,9 +390,19 @@ async function runMeteredApifyActor<T>(actorId: string, input: Record<string, un
         return { response: { run: null, usage: null, error: blocked, blocked: true }, settledCostMicrousd: 0,
           usage: { billingBasis: "not_executed_policy_block", reason: blocked } };
       }
-      const metadata = await apifyFetch<{ data?: ActorBillingMetadata }>(`/acts/${encodeURIComponent(actorPath(actorId))}`);
-      const policy = boundedActorPolicy(metadata.data || {}, chargeCapUsd);
-      await assertResearchPaidWorkAllowed();
+      // Every preflight failure is known to have started no Actor. Release the
+      // reservation instead of recording an ambiguous provider charge.
+      let policy: ReturnType<typeof boundedActorPolicy>;
+      try {
+        assertApifyAccountHeadroom(await checkApifyAccount(process.env.APIFY_API_KEY), chargeCapUsd);
+        const metadata = await apifyFetch<{ data?: ActorBillingMetadata }>(`/acts/${encodeURIComponent(actorPath(actorId))}`);
+        policy = boundedActorPolicy(metadata.data || {}, chargeCapUsd);
+        await assertResearchPaidWorkAllowed();
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "Apify preflight failed";
+        return { response: { run: null, usage: null, error: reason, blocked: true }, settledCostMicrousd: 0,
+          usage: { billingBasis: "not_executed_preflight_block", reason } };
+      }
       const parameters = new URLSearchParams({ maxTotalChargeUsd: String(policy.chargeCapUsd), build: policy.buildNumber,
         timeout: String(Math.ceil(timeoutMs / 1_000)) });
       const payload = await runRequest(handle, `/acts/${encodeURIComponent(actorPath(actorId))}/runs?${parameters}`, {
@@ -401,12 +415,48 @@ async function runMeteredApifyActor<T>(actorId: string, input: Record<string, un
     resume: (handle) => collect(handle),
   });
   if (receipt.blocked) throw new ResearchPaidOperationError(receipt.error || "Apify start blocked by strict-budget policy");
-  if (receipt.error) throw new Error(receipt.error);
+  if (receipt.error) {
+    if (receipt.run?.id) await cleanupMeteredApifyRunStorage(receipt.run);
+    throw new Error(receipt.error);
+  }
   if (!receipt.run?.defaultDatasetId || !receipt.usage) throw new Error("Apify completed without a dataset receipt");
-  // Persist the terminal actor bill before buying the independent dataset read.
-  // A failed read must never cause another actor start on workflow replay.
-  const items = await readMeteredApifyDataset<T>(receipt.run.defaultDatasetId, datasetLimit);
-  return { items, usage: receipt.usage };
+  try {
+    // Persist the terminal actor bill before buying the independent dataset read.
+    // A failed read must never cause another actor start on workflow replay.
+    const items = await readMeteredApifyDataset<T>(receipt.run.defaultDatasetId, datasetLimit);
+    return { items, usage: receipt.usage };
+  } finally {
+    // The paid operation stores the raw dataset response before parsing. Strict
+    // evaluation runs do not retain Apify's default storage after this attempt.
+    await cleanupMeteredApifyRunStorage(receipt.run);
+  }
+}
+
+async function cleanupMeteredApifyRunStorage(run: ApifyRun) {
+  const paths = apifyDefaultStorageDeletePaths(run.id || "");
+  const metadata: Array<unknown | null> = [];
+  for (const path of paths) {
+    const headers = { Accept: "application/json", Authorization: `Bearer ${getApiKey()}` };
+    const metadataResponse = await fetch(`${APIFY_BASE_URL}${path}`, {
+      method: "GET", headers, cache: "no-store", signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
+    });
+    if (metadataResponse.status === 404) { metadata.push(null); continue; }
+    if (!metadataResponse.ok) {
+      throw new ResearchPaidOperationError(`Apify test storage verification failed (${metadataResponse.status}); no storage deleted`);
+    }
+    const payload: unknown = await metadataResponse.json();
+    metadata.push(payload && typeof payload === "object" ? (payload as { data?: unknown }).data : undefined);
+  }
+  for (const path of verifiedApifyDefaultStorageDeletes(run, metadata)) {
+    const response = await fetch(`${APIFY_BASE_URL}${path}`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${getApiKey()}` }, redirect: "error",
+      cache: "no-store", signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
+    });
+    // Replay after an interrupted cleanup is idempotent.
+    if (response.status !== 204 && response.status !== 404) {
+      throw new ResearchPaidOperationError(`Apify test storage cleanup failed (${response.status}); paid research remains stopped`);
+    }
+  }
 }
 
 async function readMeteredApifyDataset<T>(datasetId: string, limit: number): Promise<T[]> {
