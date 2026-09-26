@@ -254,6 +254,18 @@ const SPORT_OVERRIDES: Record<string, Partial<Omit<SportResearchStrategy, "arche
       "equestrian rider personal brand creator Instagram {year}",
     ],
   },
+  climbing: {
+    // The federation's 2026 events are branded World Climbing Series, not a
+    // generic "tour". Keep IFSC as an alias for indexed historical profiles.
+    canonicalTerms: ["sport climbing", "competition climbing", "bouldering", "lead climbing", "speed climbing", "world climbing series", "ifsc"],
+    excludedTerms: ["climbing gym account", "climbing coach", "mountaineering expedition"],
+    authoritativeDomains: ["worldclimbing.com", "ifsc-climbing.org", "ifsc.results.info", ...BASE_DOMAINS],
+    queryTemplates: [
+      "site:worldclimbing.com/events World Climbing Series boulder lead speed athlete results {year}",
+      "site:ifsc.results.info/athlete sport climbing bouldering lead World Cup results {year}",
+      "sport climbing emerging competitor World Climbing Series final results {year}",
+    ],
+  },
   "adaptive track and field": {
     canonicalTerms: ["para athletics", "adaptive track and field", "paralympic athletics", "track", "field"],
     excludedTerms: ["wheelchair basketball", "adaptive swimming"],
