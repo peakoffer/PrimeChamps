@@ -38,7 +38,7 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     grant usage on schema public,auth to service_role,anon,authenticated;
     grant all on all tables in schema public,auth to service_role;
   `);
-  for (const migration of ["20260924173421_research_paid_operation_ledger.sql", "20260924211229_research_discovery_probe.sql", "20260924211426_research_discovery_probe_parent_index.sql", "20260925161813_research_discovery_quota_recheck.sql"]) {
+  for (const migration of ["20260924173421_research_paid_operation_ledger.sql", "20260924211229_research_discovery_probe.sql", "20260924211426_research_discovery_probe_parent_index.sql", "20260925161813_research_discovery_quota_recheck.sql", "20260926144718_research_single_search_access_check.sql"]) {
     await db.exec(await readFile(new URL(`../../supabase/migrations/${migration}`, import.meta.url), "utf8"));
   }
   await t.test("parent foreign key has a valid covering index in the follow-up migration", async () => {
@@ -71,11 +71,16 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     const result = await db.query("select public.research_paid_operation_ledger($1::jsonb) as receipt", [request]);
     return result.rows[0].receipt as Record<string, unknown>;
   }
+  async function singleSearch(request: Record<string, unknown>) {
+    const result = await db.query("select public.research_single_search_check($1::jsonb) as receipt", [request]);
+    return result.rows[0].receipt as Record<string, unknown>;
+  }
   function reserve(runId: unknown, key = "climbing", overrides: Record<string, unknown> = {}) {
     return { action: "reserve", research_log_id: runId, stage: `discovery_probe:${key}`, provider: "perplexity", model_or_actor: "search",
       maximum_cost_microusd: 5_000, operation_key: randomUUID(), input_hash: randomUUID(), claim_token: randomUUID(), ...overrides };
   }
   const recheckManifest = "weak-archetype-raw-search-recheck-20260925";
+  const singleSearchManifest = "single-search-access-check-20260926";
   const quotaBody = '{"error":{"type":"insufficient_quota"}}';
   type TestReceipt = { httpStatus?: number | string; body?: string | null; settled?: number | null; estimated?: number | null;
     operationStatus?: "completed" | "reserved" | "executing" | "ambiguous" };
@@ -136,6 +141,43 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     assert.deepEqual((await db.query("select * from public.research_hardening_campaigns where id=$1", [f.parent_campaign_id])).rows, parentBefore);
     await assert.rejects(() => db.query("update public.research_discovery_probes set status='running' where id=$1", [claim.probe_id]), /immutable/);
     await assert.rejects(() => db.query("update public.research_logs set status='running' where id=$1", [claim.research_log_id]), /cannot reopen/);
+  });
+
+  await t.test("one new Search request preserves old failures and cannot buy a second stage", async () => {
+    const { f } = await failedOriginal([{}, {}, {}]);
+    const recheck = await probe({ ...f, action: "allocate", manifest_version: recheckManifest });
+    for (const key of ["climbing", "adaptive", "esports"]) {
+      const request = reserve(recheck.research_log_id, key); const admitted = await ledger(request);
+      const identity = { ...request, operation_id: admitted.operation_id };
+      await ledger({ ...identity, action: "start" });
+      await ledger({ ...identity, action: "complete", raw_response: {
+        status: 401, body: '{"error":{"type":"invalid_api_key"}}',
+      }, settled_cost_microusd: 0 });
+    }
+    await probe({ ...f, ...recheck, action: "finish", status: "failed" });
+    const request = { ...f, action: "allocate", manifest_version: singleSearchManifest };
+    const [created, duplicate] = await Promise.all([singleSearch(request), singleSearch(request)]);
+    assert.equal([created, duplicate].filter((row) => row.created === true).length, 1);
+    const claim = created.created === true ? created : duplicate;
+    assert.equal(claim.probe_id, created.probe_id);
+    const total = (await db.query("select count(*) as count,sum(allocation_microusd) as amount from public.research_discovery_probes where parent_campaign_id=$1", [f.parent_campaign_id])).rows[0];
+    assert.equal(Number(total.count), 3); assert.equal(Number(total.amount), 90_000);
+    await assert.rejects(() => ledger(reserve(claim.research_log_id, "adaptive")), /one fixed request/);
+    await assert.rejects(() => ledger(reserve(claim.research_log_id, "climbing", { provider: "anthropic" })), /fixed raw searches|one fixed request/);
+    const operation = reserve(claim.research_log_id); const admitted = await ledger(operation);
+    const identity = { ...operation, operation_id: admitted.operation_id };
+    await ledger({ ...identity, action: "start" });
+    await ledger({ ...identity, action: "complete", raw_response: { status: 200, body: '{"results":[]}' }, settled_cost_microusd: 5_000 });
+    await assert.rejects(() => ledger(reserve(claim.research_log_id)), /cannot be purchased twice/);
+    await singleSearch({ ...f, ...claim, action: "finish", status: "completed" });
+    assert.equal((await db.query("select status from public.research_logs where id=$1", [claim.research_log_id])).rows[0].status, "completed");
+    assert.equal((await singleSearch(request)).created, false);
+    await assert.rejects(() => ledger(reserve(claim.research_log_id)), /not active/);
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(() => singleSearch(request), /permission denied/);
+      await db.exec("reset role");
+    }
   });
 
   await t.test("recheck fails closed for missing, active, empty, ambiguous, mixed or non-quota history", async () => {

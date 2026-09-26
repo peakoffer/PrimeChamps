@@ -17,6 +17,17 @@ type CanaryView = {
     results: Array<{ sport: string; status: string; httpStatus?: number | null; sourceCount: number; snippetCount: number; sources: Array<{ title: string; url: string }> }>;
   };
 };
+type SearchAccessView = {
+  eligible: boolean;
+  explanation: string;
+  check: null | {
+    id: string; status: string; httpStatus: number | null; allocationMicrousd: number;
+    settledMicrousd: number; unsettledReservedMicrousd: number;
+    sourceCount: number; snippetCount: number;
+    failureReason: string | null;
+    sources: Array<{ title: string; url: string }>;
+  };
+};
 
 const dollars = (value: number) => `$${(value / 1_000_000).toFixed(3)}`;
 
@@ -30,6 +41,46 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
   const [credentialCheck, setCredentialCheck] = useState<{ message: string; checkedAt?: string } | null>(null);
   const [checkingCredential, setCheckingCredential] = useState(false);
   const credentialLock = useRef(false);
+  const [searchAccess, setSearchAccess] = useState<SearchAccessView | null>(null);
+  const [searchAccessError, setSearchAccessError] = useState<string | null>(null);
+  const [checkingSearchAccess, setCheckingSearchAccess] = useState(false);
+  const [searchAccessSubmitted, setSearchAccessSubmitted] = useState(false);
+  const searchAccessLock = useRef(false);
+
+  const loadSearchAccess = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch(`/api/research/search-access-check?campaignId=${encodeURIComponent(campaignId)}`, { cache: "no-store", signal });
+      const body = await response.json();
+      if (!response.ok) throw new Error("Could not inspect the Search API check");
+      if (!signal?.aborted) { setSearchAccess(body); setSearchAccessError(null); }
+    } catch {
+      if (!signal?.aborted) setSearchAccessError("Could not inspect the Search API check. No paid request was started.");
+    }
+  }, [campaignId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // Loads external receipt state asynchronously after the network request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadSearchAccess(controller.signal);
+    return () => controller.abort();
+  }, [loadSearchAccess]);
+
+  async function startSearchAccessCheck() {
+    if (!isOwner || !searchAccess?.eligible || searchAccess.check || searchAccessLock.current) return;
+    searchAccessLock.current = true;
+    setCheckingSearchAccess(true); setSearchAccessSubmitted(true); setSearchAccessError(null);
+    try {
+      const response = await fetch("/api/research/search-access-check", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ campaignId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error("Search API check stopped; inspect the saved receipt. No automatic retry.");
+      setSearchAccess(body);
+    } catch {
+      setSearchAccessError("Search API check stopped or its response was lost. Refresh to inspect the saved receipt; do not retry automatically.");
+    } finally { setCheckingSearchAccess(false); }
+  }
 
   async function checkCredential() {
     if (!isOwner || credentialLock.current) return;
@@ -98,11 +149,15 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
       <div>
         <p className="pc-eyebrow">Discovery only · one-time diagnostic</p>
         <h2 id="discovery-canary-heading" className="mt-1 text-lg font-semibold text-brand-ink">Check sources before paying for scoring</h2>
-        <p className="mt-1 max-w-3xl text-sm text-brand-muted">Six searches, at most $0.030 from the existing campaign allowance. No athlete creation, scoring, or outreach. This does not certify candidate quality.</p>
+        <p className="mt-1 max-w-3xl text-sm text-brand-muted">The earlier six-search diagnostics are closed and preserved. The new access check permits one Search request, at most $0.005 in published-rate charges, with $0.03 of the original allowance held conservatively. It does not certify candidate quality. No scoring or outreach.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {isOwner && <button className="pc-button-secondary" onClick={() => void checkCredential()} disabled={checkingCredential}>
           {checkingCredential ? "Checking saved key…" : "Check saved key · no search"}
+        </button>}
+        {isOwner && <button className="pc-button-secondary" onClick={() => void startSearchAccessCheck()}
+          disabled={!searchAccess?.eligible || Boolean(searchAccess?.check) || checkingSearchAccess || searchAccessSubmitted}>
+          {checkingSearchAccess ? "Checking Search API…" : "One Search API check · max $0.005"}
         </button>}
         <button className="pc-button-secondary" onClick={() => void load()}>Refresh diagnostic</button>
         {isOwner && !view?.canary && <button className="pc-button-primary" onClick={() => void start()} disabled={!view?.eligible || starting || submitted}>
@@ -115,6 +170,16 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
       <p className="mt-1">{credentialCheck.message}</p>
       <p className="mt-1 text-xs text-brand-muted">{credentialCheck.checkedAt ? `Checked ${new Date(credentialCheck.checkedAt).toLocaleString()}. ` : ""}No search or AI generation. Previous research receipts below remain unchanged.</p>
     </div>}
+    <div className="mt-3 border border-brand-ink/10 p-3 text-sm text-brand-ink">
+      <p className="font-semibold">Single Search API access check</p>
+      <p className="mt-1 text-brand-muted">{searchAccess?.explanation || "Inspecting its separate cost authorization…"}</p>
+      {searchAccessError && <p role="alert" className="mt-1 text-brand-danger">{searchAccessError}</p>}
+      {searchAccess?.check && <div className="mt-2 space-y-1">
+        <p>Status: {searchAccess.check.status} · HTTP {searchAccess.check.httpStatus ?? "not recorded"} · Published-rate cost {dollars(searchAccess.check.settledMicrousd)} · Reserved allowance {dollars(searchAccess.check.allocationMicrousd)}</p>
+        <p>{searchAccess.check.sourceCount} source links · {searchAccess.check.snippetCount} excerpts</p>
+        {searchAccess.check.failureReason && <p className="text-brand-danger">{searchAccess.check.failureReason}</p>}
+      </div>}
+    </div>
     {error && <p role="alert" className="mt-3 text-sm text-brand-danger">{error}</p>}
     <p className="mt-3 text-xs text-brand-muted">{view?.explanation || "Checking the existing budget allocation…"}</p>
     {view?.canary && <div aria-live="polite" className="mt-3 space-y-3">
