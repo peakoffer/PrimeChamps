@@ -29,7 +29,8 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     create table public.research_hardening_campaigns (
       id uuid primary key, organization_id uuid, status text, cancel_requested_at timestamptz,
       total_cost_microusd bigint default 0, budget_limit_microusd bigint, preconfirmation_stop_microusd bigint,
-      confirmation_reserve_microusd bigint, error_message text, unique(id, organization_id)
+      confirmation_reserve_microusd bigint, error_message text, campaign_type text default 'cross_sport',
+      budget_configuration jsonb default '{}'::jsonb, unique(id, organization_id)
     );
     create table public.research_hardening_cases (
       id uuid primary key, organization_id uuid, campaign_id uuid, research_log_id uuid,
@@ -38,7 +39,7 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     grant usage on schema public,auth to service_role,anon,authenticated;
     grant all on all tables in schema public,auth to service_role;
   `);
-  for (const migration of ["20260924173421_research_paid_operation_ledger.sql", "20260924211229_research_discovery_probe.sql", "20260924211426_research_discovery_probe_parent_index.sql", "20260925161813_research_discovery_quota_recheck.sql", "20260926144718_research_single_search_access_check.sql"]) {
+  for (const migration of ["20260924173421_research_paid_operation_ledger.sql", "20260924211229_research_discovery_probe.sql", "20260924211426_research_discovery_probe_parent_index.sql", "20260925161813_research_discovery_quota_recheck.sql", "20260926144718_research_single_search_access_check.sql", "20260926151321_research_hardening_budget_draft_unique.sql", "20260926152242_research_hardening_single_50_authorization.sql"]) {
     await db.exec(await readFile(new URL(`../../supabase/migrations/${migration}`, import.meta.url), "utf8"));
   }
   await t.test("parent foreign key has a valid covering index in the follow-up migration", async () => {
@@ -47,6 +48,30 @@ test("fixed diagnostic migration executes with owner, allocation, idempotency an
     assert.equal(indexes.rows.length, 1);
     assert.equal(indexes.rows[0].valid, true);
     assert.match(String(indexes.rows[0].definition), /\(parent_campaign_id, organization_id\)/);
+  });
+  await t.test("only one cross-sport budget draft can exist per organization", async () => {
+    const organizationId = randomUUID();
+    await db.query("insert into public.organizations values($1)", [organizationId]);
+    await db.query("insert into public.research_hardening_campaigns(id,organization_id,status,campaign_type) values($1,$2,'draft','cross_sport')",
+      [randomUUID(), organizationId]);
+    await assert.rejects(() => db.query("insert into public.research_hardening_campaigns(id,organization_id,status,campaign_type) values($1,$2,'draft','cross_sport')",
+      [randomUUID(), organizationId]), /research_hardening_one_cross_sport_draft_per_org_idx/);
+    await db.query("insert into public.research_hardening_campaigns(id,organization_id,status,campaign_type) values($1,$2,'failed','cross_sport')",
+      [randomUUID(), organizationId]);
+  });
+  await t.test("a consumed authorization cannot be issued again after campaign completion", async () => {
+    const organizationId = randomUUID(); const authorizationKey = "2026-09-26-cross-sport-50";
+    await db.query("insert into public.organizations values($1)", [organizationId]);
+    const campaignId = randomUUID();
+    await db.query(`insert into public.research_hardening_campaigns
+      (id,organization_id,status,campaign_type,budget_configuration)
+      values($1,$2,'draft','cross_sport',jsonb_build_object('authorization_key',$3::text))`,
+    [campaignId, organizationId, authorizationKey]);
+    await db.query("update public.research_hardening_campaigns set status='completed' where id=$1", [campaignId]);
+    await assert.rejects(() => db.query(`insert into public.research_hardening_campaigns
+      (id,organization_id,status,campaign_type,budget_configuration)
+      values($1,$2,'draft','cross_sport',jsonb_build_object('authorization_key',$3::text))`,
+    [randomUUID(), organizationId, authorizationKey]), /research_hardening_one_50_authorization_per_org_idx/);
   });
   async function fixture(options: { status?: string; cost?: number | null; hard?: number | null; ordinary?: number | null; role?: string; membershipStatus?: string; accounting?: string } = {}) {
     const organizationId = randomUUID(); const actorId = randomUUID(); const parentId = randomUUID();

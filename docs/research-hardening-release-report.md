@@ -127,3 +127,9 @@ Database checks across every research log linked to this campaign returned:
 6. Enable Supabase leaked-password protection as a separate authentication-hardening task.
 
 The system is ready for controlled owner-only evaluation and produces defensible holds and finalists. It is not yet honestly claimable as fully release-accepted across all 13 archetypes.
+
+## September 26 budget checkpoint
+
+The owner authorized **one additional $50 cross-sport evaluation ceiling**. The new campaign is separate from the historical $100 campaign: $40 is available for ordinary testing and $10 is reserved for confirmation. The authorization is recorded as a draft and is one-use at the database level, even after a campaign completes or is cancelled. Creating this draft starts no cases, paid providers, workflow, CRM mutations, or outreach.
+
+All 407 local tests, typecheck, lint, and the production build passed at this checkpoint. The one-shot Perplexity Search diagnostic returned HTTP 200 and source links in the previous release, but it established transport only. Full paid campaigns remain intentionally blocked until source-first candidate quality and Apify storage-cost containment are verified. Do not treat the $50 draft as evidence that those prerequisites have passed.

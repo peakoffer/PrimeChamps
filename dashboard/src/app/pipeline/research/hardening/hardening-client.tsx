@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, FlaskConical, RefreshCw, ShieldCheck, Square } from "lucide-react";
 import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
-import { latestCompletedHardeningCases, RESEARCH_HARDENING_MATRIX } from "@/lib/research/hardening";
+import { latestCompletedHardeningCases, NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
+  NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD, NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
+  NEXT_HARDENING_AUTHORIZATION_KEY,
+  RESEARCH_HARDENING_MATRIX } from "@/lib/research/hardening";
 import DiscoveryCanaryPanel from "./discovery-canary-panel";
 
 type JsonRecord = Record<string, unknown>;
@@ -37,6 +40,7 @@ type Campaign = {
   preconfirmation_stop_microusd: number;
   campaign_type: string;
   accounting_version?: string;
+  budget_configuration?: JsonRecord;
   summary: JsonRecord;
   cases: HardeningCase[];
 };
@@ -98,7 +102,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
       if (!response.ok) throw new Error(body.error || "Could not load hardening campaigns");
       setCampaigns(body.campaigns || []);
       setPaidReadiness(body.paidReadiness || null);
-      setSelectedId((current) => current || body.campaigns?.[0]?.id || null);
+      setSelectedId((current) => current || body.campaigns?.find((item: Campaign) => item.status !== "draft")?.id || null);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load hardening campaigns");
@@ -108,7 +112,11 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-  const campaign = campaigns.find((item) => item.id === selectedId) || campaigns[0] || null;
+  const budgetDraft = campaigns.find((item) => item.status === "draft" && item.campaign_type === "cross_sport") || null;
+  const authorizationRecorded = campaigns.some((item) =>
+    item.budget_configuration?.authorization_key === NEXT_HARDENING_AUTHORIZATION_KEY);
+  const campaign = campaigns.find((item) => item.id === selectedId && item.status !== "draft")
+    || campaigns.find((item) => item.status !== "draft") || null;
   const active = campaign && ["queued", "running", "paused", "paused_budget"].includes(campaign.status);
   const hasRunningCase = campaign?.cases.some((item) => item.status === "running") || false;
   useEffect(() => {
@@ -136,8 +144,8 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
     try {
       const response = await fetch("/api/research/hardening", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          budgetUsd: 75, maxConcurrency: 1,
-          cases: ["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "confirmation", caseBudgetMicrousd: 3_000_000 })),
+          budgetUsd: NEXT_HARDENING_BUDGET_LIMIT_MICROUSD / 1_000_000, maxConcurrency: 1,
+          cases: ["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "smoke", caseBudgetMicrousd: 1_000_000 })),
         }),
       });
       const body = await response.json();
@@ -146,6 +154,21 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
       await load();
     } catch (actionError) { setError(actionError instanceof Error ? actionError.message : "Could not start campaign"); }
     finally { setActing(null); }
+  }
+
+  async function authorizeBudget() {
+    if (!isOwner || budgetDraft || acting) return;
+    setActing("budget"); setError(null);
+    try {
+      const response = await fetch("/api/research/hardening/budget", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not save the budget authorization");
+      await load();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Could not save the budget authorization");
+    } finally { setActing(null); }
   }
 
   async function campaignAction(action: "cancel" | "rerun" | "resume_remaining", archetype?: string | string[], stage = "targeted_rerun", useConfirmationReserve = false) {
@@ -175,8 +198,8 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
   if (loading) return <div className="h-72 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />;
 
   const spent = campaign?.total_cost_microusd || 0;
-  const limit = campaign?.budget_limit_microusd || 75_000_000;
-  const confirmationReserve = campaign?.confirmation_reserve_microusd || 15_000_000;
+  const limit = campaign?.budget_limit_microusd || NEXT_HARDENING_BUDGET_LIMIT_MICROUSD;
+  const confirmationReserve = campaign?.confirmation_reserve_microusd || NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD;
   const spendPercent = Math.min(100, (spent / limit) * 100);
   const summary = campaign?.summary || {};
   const operationsAccounting = record(summary.operation_accounting);
@@ -237,6 +260,9 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
           <p className="pc-page-description">Preserved evidence, explicit spending limits, and separate discovery and quality checks. Historical results are not certification for this release.</p>
         </div>
         <div className="pc-header-actions">
+          {isOwner && !authorizationRecorded && <button className="pc-button-secondary" onClick={() => void authorizeBudget()} disabled={acting !== null}>
+            Set $50 evaluation ceiling
+          </button>}
           <button className="pc-button-secondary" onClick={() => void load()} disabled={acting !== null}>
             <RefreshCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Refresh
           </button>
@@ -276,6 +302,10 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
       </div>
 
       {error && <div className="border border-brand-danger/30 bg-brand-danger/10 px-4 py-3 text-sm text-brand-danger">{error}</div>}
+      {budgetDraft && <div className="border border-brand-ink/10 bg-brand-paper-bright px-4 py-3 text-sm text-brand-ink">
+        <p className="font-semibold">Next campaign authorized · {money(NEXT_HARDENING_BUDGET_LIMIT_MICROUSD)} ceiling</p>
+        <p className="mt-1 text-brand-muted">{money(NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD)} for evaluation; {money(NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)} held for confirmation. This is a draft only: no cases, providers, workflow, CRM changes, or outreach have started. Full runs remain blocked until the provider-cost and quality prerequisites are cleared.</p>
+      </div>}
       {paidReadiness && !paidReadiness.ready && <div className="border border-brand-warning/30 bg-brand-warning/10 px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Full-quality testing is waiting on verified spending limits</p>
         <p className="mt-1">{paidReadiness.nextStep}</p>

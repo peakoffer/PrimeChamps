@@ -1,6 +1,12 @@
 export const HARDENING_BUDGET_LIMIT_MICROUSD = 100_000_000;
 export const HARDENING_CONFIRMATION_RESERVE_MICROUSD = 20_000_000;
 export const HARDENING_PRE_CONFIRMATION_STOP_MICROUSD = 80_000_000;
+// The next campaign is additional to, and cannot draw from, the archived
+// $100 historical campaign. It is not permission to start paid work.
+export const NEXT_HARDENING_BUDGET_LIMIT_MICROUSD = 50_000_000;
+export const NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD = 10_000_000;
+export const NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD = 40_000_000;
+export const NEXT_HARDENING_AUTHORIZATION_KEY = "2026-09-26-cross-sport-50";
 export const HARDENING_MAX_CONCURRENCY = 3;
 export const HARDENING_STALE_AFTER_MS = 20 * 60 * 1000;
 

@@ -11,7 +11,7 @@ import { assertHardeningPaidReadiness, hardeningPaidReadiness, HardeningReadines
 test("paid campaign preflight blocks the current unbounded discovery plan before dispatch", () => {
   assert.equal(hardeningPaidReadiness().ready, false);
   assert.equal(hardeningPaidReadiness().code, "BOUNDED_DISCOVERY_REQUIRED");
-  assert.match(hardeningPaidReadiness().nextStep, /single-request, ledger-capped Search API check/);
+  assert.match(hardeningPaidReadiness().nextStep, /end-to-end source-first candidate/);
   assert.doesNotMatch(hardeningPaidReadiness().nextStep, /six sports for at most/);
   assert.throws(assertHardeningPaidReadiness, HardeningReadinessError);
 });

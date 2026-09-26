@@ -17,6 +17,10 @@ import {
   HARDENING_MAX_CONCURRENCY,
   HARDENING_STAGE_RESERVATION_MICROUSD,
   HARDENING_STALE_AFTER_MS,
+  NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
+  NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD,
+  NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
+  NEXT_HARDENING_AUTHORIZATION_KEY,
   RESEARCH_HARDENING_MATRIX,
   RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE,
   campaignSpendDecision,
@@ -208,6 +212,55 @@ export async function resolveHardeningModelSnapshot() {
   };
 }
 
+/** Persist the owner's ceiling without resolving models, creating cases, or starting providers. */
+export async function createHardeningBudgetDraft(input: { organizationId: string; requestedByUserId: string }) {
+  const admin = createAdminClient({ disableRealtime: true });
+  async function existingDraft() {
+    const { data, error } = await admin.from("research_hardening_campaigns")
+      .select("id,status,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
+      .eq("organization_id", input.organizationId).eq("campaign_type", "cross_sport")
+      .contains("budget_configuration", { authorization_key: NEXT_HARDENING_AUTHORIZATION_KEY }).maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    if (data.budget_limit_microusd !== NEXT_HARDENING_BUDGET_LIMIT_MICROUSD
+      || data.preconfirmation_stop_microusd !== NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD
+      || data.confirmation_reserve_microusd !== NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD) {
+      throw new Error("A different draft budget already exists; review it before changing the authorization");
+    }
+    if (data.status !== "draft") throw new Error("This $50 authorization has already been used");
+    return { campaignId: data.id, created: false };
+  }
+  const existing = await existingDraft();
+  if (existing) return existing;
+  const { data, error } = await admin.from("research_hardening_campaigns").insert({
+    organization_id: input.organizationId,
+    requested_by_user_id: input.requestedByUserId,
+    name: `Cross-sport research · $50 ceiling · ${new Date().toISOString().slice(0, 10)}`,
+    status: "draft", campaign_type: "cross_sport", accounting_version: "operations_v1",
+    budget_limit_microusd: NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
+    preconfirmation_stop_microusd: NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
+    confirmation_reserve_microusd: NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD,
+    max_concurrency: 1,
+    budget_configuration: { ordinary_limit_microusd: NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
+      reserve_case_ids: [], case_manifest: [], authorization_only: true,
+      authorization_key: NEXT_HARDENING_AUTHORIZATION_KEY },
+    summary: { evaluation_only: true, mutation_surfaces: [], authorization_only: true,
+      paid_work_started: false },
+  }).select("id").single();
+  if (error?.code === "23505") {
+    const concurrent = await existingDraft();
+    if (concurrent) return concurrent;
+  }
+  if (error || !data) throw error || new Error("Could not record the hardening budget draft");
+  return { campaignId: data.id, created: true };
+}
+
+function requireCurrentCampaignAuthorization(campaignType: string) {
+  if (campaignType !== "cross_sport") {
+    throw new Error("This $50 authorization covers one cross-sport campaign only; other campaign types need a separate owner-approved budget");
+  }
+}
+
 export async function createHardeningCampaign(input: {
   organizationId: string;
   requestedByUserId: string;
@@ -222,6 +275,7 @@ export async function createHardeningCampaign(input: {
   assertHardeningPaidReadiness();
   const admin = createAdminClient({ disableRealtime: true });
   const campaignType = input.campaignType || "cross_sport";
+  requireCurrentCampaignAuthorization(campaignType);
   if (campaignType === "profile_validation" && (!input.profileVersionId || !input.baselineProfileVersionId)) {
     throw new Error("Paired profile validation requires both guided and baseline profile versions");
   }
@@ -232,6 +286,20 @@ export async function createHardeningCampaign(input: {
     .limit(1)
     .maybeSingle();
   if (active) throw new Error("An active research hardening campaign already exists");
+  const { data: authorizedDraft, error: draftError } = campaignType === "cross_sport"
+    ? await admin.from("research_hardening_campaigns")
+      .select("id,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
+      .eq("organization_id", input.organizationId).eq("campaign_type", "cross_sport")
+      .eq("status", "draft")
+      .contains("budget_configuration", { authorization_key: NEXT_HARDENING_AUTHORIZATION_KEY }).maybeSingle()
+    : { data: null, error: null };
+  if (draftError) throw draftError;
+  if (campaignType === "cross_sport" && (!authorizedDraft
+    || authorizedDraft.budget_limit_microusd !== NEXT_HARDENING_BUDGET_LIMIT_MICROUSD
+    || authorizedDraft.preconfirmation_stop_microusd !== NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD
+    || authorizedDraft.confirmation_reserve_microusd !== NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)) {
+    throw new Error("The exact $50 draft authorization is required before paid cross-sport work");
+  }
   const manifest = campaignType === "profile_validation"
     ? parseHardeningManifest(Object.keys(RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE).map((archetype) => ({ archetype, stage: "control" })))
     : parseHardeningManifest(input.cases);
@@ -243,12 +311,17 @@ export async function createHardeningCampaign(input: {
   const baselineProfileVersionId = input.baselineProfileVersionId || activeBaseline?.id || null;
   const models = await resolveHardeningModelSnapshot();
   const budgetLimitMicrousd = Math.min(
-    75_000_000,
-    Math.max(25_000_000, integer(input.budgetMicrousd || 75_000_000))
+    NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
+    Math.max(25_000_000, integer(input.budgetMicrousd || NEXT_HARDENING_BUDGET_LIMIT_MICROUSD))
   );
-  const confirmationReserveMicrousd = Math.min(20_000_000, Math.round(budgetLimitMicrousd * 0.2));
+  const confirmationReserveMicrousd = Math.min(NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD, Math.round(budgetLimitMicrousd * 0.2));
   const preconfirmationStopMicrousd = budgetLimitMicrousd - confirmationReserveMicrousd;
-  const { data: campaign, error } = await admin.from("research_hardening_campaigns").insert({
+  if (authorizedDraft && (budgetLimitMicrousd !== authorizedDraft.budget_limit_microusd
+    || preconfirmationStopMicrousd !== authorizedDraft.preconfirmation_stop_microusd
+    || confirmationReserveMicrousd !== authorizedDraft.confirmation_reserve_microusd)) {
+    throw new Error("Requested campaign amount differs from the owner's saved ceiling");
+  }
+  const campaignFields = {
     organization_id: input.organizationId,
     requested_by_user_id: input.requestedByUserId,
     name: input.name?.trim().slice(0, 120) || `Cross-sport hardening ${new Date().toISOString().slice(0, 10)}`,
@@ -261,7 +334,9 @@ export async function createHardeningCampaign(input: {
     model_route_snapshot: models.routeSnapshot,
     matrix: manifest,
     accounting_version: "operations_v1",
-    budget_configuration: { ordinary_limit_microusd: preconfirmationStopMicrousd, reserve_case_ids: [], case_manifest: manifest },
+    budget_configuration: { ordinary_limit_microusd: preconfirmationStopMicrousd, reserve_case_ids: [], case_manifest: manifest,
+      authorized_draft_id: authorizedDraft?.id || null, authorization_only: false,
+      authorization_key: NEXT_HARDENING_AUTHORIZATION_KEY },
     budget_limit_microusd: budgetLimitMicrousd,
     confirmation_reserve_microusd: confirmationReserveMicrousd,
     preconfirmation_stop_microusd: preconfirmationStopMicrousd,
@@ -276,7 +351,12 @@ export async function createHardeningCampaign(input: {
         ? { smoke: 0, targeted_rerun: 0, confirmation: 0, control: 8 }
         : Object.fromEntries(["smoke", "targeted_rerun", "confirmation", "control"].map((stage) => [stage, manifest.filter((item) => item.stage === stage).length])),
     },
-  }).select("id").single();
+  };
+  const { data: campaign, error } = authorizedDraft
+    ? await admin.from("research_hardening_campaigns").update(campaignFields)
+      .eq("id", authorizedDraft.id).eq("organization_id", input.organizationId).eq("status", "draft")
+      .select("id").maybeSingle()
+    : await admin.from("research_hardening_campaigns").insert(campaignFields).select("id").single();
   if (error || !campaign) throw error || new Error("Could not create hardening campaign");
   let caseError: { message?: string } | null = null;
   if (campaignType === "profile_validation") {

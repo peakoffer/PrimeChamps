@@ -9,6 +9,7 @@ import {
 } from "@/lib/research/hardening-service";
 import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
 import { hardeningPaidReadiness, HardeningReadinessError } from "@/lib/research/hardening-readiness";
+import { NEXT_HARDENING_BUDGET_LIMIT_MICROUSD } from "@/lib/research/hardening";
 
 export const maxDuration = 60;
 
@@ -36,9 +37,10 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireOrganizationRole(["owner"]);
     const body = await request.json().catch(() => ({})) as { name?: unknown; budgetUsd?: unknown; cases?: unknown; maxConcurrency?: unknown };
-    const requestedBudget = Number(body.budgetUsd ?? 75);
-    if (!Number.isFinite(requestedBudget) || requestedBudget < 25 || requestedBudget > 75) {
-      return NextResponse.json({ error: "New campaign budget must be between $25 and $75" }, { status: 400 });
+    const requestedBudget = Number(body.budgetUsd ?? NEXT_HARDENING_BUDGET_LIMIT_MICROUSD / 1_000_000);
+    if (!Number.isFinite(requestedBudget) || requestedBudget < 25
+      || requestedBudget > NEXT_HARDENING_BUDGET_LIMIT_MICROUSD / 1_000_000) {
+      return NextResponse.json({ error: "New campaign budget must be between $25 and $50" }, { status: 400 });
     }
     const campaignId = await createHardeningCampaign({
       organizationId: user.organizationId,

@@ -4,12 +4,12 @@ export function hardeningPaidReadiness() {
     ready: false,
     code: "BOUNDED_DISCOVERY_REQUIRED",
     blockers: [
-      "A newly accounted Search API transport receipt must be reviewed; the closed historical diagnostics cannot be restarted and a transport pass alone is not quality certification.",
+      "The one-shot Search API transport receipt succeeded, but transport success is not quality certification.",
       "The bounded source-first research route still needs end-to-end quality confirmation; a source retrieval diagnostic is not certification.",
       "Apify run caps do not establish an all-future storage limit; a verified retention policy is still required before full paid campaigns.",
-      "A future full campaign must reconcile earlier budget exposure rather than silently add another $75 allowance.",
+      "The new $50 authorization must remain separate from historical spend, and paid work must use its $40 ordinary stop plus $10 confirmation reserve.",
     ],
-    nextStep: "Review the owner-only, single-request, ledger-capped Search API check receipt without reusing either closed diagnostic. Then resolve Apify storage retention and remaining campaign authorization before admitting full research tests.",
+    nextStep: "Resolve Apify storage retention and verify an end-to-end source-first candidate under a small, separately metered diagnostic before admitting full research tests.",
   } as const;
 }
 
