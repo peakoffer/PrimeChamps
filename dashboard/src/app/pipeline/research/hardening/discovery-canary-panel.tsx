@@ -28,6 +28,11 @@ type SearchAccessView = {
     sources: Array<{ title: string; url: string }>;
   };
 };
+type ApifyAccountView = {
+  username: string; accountName: string | null; monthlyLimitUsd: number | null;
+  currentUsageUsd: number | null; activeActorRuns: number | null;
+  retentionDays: number | null; billingCycleEnd: string | null; checkedAt: string;
+};
 
 const dollars = (value: number) => `$${(value / 1_000_000).toFixed(3)}`;
 
@@ -41,6 +46,10 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
   const [credentialCheck, setCredentialCheck] = useState<{ message: string; checkedAt?: string } | null>(null);
   const [checkingCredential, setCheckingCredential] = useState(false);
   const credentialLock = useRef(false);
+  const [apifyAccount, setApifyAccount] = useState<ApifyAccountView | null>(null);
+  const [apifyError, setApifyError] = useState<string | null>(null);
+  const [checkingApify, setCheckingApify] = useState(false);
+  const apifyLock = useRef(false);
   const [searchAccess, setSearchAccess] = useState<SearchAccessView | null>(null);
   const [searchAccessError, setSearchAccessError] = useState<string | null>(null);
   const [checkingSearchAccess, setCheckingSearchAccess] = useState(false);
@@ -100,6 +109,19 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
     }
   }
 
+  async function checkApifyAccount() {
+    if (!isOwner || apifyLock.current) return;
+    apifyLock.current = true;
+    setCheckingApify(true); setApifyAccount(null); setApifyError(null);
+    try {
+      const response = await fetch("/api/research/hardening/apify-account", { cache: "no-store" });
+      if (!response.ok) throw new Error("Apify account check unavailable");
+      setApifyAccount(await response.json() as ApifyAccountView);
+    } catch {
+      setApifyError("Could not confirm the production Apify account. No Actor was started.");
+    } finally { apifyLock.current = false; setCheckingApify(false); }
+  }
+
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const response = await fetch(`/api/research/discovery-canary?campaignId=${encodeURIComponent(campaignId)}`, { cache: "no-store", signal });
@@ -152,6 +174,9 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
         <p className="mt-1 max-w-3xl text-sm text-brand-muted">The earlier six-search diagnostics are closed and preserved. The new access check permits one Search request, at most $0.005 in published-rate charges, with $0.03 of the original allowance held conservatively. It does not certify candidate quality. No scoring or outreach.</p>
       </div>
       <div className="flex flex-wrap gap-2">
+        {isOwner && <button className="pc-button-secondary" onClick={() => void checkApifyAccount()} disabled={checkingApify}>
+          {checkingApify ? "Checking Apify…" : "Check Apify account · no run"}
+        </button>}
         {isOwner && <button className="pc-button-secondary" onClick={() => void checkCredential()} disabled={checkingCredential}>
           {checkingCredential ? "Checking saved key…" : "Check saved key · no search"}
         </button>}
@@ -165,6 +190,13 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
         </button>}
       </div>
     </div>
+    {(apifyAccount || apifyError) && <div role={apifyError ? "alert" : "status"} className="mt-3 border border-brand-ink/10 p-3 text-sm text-brand-ink">
+      <p className="font-semibold">Production Apify account</p>
+      {apifyError ? <p className="mt-1 text-brand-danger">{apifyError}</p> : apifyAccount && <>
+        <p className="mt-1">{apifyAccount.accountName || apifyAccount.username} (@{apifyAccount.username}) · Current usage {apifyAccount.currentUsageUsd === null ? "unavailable" : `$${apifyAccount.currentUsageUsd.toFixed(2)}`} / {apifyAccount.monthlyLimitUsd === null ? "unknown limit" : `$${apifyAccount.monthlyLimitUsd.toFixed(2)} monthly limit`}</p>
+        <p className="mt-1 text-xs text-brand-muted">{apifyAccount.activeActorRuns ?? "Unknown"} active Actor runs · {apifyAccount.retentionDays ?? "Unknown"}-day data retention · Checked {new Date(apifyAccount.checkedAt).toLocaleString()}. Read-only; no Actor or account change.</p>
+      </>}
+    </div>}
     {credentialCheck && <div role="status" className="mt-3 border border-brand-ink/10 p-3 text-sm text-brand-ink">
       <p className="font-semibold">Current Perplexity credential</p>
       <p className="mt-1">{credentialCheck.message}</p>

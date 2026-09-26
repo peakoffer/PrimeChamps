@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { summarizeApifyAccount } from "../src/lib/apify-account-check.ts";
 
 test("Apify account check exposes only account identity and spend controls", () => {
@@ -21,4 +22,14 @@ test("Apify account check exposes only account identity and spend controls", () 
 
 test("Apify account check fails closed when identity is missing", () => {
   assert.throws(() => summarizeApifyAccount({ data: {} }, { data: {} }), /identity unavailable/);
+});
+
+test("account diagnostic requires an owner click and never starts an Actor", () => {
+  const route = readFileSync(new URL("../src/app/api/research/hardening/apify-account/route.ts", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../src/app/pipeline/research/hardening/discovery-canary-panel.tsx", import.meta.url), "utf8");
+  assert.match(route, /requireOrganizationRole\(\["owner"\]\)/);
+  assert.match(route, /actorRunsStarted: 0/);
+  assert.match(ui, /onClick=\{\(\) => void checkApifyAccount\(\)\}/);
+  assert.match(ui, /Check Apify account · no run/);
+  assert.doesNotMatch(route, /method: "POST"/);
 });
