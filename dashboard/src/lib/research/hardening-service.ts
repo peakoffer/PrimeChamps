@@ -9,7 +9,7 @@ import { getResearchEvaluationBudget, type ResearchEvaluationBudget } from "@/li
 import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "@/lib/research/hardening-stale-recovery";
 import { summarizeResearchPaidOperations } from "@/lib/research/paid-operation-policy";
-import { assertHardeningPaidReadiness } from "@/lib/research/hardening-readiness";
+import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign } from "@/lib/research/hardening-readiness";
 import { withResearchPaidContext } from "@/lib/research/paid-operations";
 import {
   HARDENING_BUDGET_LIMIT_MICROUSD,
@@ -305,6 +305,7 @@ export async function createHardeningCampaign(input: {
     : parseHardeningManifest(input.cases);
   const maxConcurrency = input.maxConcurrency ?? 1;
   if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > HARDENING_MAX_CONCURRENCY) throw new Error("Concurrency must be between one and three");
+  if (authorizedDraft) assertInitialHardeningCanaries(manifest, maxConcurrency);
   const { data: activeBaseline, error: baselineError } = await admin.from("research_profile_versions")
     .select("id").eq("organization_id", input.organizationId).eq("status", "active").maybeSingle();
   if (baselineError) throw baselineError;
@@ -481,8 +482,8 @@ export async function prepareHardeningBatch(input: {
     .eq("organization_id", input.campaign.organizationId).single();
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
   if (campaign.cancel_requested_at || campaign.status === "cancelled") throw new Error("Hardening campaign was cancelled");
+  assertAuthorizedHardeningCampaign(campaign);
   if (campaign.status === "paused_budget") return [];
-  if (campaign.accounting_version !== "operations_v1") throw new Error("Legacy campaign is read-only for paid work; reconcile its spending before creating an explicitly budgeted operation-ledger campaign");
   await assertFrozenModels(campaign as JsonRecord);
   const { data: activeProfile, error: profileError } = await admin.from("research_profile_versions")
     .select("id,version,name,compiled_profile")
@@ -1202,7 +1203,7 @@ export async function resumeUntouchedHardeningCases(campaignId: string, organiza
     .select("id,status,accounting_version,budget_configuration,total_cost_microusd,official_model_id,challenger_model_id,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
     .eq("id", campaignId).eq("organization_id", organizationId).single();
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
-  if (campaign.accounting_version !== "operations_v1") throw new Error("Legacy campaign paid work cannot be resumed without reconciled operation accounting");
+  assertAuthorizedHardeningCampaign(campaign);
   const currentModels = await resolveHardeningModelSnapshot();
   if (currentModels.officialModel !== campaign.official_model_id
     || currentModels.challenger.model !== campaign.challenger_model_id) {
@@ -1271,14 +1272,14 @@ export async function addHardeningRerunCases(input: {
     .select("id,accounting_version,budget_configuration,official_model_id,challenger_model_id,total_cost_microusd,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
     .eq("id", input.campaignId).eq("organization_id", input.organizationId).single();
   if (error || !campaign) throw error || new Error("Hardening campaign not found");
-  if (campaign.accounting_version !== "operations_v1") throw new Error("Legacy campaign paid work cannot be extended without reconciled operation accounting");
+  assertAuthorizedHardeningCampaign(campaign);
   const currentModels = await resolveHardeningModelSnapshot();
   if (currentModels.officialModel !== campaign.official_model_id
     || currentModels.challenger.model !== campaign.challenger_model_id) {
     throw new Error("The frozen model route has changed. Start a new campaign so results remain comparable and use the current cost-optimized route.");
   }
   const { data: caseSpendRows, error: caseSpendError } = await admin.from("research_hardening_cases")
-    .select("status,cost_microusd").eq("campaign_id", input.campaignId)
+    .select("archetype,stage,status,verdict,cost_microusd").eq("campaign_id", input.campaignId)
     .eq("organization_id", input.organizationId);
   if (caseSpendError) throw caseSpendError;
   if ((caseSpendRows || []).some((item) => item.status === "running")) {
@@ -1287,6 +1288,7 @@ export async function addHardeningRerunCases(input: {
   const persistedCaseCost = (caseSpendRows || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
   const allowance = input.caseBudgetMicrousd ?? 3_000_000;
   if (!Number.isSafeInteger(allowance) || allowance <= 0 || allowance > 25_000_000) throw new Error("Invalid per-case allowance");
+  assertHardeningWaveAdmission(caseSpendRows || [], input.archetypes, input.stage, allowance);
   const exposure = await operationExposure(admin, input.organizationId, input.campaignId);
   const spend = campaignSpendDecision({
     totalCostMicrousd: Math.max(exposure.exposureMicrousd, persistedCaseCost),

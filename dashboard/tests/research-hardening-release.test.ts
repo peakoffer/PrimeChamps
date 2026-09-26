@@ -6,14 +6,36 @@ import { buildShadowEvidencePacket, validateShadowAuditRows } from "../src/lib/r
 import { campaignSpendDecision, evaluateHardeningCase, latestCompletedHardeningCases, normalizedHardeningMetrics, parseHardeningManifest, RESEARCH_HARDENING_MATRIX } from "../src/lib/research/hardening.ts";
 import { evaluateProfileActivation } from "../src/lib/research/statistical-learning.ts";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "../src/lib/research/hardening-stale-recovery.ts";
-import { assertHardeningPaidReadiness, hardeningPaidReadiness, HardeningReadinessError } from "../src/lib/research/hardening-readiness.ts";
+import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
 
-test("paid campaign preflight blocks the current unbounded discovery plan before dispatch", () => {
-  assert.equal(hardeningPaidReadiness().ready, false);
-  assert.equal(hardeningPaidReadiness().code, "BOUNDED_DISCOVERY_REQUIRED");
-  assert.match(hardeningPaidReadiness().nextStep, /end-to-end source-first candidate/);
-  assert.doesNotMatch(hardeningPaidReadiness().nextStep, /six sports for at most/);
-  assert.throws(assertHardeningPaidReadiness, HardeningReadinessError);
+test("paid admission starts only with three sequential $1 evaluation canaries", () => {
+  assert.equal(hardeningPaidReadiness().ready, true);
+  assert.equal(hardeningPaidReadiness().code, "CONTROLLED_CANARY_ONLY");
+  assert.doesNotThrow(assertHardeningPaidReadiness);
+  const manifest = parseHardeningManifest(["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "smoke", caseBudgetMicrousd: 1_000_000 })));
+  assert.doesNotThrow(() => assertInitialHardeningCanaries(manifest, 1));
+  assert.throws(() => assertInitialHardeningCanaries(manifest, 2));
+  assert.throws(() => assertInitialHardeningCanaries(manifest.slice(0, 2), 1));
+  assert.throws(() => assertInitialHardeningCanaries(parseHardeningManifest([{ archetype: "water", stage: "smoke" }]), 1));
+});
+
+test("a wider paid wave waits for clean canaries and allows at most one bounded correction", () => {
+  const passed = ["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "smoke", status: "completed", verdict: "passed" }));
+  assert.doesNotThrow(() => assertHardeningWaveAdmission(passed, ["action"], "targeted_rerun", 3_000_000));
+  const weak = passed.map((item) => item.archetype === "winter" ? { ...item, verdict: "source_exhausted" } : item);
+  assert.throws(() => assertHardeningWaveAdmission(weak, ["action"], "targeted_rerun", 3_000_000));
+  assert.doesNotThrow(() => assertHardeningWaveAdmission(weak, ["winter"], "targeted_rerun", 3_000_000));
+  assert.throws(() => assertHardeningWaveAdmission([...weak, { archetype: "winter", stage: "targeted_rerun", status: "failed", verdict: "technical_failure" }], ["winter"], "targeted_rerun", 2_000_000));
+  assert.throws(() => assertHardeningWaveAdmission([...passed, { archetype: "action", stage: "smoke", status: "completed", verdict: "safety_stop" }], ["action"], "targeted_rerun", 2_000_000));
+});
+
+test("paid cases cannot resume or expand a historical or differently budgeted campaign", () => {
+  const campaign = { accounting_version: "operations_v1", budget_configuration: { authorization_key: "2026-09-26-cross-sport-50" },
+    budget_limit_microusd: 50_000_000, preconfirmation_stop_microusd: 40_000_000, confirmation_reserve_microusd: 10_000_000 };
+  assert.doesNotThrow(() => assertAuthorizedHardeningCampaign(campaign));
+  assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, accounting_version: "legacy" }));
+  assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, budget_configuration: {} }));
+  assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, budget_limit_microusd: 100_000_000 }));
 });
 
 test("every paid hardening UI action shares readiness and historical-campaign guards", () => {

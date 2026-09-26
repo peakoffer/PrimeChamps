@@ -304,7 +304,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
       {error && <div className="border border-brand-danger/30 bg-brand-danger/10 px-4 py-3 text-sm text-brand-danger">{error}</div>}
       {budgetDraft && <div className="border border-brand-ink/10 bg-brand-paper-bright px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Next campaign authorized · {money(NEXT_HARDENING_BUDGET_LIMIT_MICROUSD)} ceiling</p>
-        <p className="mt-1 text-brand-muted">{money(NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD)} for evaluation; {money(NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)} held for confirmation. This is a draft only: no cases, providers, workflow, CRM changes, or outreach have started. Full runs remain blocked until the provider-cost and quality prerequisites are cleared.</p>
+        <p className="mt-1 text-brand-muted">{money(NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD)} for evaluation; {money(NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)} held for confirmation. This is a draft only: no cases, providers, workflow, CRM changes, or outreach have started. The first wave is restricted to three sequential $1 canaries; broader testing waits for their audited results.</p>
       </div>}
       {paidReadiness && !paidReadiness.ready && <div className="border border-brand-warning/30 bg-brand-warning/10 px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Full-quality testing is waiting on verified spending limits</p>

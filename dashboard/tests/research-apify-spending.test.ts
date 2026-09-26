@@ -3,9 +3,8 @@ import test from "node:test";
 import { assertTerminalApifyReceipt, boundedApifyChargeMicrousd, boundedApifyDatasetReadPolicy, newApifyRunBlockReason } from "../src/lib/research/apify-spending-policy.ts";
 import { apifyDefaultStorageDeletePaths, assertApifyAccountHeadroom, assertOwnedUnnamedApifyStorage, canRecoverApifyStorageForLog, verifiedApifyDefaultStorageDeletes } from "../src/lib/research/apify-storage-policy.ts";
 
-test("new strict-budget actors remain blocked until post-run storage retention is bounded", () => {
-  assert.match(newApifyRunBlockReason() || "", /retained.*storage/);
-  assert.match(newApifyRunBlockReason() || "", /existing evidence can still be read/);
+test("campaign-owned metered Actors use the account and storage guards instead of a global static block", () => {
+  assert.equal(newApifyRunBlockReason(), null);
 });
 
 test("ABORTING and unknown are recoverable uncertainty, never terminal settled receipts", () => {

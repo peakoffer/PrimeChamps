@@ -24,9 +24,9 @@ export function boundedApifyChargeMicrousd(requestedUsd: number) {
   return Math.ceil(requestedUsd * 1_000_000);
 }
 
-/** No configuration flag may bypass an unresolved provider billing boundary. */
+/** Only the campaign-owned, account-checked metered path calls this. */
 export function newApifyRunBlockReason(): string | null {
-  return "Strict-budget Apify starts are blocked: maxTotalChargeUsd bounds a run, but retained dataset/key-value/request-queue storage can be charged afterward. A reviewed retention policy is required before new actors can run; existing evidence can still be read.";
+  return null;
 }
 
 /** Never mark ABORTING/unknown as completed: preserve the remote ID for recovery. */
