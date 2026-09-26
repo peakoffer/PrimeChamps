@@ -58,7 +58,10 @@ const STRATEGIES: Record<SportArchetype, Omit<SportResearchStrategy, "archetype"
     discoveryAngles: ["active roster players", "rookies and breakout players", "recent award and all-star selections"],
     authoritativeSources: ["official league and team rosters", "official player statistics", ...BASE_SOURCES],
     verificationSignals: ["current team and position agree across sources", "recent game or roster activity", "social bio references team or league"],
-    queryTemplates: ["{sport} official roster breakout athletes {year}", "{sport} rising stars award watchlist {year}"],
+    queryTemplates: [
+      "{sport} senior professional first contract rookie signing official club {year}",
+      "{sport} senior league newcomer first team debut breakout official results {year}",
+    ],
     canonicalTerms: [], excludedTerms: [], authoritativeDomains: BASE_DOMAINS,
   },
   combat: {

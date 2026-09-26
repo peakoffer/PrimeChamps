@@ -35,11 +35,17 @@ export function assertHardeningWaveAdmission(
     && (item.stage === "smoke" || item.stage === "targeted_rerun")
     && item.status === "completed" && item.verdict === "passed"));
   if (pending.length === 0) return;
+  const priorCorrections = cases.filter((item) => item.archetype === archetypes[0] && item.stage === "targeted_rerun");
+  // One operator-cancelled, unadjudicated correction can be replaced once.
+  // Stale interruptions and actual technical/safety verdicts do not qualify.
+  const correctionSlotAvailable = priorCorrections.length === 0
+    || (priorCorrections.length === 1 && priorCorrections[0].status === "cancelled"
+      && priorCorrections[0].verdict === null);
   const oneCorrection = stage === "targeted_rerun" && archetypes.length === 1
     && pending.includes(archetypes[0]) && allowanceMicrousd <= 3_000_000
     && cases.some((item) => item.archetype === archetypes[0] && item.stage === "smoke"
       && (item.status === "failed" || item.status === "completed"))
-    && !cases.some((item) => item.archetype === archetypes[0] && item.stage === "targeted_rerun");
+    && correctionSlotAvailable;
   if (!oneCorrection) {
     throw new Error("Complete and audit the three release canaries before admitting a wider paid wave");
   }

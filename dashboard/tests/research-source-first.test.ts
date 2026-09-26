@@ -44,6 +44,9 @@ test("weak-archetype source queries use the right competitor vocabulary", () => 
   assert.ok(climbing.some((query) => /site:worldclimbing\.com\/events/.test(query)));
   assert.ok(climbing.some((query) => /site:ifsc\.results\.info\/athlete/.test(query)));
   assert.ok(climbing.every((query) => !/official tour|event finalists/i.test(query)));
+  const soccer = queries("soccer");
+  assert.ok(soccer.every((query) => /first contract|newcomer first team debut/.test(query)));
+  assert.ok(soccer.every((query) => !/award watchlist|official roster breakout/.test(query)));
 });
 
 test("result interleaving represents every query before a dense page consumes the source budget", () => {

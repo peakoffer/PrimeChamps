@@ -1179,8 +1179,23 @@ export async function getHardeningCampaigns(
         .order("created_at", { ascending: true })
     : { data: [], error: null };
   if (caseError) throw caseError;
+  // A terminal Actor can report its actual charge after an operator cancels
+  // the workflow. Read the operation ledger at display time so the owner sees
+  // current guarded exposure, not the earlier cancellation snapshot.
+  const exposureById = new Map(await Promise.all((campaigns || [])
+    .filter((campaign) => campaign.accounting_version === "operations_v1")
+    .map(async (campaign) => [campaign.id, await operationExposure(admin, organizationId, campaign.id)] as const)));
   return (campaigns || []).map((campaign) => ({
     ...campaign,
+    ...(exposureById.has(campaign.id) ? {
+      total_cost_microusd: exposureById.get(campaign.id)!.exposureMicrousd,
+      summary: {
+        ...object(campaign.summary),
+        operation_accounting: exposureById.get(campaign.id),
+        budget_remaining_microusd: Math.max(0,
+          integer(campaign.budget_limit_microusd) - exposureById.get(campaign.id)!.exposureMicrousd),
+      },
+    } : {}),
     cases: (cases || []).filter((item) => item.campaign_id === campaign.id)
       .map((item) => ({ ...item, metrics: normalizedHardeningMetrics(item.metrics) })),
   }));

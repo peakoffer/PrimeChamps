@@ -36,6 +36,18 @@ test("a wider paid wave waits for clean canaries and allows at most one bounded 
     { archetype: "team", stage: "smoke", status: "failed", verdict: "technical_failure" },
     { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "passed" },
   ], ["action"], "confirmation", 3_000_000));
+  const stoppedCorrection = [
+    { archetype: "team", stage: "smoke", status: "failed", verdict: "technical_failure" },
+    { archetype: "team", stage: "targeted_rerun", status: "cancelled", verdict: null },
+  ];
+  assert.doesNotThrow(() => assertHardeningWaveAdmission(stoppedCorrection, ["team"], "targeted_rerun", 3_000_000));
+  assert.throws(() => assertHardeningWaveAdmission([...stoppedCorrection,
+    { archetype: "team", stage: "targeted_rerun", status: "cancelled", verdict: null },
+  ], ["team"], "targeted_rerun", 3_000_000), /Complete and audit/);
+  assert.throws(() => assertHardeningWaveAdmission([
+    { ...stoppedCorrection[0] },
+    { ...stoppedCorrection[1], verdict: "technical_failure" },
+  ], ["team"], "targeted_rerun", 3_000_000), /Complete and audit/);
 });
 
 test("failed release canaries cannot be bypassed by resuming untouched siblings", () => {
@@ -60,6 +72,13 @@ test("paid cases cannot resume or expand a historical or differently budgeted ca
   assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, accounting_version: "legacy" }));
   assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, budget_configuration: {} }));
   assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, budget_limit_microusd: 100_000_000 }));
+});
+
+test("scorecard recalculates the latest operation exposure after cancellation", () => {
+  const source = readFileSync(new URL("../src/lib/research/hardening-service.ts", import.meta.url), "utf8");
+  assert.match(source, /const exposureById = new Map\(await Promise\.all/);
+  assert.match(source, /total_cost_microusd: exposureById\.get\(campaign\.id\)!\.exposureMicrousd/);
+  assert.match(source, /operation_accounting: exposureById\.get\(campaign\.id\)/);
 });
 
 test("every paid hardening UI action shares readiness and historical-campaign guards", () => {
