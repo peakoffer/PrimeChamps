@@ -176,12 +176,12 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   await expect(page.getByRole("tab", { name: /Runs/ })).toBeVisible();
   await expect(page.getByRole("tab", { name: /Held prospects/ })).toBeVisible();
   await page.getByText("Safety checks", { exact: true }).click();
-  await expect(page.getByText("Research quality gate")).toBeVisible();
+  await expect(page.getByText("Synthetic safety regressions")).toBeVisible();
   await expect(page.getByText("100% passing")).toBeVisible();
   await page.getByRole("button", { name: /Run research agent/i }).click();
   await page.getByRole("button", { name: "Start research", exact: true }).last().click();
   await expect(page.getByText("Research running in background")).toBeVisible();
-  await expect(page.getByText(/Research queued safely/)).toBeVisible();
+  expect(researchQueued).toBe(true);
 
   const enrichment = await page.evaluate(async (athleteId) => {
     const response = await fetch(`/api/athletes/${athleteId}/enrich`, {
