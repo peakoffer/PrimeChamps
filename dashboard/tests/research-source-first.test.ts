@@ -28,6 +28,19 @@ for (const entry of RESEARCH_HARDENING_MATRIX) {
   });
 }
 
+test("weak-archetype source queries use the right competitor vocabulary", () => {
+  const queries = (sport: string) => sourceFirstDiscoveryQueries({ sport, year: 2026 });
+  assert.ok(queries("motocross").every((query) => /\brider\b/.test(query)));
+  assert.ok(queries("motocross").every((query) => !/\bdriver\b/.test(query)));
+  assert.ok(queries("equestrian").every((query) => /\brider\b/.test(query)));
+  assert.ok(queries("equestrian").every((query) => !/\bplayer\b/.test(query)));
+  assert.ok(queries("adaptive track and field").every((query) => !/adaptive adaptive/i.test(query)));
+  assert.ok(queries("adaptive track and field").every((query) => /para athletics|World Para Athletics/i.test(query)));
+  assert.ok(queries("esports").every((query) => /\bplayer\b/.test(query)));
+  assert.ok(queries("esports").every((query) => !/athlete athletes/i.test(query)));
+  assert.ok(queries("boxing").every((query) => !/athlete contenders/i.test(query)));
+});
+
 test("result interleaving represents every query before a dense page consumes the source budget", () => {
   const pages = Array.from({ length: 6 }, (_, lane) => Array.from({ length: 12 }, (_, index) => ({
     url: `https://league${lane}.example/athlete/${index}`, title: `${lane}:${index}`, snippet: `raw ${lane}:${index}`,

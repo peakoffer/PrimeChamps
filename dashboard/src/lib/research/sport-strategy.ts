@@ -163,6 +163,15 @@ const SPORT_OVERRIDES: Record<string, Partial<Omit<SportResearchStrategy, "arche
       "cycling development team breakout rider results {year}",
     ],
   },
+  motocross: {
+    canonicalTerms: ["motocross", "motocross rider", "motocross racer", "mxgp", "wmx", "ama motocross"],
+    excludedTerms: ["car racing", "sim racing"],
+    queryTemplates: [
+      "motocross world championship rider standings {year}",
+      "motocross emerging rider race results {year}",
+      "motocross rider personal brand creator Instagram {year}",
+    ],
+  },
   "motorcycle racing": {
     canonicalTerms: [
       "motorcycle racing", "motorbike racing", "road racing", "motorcycle racer",
@@ -236,6 +245,33 @@ const SPORT_OVERRIDES: Record<string, Partial<Omit<SportResearchStrategy, "arche
     excludedTerms: ["boxing only", "wrestling coach"],
     authoritativeDomains: ["ufc.com", "pflmma.com", "invictafc.com", "tapology.com", ...BASE_DOMAINS],
   },
+  equestrian: {
+    canonicalTerms: ["equestrian", "rider", "show jumping", "dressage", "eventing", "fei"],
+    excludedTerms: ["horse racing jockey", "riding school"],
+    queryTemplates: [
+      "equestrian FEI rider athlete rankings {year}",
+      "equestrian emerging rider international event results {year}",
+      "equestrian rider personal brand creator Instagram {year}",
+    ],
+  },
+  "adaptive track and field": {
+    canonicalTerms: ["para athletics", "adaptive track and field", "paralympic athletics", "track", "field"],
+    excludedTerms: ["wheelchair basketball", "adaptive swimming"],
+    queryTemplates: [
+      "World Para Athletics track and field elite results {year}",
+      "para athletics emerging sprinter field athlete results {year}",
+      "para athletics athlete personal brand Instagram {year}",
+    ],
+  },
+  esports: {
+    canonicalTerms: ["esports", "professional esports", "competitive gaming", "esports player"],
+    excludedTerms: ["streamer only", "gaming organization account"],
+    queryTemplates: [
+      "esports professional player roster tournament results {year}",
+      "esports rising player official team roster {year}",
+      "esports player personal brand creator Instagram {year}",
+    ],
+  },
   pickleball: {
     canonicalTerms: ["pickleball", "ppa tour", "major league pickleball", "mlp"],
     excludedTerms: ["tennis only", "pickleball coach"],
@@ -273,8 +309,8 @@ export function getSportResearchStrategy(sport: string): SportResearchStrategy {
 
 function neutralizeGenderedQuery(query: string) {
   return query
-    .replace(/\bwomen(?:'s)?\b/gi, "athlete")
-    .replace(/\bfemale\b/gi, "athlete")
+    .replace(/\bwomen(?:'s)?\b/gi, "")
+    .replace(/\bfemale\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 }
