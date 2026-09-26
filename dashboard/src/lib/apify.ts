@@ -459,6 +459,21 @@ async function cleanupMeteredApifyRunStorage(run: ApifyRun) {
   }
 }
 
+/** Cron recovery for a ledger-owned run after the workflow process disappears. */
+export async function cleanupTerminalMeteredApifyRunStorage(runId: string) {
+  apifyDefaultStorageDeletePaths(runId); // Exact run ID required before any request.
+  const response = await fetch(`${APIFY_BASE_URL}/actor-runs/${encodeURIComponent(runId)}`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${getApiKey()}` },
+    cache: "no-store", signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new ResearchPaidOperationError(`Apify test run recovery failed (${response.status})`);
+  const payload = await response.json() as { data?: ApifyRun };
+  if (payload.data?.id !== runId) throw new ResearchPaidOperationError("Apify recovery run identity mismatch");
+  if (!isTerminalStatus(payload.data.status)) return false;
+  await cleanupMeteredApifyRunStorage(payload.data);
+  return true;
+}
+
 async function readMeteredApifyDataset<T>(datasetId: string, limit: number): Promise<T[]> {
   const policy = boundedApifyDatasetReadPolicy(limit);
   const path = `/datasets/${encodeURIComponent(datasetId)}/items?format=json&clean=true&limit=${limit}`;

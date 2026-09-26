@@ -407,7 +407,9 @@ export async function createHardeningCampaign(input: {
     row.archetype === entry.archetype && row.stage === entry.stage && row.replicate_number === entry.replicateNumber)
     .sort((a, b) => String(a.profile_variant).localeCompare(String(b.profile_variant))).map((row) => row.id));
   const { error: budgetError } = await admin.from("research_hardening_campaigns").update({
-    budget_configuration: { ordinary_limit_microusd: preconfirmationStopMicrousd, reserve_case_ids: reserveCaseIds, case_manifest: manifest, case_order_ids: caseOrderIds },
+    budget_configuration: { ordinary_limit_microusd: preconfirmationStopMicrousd, reserve_case_ids: reserveCaseIds,
+      case_manifest: manifest, case_order_ids: caseOrderIds, authorized_draft_id: authorizedDraft?.id || null,
+      authorization_key: NEXT_HARDENING_AUTHORIZATION_KEY, authorization_only: false },
   }).eq("id", campaign.id).eq("organization_id", input.organizationId);
   if (budgetError) throw budgetError;
   return campaign.id;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assertTerminalApifyReceipt, boundedApifyChargeMicrousd, boundedApifyDatasetReadPolicy, newApifyRunBlockReason } from "../src/lib/research/apify-spending-policy.ts";
-import { apifyDefaultStorageDeletePaths, assertApifyAccountHeadroom, assertOwnedUnnamedApifyStorage, verifiedApifyDefaultStorageDeletes } from "../src/lib/research/apify-storage-policy.ts";
+import { apifyDefaultStorageDeletePaths, assertApifyAccountHeadroom, assertOwnedUnnamedApifyStorage, canRecoverApifyStorageForLog, verifiedApifyDefaultStorageDeletes } from "../src/lib/research/apify-storage-policy.ts";
 
 test("new strict-budget actors remain blocked until post-run storage retention is bounded", () => {
   assert.match(newApifyRunBlockReason() || "", /retained.*storage/);
@@ -77,4 +77,15 @@ test("one unsafe default prevents deletion of every default", () => {
   assert.deepEqual(verifiedApifyDefaultStorageDeletes(run, [null, metadata[1], metadata[2]]), apifyDefaultStorageDeletePaths(run.id).slice(1));
   assert.throws(() => verifiedApifyDefaultStorageDeletes(run, [metadata[0], metadata[1], { ...metadata[2], name: "shared" }]));
   assert.throws(() => verifiedApifyDefaultStorageDeletes({ ...run, defaultRequestQueueId: undefined }, metadata));
+});
+
+test("cron recovery waits for the exact evaluation log to finish its dataset read", () => {
+  for (const status of ["completed", "error", "cancelled"]) {
+    assert.equal(canRecoverApifyStorageForLog({ organization_id: "org_1", status, is_evaluation: true }, "org_1"), true);
+  }
+  for (const status of ["queued", "running"]) {
+    assert.equal(canRecoverApifyStorageForLog({ organization_id: "org_1", status, is_evaluation: true }, "org_1"), false);
+  }
+  assert.equal(canRecoverApifyStorageForLog({ organization_id: "org_2", status: "completed", is_evaluation: true }, "org_1"), false);
+  assert.equal(canRecoverApifyStorageForLog({ organization_id: "org_1", status: "completed", is_evaluation: false }, "org_1"), false);
 });

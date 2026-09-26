@@ -69,3 +69,12 @@ export function verifiedApifyDefaultStorageDeletes(
     return true;
   });
 }
+
+/** A terminal Actor alone is insufficient: the workflow may still be reading its dataset. */
+export function canRecoverApifyStorageForLog(
+  log: { organization_id?: string; status?: string; is_evaluation?: boolean },
+  organizationId: string,
+) {
+  return log.organization_id === organizationId && log.is_evaluation === true
+    && ["completed", "error", "cancelled"].includes(log.status || "");
+}
