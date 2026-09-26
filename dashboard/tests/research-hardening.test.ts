@@ -117,6 +117,8 @@ test("cost accounting separates measured spend, optimized Opus, external estimat
 
   const stages = researchProcessCostStages(cases);
   assert.deepEqual(stages.map((stage) => stage.id), ["brief", "discovery", "identity", "eligibility", "score", "challenge"]);
+  assert.equal(stages.find((stage) => stage.id === "discovery")?.provider, "Perplexity Search + Sonnet extraction");
+  assert.equal(stages.find((stage) => stage.id === "eligibility")?.provider, "Perplexity Search + Apify Google");
   assert.equal(stages.at(-1)?.lowMicrousd, 120_000);
   assert.equal(stages.at(-1)?.basis, "optimized_projection");
 });

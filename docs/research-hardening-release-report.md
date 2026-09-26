@@ -12,6 +12,8 @@ The first soccer correction proved the extraction fix: it produced structured ou
 
 The partial soccer pool also revealed a quality/cost problem: the broad roster/award queries surfaced many established global stars despite the extraction instructions. The team-sport source queries now ask for senior first contracts, rookies, newcomer debuts, and official current results instead. This is an unverified retrieval improvement; the replacement run must still demonstrate exact-person yield, eligibility, and scored-candidate quality.
 
+The owner scorecard's process labels were corrected to the actual evaluation route: Perplexity raw Search plus Sonnet source extraction, Apify Instagram for bounded enrichment, Perplexity/Apify evidence checks, latest Sonnet scoring, and latest standard-speed Opus as a non-authoritative challenger. Its dollar stage ranges remain historical planning estimates until full cases complete.
+
 ## 2026-09-26 transport and cost checkpoint
 
 - Production main commit `a20e598` deployed to `crm.prime-champs.com`. The owner-only, one-use Perplexity Search check returned HTTP 200 with six source links and six excerpts from one climbing query. This verifies Search API transport, not exact-person yield or research quality.

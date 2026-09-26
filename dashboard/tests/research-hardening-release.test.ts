@@ -112,6 +112,7 @@ test("every paid hardening UI action shares readiness and historical-campaign gu
   assert.match(source, /campaign && !usesOperationLedger && <div[\s\S]*?not certification for the current release/);
   assert.match(source, /estimated paid calls avoided/);
   assert.match(source, /\["blocked", "cancelled", "queued"\]\.includes\(item\.status\)/);
+  assert.match(source, /"failed", "cancelled"\]\.includes\(item\.verdict \|\| item\.status\)/);
 });
 
 test("full shadow packets retain late age evidence and contradictions, and citations cannot cross dossiers", () => {

@@ -183,8 +183,8 @@ export function researchProcessCostStages(cases: HardeningCostCase[]): ResearchP
     {
       id: "discovery",
       label: "Live discovery",
-      provider: "OpenAI web search",
-      description: "Find exact active athletes across women, men, and neutral lanes with source-linked competition evidence.",
+      provider: "Perplexity Search + Sonnet extraction",
+      description: "Find exact active athletes across women, men, and neutral lanes using raw search results and bounded source extraction.",
       lowMicrousd: 300_000,
       highMicrousd: 840_000,
       basis: "planned_range",
@@ -201,7 +201,7 @@ export function researchProcessCostStages(cases: HardeningCostCase[]): ResearchP
     {
       id: "eligibility",
       label: "Eligibility & evidence",
-      provider: "OpenAI + Apify Google",
+      provider: "Perplexity Search + Apify Google",
       description: "Require two-source 21+ proof, current sport momentum, and a public contact route before scoring.",
       lowMicrousd: 160_000,
       highMicrousd: 550_000,
@@ -210,7 +210,7 @@ export function researchProcessCostStages(cases: HardeningCostCase[]): ResearchP
     {
       id: "score",
       label: "Score & audit",
-      provider: "Claude Sonnet 5",
+      provider: "Latest Claude Sonnet",
       description: "Score the surviving dossier, then independently challenge its identity, claims, and gate decisions.",
       lowMicrousd: score + audit,
       highMicrousd: score + audit,
@@ -219,7 +219,7 @@ export function researchProcessCostStages(cases: HardeningCostCase[]): ResearchP
     {
       id: "challenge",
       label: "Shadow challenge",
-      provider: "Claude Opus 5 standard",
+      provider: "Latest Claude Opus · standard speed",
       description: "Review finalists and the two strongest rejects asynchronously; document disagreements without mutating results.",
       lowMicrousd: standardShadow,
       highMicrousd: standardShadow,
@@ -227,4 +227,3 @@ export function researchProcessCostStages(cases: HardeningCostCase[]): ResearchP
     },
   ];
 }
-

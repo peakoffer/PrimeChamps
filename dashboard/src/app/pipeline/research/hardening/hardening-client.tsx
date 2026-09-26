@@ -457,7 +457,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
                 const resolvedDefects = defects.length - unresolvedDefects.length;
                 const pending = campaign?.cases.filter((candidate) => candidate.archetype === item.archetype && candidate.sport === item.sport
                   && candidate.id !== item.id && ["queued", "running"].includes(candidate.status)) || [];
-                const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed"].includes(item.verdict || item.status);
+                const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed", "cancelled"].includes(item.verdict || item.status);
                 const canRunControl = !active
                   && !legacyFastRoute
                   && item.verdict === "passed"
