@@ -29,6 +29,8 @@ test("discovery diagnostic is separate from quality certification and never star
   assert.match(source, /!isOwner \|\| !searchAccess\?\.eligible \|\| searchAccess.check \|\| searchAccessLock.current/);
   assert.match(source, /disabled=\{!view\?\.eligible \|\| starting \|\| submitted\}/);
   assert.match(source, /does not certify candidate quality/);
+  assert.match(source, /Current Search transport is verified/);
+  assert.match(source, /Historical six-search check · previous credential/);
   assert.match(source, /not a reconciled provider invoice/);
 });
 

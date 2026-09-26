@@ -177,12 +177,14 @@ export default function DiscoveryCanaryPanel({ campaignId, isOwner }: { campaign
       {searchAccess?.check && <div className="mt-2 space-y-1">
         <p>Status: {searchAccess.check.status} · HTTP {searchAccess.check.httpStatus ?? "not recorded"} · Published-rate cost {dollars(searchAccess.check.settledMicrousd)} · Reserved allowance {dollars(searchAccess.check.allocationMicrousd)}</p>
         <p>{searchAccess.check.sourceCount} source links · {searchAccess.check.snippetCount} excerpts</p>
+        {searchAccess.check.status === "completed" && searchAccess.check.httpStatus === 200 && <p className="text-brand-muted">Current Search transport is verified. Source quality, Apify storage exposure, and the full campaign budget still need separate clearance.</p>}
         {searchAccess.check.failureReason && <p className="text-brand-danger">{searchAccess.check.failureReason}</p>}
       </div>}
     </div>
     {error && <p role="alert" className="mt-3 text-sm text-brand-danger">{error}</p>}
     <p className="mt-3 text-xs text-brand-muted">{view?.explanation || "Checking the existing budget allocation…"}</p>
     {view?.canary && <div aria-live="polite" className="mt-3 space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-brand-muted">Historical six-search check · previous credential</p>
       <p className="text-sm text-brand-ink">Status: <span className="font-semibold">{view.canary.status.replaceAll("_", " ")}</span> · Published-rate cost: {dollars(view.canary.settledMicrousd)} · Unresolved exposure: {dollars(view.canary.unsettledReservedMicrousd)} · Reserved allowance: {dollars(view.canary.allocationMicrousd)}</p>
       <p className="text-xs text-brand-muted">Cost is calculated from completed request receipts at the published rate, not a reconciled provider invoice. The full allowance stays reserved; refreshing never buys another run.</p>
       {view.canary.error && <p className="text-sm text-brand-danger">{view.canary.error}</p>}

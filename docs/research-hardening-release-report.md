@@ -1,5 +1,13 @@
 # Production Research Memory and Statistical Hardening — Release Checkpoint
 
+## 2026-09-26 transport and cost checkpoint
+
+- Production main commit `a20e598` deployed to `crm.prime-champs.com`. The owner-only, one-use Perplexity Search check returned HTTP 200 with six source links and six excerpts from one climbing query. This verifies Search API transport, not exact-person yield or research quality.
+- The operation ledger recorded exactly one request at a $0.005 published-rate charge, with $0.03 conservatively reserved. The prior quota and invalid-key attempts remain closed. Together, the three diagnostics hold $0.09 of the original ordinary allowance; the historical $79 campaign ledger is unchanged. This is not a reconciled provider invoice.
+- The new run was evaluation-only: no athletes were created, and the research log has zero discovered, enriched, scored, returned, or added candidates. No research campaign or outreach was started.
+- Apify account settings inspected read-only: 31-day unnamed-storage retention and a $100 account-wide monthly usage limit. These are not a project-specific total campaign bound. No account settings were changed, and new Apify Actor starts remain blocked in strict-budget research.
+- Next: investigate exact-person discovery for the six weak archetypes using source-linked, independent queries; separate Search transport success from identity/age/social evidence. Before paid full-quality confirmations, establish a project-specific Apify storage/spend boundary and an explicit campaign allowance. Preserve the original $100 ceiling and $20 confirmation reserve unless the owner approves a new total.
+
 - Generated: 2026-08-23
 - Campaign: Cross-sport hardening 2026-08-22
 - Campaign ID: `f89a73ff-a93d-4166-9d87-a1dacd78b3f7`
