@@ -8,7 +8,7 @@ import {
 } from "../src/lib/research/source-first-research.ts";
 import { RESEARCH_HARDENING_MATRIX } from "../src/lib/research/hardening.ts";
 import { buildAthleteAgeSearchQueries, selectVerifiedAthleteAge } from "../src/lib/research/age-evidence.ts";
-import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.ts";
+import { evaluateDiscoveryEvidence, evidenceNamesAthlete } from "../src/lib/research/evidence-quality.ts";
 import { providerDiscoveryEvidence } from "../src/lib/research/workflow-evidence.ts";
 import { rankInstagramSearchCandidates } from "../src/lib/research/instagram-identity.ts";
 
@@ -204,6 +204,18 @@ test("source-first data still passes through exact-person discovery and Instagra
     { url: "https://league.example/anna-rivera", title: "Anna Rivera", snippet: "Anna Rivera is a professional soccer player. Instagram: @annarivera." },
   ] });
   assert.equal(hints[0]?.handle, "annarivera");
+});
+
+test("exact-person evidence does not accept names embedded inside another person's name", () => {
+  assert.equal(evidenceNamesAthlete("Anna Rivera", "Annabelle Rivera won the 2026 championship"), false);
+  assert.equal(evidenceNamesAthlete("Anna Rivera", "Anna Riveradale won the 2026 championship"), false);
+  assert.equal(evidenceNamesAthlete("Anna Rivera", "Anna Rivera won the 2026 championship"), true);
+  assert.equal(evidenceNamesAthlete("Jeong Ji-min", "Jeong Ji-min won two climbing bronze medals"), true);
+  const wrong = providerDiscoveryEvidence({ url: "https://league.example/annabelle-rivera",
+    snippet: "Annabelle Rivera is a ranked professional soccer player." },
+  "Anna Rivera is ranked", "Perplexity Search raw discovery");
+  assert.equal(evaluateDiscoveryEvidence({ name: "Anna Rivera", sport: "soccer", context: "Anna Rivera is ranked",
+    evidence: [wrong] }).passed, false);
 });
 
 test("strict routes are server-pinned, avoid hosted identity/age fallback, and retain legacy production selection", () => {

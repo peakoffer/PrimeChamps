@@ -76,10 +76,13 @@ function conflictsWithCompetitionCategory(text: string, scope: "women" | "men") 
 
 export function evidenceNamesAthlete(name: string, text: string) {
   const tokens = normalize(name).split(" ").filter((token) => token.length > 1);
-  const normalizedText = normalize(text);
   if (tokens.length < 2) return false;
+  // Check complete normalized words. Substring checks let a source about
+  // Annabelle Rivera "verify" Anna Rivera, or a surname embedded in a team
+  // name satisfy the exact-person discovery gate.
+  const words = new Set(normalize(text).split(" ").filter(Boolean));
   const surname = tokens.at(-1)!;
-  return normalizedText.includes(surname) && tokens.slice(0, -1).some((token) => normalizedText.includes(token));
+  return words.has(surname) && tokens.slice(0, -1).some((token) => words.has(token));
 }
 
 function evidenceItemNamesAthlete(name: string, item: CandidateEvidence) {
