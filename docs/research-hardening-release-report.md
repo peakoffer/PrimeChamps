@@ -1,5 +1,13 @@
 # Production Research Memory and Statistical Hardening — Release Checkpoint
 
+## September 26 first paid-canary incident and correction
+
+The new, separate $50 evaluation campaign `d6d13bc5-9ef9-4334-b44d-5ed8d67d1bb2` launched exactly three one-at-a-time $1 smoke cases. The first, team/soccer, failed before producing a candidate; judged/figure skating and winter/skiing were blocked without starting or spending. The paid-operation ledger shows six Perplexity Search calls ($0.030000) and one Sonnet extraction call (conservative exposure $0.166012), for **$0.196012 total exposure**. No Apify Actor started. This is a technical failure, not a negative result for soccer.
+
+The exact production error was `Anthropic source extraction was incomplete (max_tokens)`. The Sonnet receipt reported 21,503 input tokens and 8,000 output tokens, all of the output charged as thinking tokens, with no structured candidate JSON. The correction bounds each of the existing 40 source snippets to 650 characters and requests low effort for deterministic source extraction only. Authoritative candidate scoring and Opus challenge are unchanged. The correction includes offline tests; a paid targeted soccer rerun is still required to prove it in production.
+
+Recovery now requires a passing, audited same-archetype correction before previously blocked canaries can resume. A passing correction can mark the prior technical failure resolved while retaining the failed case and its spend in the ledger. It does not erase a safety defect or treat a source-inconclusive result as a pass. The $40 ordinary stop and $10 confirmation reserve remain intact. **No production-readiness claim follows from this checkpoint.**
+
 ## 2026-09-26 transport and cost checkpoint
 
 - Production main commit `a20e598` deployed to `crm.prime-champs.com`. The owner-only, one-use Perplexity Search check returned HTTP 200 with six source links and six excerpts from one climbing query. This verifies Search API transport, not exact-person yield or research quality.
@@ -152,4 +160,4 @@ The existing five-minute stale-run recovery now also revisits Apify operations b
 
 ### Controlled paid-canary admission
 
-The next paid step is limited in code to three sequential $1 smoke evaluations (team/soccer, judged/figure skating, winter/skiing). The campaign's separate $50 ceiling, $40 ordinary stop, and $10 confirmation reserve still apply. Every new metered Apify Actor start must belong to this exact authorized campaign and pass the account-identity, current-usage, active-run, price-cap, and build-pin checks. Wider reruns remain blocked until the three canaries pass; a single bounded correction of a weak canary is allowed, but a safety-stop verdict halts further paid cases. This authorizes evaluation, **not production acceptance or outreach**. The three canaries have not yet run at this documentation checkpoint.
+The paid step is limited in code to three sequential $1 smoke evaluations (team/soccer, judged/figure skating, winter/skiing). The campaign's separate $50 ceiling, $40 ordinary stop, and $10 confirmation reserve still apply. Every new metered Apify Actor start must belong to this exact authorized campaign and pass the account-identity, current-usage, active-run, price-cap, and build-pin checks. Wider reruns remain blocked until the three canaries pass; a single bounded correction of a weak canary is allowed, but a safety-stop verdict halts further paid cases. This authorizes evaluation, **not production acceptance or outreach**. The first canary failed technically as documented above; the other two have not started.

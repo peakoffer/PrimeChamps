@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
   SOURCE_FIRST_RESEARCH_ROUTE, sourceFirstDiscoveryQueries, interleaveSourceFirstResults,
+  formatSourceFirstExtractionEvidence,
   parseSourceFirstSearchResponse, runSourceFirstSearchQueries, sourceFirstAgeInputs,
   sourceFirstDossierQueries, mergeSourceFirstAgeEvidence, selectSourceFirstAgeProof, selectSourceFirstPreparedAge,
 } from "../src/lib/research/source-first-research.ts";
@@ -53,6 +54,28 @@ test("result interleaving represents every query before a dense page consumes th
   assert.equal(results.length, 40);
   assert.deepEqual(results.slice(0, 6).map((row) => row.title), ["0:0", "1:0", "2:0", "3:0", "4:0", "5:0"]);
   assert.equal(interleaveSourceFirstResults([...pages, pages[0]], 100).length, 72);
+});
+
+test("source extraction keeps the full 40-source lane mix while bounding untrusted snippets", () => {
+  const sources = Array.from({ length: 42 }, (_, index) => ({
+    url: `https://federation.example/athlete/${index}`,
+    title: `Official result ${index}`,
+    snippet: `Candidate ${index} competed in 2026. ${"x".repeat(2_000)}`,
+    date: "2026-09-01",
+  }));
+  const evidence = formatSourceFirstExtractionEvidence(sources);
+  assert.match(evidence, /\[1\] Official result 0/);
+  assert.match(evidence, /\[40\] Official result 39/);
+  assert.doesNotMatch(evidence, /Official result 40/);
+  assert.ok(evidence.length < 36_000, "40 sources must remain below the old 20k-token prompt size");
+  assert.match(evidence, /Candidate 0 competed in 2026/);
+  assert.match(evidence, /Published: 2026-09-01/);
+});
+
+test("Sonnet source extraction explicitly uses low effort without changing scoring effort", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /const sourceText = strict \? formatSourceFirstExtractionEvidence/);
+  assert.match(workflow, /model: extractionModel,\s*max_tokens: 8_000,\s*output_config: \{[\s\S]*?effort: strict \? "low" : "medium"/);
 });
 
 test("raw response normalization preserves provider text and never manufactures a snippet from title or model summary", () => {

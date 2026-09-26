@@ -259,7 +259,8 @@ test("hardening routes and workflow preserve the evaluation-only mutation bounda
   assert.match(service, /failureResolvedByCaseId/);
   assert.match(service, /failureResolved !== true/);
   assert.match(service, /resolved_failures/);
-  assert.match(service, /\.in\("status", \["cancelled", "queued"\]\)/);
+  assert.match(service, /\.in\("status", \["blocked", "cancelled", "queued"\]\)/);
+  assert.match(service, /assertCanaryResumeAdmission\(spendRows \|\| \[\]\)/);
   assert.match(service, /campaign\.preconfirmation_stop_microusd/);
   assert.match(service, /campaign\.budget_limit_microusd/);
   assert.match(service, /operationExposure\(admin/);

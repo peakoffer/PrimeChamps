@@ -32,14 +32,45 @@ export function assertHardeningWaveAdmission(
     throw new Error("A safety stop requires evidence-backed resolution before any more paid cases");
   }
   const pending = initial.filter((archetype) => !cases.some((item) => item.archetype === archetype
+    && (item.stage === "smoke" || item.stage === "targeted_rerun")
     && item.status === "completed" && item.verdict === "passed"));
   if (pending.length === 0) return;
   const oneCorrection = stage === "targeted_rerun" && archetypes.length === 1
     && pending.includes(archetypes[0]) && allowanceMicrousd <= 3_000_000
+    && cases.some((item) => item.archetype === archetypes[0] && item.stage === "smoke"
+      && (item.status === "failed" || item.status === "completed"))
     && !cases.some((item) => item.archetype === archetypes[0] && item.stage === "targeted_rerun");
   if (!oneCorrection) {
     throw new Error("Complete and audit the three release canaries before admitting a wider paid wave");
   }
+}
+
+/** Untouched siblings can resume only after each attempted canary passes. */
+export function assertCanaryResumeAdmission(
+  cases: Array<{ archetype: string; stage: string; status: string; verdict: string | null }>,
+) {
+  for (const archetype of ["team", "judged", "winter"]) {
+    const attempts = cases.filter((item) => item.archetype === archetype
+      && (item.stage === "smoke" || item.stage === "targeted_rerun"));
+    if (attempts.some((item) => item.verdict === "safety_stop")) {
+      throw new Error("A canary safety stop requires evidence-backed resolution before resuming paid work");
+    }
+    const attempted = attempts.some((item) => item.status === "failed"
+      || item.status === "completed" || item.stage === "targeted_rerun");
+    if (attempted && !attempts.some((item) => item.status === "completed" && item.verdict === "passed")) {
+      throw new Error(`The ${archetype} release canary needs a passing audited correction before untouched cases may resume`);
+    }
+  }
+}
+
+export function canResolveCanaryTechnicalFailure(
+  prior: { archetype: string; stage: string; status: string; verdict: string | null; failureResolved?: boolean },
+  correction: { archetype: string; stage: string; status: string; verdict: string | null },
+) {
+  return prior.archetype === correction.archetype
+    && prior.stage === "smoke" && prior.status === "failed" && prior.verdict === "technical_failure"
+    && prior.failureResolved !== true
+    && correction.stage === "targeted_rerun" && correction.status === "completed" && correction.verdict === "passed";
 }
 
 export class HardeningReadinessError extends Error {

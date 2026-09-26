@@ -7,6 +7,16 @@ export const SOURCE_FIRST_SEARCH_CONCURRENCY = 3;
 
 export type SourceFirstResult = { url: string; title: string; snippet: string; date?: string };
 
+/** Bound untrusted raw snippets before the deterministic extraction call. */
+export function formatSourceFirstExtractionEvidence(sources: SourceFirstResult[]) {
+  return sources.slice(0, 40).map((source, index) => [
+    `[${index + 1}] ${source.title || "Untitled result"}`,
+    `URL: ${source.url}`,
+    source.date ? `Published: ${source.date}` : "",
+    `Snippet: ${source.snippet.slice(0, 650)}`,
+  ].filter(Boolean).join("\n")).join("\n\n");
+}
+
 export function sourceFirstRawEvidence<T extends { provider: string; sourceExcerpt?: string }>(evidence: T[]): T[] {
   return evidence.filter((item) => item.provider.startsWith("Perplexity Search raw ") && item.sourceExcerpt?.trim());
 }

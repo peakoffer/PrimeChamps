@@ -4,7 +4,7 @@ import { researchRunAcceptsWork, researchWorkflowFailurePatch } from "@/lib/rese
 import { discoveryEvidenceForMemory, providerDiscoveryEvidence, rawAgeEvidenceForReuse } from "@/lib/research/workflow-evidence";
 import { getResearchPaidContext, ResearchPaidOperationError, withResearchPaidContext } from "@/lib/research/paid-operations";
 import { SOURCE_FIRST_RESEARCH_ROUTE, runSourceFirstSearchQueries, selectSourceFirstAgeProof,
-  sourceFirstDiscoveryQueries, sourceFirstDossierQueries, selectSourceFirstPreparedAge, sourceFirstRawEvidence,
+  sourceFirstDiscoveryQueries, sourceFirstDossierQueries, selectSourceFirstPreparedAge, sourceFirstRawEvidence, formatSourceFirstExtractionEvidence,
   type SourceFirstResult } from "@/lib/research/source-first-research";
 import { researchPaidFetch } from "@/lib/research/paid-provider-fetch";
 import {
@@ -2221,7 +2221,9 @@ async function discoverAthletesFromPerplexitySearch({
     if (sources.length === 0) return [];
 
     const allowedUrls = new Set(sources.map((source) => source.url as string));
-    const sourceText = sources.map((source, index) => [
+    const sourceText = strict ? formatSourceFirstExtractionEvidence(sources.map((source) => ({
+      url: source.url as string, title: source.title || "", snippet: source.snippet || "", date: source.date,
+    }))) : sources.map((source, index) => [
       `[${index + 1}] ${source.title || "Untitled result"}`,
       `URL: ${source.url}`,
       source.date ? `Published: ${source.date}` : "",
@@ -2265,6 +2267,10 @@ Return one JSON object matching the requested schema. Put the rows in the "candi
         model: extractionModel,
         max_tokens: 8_000,
         output_config: {
+          // Sonnet 5 defaults to high-effort adaptive thinking. Evidence
+          // extraction is bounded transcription, not candidate scoring: the
+          // prior canary spent all 8k output tokens thinking and emitted no JSON.
+          effort: strict ? "low" : "medium",
           format: {
             type: "json_schema",
             schema: RESEARCH_DISCOVERY_OUTPUT_SCHEMA,

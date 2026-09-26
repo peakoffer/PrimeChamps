@@ -9,7 +9,7 @@ import { getResearchEvaluationBudget, type ResearchEvaluationBudget } from "@/li
 import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "@/lib/research/hardening-stale-recovery";
 import { summarizeResearchPaidOperations } from "@/lib/research/paid-operation-policy";
-import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign } from "@/lib/research/hardening-readiness";
+import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, canResolveCanaryTechnicalFailure } from "@/lib/research/hardening-readiness";
 import { withResearchPaidContext } from "@/lib/research/paid-operations";
 import {
   HARDENING_BUDGET_LIMIT_MICROUSD,
@@ -945,7 +945,36 @@ export async function auditCompletedHardeningCase(input: {
       resolvedPriorProviderFailures += 1;
     }
   }
+  let resolvedPriorCanaryFailures = 0;
+  if (input.prepared.stage === "targeted_rerun" && log.status === "completed" && verdict === "passed") {
+    const { data: priorCanaries, error: priorCanaryError } = await admin.from("research_hardening_cases")
+      .select("id,archetype,stage,status,verdict,metrics,defects")
+      .eq("campaign_id", input.campaign.campaignId)
+      .eq("organization_id", input.campaign.organizationId)
+      .eq("archetype", input.prepared.archetype)
+      .eq("stage", "smoke");
+    if (priorCanaryError) throw priorCanaryError;
+    for (const prior of priorCanaries || []) {
+      const priorMetrics = object(prior.metrics);
+      if (!canResolveCanaryTechnicalFailure({
+        ...prior, failureResolved: priorMetrics.failureResolved === true,
+      }, { archetype: input.prepared.archetype, stage: input.prepared.stage, status: "completed", verdict })) continue;
+      if (array(prior.defects).some((entry) => object(entry).severity === "critical" && object(entry).resolved !== true)) continue;
+      const { error: recoveryError } = await admin.from("research_hardening_cases").update({
+        metrics: {
+          ...priorMetrics,
+          failureResolved: true,
+          failureResolvedAt: new Date().toISOString(),
+          failureResolvedByCaseId: input.prepared.caseId,
+          failureResolutionNote: "A later same-archetype targeted evaluation passed after the bounded extraction fix; the earlier technical failure remains visible in the ledger.",
+        },
+      }).eq("id", prior.id).eq("organization_id", input.campaign.organizationId);
+      if (recoveryError) throw recoveryError;
+      resolvedPriorCanaryFailures += 1;
+    }
+  }
   metrics.resolvedPriorProviderFailures = resolvedPriorProviderFailures;
+  metrics.resolvedPriorCanaryFailures = resolvedPriorCanaryFailures;
   const pauseReason = [log.error_message, ...shadowDefects.map((defect) => defect.summary)].find((message) =>
     typeof message === "string" && /paid.operation budget exhausted|charge exceeded.*reservation|exceeded its exposure bound/i.test(message));
   const { error: updateError } = await admin.from("research_hardening_cases").update({
@@ -1216,12 +1245,13 @@ export async function resumeUntouchedHardeningCases(campaignId: string, organiza
   if ((runningCount || 0) > 0) throw new Error("The hardening campaign still has an active case");
   const { data: untouched, error } = await admin.from("research_hardening_cases")
     .select("id,status,stage,archetype,replicate_number").eq("campaign_id", campaignId).eq("organization_id", organizationId)
-    .in("status", ["cancelled", "queued"]).is("research_log_id", null)
+    .in("status", ["blocked", "cancelled", "queued"]).is("research_log_id", null)
     .order("created_at", { ascending: true });
   if (error) throw error;
   const { data: spendRows, error: spendRowsError } = await admin.from("research_hardening_cases")
-    .select("cost_microusd").eq("campaign_id", campaignId).eq("organization_id", organizationId);
+    .select("archetype,stage,status,verdict,cost_microusd").eq("campaign_id", campaignId).eq("organization_id", organizationId);
   if (spendRowsError) throw spendRowsError;
+  assertCanaryResumeAdmission(spendRows || []);
   const caseIds = (untouched || []).map((item) => item.id);
   if (caseIds.length === 0) throw new Error("No unfinished untouched hardening cases remain");
   const exposure = await operationExposure(admin, organizationId, campaignId);
@@ -1245,11 +1275,11 @@ export async function resumeUntouchedHardeningCases(campaignId: string, organiza
     if (!spend.allowed) throw new Error(spend.reason);
     projectedCost += reservation;
   }
-  const cancelledIds = (untouched || []).filter((item) => item.status === "cancelled").map((item) => item.id);
-  if (cancelledIds.length > 0) {
+  const resettableIds = (untouched || []).filter((item) => item.status !== "queued").map((item) => item.id);
+  if (resettableIds.length > 0) {
     const { error: resetError } = await admin.from("research_hardening_cases").update({
       status: "queued", verdict: null, resolution_notes: null, completed_at: null,
-    }).in("id", cancelledIds).eq("organization_id", organizationId).eq("status", "cancelled").is("research_log_id", null);
+    }).in("id", resettableIds).eq("organization_id", organizationId).in("status", ["blocked", "cancelled"]).is("research_log_id", null);
     if (resetError) throw resetError;
   }
   await admin.from("research_hardening_campaigns").update({

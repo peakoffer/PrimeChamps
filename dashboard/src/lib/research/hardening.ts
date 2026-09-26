@@ -130,6 +130,7 @@ export interface HardeningCaseMetrics {
   providerFailures: number;
   optionalProviderDegradations?: number;
   resolvedPriorProviderFailures?: number;
+  resolvedPriorCanaryFailures?: number;
   duplicatesSuppressedBeforeEnrichment?: number;
   paidCallsAvoided?: number;
   alignedCandidates?: number;

@@ -6,7 +6,7 @@ import { buildShadowEvidencePacket, validateShadowAuditRows } from "../src/lib/r
 import { campaignSpendDecision, evaluateHardeningCase, latestCompletedHardeningCases, normalizedHardeningMetrics, parseHardeningManifest, RESEARCH_HARDENING_MATRIX } from "../src/lib/research/hardening.ts";
 import { evaluateProfileActivation } from "../src/lib/research/statistical-learning.ts";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "../src/lib/research/hardening-stale-recovery.ts";
-import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
+import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, assertCanaryResumeAdmission, canResolveCanaryTechnicalFailure, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
 
 test("paid admission starts only with three sequential $1 evaluation canaries", () => {
   assert.equal(hardeningPaidReadiness().ready, true);
@@ -27,6 +27,30 @@ test("a wider paid wave waits for clean canaries and allows at most one bounded 
   assert.doesNotThrow(() => assertHardeningWaveAdmission(weak, ["winter"], "targeted_rerun", 3_000_000));
   assert.throws(() => assertHardeningWaveAdmission([...weak, { archetype: "winter", stage: "targeted_rerun", status: "failed", verdict: "technical_failure" }], ["winter"], "targeted_rerun", 2_000_000));
   assert.throws(() => assertHardeningWaveAdmission([...passed, { archetype: "action", stage: "smoke", status: "completed", verdict: "safety_stop" }], ["action"], "targeted_rerun", 2_000_000));
+  assert.throws(() => assertHardeningWaveAdmission([
+    { archetype: "team", stage: "smoke", status: "failed", verdict: "technical_failure" },
+    { archetype: "judged", stage: "smoke", status: "blocked", verdict: null },
+  ], ["judged"], "targeted_rerun", 2_000_000), /Complete and audit/);
+  assert.doesNotThrow(() => assertHardeningWaveAdmission([
+    ...passed.filter((item) => item.archetype !== "team"),
+    { archetype: "team", stage: "smoke", status: "failed", verdict: "technical_failure" },
+    { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "passed" },
+  ], ["action"], "confirmation", 3_000_000));
+});
+
+test("failed release canaries cannot be bypassed by resuming untouched siblings", () => {
+  const failed = { archetype: "team", stage: "smoke", status: "failed", verdict: "technical_failure" };
+  const blocked = { archetype: "judged", stage: "smoke", status: "blocked", verdict: null };
+  assert.throws(() => assertCanaryResumeAdmission([failed, blocked]), /passing audited correction/);
+  assert.doesNotThrow(() => assertCanaryResumeAdmission([failed, blocked,
+    { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "passed" }]));
+  assert.throws(() => assertCanaryResumeAdmission([{ ...failed, verdict: "safety_stop" }]), /safety stop/);
+  assert.equal(canResolveCanaryTechnicalFailure(failed, {
+    archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "passed",
+  }), true);
+  assert.equal(canResolveCanaryTechnicalFailure(failed, {
+    archetype: "judged", stage: "targeted_rerun", status: "completed", verdict: "passed",
+  }), false);
 });
 
 test("paid cases cannot resume or expand a historical or differently budgeted campaign", () => {
@@ -68,6 +92,7 @@ test("every paid hardening UI action shares readiness and historical-campaign gu
   assert.match(source, /const campaignPaidActionDisabled = paidActionDisabled \|\| !usesOperationLedger/);
   assert.match(source, /campaign && !usesOperationLedger && <div[\s\S]*?not certification for the current release/);
   assert.match(source, /estimated paid calls avoided/);
+  assert.match(source, /\["blocked", "cancelled", "queued"\]\.includes\(item\.status\)/);
 });
 
 test("full shadow packets retain late age evidence and contradictions, and citations cannot cross dossiers", () => {

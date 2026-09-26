@@ -214,7 +214,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
     : paidActionTitle;
   const legacyFastRoute = /(?:^|[-_/])fast(?:$|[-_/])/i.test(campaign?.challenger_model_id || "");
   const untouchedPending = campaign?.cases.filter((item) =>
-    ["cancelled", "queued"].includes(item.status) && !item.research_log_id
+    ["blocked", "cancelled", "queued"].includes(item.status) && !item.research_log_id
   ).length || 0;
   const confirmedArchetypes = new Set(campaign?.cases.filter((item) =>
     item.stage === "confirmation" && item.status === "completed" && item.verdict === "passed"
