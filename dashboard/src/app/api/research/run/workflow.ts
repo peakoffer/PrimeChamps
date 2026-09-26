@@ -7,6 +7,7 @@ import { SOURCE_FIRST_RESEARCH_ROUTE, runSourceFirstSearchQueries, selectSourceF
   sourceFirstDiscoveryQueries, sourceFirstDossierQueries, selectSourceFirstPreparedAge, sourceFirstRawEvidence, formatSourceFirstExtractionEvidence,
   type SourceFirstResult } from "@/lib/research/source-first-research";
 import { researchPaidFetch } from "@/lib/research/paid-provider-fetch";
+import { resolveOnlyFansReverseLookupActor } from "@/lib/research/onlyfans-actor";
 import {
   runApifyActor,
   runApifyGoogleSearch,
@@ -143,8 +144,7 @@ const APIFY_GOOGLE_IDENTITY_FALLBACK = process.env.RESEARCH_APIFY_GOOGLE_IDENTIT
 const APIFY_GOOGLE_DOSSIER_FALLBACK = process.env.RESEARCH_APIFY_GOOGLE_DOSSIER_FALLBACK === "true";
 const APIFY_GOOGLE_AGE_LOOKUP = process.env.RESEARCH_APIFY_GOOGLE_AGE_LOOKUP !== "false";
 const APIFY_INSTAGRAM_SEARCH_ACTOR = process.env.APIFY_INSTAGRAM_SEARCH_ACTOR || "apify/instagram-search-scraper";
-const APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR = process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR
-  || "sentry/onlyfans-reverse-lookup";
+const APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR = resolveOnlyFansReverseLookupActor(process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR);
 // The reverse-lookup Actor routinely needs more than two minutes for a bounded
 // scoring batch. Let the existing run finish instead of turning a healthy,
 // slow provider into an artificial finalist gate failure. This remains well

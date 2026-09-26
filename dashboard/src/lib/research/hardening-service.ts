@@ -1325,7 +1325,7 @@ export async function addHardeningRerunCases(input: {
   }
   const { data: caseSpendRows, error: caseSpendError } = await admin.from("research_hardening_cases")
     .select("archetype,stage,status,verdict,cost_microusd").eq("campaign_id", input.campaignId)
-    .eq("organization_id", input.organizationId);
+    .eq("organization_id", input.organizationId).order("created_at", { ascending: true });
   if (caseSpendError) throw caseSpendError;
   if ((caseSpendRows || []).some((item) => item.status === "running")) {
     throw new Error("The hardening campaign still has an active case");

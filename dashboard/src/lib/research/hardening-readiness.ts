@@ -37,10 +37,14 @@ export function assertHardeningWaveAdmission(
   if (pending.length === 0) return;
   const priorCorrections = cases.filter((item) => item.archetype === archetypes[0] && item.stage === "targeted_rerun");
   // One operator-cancelled, unadjudicated correction can be replaced once.
-  // Stale interruptions and actual technical/safety verdicts do not qualify.
+  // A subsequent provider-preflight technical failure may receive one final
+  // bounded correction after a staged fix. Safety or quality verdicts cannot.
   const correctionSlotAvailable = priorCorrections.length === 0
     || (priorCorrections.length === 1 && priorCorrections[0].status === "cancelled"
-      && priorCorrections[0].verdict === null);
+      && priorCorrections[0].verdict === null)
+    || (priorCorrections.length === 2
+      && priorCorrections[0].status === "cancelled" && priorCorrections[0].verdict === null
+      && priorCorrections[1].status === "failed" && priorCorrections[1].verdict === "technical_failure");
   const oneCorrection = stage === "targeted_rerun" && archetypes.length === 1
     && pending.includes(archetypes[0]) && allowanceMicrousd <= 3_000_000
     && cases.some((item) => item.archetype === archetypes[0] && item.stage === "smoke"

@@ -12,6 +12,7 @@ import { buildAthleteAgeSearchQueries, selectVerifiedAthleteAge } from "../src/l
 import { evaluateDiscoveryEvidence, evidenceNamesAthlete } from "../src/lib/research/evidence-quality.ts";
 import { providerDiscoveryEvidence } from "../src/lib/research/workflow-evidence.ts";
 import { rankInstagramSearchCandidates } from "../src/lib/research/instagram-identity.ts";
+import { resolveOnlyFansReverseLookupActor } from "../src/lib/research/onlyfans-actor.ts";
 
 for (const entry of RESEARCH_HARDENING_MATRIX) {
   test(`${entry.archetype}: bounded discovery retains women, men and neutral lanes without inferred gender`, () => {
@@ -47,6 +48,21 @@ test("weak-archetype source queries use the right competitor vocabulary", () => 
   const soccer = queries("soccer");
   assert.ok(soccer.every((query) => /first contract|newcomer first team debut/.test(query)));
   assert.ok(soccer.every((query) => !/award watchlist|official roster breakout/.test(query)));
+});
+
+test("evaluation prose selects the discovery strategy but never pollutes raw search queries", () => {
+  const brief = "Cross-sport hardening evaluation. Global mixed discovery across women, men, and neutral/open lanes. Prioritize emerging, active athletes and do not infer gender.";
+  const queries = sourceFirstDiscoveryQueries({ sport: "soccer", year: 2026, brief });
+  assert.equal(queries.length, 6);
+  assert.ok(queries.every((query) => !query.includes("Cross-sport hardening evaluation")));
+  assert.ok(queries.every((query) => !query.includes("do not infer gender")));
+  assert.ok(queries.every((query) => /soccer/.test(query)));
+});
+
+test("retired reverse-lookup actor override resolves to the available actor", () => {
+  assert.equal(resolveOnlyFansReverseLookupActor(), "deepmine/onlyfans-reverse-lookup");
+  assert.equal(resolveOnlyFansReverseLookupActor("sentry/onlyfans-reverse-lookup"), "deepmine/onlyfans-reverse-lookup");
+  assert.equal(resolveOnlyFansReverseLookupActor("custom/actor"), "custom/actor");
 });
 
 test("result interleaving represents every query before a dense page consumes the source budget", () => {

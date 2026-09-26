@@ -2504,6 +2504,21 @@ test("OnlyFans platform signal treats no corroborated exact profile as neutral",
   });
   assert.equal(crossCandidate.exactMatch, false);
   assert.equal(crossCandidate.status, "not_found");
+
+  const wrongPersonFromCorrectSeed = selectOnlyFansPlatformSignal({
+    athleteName: "Alex Example",
+    instagramHandle: "alexexample",
+    results: [{
+      displayInput: "https://www.instagram.com/alexexample/",
+      matchConfidence: "exact",
+      ofFound: true,
+      ofUsername: "jennifer25",
+      ofName: "Jennifer Other",
+      ofIsActive: false,
+    }],
+  });
+  assert.equal(wrongPersonFromCorrectSeed.exactMatch, false);
+  assert.equal(wrongPersonFromCorrectSeed.status, "not_found");
 });
 
 test("benchmark platform gate uses the newest explicit activity state and treats absence as neutral", () => {

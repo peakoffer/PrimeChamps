@@ -8,6 +8,7 @@ import {
   type ApifyOnlyFansUsernameProfile,
 } from "@/lib/apify";
 import { isHighConfidenceTikTokMatch } from "@/lib/enrichment-identity";
+import { resolveOnlyFansReverseLookupActor } from "@/lib/research/onlyfans-actor";
 
 export const enrichmentSources = [
   "instagram",
@@ -511,8 +512,7 @@ async function enrichOnlyFans(athlete: EnrichmentAthlete): Promise<EnrichmentPro
   let reverseLookupCandidates: ApifyOnlyFansReverseLookup[] = [];
 
   try {
-    const reverseLookupActorId = process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR ||
-      "sentry/onlyfans-reverse-lookup";
+    const reverseLookupActorId = resolveOnlyFansReverseLookupActor(process.env.APIFY_ONLYFANS_REVERSE_LOOKUP_ACTOR);
     reverseLookupCandidates = await runApifyActor<ApifyOnlyFansReverseLookup>(
       reverseLookupActorId,
       { seeds: reverseLookupSeeds },

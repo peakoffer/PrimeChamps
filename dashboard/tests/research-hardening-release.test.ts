@@ -19,7 +19,7 @@ test("paid admission starts only with three sequential $1 evaluation canaries", 
   assert.throws(() => assertInitialHardeningCanaries(parseHardeningManifest([{ archetype: "water", stage: "smoke" }]), 1));
 });
 
-test("a wider paid wave waits for clean canaries and allows at most one bounded correction", () => {
+test("a wider paid wave waits for clean canaries and bounds technical corrections", () => {
   const passed = ["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "smoke", status: "completed", verdict: "passed" }));
   assert.doesNotThrow(() => assertHardeningWaveAdmission(passed, ["action"], "targeted_rerun", 3_000_000));
   const weak = passed.map((item) => item.archetype === "winter" ? { ...item, verdict: "source_exhausted" } : item);
@@ -48,6 +48,15 @@ test("a wider paid wave waits for clean canaries and allows at most one bounded 
     { ...stoppedCorrection[0] },
     { ...stoppedCorrection[1], verdict: "technical_failure" },
   ], ["team"], "targeted_rerun", 3_000_000), /Complete and audit/);
+  const providerPreflightFailure = [...stoppedCorrection,
+    { archetype: "team", stage: "targeted_rerun", status: "failed", verdict: "technical_failure" }];
+  assert.doesNotThrow(() => assertHardeningWaveAdmission(providerPreflightFailure, ["team"], "targeted_rerun", 3_000_000));
+  assert.throws(() => assertHardeningWaveAdmission([...providerPreflightFailure,
+    { archetype: "team", stage: "targeted_rerun", status: "failed", verdict: "technical_failure" },
+  ], ["team"], "targeted_rerun", 3_000_000), /Complete and audit/);
+  assert.throws(() => assertHardeningWaveAdmission([...stoppedCorrection,
+    { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "safety_stop" },
+  ], ["team"], "targeted_rerun", 3_000_000), /safety stop/);
 });
 
 test("failed release canaries cannot be bypassed by resuming untouched siblings", () => {

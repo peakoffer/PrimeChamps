@@ -64,7 +64,10 @@ export function selectOnlyFansPlatformSignal(input: {
     const profileName = normalizeIdentity(result.ofName);
     const displayInput = normalizeIdentity(result.displayInput);
     const inputInstagramHandle = instagramHandleFromSeed(result.displayInput);
-    const matchedBy = instagramHandle && (username === instagramHandle || inputInstagramHandle === instagramHandle)
+    // The input seed is supplied by us; echoing it is not independent proof
+    // that the returned OnlyFans account belongs to this athlete.
+    const matchedBy = instagramHandle && (username === instagramHandle
+      || (inputInstagramHandle === instagramHandle && profileName === athleteName))
       ? "instagram_handle" as const
       : athleteName && profileName === athleteName && (!displayInput || displayInput === athleteName)
         ? "athlete_name" as const

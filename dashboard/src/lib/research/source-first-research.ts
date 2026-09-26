@@ -27,7 +27,6 @@ export function sourceFirstDiscoveryQueries(input: {
 }) {
   const creatorFirst = /wave\s*2|creator-led|personal audiences|nil|social media/i.test(input.brief || "");
   const laterWave = /wave\s*3/i.test(input.brief || "");
-  const brief = input.brief?.replace(/\s+/g, " ").trim().slice(0, 240);
   const market = input.regions?.length ? input.regions.join(" ") : "";
   const lanes = buildMixedGlobalDiscoveryPlan(input.sport, input.year);
   return [0, 1].flatMap((angle) => lanes.map((lane) => {
@@ -35,7 +34,10 @@ export function sourceFirstDiscoveryQueries(input: {
       ? buildCreatorFirstDiscoveryQueries(input.sport, input.year, { audienceScope: "mixed_global", lane: lane.lane })
       : lane.queries;
     const index = laterWave ? angle + 2 : angle;
-    return [options[index % options.length], brief, market].filter(Boolean).join(" ");
+    // The brief selects a strategy above, but is not itself search syntax.
+    // Appending evaluation instructions to raw provider queries produced
+    // irrelevant academic/youth pages and wasted paid enrichment calls.
+    return [options[index % options.length], market].filter(Boolean).join(" ");
   }));
 }
 

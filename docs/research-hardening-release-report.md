@@ -1,5 +1,13 @@
 # Production Research Memory and Statistical Hardening — Release Checkpoint
 
+## September 26 second technical stop and staged correction
+
+The replacement team/soccer correction reached source extraction and four Instagram enrichments but stopped before scoring. Apify's preflight returned HTTP 404 for the configured `sentry/onlyfans-reverse-lookup` Actor. The failed Actor operation was settled at **$0**, and no Actor started. Apify's public Actor API now resolves the equivalent `deepmine/onlyfans-reverse-lookup`; its published input uses the same `seeds` field, the output fields used by our parser, and the metadata identifies a pay-per-event build that can be charge-capped. This is a compatibility preflight, **not** a successful paid integration test.
+
+The second correction's recorded exposure is **$0.518974**. Across the original failed smoke, the operator-cancelled correction, and this second technical stop, the operation ledger totals **$1.536860**, with no unsettled operations. Figure skating and skiing remain blocked without paid starts. No quality verdict can be inferred from the incomplete soccer cases.
+
+The staged fix replaces the retired Actor default in both research and manual enrichment, including deployments retaining that exact old override. It also stops appending operational brief prose to paid raw-search queries. A regression test guards against treating an echoed Instagram input seed as independent proof that an unrelated OnlyFans profile belongs to the athlete. The same $50 campaign ceiling and $40/$10 ordinary/confirmation split remain unchanged. One final bounded soccer technical correction is allowed after deployment; if it fails or exposes a safety issue, the remaining canaries stay blocked for review.
+
 ## September 26 first paid-canary incident and correction
 
 The new, separate $50 evaluation campaign `d6d13bc5-9ef9-4334-b44d-5ed8d67d1bb2` launched exactly three one-at-a-time $1 smoke cases. The first, team/soccer, failed before producing a candidate; judged/figure skating and winter/skiing were blocked without starting or spending. The paid-operation ledger shows six Perplexity Search calls ($0.030000) and one Sonnet extraction call (conservative exposure $0.166012), for **$0.196012 total exposure**. No Apify Actor started. This is a technical failure, not a negative result for soccer.
