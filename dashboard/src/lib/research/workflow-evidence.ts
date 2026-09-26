@@ -21,3 +21,14 @@ export function discoveryEvidenceForMemory<T extends { provider: string; sourceE
     ? { ...item, sourceExcerpt: "" }
     : item);
 }
+
+/** Legacy age reuse accepts only excerpts produced by raw-search constructors.
+ * A model claim or a citation title is not a published age statement. */
+export function rawAgeEvidenceForReuse(evidence: Array<{
+  url?: string; title?: string; claim?: string; provider: string; sourceExcerpt?: string;
+}>) {
+  const rawProviders = /^(?:Perplexity Search (?:raw |exact-name verification$|\+ Anthropic extraction$)|Apify Google Search (?:\+ Anthropic extraction$|candidate dossier$|age batch$))/;
+  return evidence.flatMap((item) =>
+    item.url?.startsWith("https://") && rawProviders.test(item.provider) && item.sourceExcerpt?.trim()
+      ? [{ title: "", snippet: item.sourceExcerpt, link: item.url }] : []);
+}

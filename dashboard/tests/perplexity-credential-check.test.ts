@@ -68,13 +68,14 @@ test("valid model-list responses use exactly one fixed no-store GET with no paid
   assert.deepEqual(timeoutMs, [8_000, 8_000]);
 });
 
-test("401 and 403 reject credentials without exposing provider errors or retrying", async () => {
+test("ambiguous 401 and 403 catalog errors do not imply Search access is rejected", async () => {
   for (const status of [401, 403]) {
     const { calls, fetcher } = responseFetcher(Response.json({ error: { message: `${syntheticKey} provider-secret-body` } }, { status }));
     const result = await checkPerplexityCredential(syntheticKey, fetcher);
-    assert.equal(result.credentialStatus, "rejected");
+    assert.equal(result.credentialStatus, "unavailable");
     assert.equal(result.providerHttpStatus, status);
     assert.equal(result.providerErrorCode, null);
+    assert.match(result.message, /separate Search API/);
     assertSafeResult(result);
     assert.equal(calls.length, 1);
   }
@@ -100,7 +101,7 @@ test("allowlisted provider error codes distinguish quota from rejected keys and 
   }
 });
 
-test("unknown, malformed and secret-bearing error bodies use a sanitized generic rejection", async () => {
+test("unknown, malformed and secret-bearing error bodies use a sanitized uncertain status", async () => {
   const bodies = ["<html>provider-secret-body</html>", '{"error":', "null", "[]", "{}",
     JSON.stringify({ error: null }), JSON.stringify({ error: "provider-secret-body" }),
     JSON.stringify({ error: { type: "some_new_provider_error", message: syntheticKey } }),
@@ -111,7 +112,7 @@ test("unknown, malformed and secret-bearing error bodies use a sanitized generic
     for (const body of bodies) {
       const { calls, fetcher } = responseFetcher(new Response(body, { status }));
       const result = await checkPerplexityCredential(syntheticKey, fetcher);
-      assert.equal(result.credentialStatus, "rejected");
+      assert.equal(result.credentialStatus, "unavailable");
       assert.equal(result.providerHttpStatus, status);
       assert.equal(result.providerErrorCode, null);
       assertSafeResult(result);

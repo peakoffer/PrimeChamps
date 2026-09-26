@@ -3,8 +3,9 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { fixedResearchBatches, reusablePrecheckedProfile, unfinishedResearchBatch } from "../src/lib/research/workflow-batches.ts";
 import { researchRunAcceptsWork, researchWorkflowFailurePatch, resetEnrichedCandidateForRescoring } from "../src/lib/research/workflow-state.ts";
-import { discoveryEvidenceForMemory, providerDiscoveryEvidence } from "../src/lib/research/workflow-evidence.ts";
+import { discoveryEvidenceForMemory, providerDiscoveryEvidence, rawAgeEvidenceForReuse } from "../src/lib/research/workflow-evidence.ts";
 import { evaluateDiscoveryEvidence } from "../src/lib/research/evidence-quality.ts";
+import { selectVerifiedAthleteAge } from "../src/lib/research/age-evidence.ts";
 
 test("fixed work uses unique stable candidate IDs and preserves every candidate across bounded batches", () => {
   const ids = Array.from({ length: 41 }, (_, index) => `candidate-${index}`);
@@ -137,4 +138,24 @@ test("memory reuse discards legacy OpenAI generated excerpts without changing ra
   assert.deepEqual(sanitized.map((row) => row.sourceExcerpt), ["", "", "Raw retrieved source text", "Raw search snippet"]);
   assert.equal(original[0].sourceExcerpt, "Model generated professional athlete claim");
   assert.equal(original[1].sourceExcerpt, "Model generated age source summary");
+});
+
+test("legacy age reuse cannot turn model claims or citation titles into 21+ proof", () => {
+  const fabricated = "Morgan Vale born January 1, 1999";
+  const evidence = [
+    { url: "https://official.example/morgan", title: fabricated, claim: fabricated,
+      provider: "OpenAI gpt-5.4 web search", sourceExcerpt: "" },
+    { url: "https://another.example/morgan", title: "Athlete profile", claim: fabricated,
+      provider: "Perplexity Search + Anthropic extraction", sourceExcerpt: "Morgan Vale competes in soccer." },
+    { url: "https://third.example/morgan", title: "Age source", claim: fabricated,
+      provider: "OpenAI gpt-5.4 age web search", sourceExcerpt: fabricated },
+  ];
+  assert.equal(selectVerifiedAthleteAge("Morgan Vale", rawAgeEvidenceForReuse(evidence), []), null);
+  assert.deepEqual(rawAgeEvidenceForReuse(evidence), [
+    { link: "https://another.example/morgan", title: "", snippet: "Morgan Vale competes in soccer." },
+  ]);
+  assert.deepEqual(rawAgeEvidenceForReuse([{ url: "https://federation.example/morgan", title: "Morgan Vale profile",
+    claim: fabricated, provider: "Perplexity Search raw candidate dossier", sourceExcerpt: fabricated }]), [
+    { link: "https://federation.example/morgan", title: "", snippet: fabricated },
+  ]);
 });

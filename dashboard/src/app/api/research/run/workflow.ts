@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fixedResearchBatches, reusablePrecheckedProfile, unfinishedResearchBatch } from "@/lib/research/workflow-batches";
 import { researchRunAcceptsWork, researchWorkflowFailurePatch } from "@/lib/research/workflow-state";
-import { discoveryEvidenceForMemory, providerDiscoveryEvidence } from "@/lib/research/workflow-evidence";
+import { discoveryEvidenceForMemory, providerDiscoveryEvidence, rawAgeEvidenceForReuse } from "@/lib/research/workflow-evidence";
 import { getResearchPaidContext, ResearchPaidOperationError, withResearchPaidContext } from "@/lib/research/paid-operations";
 import { SOURCE_FIRST_RESEARCH_ROUTE, runSourceFirstSearchQueries, selectSourceFirstAgeProof,
   sourceFirstDiscoveryQueries, sourceFirstDossierQueries, selectSourceFirstPreparedAge, sourceFirstRawEvidence,
@@ -3617,13 +3617,7 @@ async function lookupAthleteAgesWithApify(athletes: EnrichedAthlete[]) {
       // Discovery may already contain a dated, attributable age statement.
       // Combine it with the Google batch instead of discarding it and paying
       // a second provider to rediscover the same first source.
-      const existingAgeResults: AthleteAgeSearchResult[] = (athlete.evidence || []).flatMap((item) =>
-        item.url?.startsWith("http") ? [{
-          title: item.title,
-          snippet: item.sourceExcerpt || item.claim,
-          link: item.url,
-        }] : []
-      );
+      const existingAgeResults: AthleteAgeSearchResult[] = rawAgeEvidenceForReuse(athlete.evidence || []);
       const existingProviderByUrl = new Map((athlete.evidence || []).flatMap((item) =>
         item.url?.startsWith("http") ? [[canonicalResearchUrl(item.url), item.provider] as const] : []
       ));
@@ -3779,11 +3773,7 @@ Return only the strict JSON object.`,
     }
     for (const athlete of athletes) {
       const key = researchCandidateKey(athlete.name, athlete.sport);
-      const existingAgeResults: AthleteAgeSearchResult[] = (athlete.evidence || []).flatMap((item) => item.url ? [{
-        title: item.title,
-        snippet: item.sourceExcerpt || item.claim,
-        link: item.url,
-      }] : []);
+      const existingAgeResults: AthleteAgeSearchResult[] = rawAgeEvidenceForReuse(athlete.evidence || []);
       const ageResults = [
         ...existingAgeResults,
         ...(recordsByAthlete.get(key) || []),
@@ -3843,11 +3833,7 @@ async function lookupAthleteAge(
     const selectAge = (results: AthleteAgeSearchResult[]) =>
       selectVerifiedAthleteAge(athleteName, results, trustedAgeDomains);
 
-    const organicResults: AthleteAgeSearchResult[] = (existingEvidence || []).flatMap((item) => item.url ? [{
-        title: item.title,
-        snippet: item.sourceExcerpt || item.claim,
-        link: item.url,
-      }] : []);
+    const organicResults: AthleteAgeSearchResult[] = rawAgeEvidenceForReuse(existingEvidence || []);
     let verifiedAge = selectAge(organicResults);
     if (verifiedAge) {
       log(`    Reused source-linked age evidence for ${athleteName}`);

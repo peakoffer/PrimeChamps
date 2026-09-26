@@ -60,7 +60,7 @@ export async function checkPerplexityCredential(
         if (code === "permission_denied") {
           return result("rejected", `Perplexity reports permission_denied (HTTP ${status}) for its authenticated model catalog. Check this key's API permissions; Search access remains untested.`, status, code);
         }
-        return result("rejected", `Perplexity rejected the saved credential or its access (HTTP ${status}), without a recognized error code. No search was attempted.`, status);
+        return result("unavailable", `Perplexity's model catalog returned HTTP ${status} without a recognized error code. That does not establish whether this key can use the separate Search API. No search was attempted.`, status);
       }
       await response.body?.cancel();
       return result("unavailable", "Perplexity could not complete the credential check. No automatic retry or search was attempted.", status);
