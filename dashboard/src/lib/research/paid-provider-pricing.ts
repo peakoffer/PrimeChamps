@@ -47,6 +47,12 @@ export function boundedHttpPayload(url: string, body: Record<string, unknown>, p
   if (!price || !String(body.model).startsWith("anthropic/claude-") || String(body.model).includes(":")) {
     throw new Error("Strict OpenRouter research requires a reviewed exact Anthropic model route");
   }
+  // The current Anthropic first-party Opus 5.5 endpoint does not advertise
+  // temperature. With require_parameters=true, sending it produces a 404
+  // before inference while still consuming a conservative ledger reservation.
+  if (body.model === "anthropic/claude-opus-5.5" && Object.hasOwn(body, "temperature")) {
+    throw new Error("Anthropic Opus 5.5 does not support temperature on the frozen OpenRouter route");
+  }
   if (new URL(url).pathname !== "/api/v1/chat/completions") throw new Error("OpenRouter Responses routing bounds need separate verification");
   const provider = record(body.provider);
   if (Object.keys(provider).some((key) => !["zdr", "data_collection", "enforce_distillable_text", "only", "order", "allow_fallbacks", "require_parameters", "sort", "max_price"].includes(key))) {

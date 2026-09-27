@@ -87,6 +87,7 @@ test("the outgoing router payload pins model provider and enforces price ceiling
   assert.equal(outgoing.model, request.model);
   assert.ok(paidHttpPolicy(url, outgoing, price).maximumCostMicrousd > 0);
   assert.throws(() => boundedHttpPayload(url, { ...request, model: "anthropic/claude-opus-5.5:nitro" }, price), /exact Anthropic/);
+  assert.throws(() => boundedHttpPayload(url, { ...request, temperature: 0 }, price), /does not support temperature/);
 });
 
 test("multimodal, hidden continuations, fallback lists and multiple completions cannot use text pricing", () => {

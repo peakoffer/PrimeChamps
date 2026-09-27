@@ -160,7 +160,6 @@ Return exactly one audit for every candidate.`;
     },
     body: JSON.stringify({
       model: route.model,
-      temperature: 0,
       max_tokens: 5_000,
       response_format: {
         type: "json_schema",
