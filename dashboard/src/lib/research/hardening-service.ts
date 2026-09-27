@@ -9,7 +9,7 @@ import { getResearchEvaluationBudget, type ResearchEvaluationBudget } from "@/li
 import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "@/lib/research/hardening-stale-recovery";
 import { summarizeResearchPaidOperations } from "@/lib/research/paid-operation-policy";
-import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, canResolveCanaryTechnicalFailure } from "@/lib/research/hardening-readiness";
+import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure } from "@/lib/research/hardening-readiness";
 import { withResearchPaidContext } from "@/lib/research/paid-operations";
 import {
   HARDENING_BUDGET_LIMIT_MICROUSD,
@@ -641,6 +641,73 @@ export async function prepareHardeningBatch(input: {
 }
 prepareHardeningBatch.maxRetries = 1;
 
+export async function prepareHardeningShadowRetry(input: HardeningCampaignWorkflowInput & { caseId: string }): Promise<PreparedHardeningCase> {
+  "use step";
+  const admin = createAdminClient({ disableRealtime: true });
+  const [{ data: campaign, error: campaignError }, { data: item, error: caseError }] = await Promise.all([
+    admin.from("research_hardening_campaigns").select("*")
+      .eq("id", input.campaignId).eq("organization_id", input.organizationId).single(),
+    admin.from("research_hardening_cases").select("*")
+      .eq("id", input.caseId).eq("campaign_id", input.campaignId)
+      .eq("organization_id", input.organizationId).single(),
+  ]);
+  if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
+  if (caseError || !item?.research_log_id) throw caseError || new Error("Hardening case has no research log");
+  assertAuthorizedHardeningCampaign(campaign);
+  const models = await resolveHardeningModelSnapshot();
+  if (models.officialModel !== campaign.official_model_id || models.challenger.model !== campaign.challenger_model_id) {
+    throw new Error("The frozen model route changed; do not replay the shadow audit");
+  }
+  const [{ data: log, error: logError }, { count: activeCases, error: activeError },
+    { count: shadowOperations, error: shadowError }] = await Promise.all([
+    admin.from("research_logs").select("id,status,is_evaluation,accounting_version,cost_limit_microusd,config_used,requested_by_user_id")
+      .eq("id", item.research_log_id).eq("organization_id", input.organizationId).single(),
+    admin.from("research_hardening_cases").select("id", { count: "exact", head: true })
+      .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId).eq("status", "running"),
+    admin.from("research_paid_operations").select("id", { count: "exact", head: true })
+      .eq("research_log_id", item.research_log_id).eq("organization_id", input.organizationId).eq("stage", "shadow"),
+  ]);
+  if (logError || !log) throw logError || new Error("Hardening research log not found");
+  if (activeError || shadowError) throw activeError || shadowError;
+  assertShadowAuditRetryAdmission({
+    campaignStatus: campaign.status, caseStatus: item.status, verdict: item.verdict,
+    researchStatus: log.status, researchIsEvaluation: log.is_evaluation === true && log.accounting_version === "operations_v1",
+    defectSummaries: array(item.defects).map((entry) => String(object(entry).summary || "")),
+    priorRetries: integer(object(item.metrics).shadowAuditRetryCount),
+    activeCases: activeCases || 0, priorShadowOperations: shadowOperations || 0,
+    unresolvedCriticalDefects: array(item.defects).filter((entry) =>
+      object(entry).severity === "critical" && object(entry).resolved !== true).length,
+  });
+  const [caseExposure, campaignExposure] = await Promise.all([
+    operationExposure(admin, input.organizationId, input.campaignId, item.id),
+    operationExposure(admin, input.organizationId, input.campaignId),
+  ]);
+  const caseRemaining = integer(log.cost_limit_microusd) - caseExposure.exposureMicrousd;
+  const ordinaryRemaining = integer(campaign.preconfirmation_stop_microusd) - campaignExposure.exposureMicrousd;
+  if (caseRemaining < 250_000 || ordinaryRemaining < caseRemaining) {
+    throw new Error("The original case or ordinary campaign allowance cannot cover a bounded audit retry");
+  }
+  const { data: claimed, error: claimError } = await admin.from("research_hardening_cases").update({
+    status: "running", verdict: null, completed_at: null,
+    metrics: { ...object(item.metrics), shadowAuditRetryCount: 1 },
+  }).eq("id", item.id).eq("organization_id", input.organizationId)
+    .eq("status", "blocked").eq("verdict", "needs_fix").select("id").maybeSingle();
+  if (claimError || !claimed) throw claimError || new Error("The audit retry was already claimed");
+  const { error: reopenError } = await admin.from("research_hardening_campaigns").update({
+    status: "running", error_message: null, completed_at: null,
+  }).eq("id", input.campaignId).eq("organization_id", input.organizationId)
+    .in("status", ["failed", "paused_budget", "running"]);
+  if (reopenError) throw reopenError;
+  return {
+    caseId: item.id, archetype: item.archetype as HardeningArchetype, sport: item.sport,
+    stage: item.stage as HardeningStage, profileVariant: item.profile_variant === "guided" ? "guided" : "baseline",
+    workflowInput: { researchLogId: log.id, organizationId: input.organizationId,
+      requestedByUserId: log.requested_by_user_id || input.requestedByUserId,
+      config: log.config_used as ResearchConfig },
+  };
+}
+prepareHardeningShadowRetry.maxRetries = 1;
+
 function exactEvidenceRefs(sourceEvidence: unknown[]) {
   return sourceEvidence.flatMap((entry) => {
     const item = object(entry);
@@ -668,6 +735,9 @@ export async function auditCompletedHardeningCase(input: {
     .select("id,status,stats,final_results,error_message,provider_costs,context_summary")
     .eq("id", input.prepared.workflowInput.researchLogId).eq("organization_id", input.campaign.organizationId).single();
   if (logError || !log) throw logError || new Error("Hardening research log not found");
+  const { data: currentCase, error: currentCaseError } = await admin.from("research_hardening_cases")
+    .select("metrics").eq("id", input.prepared.caseId).eq("organization_id", input.campaign.organizationId).single();
+  if (currentCaseError || !currentCase) throw currentCaseError || new Error("Hardening case not found");
   const { data: candidates, error: candidateError } = await admin.from("research_candidates")
     .select("id,name,sport,disposition,identity_status,identity_confidence,age,age_verified,follower_count,engagement_rate,source_evidence,gate_results,raw_candidate,score")
     .eq("research_log_id", log.id).eq("organization_id", input.campaign.organizationId);
@@ -838,6 +908,7 @@ export async function auditCompletedHardeningCase(input: {
     auditRetention80Plus: highScoreCandidates > 0 ? finalists.length / highScoreCandidates : null,
     heldOutPrecision80Plus: null,
     profileVariant: input.prepared.profileVariant,
+    shadowAuditRetryCount: integer(object(currentCase.metrics).shadowAuditRetryCount),
   };
   const evaluatedVerdict = evaluateHardeningCase(metrics, allDefects);
   const verdict = evaluatedVerdict === "safety_stop" ? evaluatedVerdict
@@ -971,6 +1042,44 @@ export async function auditCompletedHardeningCase(input: {
       }).eq("id", prior.id).eq("organization_id", input.campaign.organizationId);
       if (recoveryError) throw recoveryError;
       resolvedPriorCanaryFailures += 1;
+    }
+  }
+  if (input.prepared.stage === "targeted_rerun" && log.status === "completed" && verdict === "passed") {
+    const { count: recoveredActorRuns, error: actorError } = await admin.from("research_paid_operations")
+      .select("id", { count: "exact", head: true }).eq("research_log_id", log.id)
+      .eq("organization_id", input.campaign.organizationId)
+      .eq("model_or_actor", "deepmine/onlyfans-reverse-lookup").eq("status", "completed");
+    if (actorError) throw actorError;
+    if ((recoveredActorRuns || 0) > 0) {
+      const { data: priorFailures, error: priorError } = await admin.from("research_hardening_cases")
+        .select("id,research_log_id,metrics,defects")
+        .eq("campaign_id", input.campaign.campaignId).eq("organization_id", input.campaign.organizationId)
+        .eq("archetype", input.prepared.archetype).eq("stage", "targeted_rerun")
+        .eq("status", "failed").eq("verdict", "technical_failure").neq("id", input.prepared.caseId);
+      if (priorError) throw priorError;
+      for (const prior of priorFailures || []) {
+        if (!prior.research_log_id || object(prior.metrics).failureResolved === true
+          || array(prior.defects).some((entry) => object(entry).severity === "critical" && object(entry).resolved !== true)) continue;
+        const { data: priorActor, error: priorActorError } = await admin.from("research_paid_operations")
+          .select("usage,settled_microusd,status").eq("research_log_id", prior.research_log_id)
+          .eq("organization_id", input.campaign.organizationId)
+          .eq("model_or_actor", "sentry/onlyfans-reverse-lookup").eq("stage", "scoring_onlyfans")
+          .limit(1).maybeSingle();
+        if (priorActorError) throw priorActorError;
+        if (!canResolveRetiredOnlyFansActorFailure({
+          priorStatus: priorActor?.status || "", priorSettledMicrousd: integer(priorActor?.settled_microusd),
+          priorBillingBasis: String(object(priorActor?.usage).billingBasis || ""),
+          priorReason: String(object(priorActor?.usage).reason || ""),
+          replacementActorCompleted: true, replacementCasePassed: true,
+        })) continue;
+        const { error: resolvedError } = await admin.from("research_hardening_cases").update({
+          metrics: { ...object(prior.metrics), failureResolved: true,
+            failureResolvedAt: new Date().toISOString(), failureResolvedByCaseId: input.prepared.caseId,
+            failureResolutionNote: "The replacement reverse-lookup Actor completed under the same campaign and this archetype passed its independent audit." },
+        }).eq("id", prior.id).eq("organization_id", input.campaign.organizationId);
+        if (resolvedError) throw resolvedError;
+        resolvedPriorProviderFailures += 1;
+      }
     }
   }
   metrics.resolvedPriorProviderFailures = resolvedPriorProviderFailures;

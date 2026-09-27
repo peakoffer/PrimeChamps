@@ -83,6 +83,44 @@ export function canResolveCanaryTechnicalFailure(
     && correction.stage === "targeted_rerun" && correction.status === "completed" && correction.verdict === "passed";
 }
 
+/** Reuse a completed research log; never buy discovery again for an audit-only budget correction. */
+export function assertShadowAuditRetryAdmission(input: {
+  campaignStatus: string;
+  caseStatus: string;
+  verdict: string | null;
+  researchStatus: string;
+  researchIsEvaluation: boolean;
+  defectSummaries: string[];
+  priorRetries: number;
+  activeCases: number;
+  priorShadowOperations: number;
+  unresolvedCriticalDefects: number;
+}) {
+  if (!["failed", "paused_budget", "running"].includes(input.campaignStatus)
+    || input.caseStatus !== "blocked" || input.verdict !== "needs_fix"
+    || input.researchStatus !== "completed" || !input.researchIsEvaluation
+    || input.priorRetries !== 0 || input.activeCases !== 0 || input.priorShadowOperations !== 0
+    || input.unresolvedCriticalDefects !== 0
+    || !input.defectSummaries.some((summary) => /Research case paid-operation budget exhausted/.test(summary))) {
+    throw new Error("Only one audit-only retry is allowed for a completed evaluation held by the case budget");
+  }
+}
+
+export function canResolveRetiredOnlyFansActorFailure(input: {
+  priorStatus: string;
+  priorSettledMicrousd: number;
+  priorBillingBasis: string;
+  priorReason: string;
+  replacementActorCompleted: boolean;
+  replacementCasePassed: boolean;
+}) {
+  return input.priorStatus === "completed" && input.priorSettledMicrousd === 0
+    && input.priorBillingBasis === "not_executed_preflight_block"
+    && /Apify request failed \(404\)/i.test(input.priorReason)
+    && /Actor with this name was not found/i.test(input.priorReason)
+    && input.replacementActorCompleted && input.replacementCasePassed;
+}
+
 export class HardeningReadinessError extends Error {
   readonly code = "BOUNDED_DISCOVERY_REQUIRED";
   constructor() {

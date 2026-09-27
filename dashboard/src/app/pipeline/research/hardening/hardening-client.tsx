@@ -195,6 +195,22 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
     finally { setActing(null); }
   }
 
+  async function retryAudit(caseId: string) {
+    if (!campaign || !paidReadiness?.ready) return;
+    setActing(`audit:${caseId}`); setError(null);
+    try {
+      const response = await fetch(`/api/research/hardening/${campaign.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "retry_audit", caseId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not retry the independent audit");
+      await load();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Could not retry the independent audit");
+    } finally { setActing(null); }
+  }
+
   if (loading) return <div className="h-72 animate-pulse border border-brand-ink/10 bg-brand-paper-bright" />;
 
   const spent = campaign?.total_cost_microusd || 0;
@@ -455,9 +471,12 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
                 const defects = Array.isArray(item.defects) ? item.defects : [];
                 const unresolvedDefects = defects.filter((defect) => defect.resolved !== true);
                 const resolvedDefects = defects.length - unresolvedDefects.length;
+                const canRetryAudit = !active && item.status === "blocked" && item.verdict === "needs_fix"
+                  && Boolean(item.research_log_id) && metric(item.metrics, "shadowAuditRetryCount") === 0
+                  && unresolvedDefects.some((defect) => /Research case paid-operation budget exhausted/.test(String(defect.summary || "")));
                 const pending = campaign?.cases.filter((candidate) => candidate.archetype === item.archetype && candidate.sport === item.sport
                   && candidate.id !== item.id && ["queued", "running"].includes(candidate.status)) || [];
-                const canRerun = !active && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed", "cancelled"].includes(item.verdict || item.status);
+                const canRerun = !active && !canRetryAudit && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed", "cancelled"].includes(item.verdict || item.status);
                 const canRunControl = !active
                   && !legacyFastRoute
                   && item.verdict === "passed"
@@ -486,9 +505,10 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
                       <p className="mt-1 font-mono text-[9px] uppercase text-brand-muted">reserve {money(item.cost_microusd)}</p>
                     </td>
                     <td className="px-4 py-4 text-right">
+                      {canRetryAudit && <button className="text-xs font-semibold text-brand-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline" onClick={() => void retryAudit(item.id)} disabled={campaignPaidActionDisabled} title="Retry only the independent audit of this completed evaluation; discovery and scoring will not rerun">Retry audit only</button>}
                       {canRerun && <button className="text-xs font-semibold text-brand-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline" onClick={() => void campaignAction("rerun", item.archetype, item.stage === "control" ? "control" : "targeted_rerun")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>{item.stage === "control" ? "Control rerun" : "Targeted rerun"}</button>}
                       {canRunControl && <button className="text-xs font-semibold text-brand-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline" onClick={() => void campaignAction("rerun", item.archetype, "control")} disabled={campaignPaidActionDisabled} title={campaignPaidActionTitle}>Control rerun</button>}
-                      {!canRerun && !canRunControl && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
+                      {!canRerun && !canRetryAudit && !canRunControl && item.research_log_id && <Link className="text-xs font-semibold text-brand-muted hover:text-brand-ink" href={`/pipeline/research?session=${item.research_log_id}`}>Inspect run</Link>}
                     </td>
                   </tr>
                 );

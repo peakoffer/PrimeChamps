@@ -11,10 +11,18 @@ export function buildShadowEvidencePacket(input: {
 }) {
   // Preserve gate support AND contradictions. Array position is never a
   // relevance signal, and truncation can remove the sole age/contact source.
+  // These are workflow replay caches, not scored claims. The profile embeds
+  // full post/media payloads and scoring_preparation duplicates paid lookup
+  // responses. Sending both to Opus made the conservative input-byte
+  // reservation exceed a $3 case even for two rejected candidates. Keep the
+  // separately pinned source evidence and every other candidate field.
+  const candidateSnapshot = { ...input.rawCandidate };
+  delete candidateSnapshot.prechecked_instagram_profile;
+  delete candidateSnapshot.scoring_preparation;
   return {
     gates: input.gateResults,
     evidence: input.sourceEvidence.map((value, index) => ({ reference_id: `SOURCE-${index + 1}`, value })),
-    candidate_snapshot: input.rawCandidate,
+    candidate_snapshot: candidateSnapshot,
   };
 }
 

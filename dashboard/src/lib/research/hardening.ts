@@ -143,6 +143,7 @@ export interface HardeningCaseMetrics {
   sourceInvestigations?: Array<{ runId: string; queryPlanHash: string; providerVerified: boolean; completed: boolean; evidenceRefs: string[] }>;
   profileVariant?: "baseline" | "guided";
   repeatabilityVariance?: number;
+  shadowAuditRetryCount?: number;
 }
 
 export function normalizedHardeningMetrics(value: unknown) {

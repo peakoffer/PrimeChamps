@@ -10,7 +10,7 @@ import {
   recoverStaleHardeningRuns,
   resumeUntouchedHardeningCases,
 } from "@/lib/research/hardening-service";
-import { runResearchHardeningCampaign } from "@/workflows/research-hardening";
+import { runResearchHardeningCampaign, runResearchHardeningShadowRetry } from "@/workflows/research-hardening";
 import { hardeningPaidReadiness, HardeningReadinessError } from "@/lib/research/hardening-readiness";
 
 const archetypes = new Set(RESEARCH_HARDENING_MATRIX.map((entry) => entry.archetype));
@@ -39,7 +39,28 @@ export async function POST(
   try {
     const user = await requireOrganizationRole(["owner"]);
     const { id } = await params;
-    const body = await request.json() as { action?: unknown; archetypes?: unknown; stage?: unknown; caseBudgetUsd?: unknown; useConfirmationReserve?: unknown };
+    const body = await request.json() as { action?: unknown; archetypes?: unknown; stage?: unknown; caseBudgetUsd?: unknown; useConfirmationReserve?: unknown; caseId?: unknown };
+    if (body.action === "retry_audit") {
+      if (typeof body.caseId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.caseId)) {
+        return NextResponse.json({ error: "Select one exact case for the audit-only retry" }, { status: 400 });
+      }
+      const campaign = (await getHardeningCampaigns(user.organizationId, id))[0];
+      const selected = campaign?.cases?.find((item: { id: string }) => item.id === body.caseId);
+      const defects: unknown[] = Array.isArray(selected?.defects) ? selected.defects : [];
+      if (!selected || campaign?.cases?.some((item: { status: string }) => item.status === "running")
+        || selected.status !== "blocked" || selected.verdict !== "needs_fix"
+        || !selected.research_log_id || Number((selected.metrics as Record<string, unknown> | null)?.shadowAuditRetryCount || 0) !== 0
+        || !defects.some((defect: unknown) => /Research case paid-operation budget exhausted/.test(String((defect as { summary?: unknown }).summary || "")))) {
+        return NextResponse.json({ error: "This completed case is not eligible for an audit-only retry" }, { status: 409 });
+      }
+      const workflow = await start(runResearchHardeningShadowRetry, [{
+        campaignId: id, caseId: body.caseId, organizationId: user.organizationId,
+        requestedByUserId: user.id,
+      }]);
+      await linkCampaignWorkflow({ campaignId: id, organizationId: user.organizationId, workflowRunId: workflow.runId });
+      return NextResponse.json({ ok: true, campaignId: id, caseId: body.caseId,
+        workflowRunId: workflow.runId }, { status: 202 });
+    }
     if (body.action === "cancel") {
       const campaign = await cancelHardeningCampaign(id, user.organizationId);
       if (campaign.workflow_run_id) {

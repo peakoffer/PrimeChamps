@@ -6,7 +6,7 @@ import { buildShadowEvidencePacket, validateShadowAuditRows } from "../src/lib/r
 import { campaignSpendDecision, evaluateHardeningCase, latestCompletedHardeningCases, normalizedHardeningMetrics, parseHardeningManifest, RESEARCH_HARDENING_MATRIX } from "../src/lib/research/hardening.ts";
 import { evaluateProfileActivation } from "../src/lib/research/statistical-learning.ts";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "../src/lib/research/hardening-stale-recovery.ts";
-import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, assertCanaryResumeAdmission, canResolveCanaryTechnicalFailure, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
+import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
 
 test("paid admission starts only with three sequential $1 evaluation canaries", () => {
   assert.equal(hardeningPaidReadiness().ready, true);
@@ -81,6 +81,51 @@ test("paid cases cannot resume or expand a historical or differently budgeted ca
   assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, accounting_version: "legacy" }));
   assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, budget_configuration: {} }));
   assert.throws(() => assertAuthorizedHardeningCampaign({ ...campaign, budget_limit_microusd: 100_000_000 }));
+});
+
+test("shadow evidence retains claims and contradictions without workflow replay caches", () => {
+  const packet = buildShadowEvidencePacket({
+    sourceEvidence: [{ url: "https://official.example/age", claim: "Born in 2001" }],
+    gateResults: { age: { passed: true } },
+    rawCandidate: {
+      name: "Example Athlete", score: 78,
+      evidence: [{ url: "https://official.example/contradiction", claim: "Conflicting birthdate" }],
+      concerns: ["Conflicting birthdate"],
+      prechecked_instagram_profile: { latestPosts: ["large cached media"] },
+      scoring_preparation: { ageInfo: { rawResults: "large cached lookup" } },
+    },
+  });
+  assert.deepEqual(packet.evidence[0].value, { url: "https://official.example/age", claim: "Born in 2001" });
+  assert.deepEqual(packet.gates, { age: { passed: true } });
+  assert.deepEqual(packet.candidate_snapshot.evidence, [{ url: "https://official.example/contradiction", claim: "Conflicting birthdate" }]);
+  assert.deepEqual(packet.candidate_snapshot.concerns, ["Conflicting birthdate"]);
+  assert.equal("prechecked_instagram_profile" in packet.candidate_snapshot, false);
+  assert.equal("scoring_preparation" in packet.candidate_snapshot, false);
+});
+
+test("audit-only retry admits exactly one completed evaluation after case-budget admission failure", () => {
+  const eligible = { campaignStatus: "failed", caseStatus: "blocked", verdict: "needs_fix",
+    researchStatus: "completed", researchIsEvaluation: true,
+    defectSummaries: ["Research paid ledger: Research case paid-operation budget exhausted"],
+    priorRetries: 0, activeCases: 0, priorShadowOperations: 0, unresolvedCriticalDefects: 0 };
+  assert.doesNotThrow(() => assertShadowAuditRetryAdmission(eligible));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, priorRetries: 1 }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, researchStatus: "error" }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, researchIsEvaluation: false }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, defectSummaries: ["unsafe finalist"] }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, priorShadowOperations: 1 }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, unresolvedCriticalDefects: 1 }));
+});
+
+test("retired OnlyFans Actor failure resolves only with a passing replacement receipt", () => {
+  const eligible = { priorStatus: "completed", priorSettledMicrousd: 0,
+    priorBillingBasis: "not_executed_preflight_block",
+    priorReason: "Apify request failed (404): Actor with this name was not found",
+    replacementActorCompleted: true, replacementCasePassed: true };
+  assert.equal(canResolveRetiredOnlyFansActorFailure(eligible), true);
+  assert.equal(canResolveRetiredOnlyFansActorFailure({ ...eligible, priorSettledMicrousd: 1 }), false);
+  assert.equal(canResolveRetiredOnlyFansActorFailure({ ...eligible, replacementCasePassed: false }), false);
+  assert.equal(canResolveRetiredOnlyFansActorFailure({ ...eligible, priorReason: "An unrelated provider failure" }), false);
 });
 
 test("scorecard recalculates the latest operation exposure after cancellation", () => {

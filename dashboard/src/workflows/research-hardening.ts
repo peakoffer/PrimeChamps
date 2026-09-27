@@ -6,6 +6,7 @@ import {
   loadHardeningCaseIds,
   loadHardeningConcurrency,
   prepareHardeningBatch,
+  prepareHardeningShadowRetry,
   refreshHardeningCampaign,
   type HardeningCampaignWorkflowInput,
 } from "@/lib/research/hardening-service";
@@ -30,6 +31,18 @@ export async function runResearchHardeningCampaign(input: HardeningCampaignWorkf
       // confirmation batches after normal testing reaches its reserved stop.
       if (campaign.status !== "running") break;
     }
+    return await refreshHardeningCampaign(input);
+  } catch (error) {
+    return await failHardeningCampaign(input, error);
+  }
+}
+
+/** Resume only the independent audit of a completed evaluation log. */
+export async function runResearchHardeningShadowRetry(input: HardeningCampaignWorkflowInput & { caseId: string }) {
+  "use workflow";
+  try {
+    const prepared = await prepareHardeningShadowRetry(input);
+    await auditCompletedHardeningCase({ campaign: input, prepared });
     return await refreshHardeningCampaign(input);
   } catch (error) {
     return await failHardeningCampaign(input, error);
