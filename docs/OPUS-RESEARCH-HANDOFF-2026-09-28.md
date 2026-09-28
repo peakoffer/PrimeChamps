@@ -8,6 +8,67 @@ Vercel production deployment `dpl_2DrLhBEfw83KPE2JqvZLk8JX7uSa` is READY and
 aliases `crm.prime-champs.com`. Start from a fresh `main` checkout; do not rely
 on an older Claude session's repository map.
 
+## Update - September 28, 2026 (Claude review and hardening pass)
+
+Read this first; the sections below it describe the state before this pass.
+No paid research, audit retry, outreach, or cost-record change was made.
+The campaign is unchanged: `failed`, $3.979062 exposure, zero passed cases,
+and the $1.575512 Opus reservation is still unsettled.
+
+**Shipped to `main` (code) and production (database):**
+
+1. *Evaluation isolation (was a HIGH-severity gap).* `POST
+   /api/research/sessions/[id]/athletes` promoted evaluation candidates into
+   the live Approval stage (36 stored evaluation finalists passed its gates),
+   and the Pipeline board listed evaluation runs so they could be dragged
+   there. `/api/research/approve` trusted client-sent age, minor, and score
+   values. Both routes now refuse evaluation data and use only stored gate
+   values; the board requests live runs only. Database backstop migrations
+   `research_evaluation_crm_isolation` and
+   `research_evaluation_flag_guards_split` were applied and proven with
+   rolled-back probes: an athlete sourced from an evaluation log, relabelling
+   an evaluation log as live, and relabelling a test candidate as live all
+   fail; ordinary evaluation upserts still work.
+2. *OpenRouter endpoint preflight.* Before any reservation, strict OpenRouter
+   requests read the pinned Anthropic endpoint's advertised parameters (free)
+   and refuse locally unless every field, strict structured output, and the
+   output cap fit. This replaces reliance on the one-field temperature guard.
+3. *Opus output budget.* Opus 5.5 cannot disable thinking, and thinking counts
+   against `max_tokens`. The audit budget rose from 5,000 to 16,000 tokens
+   (about +$0.22 reservation) and a truncated answer is reported explicitly.
+4. *Sonnet 5.5 price.* Added the reviewed $2/$10 rate so the dynamic
+   latest-Sonnet resolver does not halt paid research when it returns
+   `claude-sonnet-5-5`. Note: this campaign is frozen on `claude-sonnet-5`;
+   once the catalog returns Sonnet 5.5, its resume/retry route checks will
+   refuse (by design) and a new campaign is required.
+
+**Held for an explicit owner decision (not applied, not on `main`):**
+
+The soccer audit remains blocked. Unblocking it relaxes spending controls on
+production, so the automated safety review stopped the agent and it is the
+owner's decision, not an agent's:
+
+- *Settling the stuck reservation.* Nothing in the code can settle a
+  pre-inference rejection that has no request ID. The agent drafted an
+  append-only, evidence-required reconciliation migration but did not apply
+  or commit it.
+- *Re-admitting one more audit-only attempt.* The retry gate allows exactly
+  one attempt, only for a case-budget hold, and refuses if the frozen Sonnet
+  route has changed. Allowing a second attempt is a policy change.
+
+Do not implement either without the owner's explicit, written approval of
+that specific change. If approved, the smallest next paid test is unchanged:
+one audit-only Opus call on research log
+`390725ab-a61e-4b1f-9293-2242c5f600ee`, reserving roughly $1.8, which fits the
+$3 case cap only after the $1.575512 rejection is settled at $0.
+
+**Verification:** typecheck clean; 407 unit tests pass, 2 skipped, 0 fail;
+lint 0 errors (53 pre-existing warnings). A local production build compiled
+and type-checked but cannot collect page data without the Supabase secret;
+Vercel's build is authoritative. `npm ci` currently fails because
+`package-lock.json` is out of sync with `package.json` (missing
+`chokidar@5.0.0`), which also affects the CI workflow.
+
 ## What the owner wants
 
 Harden a cost-controlled, source-backed athlete research agent across 13
