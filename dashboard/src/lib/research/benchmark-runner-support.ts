@@ -1148,7 +1148,8 @@ export function sonnetPriceSnapshot(model: string, _now = new Date()): Benchmark
       effectiveUntil: null,
     };
   }
-  if (model !== "claude-sonnet-5") {
+  // Reviewed first-party rates; Sonnet 5.5 kept Sonnet 5's per-token prices.
+  if (!["claude-sonnet-5", "claude-sonnet-5-5"].includes(model)) {
     throw new Error(`Pricing is not configured for the latest resolved Sonnet model (${model})`);
   }
   return {
@@ -1158,7 +1159,7 @@ export function sonnetPriceSnapshot(model: string, _now = new Date()): Benchmark
     outputUsdPerMillion: 10,
     cacheCreationUsdPerMillion: 2.5,
     cacheReadUsdPerMillion: 0.2,
-    source: "https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-24)",
+    source: "https://platform.claude.com/docs/en/about-claude/pricing (Sonnet 5 verified 2026-09-24; Sonnet 5.5 2026-09-28)",
     effectiveUntil: null,
   };
 }

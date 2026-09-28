@@ -1,6 +1,9 @@
 import "server-only";
 import { getResearchPaidContext, runResearchPaidOperation, ResearchPaidOperationError } from "./paid-operations";
-import { boundedHttpPayload, boundedHttpTransport, paidHttpPolicy, paidHttpProvider, httpUsageReceipt, type ProviderPrice } from "./paid-provider-pricing";
+import {
+  assertOpenRouterEndpointSupports, boundedHttpPayload, boundedHttpTransport, paidHttpPolicy, paidHttpProvider, httpUsageReceipt,
+  type OpenRouterEndpoint, type ProviderPrice,
+} from "./paid-provider-pricing";
 
 async function routerPrice(model: string): Promise<ProviderPrice> {
   const response = await fetch("https://openrouter.ai/api/v1/models", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
@@ -17,6 +20,16 @@ async function routerPrice(model: string): Promise<ProviderPrice> {
     source: "https://openrouter.ai/api/v1/models" };
 }
 
+async function routerEndpoints(model: string): Promise<OpenRouterEndpoint[]> {
+  if (!/^[a-z0-9-]+\/[a-z0-9.-]+$/i.test(model)) throw new ResearchPaidOperationError(`Unexpected OpenRouter model id ${model}`);
+  const response = await fetch(`https://openrouter.ai/api/v1/models/${model}/endpoints`, {
+    cache: "no-store", signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new ResearchPaidOperationError("Cannot verify the pinned endpoint's parameters; no paid request sent");
+  const payload = await response.json() as { data?: { endpoints?: OpenRouterEndpoint[] } };
+  return Array.isArray(payload.data?.endpoints) ? payload.data.endpoints : [];
+}
+
 /** Persist raw HTTP receipts before any JSON/schema parsing in the calling stage. */
 export async function researchPaidFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -31,6 +44,7 @@ export async function researchPaidFetch(input: string | URL | Request, init?: Re
     payload = isSocialBlade ? Object.fromEntries(new URL(url).searchParams) : JSON.parse(init!.body as string) as Record<string, unknown>;
     const price = paidHttpProvider(url) === "openrouter" ? await routerPrice(String(payload.model)) : undefined;
     payload = boundedHttpPayload(url, payload, price);
+    if (paidHttpProvider(url) === "openrouter") assertOpenRouterEndpointSupports(payload, await routerEndpoints(String(payload.model)));
     policy = paidHttpPolicy(url, payload, price,
       Number(process.env.SOCIAL_BLADE_CREDIT_UPPER_USD));
   } catch (error) { throw new ResearchPaidOperationError(error instanceof Error ? error.message : "Cannot bound paid research request"); }

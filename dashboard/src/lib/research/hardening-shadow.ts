@@ -121,6 +121,52 @@ function normalizeAudit(value: unknown, dossiers: ShadowCandidateDossier[]): Sha
   });
 }
 
+/**
+ * Opus 5.5 always thinks, and thinking tokens count against max_tokens. Leave
+ * room for reasoning plus one JSON audit per candidate so the answer is never
+ * truncated. Sampling parameters are omitted: the first-party Opus 5.5
+ * endpoint rejects them, and strict routing would refuse the whole request.
+ */
+export const OPUS_SHADOW_MAX_TOKENS = 16_000;
+
+export function buildOpusShadowRequest(model: string, prompt?: string) {
+  const request = {
+    model,
+    max_tokens: OPUS_SHADOW_MAX_TOKENS,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "research_hardening_shadow_audit",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["audits"],
+          properties: {
+            audits: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["candidate_id", "verdict", "issue_category", "severity", "summary", "evidence_refs"],
+                properties: {
+                  candidate_id: { type: "string" },
+                  verdict: { type: "string", enum: ["agree", "unsafe_finalist", "missed_strong_fit", "insufficient_evidence"] },
+                  issue_category: { type: "string", enum: [...HARDENING_DEFECT_CATEGORIES] },
+                  severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                  summary: { type: "string" },
+                  evidence_refs: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  return prompt === undefined ? request : { ...request, messages: [{ role: "user", content: prompt }] };
+}
+
 export async function runOpusShadowAudit(
   route: OpusRouteSnapshot,
   dossiers: ShadowCandidateDossier[]
@@ -158,48 +204,17 @@ Return exactly one audit for every candidate.`;
       "HTTP-Referer": "https://crm.prime-champs.com",
       "X-Title": "Prime Champs Research Hardening",
     },
-    body: JSON.stringify({
-      model: route.model,
-      max_tokens: 5_000,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "research_hardening_shadow_audit",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            required: ["audits"],
-            properties: {
-              audits: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["candidate_id", "verdict", "issue_category", "severity", "summary", "evidence_refs"],
-                  properties: {
-                    candidate_id: { type: "string" },
-                    verdict: { type: "string", enum: ["agree", "unsafe_finalist", "missed_strong_fit", "insufficient_evidence"] },
-                    issue_category: { type: "string", enum: [...HARDENING_DEFECT_CATEGORIES] },
-                    severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
-                    summary: { type: "string" },
-                    evidence_refs: { type: "array", items: { type: "string" } },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      messages: [{ role: "user", content: prompt }],
-    }),
+    body: JSON.stringify(buildOpusShadowRequest(route.model, prompt)),
     signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok) throw new Error(`${route.model} shadow audit failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
   const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
     usage?: OpenRouterBenchmarkUsage;
   };
+  if (payload.choices?.[0]?.finish_reason === "length") {
+    throw new Error(`${route.model} exhausted its ${OPUS_SHADOW_MAX_TOKENS}-token output limit before returning the audit JSON`);
+  }
   const content = payload.choices?.[0]?.message?.content || "";
   const parsed = JSON.parse(content) as { audits?: unknown };
   const audits = normalizeAudit(parsed.audits, dossiers);

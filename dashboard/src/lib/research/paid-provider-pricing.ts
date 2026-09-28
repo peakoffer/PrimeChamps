@@ -41,6 +41,46 @@ function assertTextContent(value: unknown): void {
   }
 }
 
+export type OpenRouterEndpoint = {
+  provider_name?: unknown;
+  tag?: unknown;
+  status?: unknown;
+  max_completion_tokens?: unknown;
+  supported_parameters?: unknown;
+};
+
+// Body fields that route or carry the prompt rather than request a model
+// capability; OpenRouter's parameter filter applies to every other field.
+const OPENROUTER_ROUTING_FIELDS = new Set(["model", "messages", "provider"]);
+
+/**
+ * With require_parameters=true, OpenRouter rejects a request before inference
+ * when the pinned endpoint does not advertise every requested parameter, yet the
+ * ledger must still hold the reservation. Check the endpoint's own metadata
+ * first so an incompatible request fails locally at zero cost.
+ */
+export function assertOpenRouterEndpointSupports(payload: Record<string, unknown>, endpoints: OpenRouterEndpoint[]) {
+  const endpoint = endpoints.find((entry) =>
+    /^anthropic$/i.test(String(entry.provider_name || "")) || /^anthropic(?:\/|$)/i.test(String(entry.tag || "")));
+  if (!endpoint) throw new Error(`OpenRouter lists no Anthropic first-party endpoint for ${String(payload.model)}; no paid request sent`);
+  if (typeof endpoint.status === "number" && endpoint.status < 0) {
+    throw new Error(`The Anthropic endpoint for ${String(payload.model)} is reported unavailable; no paid request sent`);
+  }
+  const supported = new Set(Array.isArray(endpoint.supported_parameters) ? endpoint.supported_parameters.map(String) : []);
+  const required = Object.keys(payload).filter((key) => !OPENROUTER_ROUTING_FIELDS.has(key));
+  if (record(payload.response_format).type === "json_schema") required.push("structured_outputs");
+  const missing = required.filter((parameter) => !supported.has(parameter));
+  if (missing.length) {
+    throw new Error(`The Anthropic endpoint for ${String(payload.model)} does not advertise ${missing.join(", ")} `
+      + `(supports: ${Array.from(supported).sort().join(", ") || "none"}); no paid request sent`);
+  }
+  const outputCap = Number(endpoint.max_completion_tokens);
+  const requestedOutput = Number(payload.max_tokens);
+  if (Number.isFinite(outputCap) && outputCap > 0 && requestedOutput > outputCap) {
+    throw new Error(`Requested ${requestedOutput} output tokens exceed the endpoint cap of ${outputCap}; no paid request sent`);
+  }
+}
+
 /** This exact payload is priced, hashed, and sent; caller routing cannot bypass admission. */
 export function boundedHttpPayload(url: string, body: Record<string, unknown>, price?: ProviderPrice): Record<string, unknown> {
   if (paidHttpProvider(url) !== "openrouter") return body;
@@ -114,7 +154,8 @@ export function paidHttpPolicy(url: string, body: Record<string, unknown>, route
   let price: ProviderPrice;
   const fixedChargeMicrousd = 0;
   if (provider === "anthropic") {
-    if (model !== "claude-sonnet-5") throw new Error(`No reviewed price for ${model}; refresh the price snapshot first`);
+    // Reviewed 2026-09-28: Sonnet 5.5 kept Sonnet 5's $2/$10 per-million rates.
+    if (!["claude-sonnet-5", "claude-sonnet-5-5"].includes(model)) throw new Error(`No reviewed price for ${model}; refresh the price snapshot first`);
     price = { input: 2, output: 10, cacheWrite: 4, source: "https://platform.claude.com/docs/en/about-claude/pricing" };
   } else if (provider === "openai") {
     if (!["gpt-5.6", "gpt-5.6-sol"].includes(model)) throw new Error(`No reviewed direct OpenAI price for ${model}`);
