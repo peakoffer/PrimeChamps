@@ -65,9 +65,9 @@ $3 case cap only after the $1.575512 rejection is settled at $0.
 **Verification:** typecheck clean; 407 unit tests pass, 2 skipped, 0 fail;
 lint 0 errors (53 pre-existing warnings). A local production build compiled
 and type-checked but cannot collect page data without the Supabase secret;
-Vercel's build is authoritative. `npm ci` currently fails because
-`package-lock.json` is out of sync with `package.json` (missing
-`chokidar@5.0.0`), which also affects the CI workflow.
+Vercel's build is authoritative. With npm 10.9.7 locally, `npm ci` reported
+`package-lock.json` out of sync (missing `chokidar@5.0.0`); GitHub CI's
+`npm ci` passes, so this is local-toolchain specific.
 
 ## What the owner wants
 
