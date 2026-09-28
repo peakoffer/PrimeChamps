@@ -13,37 +13,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing candidate data" }, { status: 400 });
     }
 
-    if (candidate.is_minor === true || candidate.score === 0) {
+    // Gate decisions come from the stored research ledger, never from request
+    // values, so a client cannot assert age verification or a passing score.
+    const candidateId = typeof candidate.id === "string" ? candidate.id : null;
+    if (!candidateId) {
+      return NextResponse.json({ error: "Approve a stored research candidate from its research run" }, { status: 400 });
+    }
+    const { data: stored, error: candidateError } = await supabase
+      .from("research_candidates")
+      .select("id,research_log_id,is_test_data,is_minor,age_verified,score,instagram_handle")
+      .eq("id", candidateId)
+      .eq("organization_id", user.organizationId)
+      .maybeSingle();
+    if (candidateError) throw candidateError;
+    if (!stored || (researchRunId && stored.research_log_id !== researchRunId)) {
+      return NextResponse.json({ error: "Research candidate not found" }, { status: 404 });
+    }
+    const { data: run, error: runError } = await supabase
+      .from("research_logs")
+      .select("id,is_evaluation")
+      .eq("id", stored.research_log_id)
+      .eq("organization_id", user.organizationId)
+      .maybeSingle();
+    if (runError) throw runError;
+    if (!run) return NextResponse.json({ error: "Research run not found" }, { status: 404 });
+    if (run.is_evaluation === true || stored.is_test_data === true) {
+      return NextResponse.json(
+        { error: "Evaluation research is isolated from the live pipeline and cannot be approved." },
+        { status: 403 }
+      );
+    }
+    if (!stored.instagram_handle || stored.instagram_handle.toLowerCase() !== String(candidate.instagram_handle).replace(/^@/, "").toLowerCase()) {
+      return NextResponse.json({ error: "Candidate handle does not match the stored research record" }, { status: 409 });
+    }
+    if (stored.is_minor === true || stored.score === null || Number(stored.score) === 0) {
       return NextResponse.json({ error: "This candidate is safety-blocked and cannot enter Approval" }, { status: 403 });
     }
-
-    if (candidate.age_verified !== true) {
+    if (stored.age_verified !== true) {
       return NextResponse.json(
         { error: "Age is not source-verified. Review the held candidate in the Research pipeline first." },
         { status: 422 }
       );
-    }
-
-    const candidateId = typeof candidate.id === "string" ? candidate.id : null;
-    if (candidateId) {
-      const { data: candidateRecord, error: candidateError } = await supabase
-        .from("research_candidates")
-        .select("id,research_log_id")
-        .eq("id", candidateId)
-        .eq("organization_id", user.organizationId)
-        .maybeSingle();
-      if (candidateError) throw candidateError;
-      if (!candidateRecord || (researchRunId && candidateRecord.research_log_id !== researchRunId)) {
-        return NextResponse.json({ error: "Research candidate not found" }, { status: 404 });
-      }
-    } else if (researchRunId) {
-      const { data: run } = await supabase
-        .from("research_logs")
-        .select("id")
-        .eq("id", researchRunId)
-        .eq("organization_id", user.organizationId)
-        .maybeSingle();
-      if (!run) return NextResponse.json({ error: "Research run not found" }, { status: 404 });
     }
 
     // Check if already exists
@@ -73,11 +83,11 @@ export async function POST(request: NextRequest) {
           bio: candidate.bio,
           source: candidate.source,
           discovered_at: new Date().toISOString(),
-          research_run_id: researchRunId,
-          research_score: candidate.score,
+          research_run_id: stored.research_log_id,
+          research_score: Number(stored.score),
           research_reasoning: candidate.reasoning,
           concerns: candidate.concerns || [],
-          age_verified: candidate.age_verified,
+          age_verified: stored.age_verified,
           age: candidate.age,
           age_source: candidate.age_source,
         }),
@@ -85,7 +95,7 @@ export async function POST(request: NextRequest) {
         source: "research_agent",
         is_historical: false,
         is_test_data: false,
-        source_research_log_id: researchRunId || null,
+        source_research_log_id: stored.research_log_id,
       })
       .select()
       .single();
@@ -101,14 +111,14 @@ export async function POST(request: NextRequest) {
         organization_id: user.organizationId,
         created_by_user_id: user.id,
         research_candidate_id: candidateId,
-        research_log_id: researchRunId,
+        research_log_id: stored.research_log_id,
         athlete_id: newAthlete.id,
         candidate_data: candidate,
         decision: "approved",
-        score: candidate.score,
+        score: Number(stored.score),
         reasoning: candidate.reasoning,
       });
-      if (candidateId) {
+      {
         await supabase.from("research_candidates").update({
           athlete_id: newAthlete.id,
           disposition: "approval",

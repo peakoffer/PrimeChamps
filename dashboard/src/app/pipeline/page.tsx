@@ -124,7 +124,7 @@ export default function PipelinePage() {
             // Research keeps both the run audit and the currently held athlete
             // count. The board renders runs; the funnel counts people.
             const [sessionsResponse, athletesResponse] = await Promise.all([
-              fetch("/api/research/sessions?limit=10"),
+              fetch("/api/research/sessions?limit=10&live=1"),
               fetch("/api/pipeline/athletes?stage=research"),
             ]);
             const [sessionsData, athletesData] = await Promise.all([

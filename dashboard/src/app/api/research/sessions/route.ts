@@ -10,13 +10,19 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const limit = parseInt(searchParams.get("limit") || "20");
 
-    const { data, error } = await supabase
+    // The Pipeline board requests live runs only; evaluation research is an
+    // experiment record and must not appear where candidates can be promoted.
+    const liveOnly = searchParams.get("live") === "1";
+
+    let query = supabase
       .from("research_logs")
       .select("id, status, phase, workflow_run_id, profile_version_id, research_depth, prompt_version, scoring_model, is_evaluation, config_used, stats, final_results, created_at, completed_at, heartbeat_at, error_message")
       .eq("organization_id", user.organizationId)
       .order("created_at", { ascending: false })
       .limit(limit);
+    if (liveOnly) query = query.eq("is_evaluation", false);
 
+    const { data, error } = await query;
     if (error) throw error;
 
     const rawSessions = data || [];

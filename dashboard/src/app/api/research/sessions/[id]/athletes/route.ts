@@ -15,7 +15,7 @@ export async function GET(
     // Fetch the research log which contains final_results
     const { data: log, error } = await supabase
       .from("research_logs")
-      .select("id, final_results, config_used, stats")
+      .select("id, final_results, config_used, stats, is_evaluation")
       .eq("id", id)
       .eq("organization_id", user.organizationId)
       .single();
@@ -150,7 +150,9 @@ export async function GET(
         id: existingProfile?.id || candidate.id || candidate.instagram_handle,
         candidate_key: candidate.instagram_handle || candidate.name,
         persisted: Boolean(existingProfile?.id),
+        // Evaluation research is an experiment record and never enters the live CRM.
         can_move: Boolean(
+          log.is_evaluation !== true &&
           inferredDisposition !== "blocked" &&
           inferredDisposition !== "skipped" &&
           (actualStage === "research" || (!existingProfile?.id && inferredDisposition === "held"))
@@ -218,13 +220,19 @@ export async function POST(
 
     const { data: log, error: logError } = await supabase
       .from("research_logs")
-      .select("id, final_results")
+      .select("id, final_results, is_evaluation")
       .eq("id", id)
       .eq("organization_id", user.organizationId)
       .single();
 
     if (logError || !log || !Array.isArray(log.final_results)) {
       return NextResponse.json({ error: "Research run not found" }, { status: 404 });
+    }
+    if (log.is_evaluation === true) {
+      return NextResponse.json(
+        { error: "Evaluation research is isolated from the live pipeline and cannot be moved to Approval." },
+        { status: 403 }
+      );
     }
 
     const candidate = log.final_results.find((result) => {
