@@ -104,17 +104,73 @@ export function hasIndependentInstagramHandleEvidence(candidate: InstagramSearch
     || candidate.reasons.includes("named athlete source corroborates profile ownership");
 }
 
+/**
+ * Handles a source publishes. "labeled" means the source states the handle as
+ * an Instagram account ("Instagram: sarawojoo", "Instagram @handle"); an
+ * unlabeled instagram.com link may point at a team, sponsor, or photographer.
+ */
 function instagramHandlesFromText(value: string) {
-  const handles = new Set<string>();
-  for (const match of value.matchAll(/instagram(?:\s+(?:handle|username|profile))?\s*[:\-]?(?:\s*@|\s+@?)([a-z0-9_.]{3,30})\b/ig)) {
+  const handles = new Map<string, { handle: string; labeled: boolean }>();
+  // "<Name> on Instagram: <caption>" is Instagram's own post title format; the
+  // word after the colon is caption text, not a handle.
+  for (const match of value.matchAll(/(?<!\bon\s)instagram(?:\s+(?:handle|username|profile))?\s*[:\-]?(?:\s*@|\s+@?)([a-z0-9_.]{3,30})\b/ig)) {
     const handle = match[1].toLowerCase();
-    if (!HANDLE_STOPWORDS.has(handle) && !RESERVED_PATHS.has(handle)) handles.add(handle);
+    if (!HANDLE_STOPWORDS.has(handle) && !RESERVED_PATHS.has(handle)) handles.set(handle, { handle, labeled: true });
   }
   for (const match of value.matchAll(/instagram\.com\/([a-z0-9_.]{1,30})(?:\/|\b)/ig)) {
     const handle = match[1].toLowerCase();
-    if (!HANDLE_STOPWORDS.has(handle) && !RESERVED_PATHS.has(handle)) handles.add(handle);
+    if (!HANDLE_STOPWORDS.has(handle) && !RESERVED_PATHS.has(handle) && !handles.has(handle)) handles.set(handle, { handle, labeled: false });
   }
-  return Array.from(handles);
+  return Array.from(handles.values());
+}
+
+/**
+ * A source names the athlete when it carries the full name, or both the first
+ * name and surname as whole words ("Sara (Wojo) Wojdelko"). Partial or
+ * substring matches never count.
+ */
+export function sourceNamesAthlete(name: string, value: string) {
+  const tokens = normalize(name).split(" ").filter((token) => token.length > 1);
+  if (tokens.length < 2) return false;
+  if (compact(value).includes(tokens.join(""))) return true;
+  const words = new Set(normalize(value).split(" "));
+  return words.has(tokens[0]) && words.has(tokens.at(-1)!);
+}
+
+/**
+ * Whether a source-published handle plausibly belongs to the named athlete.
+ * A labeled handle may use a nickname but must still carry the first name or
+ * surname; an unlabeled link must carry the surname or full name. The live
+ * profile must then independently match before identity can be corroborated.
+ */
+export function sourcePublishedHandleFits(name: string, handle: string, labeled: boolean) {
+  const tokens = normalize(name).split(" ").filter((token) => token.length > 1);
+  if (tokens.length < 2) return false;
+  const compactHandle = handle.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const first = tokens[0];
+  const surname = tokens.at(-1)!;
+  if (compactHandle.includes(tokens.join("")) || (surname.length >= 3 && compactHandle.includes(surname))) return true;
+  return labeled && first.length >= 3 && compactHandle.includes(first);
+}
+
+const ORGANIZATION_OR_FAN_ACCOUNT = /(?:^|[^a-z])(?:fc|sc|cf|afc|team|league|federation|association|academy|club|athletics|official|news|media|fan\s?page|fan account|fans|updates|supporters)(?:[^a-z]|$)/i;
+
+/** Instagram profile result titles read "Display Name (@handle) • Instagram photos and videos". */
+function instagramResultDisplayName(title: string) {
+  const index = title.indexOf("(@");
+  return index > 0 ? title.slice(0, index).trim() : "";
+}
+
+/**
+ * The live display name is the athlete's: exactly the name, or the first name
+ * and surname as whole words with at most two extra words (a middle name).
+ */
+export function profileNameMatchesAthlete(athleteName: string, displayName: string) {
+  if (normalize(displayName) === normalize(athleteName)) return true;
+  const nameTokens = normalize(athleteName).split(" ").filter(Boolean);
+  const displayTokens = normalize(displayName).split(" ").filter(Boolean);
+  return nameTokens.length >= 2 && displayTokens.length <= nameTokens.length + 2
+    && displayTokens[0] === nameTokens[0] && displayTokens.at(-1) === nameTokens.at(-1);
 }
 
 function nameSignals(name: string, value: string) {
@@ -224,6 +280,25 @@ export function rankInstagramNativeSearchCandidates(input: {
     .slice(0, 3);
 }
 
+/**
+ * Other sources from the same paid discovery pool that name this athlete and
+ * publish a fitting Instagram handle (for example an NIL or roster profile).
+ * Attaching them costs nothing and lets identity ranking see the real handle
+ * instead of guessing one from the name. Provider text only, never model text.
+ */
+export function sourcesPublishingAthleteHandle<T extends { url?: string | null; title?: string | null; snippet?: string | null }>(
+  athleteName: string,
+  sources: T[],
+  limit = 3,
+) {
+  return sources.filter((source) => {
+    const text = `${source.title || ""} ${source.snippet || ""}`;
+    return typeof source.url === "string" && source.url.startsWith("http")
+      && sourceNamesAthlete(athleteName, text)
+      && instagramHandlesFromText(text).some((entry) => sourcePublishedHandleFits(athleteName, entry.handle, entry.labeled));
+  }).slice(0, limit);
+}
+
 export function rankInstagramSearchCandidates(input: {
   athleteName: string;
   sport: string;
@@ -234,21 +309,25 @@ export function rankInstagramSearchCandidates(input: {
   for (const result of input.results) {
     const directHandle = instagramHandleFromUrl(result.url);
     const sourceText = `${result.title} ${result.snippet}`;
-    const sourceSignals = nameSignals(input.athleteName, sourceText);
-    const sourcedHandles = !directHandle && sourceSignals.full
-      && (normalize(sourceText).includes(sport) || /athlete|professional|olympian|player|fighter|surfer|gymnast/i.test(sourceText))
-      ? instagramHandlesFromText(sourceText).filter((handle) => {
-          const handleSignals = nameSignals(input.athleteName, handle);
-          return handleSignals.full || handleSignals.surname;
-        })
+    const sourcedHandles = !directHandle && sourceNamesAthlete(input.athleteName, sourceText)
+      && (normalize(sourceText).includes(sport) || /athlete|professional|olympian|player|fighter|surfer|gymnast|goalkeeper|keeper|forward|defender|midfielder|roster|nil/i.test(sourceText))
+      ? instagramHandlesFromText(sourceText)
+        .filter((entry) => sourcePublishedHandleFits(input.athleteName, entry.handle, entry.labeled))
+        .map((entry) => entry.handle)
       : [];
     for (const handle of directHandle ? [directHandle] : sourcedHandles) {
       const searchable = `${handle} ${sourceText}`;
-      const signals = nameSignals(input.athleteName, searchable);
+      // A profile result's snippet mixes the owner's name with captions, tags
+      // and roster lists: a club account that lists the athlete must not match
+      // her name. Judge a direct profile only by its handle and display name.
+      const displayName = directHandle ? instagramResultDisplayName(result.title) : "";
+      const identityText = directHandle ? `${handle} ${displayName}` : searchable;
+      const signals = nameSignals(input.athleteName, identityText);
+      const wholeNameInDisplay = directHandle && sourceNamesAthlete(input.athleteName, displayName);
       const reasons: string[] = [];
       let confidence = sourcedHandles.includes(handle) ? 20 : 0;
       if (sourcedHandles.includes(handle)) reasons.push("named source publishes Instagram handle");
-      if (signals.full) { confidence += 55; reasons.push("full name matches"); }
+      if (signals.full || wholeNameInDisplay) { confidence += 55; reasons.push("full name matches"); }
       else {
         if (signals.first) { confidence += 18; reasons.push("first name matches"); }
         if (signals.surname) { confidence += 32; reasons.push("surname matches"); }
@@ -258,9 +337,11 @@ export function rankInstagramSearchCandidates(input: {
         confidence += 8;
         reasons.push("athlete signal present");
       }
-      if (/team|league|federation|association|academy|club|news|media|official account|fan\s?page|fan account|updates|supporters/i.test(handle + " " + result.title + " " + result.snippet)) {
-        confidence -= directHandle ? 25 : 0;
-        if (directHandle) reasons.push("organization or fan-account risk");
+      // Captions routinely mention a team or club; only the account's own
+      // handle and display name say whether it is an organization or fan page.
+      if (directHandle && ORGANIZATION_OR_FAN_ACCOUNT.test(`${handle} ${displayName}`)) {
+        confidence -= 25;
+        reasons.push("organization or fan-account risk");
       }
       const candidate = {
         handle,
@@ -371,7 +452,7 @@ export function evaluateCorroboratedInstagramIdentity(input: {
   externalSportIdentityVerified: boolean;
 }) {
   const profileText = `${input.profile.fullName} ${input.profile.bio}`;
-  const exactProfileName = normalize(input.profile.fullName) === normalize(input.athleteName);
+  const exactProfileName = profileNameMatchesAthlete(input.athleteName, input.profile.fullName);
   const exactNameHandle = compact(input.searchCandidate.handle) === compact(input.athleteName);
   const sportTokens = normalize(input.sport).split(" ").filter((token) => token.length >= 3);
   const normalizedProfile = normalize(profileText);

@@ -39,6 +39,7 @@ import {
   independentSourcePublishesInstagramHandle,
   instagramHandleFromUrl,
   rankInstagramSearchCandidates,
+  sourcesPublishingAthleteHandle,
   scoreInstagramProfileIdentity,
   type InstagramSearchCandidate,
 } from "@/lib/research/instagram-identity";
@@ -2310,7 +2311,13 @@ Return one JSON object matching the requested schema. Put the rows in the "candi
         source: typeof candidate.source === "string" ? candidate.source : "Perplexity Search",
         evidence: [providerDiscoveryEvidence({ url, title: sourceResult?.title, snippet: sourceResult?.snippet },
           strict ? sourceResult?.snippet || "" : context,
-          strict ? "Perplexity Search raw discovery" : "Perplexity Search + Anthropic extraction")],
+          strict ? "Perplexity Search raw discovery" : "Perplexity Search + Anthropic extraction"),
+          // Free: other already-retrieved sources that name this athlete and
+          // publish their Instagram handle, so identity can use the real one.
+          ...sourcesPublishingAthleteHandle(name, sources.filter((source) =>
+            canonicalResearchUrl(source.url as string) !== canonicalResearchUrl(url)))
+            .map((source) => providerDiscoveryEvidence({ url: source.url as string, title: source.title, snippet: source.snippet },
+              source.snippet || "", "Perplexity Search raw discovery (handle source)"))],
         known_instagram_handle: precheck.instagramHandle,
         discovery_precheck: precheck.discoveryPrecheck,
       })];
