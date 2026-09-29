@@ -103,6 +103,8 @@ export async function POST(request: NextRequest) {
       resultCount: evaluationBudget?.resultCount || (depth === "extended" ? 20 : 10),
       scoringModel: undefined,
       evaluationMode,
+      // Owner intent: mixed/global discovery without a women-only default.
+      audienceScope: "mixed_global",
       evaluationBudget: evaluationBudget || undefined,
       profileVersionId: activeProfile?.id,
       profileVersion: activeProfile?.version,

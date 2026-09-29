@@ -135,6 +135,7 @@ export async function launchResearchEvaluations(input: {
       followerMax: profile.parameters.follower_max,
       resultCount: evaluationBudget.resultCount,
       evaluationMode: true,
+      audienceScope: "mixed_global",
       evaluationBudget,
       profileVersionId: activeProfile?.id,
       profileVersion: activeProfile?.version,
