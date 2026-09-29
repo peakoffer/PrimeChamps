@@ -42,28 +42,35 @@ and the $1.575512 Opus reservation is still unsettled.
    once the catalog returns Sonnet 5.5, its resume/retry route checks will
    refuse (by design) and a new campaign is required.
 
-**Held for an explicit owner decision (not applied, not on `main`):**
+**Owner-approved on September 29 and shipped (`b698944`):**
 
-The soccer audit remains blocked. Unblocking it relaxes spending controls on
-production, so the automated safety review stopped the agent and it is the
-owner's decision, not an agent's:
+The owner approved, in writing, settling the $1.575512 Opus hold and one
+more audit-only attempt on the soccer case.
 
-- *Settling the stuck reservation.* Nothing in the code can settle a
-  pre-inference rejection that has no request ID. The agent drafted an
-  append-only, evidence-required reconciliation migration but did not apply
-  or commit it.
-- *Re-admitting one more audit-only attempt.* The retry gate allows exactly
-  one attempt, only for a case-budget hold, and refuses if the frozen Sonnet
-  route has changed. Allowing a second attempt is a policy change.
+- *Reconciliation ledger.* Migration `research_paid_operation_reconciliations`
+  is applied. Its service-role function settles only a completed OpenRouter
+  4xx "No endpoints found" operation with no usage and no request ID, only
+  for an active organization owner, and only with OpenRouter Activity
+  evidence of an exact $0 charge. The table is append-only. Rolled-back
+  probes proved it refuses a wrong evidence source, a non-zero charge, a
+  short description, a non-owner, and an ordinary receipt.
+- *Scorecard.* An "Unsettled provider rejections" panel lets the owner record
+  the billing check. Settlement requires the owner's own observation; the
+  agent does not infer a $0 charge from the error body.
+- *Second audit path.* After the $0 record exists, "Retry audit only"
+  appears on the soccer case (and "Targeted rerun" is hidden there). The
+  retry is capped at two attempts per case, compares only the frozen Opus
+  route, and runs the free endpoint preflight before spending the claim.
 
-Do not implement either without the owner's explicit, written approval of
-that specific change. If approved, the smallest next paid test is unchanged:
-one audit-only Opus call on research log
-`390725ab-a61e-4b1f-9293-2242c5f600ee`, reserving roughly $1.8, which fits the
-$3 case cap only after the $1.575512 rejection is settled at $0.
+**Next steps, in order:** (1) owner checks OpenRouter Activity for
+2026-09-27 00:08:47 UTC and records the result in the scorecard panel;
+(2) if it shows $0, owner clicks "Retry audit only" on team/soccer. Expected
+reservation is about $1.8 against about $2.13 left in the case; nothing else
+is bought. If the preflight refuses, no money is held and the claim is not
+spent; read the error before trying anything else.
 
-**Verification:** typecheck clean; 407 unit tests pass, 2 skipped, 0 fail;
-lint 0 errors (53 pre-existing warnings). A local production build compiled
+**Verification:** typecheck clean; 409 unit tests pass, 2 skipped, 0 fail;
+lint 0 errors (54 warnings, all pre-existing patterns). A local production build compiled
 and type-checked but cannot collect page data without the Supabase secret;
 Vercel's build is authoritative. With npm 10.9.7 locally, `npm ci` reported
 `package-lock.json` out of sync (missing `chokidar@5.0.0`); GitHub CI's
