@@ -83,3 +83,14 @@ test("starting a paid check is owner-only and resume is lease-guarded", () => {
   // Grades appear only after every record is scored.
   assert.match(runner, /check\.status === "completed"\n      \? sponsorApprovalScorecard/);
 });
+
+test("reason categories in public boilerplate are not leakage, but the written explanation still is", async () => {
+  const { promptContainsBenchmarkLeakage } = await import("../src/lib/research/benchmark-runner-support.ts");
+  const labels = {
+    fit_label: "not_fit", achievability_label: "low", final_outcome: "onlyfans_rejected", primary_reason: "terms",
+    explanation: "A new fight opportunity was declined because the broadcast would not permit the logo.",
+  };
+  assert.equal(promptContainsBenchmarkLeakage("Sign in. By continuing, you agree to our Terms of Service.", labels), false);
+  assert.equal(promptContainsBenchmarkLeakage(`Note: ${labels.explanation}`, labels), true);
+  assert.equal(promptContainsBenchmarkLeakage("Status: onlyfans_rejected", labels), true);
+});

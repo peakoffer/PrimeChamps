@@ -989,6 +989,9 @@ export function promptContainsBenchmarkLeakage(prompt: string, record: Record<st
   const genericLabels = new Set([
     "fit", "not_fit", "uncertain", "high", "medium", "low", "signed", "stalled",
     "unresolved", "unknown", "other", "yes", "no",
+    // Primary-reason categories are ordinary words ("terms" appears in site
+    // sign-in boilerplate); the explanation and references still guard leakage.
+    "terms", "reach", "timing", "interest", "eligibility",
   ]);
   const forbidden = [
     record.fit_label,
