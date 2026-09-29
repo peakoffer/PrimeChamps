@@ -1,6 +1,7 @@
 import { runResearchWorkflow } from "@/app/api/research/run/workflow";
 import { chunkWithConcurrency } from "@/lib/research/hardening";
 import {
+  applyHardeningCanaryGate,
   auditCompletedHardeningCase,
   failHardeningCampaign,
   loadHardeningCaseIds,
@@ -30,6 +31,10 @@ export async function runResearchHardeningCampaign(input: HardeningCampaignWorkf
       // and absolute ceiling with stage awareness. Do not strand later
       // confirmation batches after normal testing reaches its reserved stop.
       if (campaign.status !== "running") break;
+      // Canaries-then-wave campaigns continue past the release canaries only
+      // when every canary has an audited passing attempt.
+      const gate = await applyHardeningCanaryGate(input);
+      if (!gate.continue) break;
     }
     return await refreshHardeningCampaign(input);
   } catch (error) {

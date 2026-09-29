@@ -9,7 +9,7 @@ import { getResearchEvaluationBudget, type ResearchEvaluationBudget } from "@/li
 import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "@/lib/research/hardening-stale-recovery";
 import { summarizeResearchPaidOperations } from "@/lib/research/paid-operation-policy";
-import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, type ShadowAuditRetryPath, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure } from "@/lib/research/hardening-readiness";
+import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, type ShadowAuditRetryPath, canResolveCanaryTechnicalFailure, hardeningCanaryGate, canResolveRetiredOnlyFansActorFailure } from "@/lib/research/hardening-readiness";
 import { withResearchPaidContext } from "@/lib/research/paid-operations";
 import { assertOpenRouterRequestReady } from "@/lib/research/paid-provider-fetch";
 import {
@@ -22,6 +22,8 @@ import {
   NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD,
   NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
   NEXT_HARDENING_AUTHORIZATION_KEY,
+  CURRENT_HARDENING_AUTHORIZATION,
+  type HardeningCampaignPolicy,
   RESEARCH_HARDENING_MATRIX,
   RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE,
   campaignSpendDecision,
@@ -62,9 +64,11 @@ export type PreparedHardeningCase = {
   workflowInput: ResearchWorkflowInput;
 };
 
-function hardeningEvaluationBudget(stage: HardeningStage): ResearchEvaluationBudget {
+function hardeningEvaluationBudget(stage: HardeningStage, policy: HardeningCampaignPolicy = "sequential_canaries_v1"): ResearchEvaluationBudget {
   if (stage === "confirmation" || stage === "control") return getResearchEvaluationBudget("release");
-  if (stage === "targeted_rerun") return getResearchEvaluationBudget("development");
+  // A release campaign's first run per archetype must be able to surface real
+  // talent, so it uses the full development depth rather than a $1 smoke probe.
+  if (stage === "targeted_rerun" || policy === "canaries_then_wave_v2") return getResearchEvaluationBudget("development");
   return {
     ...getResearchEvaluationBudget("smoke"),
     discoveryCandidatesPerWave: 12,
@@ -229,7 +233,7 @@ export async function createHardeningBudgetDraft(input: { organizationId: string
       || data.confirmation_reserve_microusd !== NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD) {
       throw new Error("A different draft budget already exists; review it before changing the authorization");
     }
-    if (data.status !== "draft") throw new Error("This $50 authorization has already been used");
+    if (data.status !== "draft") throw new Error(`This ${CURRENT_HARDENING_AUTHORIZATION.label} authorization has already been used`);
     return { campaignId: data.id, created: false };
   }
   const existing = await existingDraft();
@@ -237,7 +241,7 @@ export async function createHardeningBudgetDraft(input: { organizationId: string
   const { data, error } = await admin.from("research_hardening_campaigns").insert({
     organization_id: input.organizationId,
     requested_by_user_id: input.requestedByUserId,
-    name: `Cross-sport research · $50 ceiling · ${new Date().toISOString().slice(0, 10)}`,
+    name: `Cross-sport research · ${CURRENT_HARDENING_AUTHORIZATION.label} · ${new Date().toISOString().slice(0, 10)}`,
     status: "draft", campaign_type: "cross_sport", accounting_version: "operations_v1",
     budget_limit_microusd: NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
     preconfirmation_stop_microusd: NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
@@ -259,7 +263,7 @@ export async function createHardeningBudgetDraft(input: { organizationId: string
 
 function requireCurrentCampaignAuthorization(campaignType: string) {
   if (campaignType !== "cross_sport") {
-    throw new Error("This $50 authorization covers one cross-sport campaign only; other campaign types need a separate owner-approved budget");
+    throw new Error("This budget authorization covers one cross-sport campaign only; other campaign types need a separate owner-approved budget");
   }
 }
 
@@ -300,14 +304,15 @@ export async function createHardeningCampaign(input: {
     || authorizedDraft.budget_limit_microusd !== NEXT_HARDENING_BUDGET_LIMIT_MICROUSD
     || authorizedDraft.preconfirmation_stop_microusd !== NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD
     || authorizedDraft.confirmation_reserve_microusd !== NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)) {
-    throw new Error("The exact $50 draft authorization is required before paid cross-sport work");
+    throw new Error("The exact saved budget authorization is required before paid cross-sport work");
   }
   const manifest = campaignType === "profile_validation"
     ? parseHardeningManifest(Object.keys(RESEARCH_HARDENING_CONTROL_BY_ARCHETYPE).map((archetype) => ({ archetype, stage: "control" })))
     : parseHardeningManifest(input.cases);
   const maxConcurrency = input.maxConcurrency ?? 1;
   if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1 || maxConcurrency > HARDENING_MAX_CONCURRENCY) throw new Error("Concurrency must be between one and three");
-  if (authorizedDraft) assertInitialHardeningCanaries(manifest, maxConcurrency);
+  if (authorizedDraft) assertInitialHardeningCanaries(manifest, maxConcurrency,
+    CURRENT_HARDENING_AUTHORIZATION.policy, CURRENT_HARDENING_AUTHORIZATION.defaultCaseBudgetMicrousd);
   const { data: activeBaseline, error: baselineError } = await admin.from("research_profile_versions")
     .select("id").eq("organization_id", input.organizationId).eq("status", "active").maybeSingle();
   if (baselineError) throw baselineError;
@@ -484,8 +489,8 @@ export async function prepareHardeningBatch(input: {
     .eq("organization_id", input.campaign.organizationId).single();
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
   if (campaign.cancel_requested_at || campaign.status === "cancelled") throw new Error("Hardening campaign was cancelled");
-  assertAuthorizedHardeningCampaign(campaign);
-  if (campaign.status === "paused_budget") return [];
+  const authorization = assertAuthorizedHardeningCampaign(campaign);
+  if (campaign.status === "paused_budget" || campaign.status === "paused") return [];
   await assertFrozenModels(campaign as JsonRecord);
   const { data: activeProfile, error: profileError } = await admin.from("research_profile_versions")
     .select("id,version,name,compiled_profile")
@@ -517,7 +522,7 @@ export async function prepareHardeningBatch(input: {
   const reserveCaseIds = new Set(array(budgetConfiguration.reserve_case_ids).map(String));
   const allowanceFor = (item: { archetype: string; stage: string; replicate_number: number }) => {
     const entry = manifest.find((entry) => entry.archetype === item.archetype && entry.stage === item.stage && entry.replicateNumber === item.replicate_number);
-    return integer(entry?.caseBudgetMicrousd) || 3_000_000;
+    return integer(entry?.caseBudgetMicrousd) || authorization.defaultCaseBudgetMicrousd;
   };
   const selectedCases = (cases || []).filter((item) => item.status === "queued")
     .sort((a, b) => input.caseIds.indexOf(a.id) - input.caseIds.indexOf(b.id));
@@ -560,7 +565,7 @@ export async function prepareHardeningBatch(input: {
       ...storedProfile,
       parameters: { ...DEFAULT_RECRUITING_PROFILE.parameters, ...(storedProfile.parameters || {}) },
     };
-    const evaluationBudget = hardeningEvaluationBudget(stage);
+    const evaluationBudget = hardeningEvaluationBudget(stage, authorization.policy);
     const config: ResearchConfig = {
       sportFocus: item.sport,
       partnershipGoal: "onlyfans_creator",
@@ -1261,6 +1266,40 @@ export async function auditCompletedHardeningCase(input: {
 }
 auditCompletedHardeningCase.maxRetries = 1;
 
+function hardeningAuthorizationDefault(campaign: Record<string, unknown>) {
+  return assertAuthorizedHardeningCampaign(campaign).defaultCaseBudgetMicrousd;
+}
+
+/**
+ * Between batches of a canaries-then-wave campaign: once every release canary
+ * has finished, continue into the wider wave only if each has an audited
+ * passing attempt. Otherwise hold the campaign for review with a clear reason;
+ * queued wave cases stay untouched and can resume after a passing correction.
+ */
+export async function applyHardeningCanaryGate(input: HardeningCampaignWorkflowInput) {
+  "use step";
+  const admin = createAdminClient({ disableRealtime: true });
+  const [{ data: campaign, error: campaignError }, { data: cases, error: caseError }] = await Promise.all([
+    admin.from("research_hardening_campaigns")
+      .select("status,accounting_version,budget_configuration,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
+      .eq("id", input.campaignId).eq("organization_id", input.organizationId).single(),
+    admin.from("research_hardening_cases").select("archetype,stage,status,verdict")
+      .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId),
+  ]);
+  if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
+  if (caseError) throw caseError;
+  if (assertAuthorizedHardeningCampaign(campaign).policy !== "canaries_then_wave_v2") return { continue: true };
+  const gate = hardeningCanaryGate(cases || []);
+  if (gate.passed || gate.pending > 0) return { continue: true };
+  const message = `Release canary ${gate.blocking.join(", ")} did not pass its audited evaluation; review and correct it before the wider wave continues`;
+  const { error: holdError } = await admin.from("research_hardening_campaigns").update({
+    status: "paused", error_message: message, completed_at: null,
+  }).eq("id", input.campaignId).eq("organization_id", input.organizationId).in("status", ["queued", "running"]);
+  if (holdError) throw holdError;
+  return { continue: false, reason: message };
+}
+applyHardeningCanaryGate.maxRetries = 2;
+
 export async function refreshHardeningCampaign(input: HardeningCampaignWorkflowInput) {
   "use step";
   const admin = createAdminClient({ disableRealtime: true });
@@ -1297,15 +1336,16 @@ export async function refreshHardeningCampaign(input: HardeningCampaignWorkflowI
     }).eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId).eq("status", "queued");
   }
   const active = !mustStop && campaign.status !== "cancelled" && queued + running > 0;
-  const status = campaign.status === "cancelled" ? "cancelled" : mustStop ? "failed" : campaign.status === "paused_budget" ? "paused_budget" : failed > 0 ? "failed" : active ? "running" : "completed";
+  const held = campaign.status === "paused_budget" || campaign.status === "paused" ? campaign.status : null;
+  const status = campaign.status === "cancelled" ? "cancelled" : mustStop ? "failed" : held ? held : failed > 0 ? "failed" : active ? "running" : "completed";
   const { error: updateError } = await admin.from("research_hardening_campaigns").update({
     status,
     total_cost_microusd: totalCost,
     summary: costSummary,
-    completed_at: active || status === "paused_budget" ? null : new Date().toISOString(),
+    completed_at: active || held ? null : new Date().toISOString(),
   }).eq("id", input.campaignId).eq("organization_id", input.organizationId);
   if (updateError) throw updateError;
-  if (!active && status !== "paused_budget" && campaign.campaign_type === "profile_validation" && campaign.profile_version_id) {
+  if (!active && !held && campaign.campaign_type === "profile_validation" && campaign.profile_version_id) {
     const baseline = profileComparisonFromRows((cases || []).filter((item) => item.profile_variant === "baseline"));
     const guided = profileComparisonFromRows((cases || []).filter((item) => item.profile_variant === "guided"));
     const decision = evaluateProfileActivation(baseline, guided);
@@ -1518,7 +1558,7 @@ export async function resumeUntouchedHardeningCases(campaignId: string, organiza
   for (const item of untouched || []) {
     const stage = item.stage as HardeningStage;
     const entry = manifest.find((entry) => entry.archetype === item.archetype && entry.stage === stage && entry.replicateNumber === item.replicate_number);
-    const reservation = integer(entry?.caseBudgetMicrousd) || 3_000_000;
+    const reservation = integer(entry?.caseBudgetMicrousd) || hardeningAuthorizationDefault(campaign);
     const spend = campaignSpendDecision({
       totalCostMicrousd: projectedCost,
       stage,
@@ -1558,7 +1598,7 @@ export async function addHardeningRerunCases(input: {
     .select("id,accounting_version,budget_configuration,official_model_id,challenger_model_id,total_cost_microusd,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
     .eq("id", input.campaignId).eq("organization_id", input.organizationId).single();
   if (error || !campaign) throw error || new Error("Hardening campaign not found");
-  assertAuthorizedHardeningCampaign(campaign);
+  const authorization = assertAuthorizedHardeningCampaign(campaign);
   const currentModels = await resolveHardeningModelSnapshot();
   if (currentModels.officialModel !== campaign.official_model_id
     || currentModels.challenger.model !== campaign.challenger_model_id) {
@@ -1572,9 +1612,9 @@ export async function addHardeningRerunCases(input: {
     throw new Error("The hardening campaign still has an active case");
   }
   const persistedCaseCost = (caseSpendRows || []).reduce((sum, row) => sum + integer(row.cost_microusd), 0);
-  const allowance = input.caseBudgetMicrousd ?? 3_000_000;
+  const allowance = input.caseBudgetMicrousd ?? authorization.defaultCaseBudgetMicrousd;
   if (!Number.isSafeInteger(allowance) || allowance <= 0 || allowance > 25_000_000) throw new Error("Invalid per-case allowance");
-  assertHardeningWaveAdmission(caseSpendRows || [], input.archetypes, input.stage, allowance);
+  assertHardeningWaveAdmission(caseSpendRows || [], input.archetypes, input.stage, allowance, authorization);
   const exposure = await operationExposure(admin, input.organizationId, input.campaignId);
   const spend = campaignSpendDecision({
     totalCostMicrousd: Math.max(exposure.exposureMicrousd, persistedCaseCost),

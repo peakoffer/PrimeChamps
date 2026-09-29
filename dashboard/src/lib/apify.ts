@@ -6,7 +6,7 @@ import { assertResearchPaidWorkAllowed, getResearchPaidContext, runResearchPaidO
 import { assertTerminalApifyReceipt, boundedActorPolicy, boundedApifyChargeMicrousd, boundedApifyDatasetReadPolicy, newApifyRunBlockReason, type ActorBillingMetadata } from "@/lib/research/apify-spending-policy";
 import { apifyDefaultStorageDeletePaths, assertApifyAccountHeadroom, verifiedApifyDefaultStorageDeletes } from "@/lib/research/apify-storage-policy";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { NEXT_HARDENING_AUTHORIZATION_KEY, NEXT_HARDENING_BUDGET_LIMIT_MICROUSD, NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD, NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD } from "@/lib/research/hardening";
+import { hardeningAuthorizationFor } from "@/lib/research/hardening";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
@@ -442,16 +442,12 @@ async function assertAuthorizedApifyTestCampaign() {
   }
   const admin = createAdminClient({ disableRealtime: true });
   const { data, error } = await admin.from("research_hardening_campaigns")
-    .select("status,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
+    .select("status,accounting_version,budget_configuration,budget_limit_microusd,preconfirmation_stop_microusd,confirmation_reserve_microusd")
     .eq("id", context.campaignId).eq("organization_id", context.organizationId)
     .eq("accounting_version", "operations_v1")
-    .contains("budget_configuration", { authorization_key: NEXT_HARDENING_AUTHORIZATION_KEY })
     .maybeSingle();
-  if (error || !data || !["queued", "running"].includes(data.status)
-    || data.budget_limit_microusd !== NEXT_HARDENING_BUDGET_LIMIT_MICROUSD
-    || data.preconfirmation_stop_microusd !== NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD
-    || data.confirmation_reserve_microusd !== NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD) {
-    throw new ResearchPaidOperationError("Apify campaign identity or budget differs from the $50 authorization");
+  if (error || !data || !["queued", "running"].includes(data.status) || !hardeningAuthorizationFor(data)) {
+    throw new ResearchPaidOperationError("Apify campaign identity or budget differs from an owner budget authorization");
   }
 }
 

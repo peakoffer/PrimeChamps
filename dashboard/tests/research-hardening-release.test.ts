@@ -6,7 +6,7 @@ import { buildShadowEvidencePacket, validateShadowAuditRows } from "../src/lib/r
 import { campaignSpendDecision, evaluateHardeningCase, latestCompletedHardeningCases, normalizedHardeningMetrics, parseHardeningManifest, RESEARCH_HARDENING_MATRIX } from "../src/lib/research/hardening.ts";
 import { evaluateProfileActivation } from "../src/lib/research/statistical-learning.ts";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "../src/lib/research/hardening-stale-recovery.ts";
-import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
+import { assertAuthorizedHardeningCampaign, assertHardeningPaidReadiness, assertHardeningWaveAdmission, assertInitialHardeningCanaries, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure, hardeningCanaryGate, hardeningPaidReadiness } from "../src/lib/research/hardening-readiness.ts";
 
 test("paid admission starts only with three sequential $1 evaluation canaries", () => {
   assert.equal(hardeningPaidReadiness().ready, true);
@@ -314,4 +314,63 @@ test("stale cancellation rechecks heartbeat, org, evaluation mode, and terminal 
   assert.deepEqual(result.map((row) => row.id), ["legacy", "old-null"]);
   assert.equal(rows.find((row) => row.id === "revived")?.status, "running");
   assert.equal(rows.find((row) => row.id === "legacy")?.phase, "interrupted");
+});
+
+test("a release campaign starts with every archetype once, canaries first, one at a time at its case allowance", () => {
+  const canaries = ["team", "judged", "winter"];
+  const wave = RESEARCH_HARDENING_MATRIX.map((entry) => entry.archetype).filter((archetype) => !canaries.includes(archetype));
+  const manifest = parseHardeningManifest([...canaries, ...wave].map((archetype) => ({ archetype, stage: "smoke", caseBudgetMicrousd: 5_000_000 })));
+  assert.doesNotThrow(() => assertInitialHardeningCanaries(manifest, 1, "canaries_then_wave_v2", 5_000_000));
+  assert.throws(() => assertInitialHardeningCanaries(manifest, 2, "canaries_then_wave_v2", 5_000_000));
+  assert.throws(() => assertInitialHardeningCanaries([manifest[1], manifest[0], ...manifest.slice(2)], 1, "canaries_then_wave_v2", 5_000_000));
+  assert.throws(() => assertInitialHardeningCanaries(manifest.slice(0, 12), 1, "canaries_then_wave_v2", 5_000_000));
+  assert.throws(() => assertInitialHardeningCanaries(parseHardeningManifest([...canaries, ...wave].map((archetype) =>
+    ({ archetype, stage: "smoke", caseBudgetMicrousd: 9_000_000 }))), 1, "canaries_then_wave_v2", 5_000_000));
+  // The earlier campaign policy is unchanged.
+  assert.throws(() => assertInitialHardeningCanaries(manifest, 1));
+});
+
+test("the wider wave continues only after every canary has an audited pass", () => {
+  const done = (archetype: string, verdict: string | null, status = "completed", stage = "smoke") => ({ archetype, stage, status, verdict });
+  assert.deepEqual(hardeningCanaryGate([done("team", "passed"), done("judged", "passed"), done("winter", "passed")]),
+    { passed: true, pending: 0, blocking: [] });
+  assert.equal(hardeningCanaryGate([done("team", "passed"), done("judged", null, "queued"), done("winter", null, "queued")]).pending, 2);
+  const held = hardeningCanaryGate([done("team", "passed"), done("judged", "needs_fix"), done("winter", "passed")]);
+  assert.equal(held.passed, false);
+  assert.deepEqual(held.blocking, ["judged"]);
+  // A passing correction clears the canary.
+  assert.equal(hardeningCanaryGate([done("team", "passed"), done("judged", "needs_fix"), done("judged", "passed", "completed", "targeted_rerun"),
+    done("winter", "passed")]).passed, true);
+  assert.deepEqual(hardeningCanaryGate([done("team", null, "failed"), done("judged", "passed"), done("winter", "passed")]).blocking, ["team"]);
+});
+
+test("release-campaign canary corrections are bounded and never follow a safety stop", () => {
+  const policy = { policy: "canaries_then_wave_v2" as const, defaultCaseBudgetMicrousd: 5_000_000 };
+  const base = [
+    { archetype: "team", stage: "smoke", status: "completed", verdict: "needs_fix" },
+    { archetype: "judged", stage: "smoke", status: "completed", verdict: "passed" },
+    { archetype: "winter", stage: "smoke", status: "completed", verdict: "passed" },
+  ];
+  assert.doesNotThrow(() => assertHardeningWaveAdmission(base, ["team"], "targeted_rerun", 5_000_000, policy));
+  assert.throws(() => assertHardeningWaveAdmission(base, ["team"], "targeted_rerun", 6_000_000, policy));
+  assert.throws(() => assertHardeningWaveAdmission(base, ["action"], "targeted_rerun", 5_000_000, policy));
+  const twoCorrections = [...base,
+    { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "needs_fix" },
+    { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "needs_fix" }];
+  assert.throws(() => assertHardeningWaveAdmission(twoCorrections, ["team"], "targeted_rerun", 5_000_000, policy));
+  assert.throws(() => assertHardeningWaveAdmission([...base, { archetype: "team", stage: "targeted_rerun", status: "completed", verdict: "safety_stop" }],
+    ["team"], "targeted_rerun", 5_000_000, policy), /safety stop/);
+  // Once all canaries pass, targeted reruns across the wave are admitted.
+  const passed = base.map((item) => ({ ...item, verdict: "passed" }));
+  assert.doesNotThrow(() => assertHardeningWaveAdmission(passed, ["action", "general"], "targeted_rerun", 5_000_000, policy));
+});
+
+test("the campaign workflow checks the canary gate after every batch", () => {
+  const workflow = readFileSync(new URL("../src/workflows/research-hardening.ts", import.meta.url), "utf8");
+  const loop = workflow.slice(workflow.indexOf("for (const batch"), workflow.indexOf("return await refreshHardeningCampaign(input);"));
+  assert.ok(loop.indexOf("applyHardeningCanaryGate(input)") > loop.indexOf("refreshHardeningCampaign(input)"));
+  assert.match(loop, /if \(!gate\.continue\) break;/);
+  const service = readFileSync(new URL("../src/lib/research/hardening-service.ts", import.meta.url), "utf8");
+  assert.match(service, /if \(campaign\.status === "paused_budget" \|\| campaign\.status === "paused"\) return \[\];/);
+  assert.match(service, /policy === "canaries_then_wave_v2"\) return getResearchEvaluationBudget\("development"\)/);
 });

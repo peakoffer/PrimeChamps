@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Download, FlaskConical, RefreshCw, ShieldCheck, Square } from "lucide-react";
 import { researchProcessCostStages, summarizeHardeningCosts } from "@/lib/research/hardening-cost";
-import { latestCompletedHardeningCases, NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
+import { CURRENT_HARDENING_AUTHORIZATION, HARDENING_CANARY_ARCHETYPES, latestCompletedHardeningCases, NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
   NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD, NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD,
   NEXT_HARDENING_AUTHORIZATION_KEY,
   RESEARCH_HARDENING_MATRIX } from "@/lib/research/hardening";
@@ -88,6 +88,18 @@ function StatusPill({ value }: { value: string | null }) {
   return <span className={`inline-flex border px-2 py-1 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] ${statusTone[value || ""] || statusTone.queued}`}>{label}</span>;
 }
 
+/** The first manifest the current authorization accepts: canaries first. */
+function initialCampaignManifest() {
+  const canaries: readonly string[] = HARDENING_CANARY_ARCHETYPES;
+  if (CURRENT_HARDENING_AUTHORIZATION.policy !== "canaries_then_wave_v2") {
+    return canaries.map((archetype) => ({ archetype, stage: "smoke", caseBudgetMicrousd: 1_000_000 }));
+  }
+  const wave = RESEARCH_HARDENING_MATRIX.map((entry) => entry.archetype).filter((archetype) => !canaries.includes(archetype));
+  return [...canaries, ...wave].map((archetype) => ({
+    archetype, stage: "smoke", caseBudgetMicrousd: CURRENT_HARDENING_AUTHORIZATION.defaultCaseBudgetMicrousd,
+  }));
+}
+
 export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -120,6 +132,8 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
     || campaigns.find((item) => item.status !== "draft") || null;
   const active = campaign && ["queued", "running", "paused", "paused_budget"].includes(campaign.status);
   const hasRunningCase = campaign?.cases.some((item) => item.status === "running") || false;
+  // A canary review hold is not running work: corrections stay available.
+  const busy = Boolean(active) && campaign?.status !== "paused";
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => void load(), 10_000);
@@ -146,7 +160,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
       const response = await fetch("/api/research/hardening", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           budgetUsd: NEXT_HARDENING_BUDGET_LIMIT_MICROUSD / 1_000_000, maxConcurrency: 1,
-          cases: ["team", "judged", "winter"].map((archetype) => ({ archetype, stage: "smoke", caseBudgetMicrousd: 1_000_000 })),
+          cases: initialCampaignManifest(),
         }),
       });
       const body = await response.json();
@@ -278,7 +292,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
         </div>
         <div className="pc-header-actions">
           {isOwner && !authorizationRecorded && <button className="pc-button-secondary" onClick={() => void authorizeBudget()} disabled={acting !== null}>
-            Set $50 evaluation ceiling
+            Set {money(NEXT_HARDENING_BUDGET_LIMIT_MICROUSD)} evaluation ceiling
           </button>}
           <button className="pc-button-secondary" onClick={() => void load()} disabled={acting !== null}>
             <RefreshCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Refresh
@@ -321,7 +335,9 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
       {error && <div className="border border-brand-danger/30 bg-brand-danger/10 px-4 py-3 text-sm text-brand-danger">{error}</div>}
       {budgetDraft && <div className="border border-brand-ink/10 bg-brand-paper-bright px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Next campaign authorized · {money(NEXT_HARDENING_BUDGET_LIMIT_MICROUSD)} ceiling</p>
-        <p className="mt-1 text-brand-muted">{money(NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD)} for evaluation; {money(NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)} held for confirmation. This is a draft only: no cases, providers, workflow, CRM changes, or outreach have started. The first wave is restricted to three sequential $1 canaries; broader testing waits for their audited results.</p>
+        <p className="mt-1 text-brand-muted">{money(NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD)} for evaluation; {money(NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD)} held for confirmation. This is a draft only: no cases, providers, workflow, CRM changes, or outreach have started. {CURRENT_HARDENING_AUTHORIZATION.policy === "canaries_then_wave_v2"
+          ? `Starting runs the soccer, figure skating and skiing canaries first, one at a time at up to ${money(CURRENT_HARDENING_AUTHORIZATION.defaultCaseBudgetMicrousd)} each; the other ten archetypes follow automatically only if all three pass their audited evaluation.`
+          : "The first wave is restricted to three sequential $1 canaries; broader testing waits for their audited results."}</p>
       </div>}
       {paidReadiness && !paidReadiness.ready && <div className="border border-brand-warning/30 bg-brand-warning/10 px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Full-quality testing is waiting on verified spending limits</p>
@@ -480,12 +496,12 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
                 const reconciledRejectionRetry = item.status === "completed" && metric(item.metrics, "shadowAuditRetryCount") === 1
                   && unresolvedDefects.length > 0
                   && unresolvedDefects.every((defect) => /shadow audit failed \(4\d\d\)/.test(String(defect.summary || "")));
-                const canRetryAudit = !active && item.verdict === "needs_fix" && Boolean(item.research_log_id)
+                const canRetryAudit = !busy && item.verdict === "needs_fix" && Boolean(item.research_log_id)
                   && (budgetHoldRetry || reconciledRejectionRetry);
                 const pending = campaign?.cases.filter((candidate) => candidate.archetype === item.archetype && candidate.sport === item.sport
                   && candidate.id !== item.id && ["queued", "running"].includes(candidate.status)) || [];
-                const canRerun = !active && !canRetryAudit && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed", "cancelled"].includes(item.verdict || item.status);
-                const canRunControl = !active
+                const canRerun = !busy && !canRetryAudit && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed", "cancelled"].includes(item.verdict || item.status);
+                const canRunControl = !busy
                   && !legacyFastRoute
                   && item.verdict === "passed"
                   && spent + 3_000_000 <= (campaign?.preconfirmation_stop_microusd || 60_000_000);

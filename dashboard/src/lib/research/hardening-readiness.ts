@@ -1,24 +1,58 @@
-import type { HardeningManifestCase } from "./hardening.ts";
-import { NEXT_HARDENING_AUTHORIZATION_KEY, NEXT_HARDENING_BUDGET_LIMIT_MICROUSD, NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD, NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD } from "./hardening.ts";
+import type { HardeningManifestCase, HardeningCampaignPolicy, HardeningBudgetAuthorization } from "./hardening.ts";
+import { HARDENING_CANARY_ARCHETYPES, RESEARCH_HARDENING_MATRIX, hardeningAuthorizationFor } from "./hardening.ts";
 
-/** Permission for the bounded first evaluation wave, not production certification. */
+/** Permission for bounded evaluation campaigns, not production certification. */
 export function hardeningPaidReadiness() {
   return {
     ready: true,
     code: "CONTROLLED_CANARY_ONLY",
     blockers: [],
-    nextStep: "Run the three one-at-a-time $1 evaluation canaries, inspect source quality and provider receipts, then decide whether a wider wave is safe.",
+    nextStep: "Start the authorized campaign: the three release canaries run first, and the wider 13-archetype wave continues only if all three pass their audited evaluation.",
   } as const;
 }
 
-/** The owner's first $50 campaign may only begin with these three $1 smoke cases. */
-export function assertInitialHardeningCanaries(manifest: HardeningManifestCase[], concurrency: number) {
-  const expected = new Set(["team", "judged", "winter"]);
-  if (concurrency !== 1 || manifest.length !== expected.size || manifest.some((item) =>
-    !expected.has(item.archetype) || item.stage !== "smoke" || item.replicateNumber !== 1
+/**
+ * The first manifest a campaign may start with.
+ * - sequential_canaries_v1: only the three one-at-a-time $1 smoke canaries.
+ * - canaries_then_wave_v2: every archetype once, the three canaries first in a
+ *   fixed order, one at a time, each at the authorization's per-case allowance.
+ */
+export function assertInitialHardeningCanaries(manifest: HardeningManifestCase[], concurrency: number,
+  policy: HardeningCampaignPolicy = "sequential_canaries_v1", caseBudgetMicrousd = 1_000_000) {
+  const canaries = new Set<string>(HARDENING_CANARY_ARCHETYPES);
+  if (policy === "canaries_then_wave_v2") {
+    const archetypes = manifest.map((item) => item.archetype);
+    if (concurrency !== 1 || manifest.length !== RESEARCH_HARDENING_MATRIX.length
+      || new Set(archetypes).size !== manifest.length
+      || HARDENING_CANARY_ARCHETYPES.some((archetype, index) => archetypes[index] !== archetype)
+      || manifest.some((item) => item.stage !== "smoke" || item.replicateNumber !== 1
+        || item.caseBudgetMicrousd !== caseBudgetMicrousd || item.useConfirmationReserve)) {
+      throw new Error("This campaign must start with every archetype once, the three release canaries first, one at a time");
+    }
+    return;
+  }
+  if (concurrency !== 1 || manifest.length !== canaries.size || manifest.some((item) =>
+    !canaries.has(item.archetype) || item.stage !== "smoke" || item.replicateNumber !== 1
     || item.caseBudgetMicrousd !== 1_000_000 || item.useConfirmationReserve)) {
     throw new Error("The first paid campaign must start with only the three one-at-a-time $1 release canaries");
   }
+}
+
+/**
+ * Whether a campaign may continue past its canaries: every canary has an
+ * audited passing attempt. Canaries still queued or running are pending.
+ */
+export function hardeningCanaryGate(cases: Array<{ archetype: string; stage: string; status: string; verdict: string | null }>) {
+  const blocking: string[] = [];
+  let pending = 0;
+  for (const archetype of HARDENING_CANARY_ARCHETYPES) {
+    const attempts = cases.filter((item) => item.archetype === archetype
+      && (item.stage === "smoke" || item.stage === "targeted_rerun"));
+    if (attempts.some((item) => item.status === "completed" && item.verdict === "passed")) continue;
+    if (attempts.some((item) => ["queued", "running"].includes(item.status))) { pending += 1; continue; }
+    blocking.push(archetype);
+  }
+  return { passed: blocking.length === 0 && pending === 0, pending, blocking };
 }
 
 export function assertHardeningWaveAdmission(
@@ -26,6 +60,7 @@ export function assertHardeningWaveAdmission(
   archetypes: string[],
   stage: string,
   allowanceMicrousd: number,
+  authorization?: Pick<HardeningBudgetAuthorization, "policy" | "defaultCaseBudgetMicrousd">,
 ) {
   const initial = ["team", "judged", "winter"];
   if (cases.some((item) => item.verdict === "safety_stop")) {
@@ -45,6 +80,19 @@ export function assertHardeningWaveAdmission(
     || (priorCorrections.length === 2
       && priorCorrections[0].status === "cancelled" && priorCorrections[0].verdict === null
       && priorCorrections[1].status === "failed" && priorCorrections[1].verdict === "technical_failure");
+  if (authorization?.policy === "canaries_then_wave_v2") {
+    // Iterating on a canary is the point of hardening: up to two bounded
+    // corrections per canary archetype after its first run, never after a
+    // safety stop (checked above) and never above the per-case allowance.
+    const correction = stage === "targeted_rerun" && archetypes.length === 1
+      && pending.includes(archetypes[0]) && allowanceMicrousd <= authorization.defaultCaseBudgetMicrousd
+      && cases.some((item) => item.archetype === archetypes[0] && item.stage === "smoke"
+        && (item.status === "failed" || item.status === "completed"))
+      && !cases.some((item) => item.archetype === archetypes[0] && ["queued", "running"].includes(item.status))
+      && priorCorrections.length < 2;
+    if (!correction) throw new Error("Complete and audit the three release canaries before admitting a wider paid wave");
+    return;
+  }
   const oneCorrection = stage === "targeted_rerun" && archetypes.length === 1
     && pending.includes(archetypes[0]) && allowanceMicrousd <= 3_000_000
     && cases.some((item) => item.archetype === archetypes[0] && item.stage === "smoke"
@@ -158,14 +206,10 @@ export function assertHardeningPaidReadiness() {
 export function assertAuthorizedHardeningCampaign(campaign: {
   accounting_version?: string; budget_configuration?: unknown;
   budget_limit_microusd?: number; preconfirmation_stop_microusd?: number; confirmation_reserve_microusd?: number;
-}) {
-  const budget = campaign.budget_configuration && typeof campaign.budget_configuration === "object"
-    ? campaign.budget_configuration as Record<string, unknown> : {};
-  if (campaign.accounting_version !== "operations_v1"
-    || budget.authorization_key !== NEXT_HARDENING_AUTHORIZATION_KEY
-    || campaign.budget_limit_microusd !== NEXT_HARDENING_BUDGET_LIMIT_MICROUSD
-    || campaign.preconfirmation_stop_microusd !== NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD
-    || campaign.confirmation_reserve_microusd !== NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD) {
-    throw new Error("This paid action requires the exact owner-authorized $50 evaluation campaign");
+}): HardeningBudgetAuthorization {
+  const authorization = hardeningAuthorizationFor(campaign);
+  if (!authorization) {
+    throw new Error("This paid action requires a campaign created under an exact owner budget authorization");
   }
+  return authorization;
 }

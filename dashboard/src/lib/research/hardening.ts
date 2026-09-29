@@ -1,12 +1,63 @@
 export const HARDENING_BUDGET_LIMIT_MICROUSD = 100_000_000;
 export const HARDENING_CONFIRMATION_RESERVE_MICROUSD = 20_000_000;
 export const HARDENING_PRE_CONFIRMATION_STOP_MICROUSD = 80_000_000;
-// The next campaign is additional to, and cannot draw from, the archived
-// $100 historical campaign. It is not permission to start paid work.
-export const NEXT_HARDENING_BUDGET_LIMIT_MICROUSD = 50_000_000;
-export const NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD = 10_000_000;
-export const NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD = 40_000_000;
-export const NEXT_HARDENING_AUTHORIZATION_KEY = "2026-09-26-cross-sport-50";
+export type HardeningCampaignPolicy = "sequential_canaries_v1" | "canaries_then_wave_v2";
+
+export type HardeningBudgetAuthorization = {
+  key: string;
+  label: string;
+  budgetLimitMicrousd: number;
+  ordinaryLimitMicrousd: number;
+  confirmationReserveMicrousd: number;
+  policy: HardeningCampaignPolicy;
+  /** Allowance for each first run and each correction unless the owner sets another. */
+  defaultCaseBudgetMicrousd: number;
+};
+
+/**
+ * Owner budget decisions, each usable for exactly one campaign (a unique index
+ * enforces this per key). Earlier campaigns keep their own frozen limits.
+ * - Sept 26: $50, three sequential $1 canaries, manual waves.
+ * - Sept 29: the owner directed a self-set limit well below $500 so testing
+ *   stops economizing on pennies: $150 total ($120 ordinary, $30 confirmation
+ *   reserve), $5 per case, the three canaries first and then the full
+ *   13-archetype wave, with every safety stop still in force.
+ */
+export const HARDENING_BUDGET_AUTHORIZATIONS: readonly HardeningBudgetAuthorization[] = [
+  { key: "2026-09-26-cross-sport-50", label: "$50 canary campaign", budgetLimitMicrousd: 50_000_000,
+    ordinaryLimitMicrousd: 40_000_000, confirmationReserveMicrousd: 10_000_000,
+    policy: "sequential_canaries_v1", defaultCaseBudgetMicrousd: 3_000_000 },
+  { key: "2026-09-29-cross-sport-150", label: "$150 release campaign", budgetLimitMicrousd: 150_000_000,
+    ordinaryLimitMicrousd: 120_000_000, confirmationReserveMicrousd: 30_000_000,
+    policy: "canaries_then_wave_v2", defaultCaseBudgetMicrousd: 5_000_000 },
+];
+
+// The next campaign is additional to, and cannot draw from, earlier campaigns.
+// A draft records the owner's ceiling; it is not itself permission to start paid work.
+export const CURRENT_HARDENING_AUTHORIZATION = HARDENING_BUDGET_AUTHORIZATIONS[HARDENING_BUDGET_AUTHORIZATIONS.length - 1];
+export const NEXT_HARDENING_BUDGET_LIMIT_MICROUSD = CURRENT_HARDENING_AUTHORIZATION.budgetLimitMicrousd;
+export const NEXT_HARDENING_CONFIRMATION_RESERVE_MICROUSD = CURRENT_HARDENING_AUTHORIZATION.confirmationReserveMicrousd;
+export const NEXT_HARDENING_ORDINARY_LIMIT_MICROUSD = CURRENT_HARDENING_AUTHORIZATION.ordinaryLimitMicrousd;
+export const NEXT_HARDENING_AUTHORIZATION_KEY = CURRENT_HARDENING_AUTHORIZATION.key;
+
+/** The authorization a campaign was created under, only if its frozen limits match exactly. */
+export function hardeningAuthorizationFor(campaign: {
+  accounting_version?: string; budget_configuration?: unknown;
+  budget_limit_microusd?: number | string | null; preconfirmation_stop_microusd?: number | string | null;
+  confirmation_reserve_microusd?: number | string | null;
+}): HardeningBudgetAuthorization | null {
+  const budget = campaign.budget_configuration && typeof campaign.budget_configuration === "object"
+    ? campaign.budget_configuration as Record<string, unknown> : {};
+  const authorization = HARDENING_BUDGET_AUTHORIZATIONS.find((entry) => entry.key === budget.authorization_key);
+  if (!authorization || campaign.accounting_version !== "operations_v1"
+    || Number(campaign.budget_limit_microusd) !== authorization.budgetLimitMicrousd
+    || Number(campaign.preconfirmation_stop_microusd) !== authorization.ordinaryLimitMicrousd
+    || Number(campaign.confirmation_reserve_microusd) !== authorization.confirmationReserveMicrousd) return null;
+  return authorization;
+}
+
+/** Release canaries run first, in this order, before any wider wave. */
+export const HARDENING_CANARY_ARCHETYPES = ["team", "judged", "winter"] as const;
 export const HARDENING_MAX_CONCURRENCY = 3;
 export const HARDENING_STALE_AFTER_MS = 20 * 60 * 1000;
 
