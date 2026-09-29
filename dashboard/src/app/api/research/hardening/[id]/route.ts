@@ -4,9 +4,12 @@ import { requireOrganizationRole } from "@/lib/auth";
 import { RESEARCH_HARDENING_MATRIX, type HardeningArchetype, type HardeningStage } from "@/lib/research/hardening";
 import {
   addHardeningRerunCases,
+  assertShadowAuditRetryRequestable,
   cancelHardeningCampaign,
   getHardeningCampaigns,
   linkCampaignWorkflow,
+  listReconcilableHardeningOperations,
+  reconcileHardeningPreInferenceRejection,
   recoverStaleHardeningRuns,
   resumeUntouchedHardeningCases,
 } from "@/lib/research/hardening-service";
@@ -25,7 +28,8 @@ export async function GET(
     await recoverStaleHardeningRuns(user.organizationId);
     const campaign = (await getHardeningCampaigns(user.organizationId, id))[0];
     if (!campaign) return NextResponse.json({ error: "Hardening campaign not found" }, { status: 404 });
-    return NextResponse.json({ campaign });
+    const reconcilableOperations = await listReconcilableHardeningOperations(user.organizationId, id);
+    return NextResponse.json({ campaign, reconcilableOperations });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load hardening campaign";
     return NextResponse.json({ error: message }, { status: message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 500 });
@@ -39,19 +43,37 @@ export async function POST(
   try {
     const user = await requireOrganizationRole(["owner"]);
     const { id } = await params;
-    const body = await request.json() as { action?: unknown; archetypes?: unknown; stage?: unknown; caseBudgetUsd?: unknown; useConfirmationReserve?: unknown; caseId?: unknown };
+    const body = await request.json() as { action?: unknown; archetypes?: unknown; stage?: unknown; caseBudgetUsd?: unknown; useConfirmationReserve?: unknown; caseId?: unknown;
+      operationId?: unknown; evidence?: { checkedAt?: unknown; observedChargeUsd?: unknown; attestation?: unknown; reference?: unknown } };
+    if (body.action === "reconcile_operation") {
+      // Owner attests what the provider's own billing activity shows; the
+      // database function enforces eligibility and keeps an append-only record.
+      if (typeof body.operationId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.operationId)) {
+        return NextResponse.json({ error: "Select one exact paid operation to reconcile" }, { status: 400 });
+      }
+      const evidence = body.evidence || {};
+      if (typeof evidence.checkedAt !== "string" || typeof evidence.observedChargeUsd !== "string" || typeof evidence.attestation !== "string") {
+        return NextResponse.json({ error: "Record when you checked OpenRouter Activity, the charge it shows, and what you saw" }, { status: 400 });
+      }
+      try {
+        const result = await reconcileHardeningPreInferenceRejection({
+          organizationId: user.organizationId, userId: user.id, campaignId: id, operationId: body.operationId,
+          evidence: { checkedAt: evidence.checkedAt, observedChargeUsd: evidence.observedChargeUsd.trim(),
+            attestation: evidence.attestation, reference: typeof evidence.reference === "string" ? evidence.reference : "" },
+        });
+        return NextResponse.json({ ok: true, ...result });
+      } catch (error) {
+        return NextResponse.json({ error: error instanceof Error ? error.message : "Reconciliation was refused" }, { status: 409 });
+      }
+    }
     if (body.action === "retry_audit") {
       if (typeof body.caseId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.caseId)) {
         return NextResponse.json({ error: "Select one exact case for the audit-only retry" }, { status: 400 });
       }
-      const campaign = (await getHardeningCampaigns(user.organizationId, id))[0];
-      const selected = campaign?.cases?.find((item: { id: string }) => item.id === body.caseId);
-      const defects: unknown[] = Array.isArray(selected?.defects) ? selected.defects : [];
-      if (!selected || campaign?.cases?.some((item: { status: string }) => item.status === "running")
-        || selected.status !== "blocked" || selected.verdict !== "needs_fix"
-        || !selected.research_log_id || Number((selected.metrics as Record<string, unknown> | null)?.shadowAuditRetryCount || 0) !== 0
-        || !defects.some((defect: unknown) => /Research case paid-operation budget exhausted/.test(String((defect as { summary?: unknown }).summary || "")))) {
-        return NextResponse.json({ error: "This completed case is not eligible for an audit-only retry" }, { status: 409 });
+      try {
+        await assertShadowAuditRetryRequestable({ organizationId: user.organizationId, campaignId: id, caseId: body.caseId });
+      } catch (error) {
+        return NextResponse.json({ error: error instanceof Error ? error.message : "This case is not eligible for an audit-only retry" }, { status: 409 });
       }
       const workflow = await start(runResearchHardeningShadowRetry, [{
         campaignId: id, caseId: body.caseId, organizationId: user.organizationId,

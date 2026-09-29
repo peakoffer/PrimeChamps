@@ -9,8 +9,9 @@ import { getResearchEvaluationBudget, type ResearchEvaluationBudget } from "@/li
 import { evaluateProfileActivation, type ProfileComparisonMetrics } from "@/lib/research/statistical-learning";
 import { cancelStaleEvaluationRows, staleEvaluationFilter } from "@/lib/research/hardening-stale-recovery";
 import { summarizeResearchPaidOperations } from "@/lib/research/paid-operation-policy";
-import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure } from "@/lib/research/hardening-readiness";
+import { assertHardeningPaidReadiness, assertInitialHardeningCanaries, assertHardeningWaveAdmission, assertAuthorizedHardeningCampaign, assertCanaryResumeAdmission, assertShadowAuditRetryAdmission, type ShadowAuditRetryPath, canResolveCanaryTechnicalFailure, canResolveRetiredOnlyFansActorFailure } from "@/lib/research/hardening-readiness";
 import { withResearchPaidContext } from "@/lib/research/paid-operations";
+import { assertOpenRouterRequestReady } from "@/lib/research/paid-provider-fetch";
 import {
   HARDENING_BUDGET_LIMIT_MICROUSD,
   HARDENING_CONFIRMATION_RESERVE_MICROUSD,
@@ -35,6 +36,7 @@ import {
   type HardeningStage,
 } from "@/lib/research/hardening";
 import {
+  buildOpusShadowRequest,
   defectsFromShadowAudits,
   resolveLatestOpusChallenger,
   runOpusShadowAudit,
@@ -641,6 +643,145 @@ export async function prepareHardeningBatch(input: {
 }
 prepareHardeningBatch.maxRetries = 1;
 
+/**
+ * Record owner-verified provider billing for a request refused before
+ * inference. The database function re-checks every eligibility rule on the
+ * locked receipt, requires an active owner, and writes an append-only record;
+ * it never edits any other receipt.
+ */
+export async function reconcileHardeningPreInferenceRejection(input: {
+  organizationId: string;
+  userId: string;
+  campaignId: string;
+  operationId: string;
+  evidence: { checkedAt: string; observedChargeUsd: string; attestation: string; reference?: string };
+}) {
+  const admin = createAdminClient({ disableRealtime: true });
+  const { data, error } = await admin.rpc("reconcile_research_pre_inference_rejection", {
+    p_request: {
+      operation_id: input.operationId,
+      organization_id: input.organizationId,
+      campaign_id: input.campaignId,
+      user_id: input.userId,
+      evidence: {
+        source: "openrouter_activity",
+        checked_at: input.evidence.checkedAt,
+        observed_charge_usd: input.evidence.observedChargeUsd,
+        attestation: input.evidence.attestation,
+        reference: input.evidence.reference || "",
+      },
+    },
+  });
+  if (error) throw new Error(error.message);
+  return data as { reconciliation_id: string; operation_id: string; released_microusd: number };
+}
+
+/** Unsettled pre-inference provider rejections the owner may reconcile, for the scorecard. */
+export async function listReconcilableHardeningOperations(organizationId: string, campaignId: string) {
+  const admin = createAdminClient({ disableRealtime: true });
+  const { data, error } = await admin.from("research_paid_operations")
+    .select("id,case_id,stage,provider,model_or_actor,reserved_microusd,settled_microusd,estimated_microusd,remote_request_id,usage,raw_response,completed_at")
+    .eq("organization_id", organizationId).eq("campaign_id", campaignId)
+    .eq("status", "completed").eq("provider", "openrouter").is("settled_microusd", null).is("remote_request_id", null);
+  if (error) throw error;
+  return (data || []).filter((operation) => {
+    const raw = object(operation.raw_response);
+    const status = Number(raw.status);
+    return operation.estimated_microusd === null && object(operation.usage).billingBasis === "unsettled_reserved"
+      && status >= 400 && status < 500 && String(raw.body || "").includes("No endpoints found");
+  }).map((operation) => ({
+    id: operation.id, caseId: operation.case_id, stage: operation.stage, model: operation.model_or_actor,
+    reservedMicrousd: integer(operation.reserved_microusd), completedAt: operation.completed_at,
+    httpStatus: Number(object(operation.raw_response).status),
+  }));
+}
+
+const OPENROUTER_CHAT_COMPLETIONS = "https://openrouter.ai/api/v1/chat/completions";
+// A retry reuses the same frozen dossier, so the prior reservation is the best
+// measure of the next one; keep margin for the larger thinking-safe output cap.
+const SHADOW_RETRY_HEADROOM_FACTOR = 1.25;
+const SHADOW_RETRY_MINIMUM_HEADROOM_MICROUSD = 250_000;
+
+type ShadowRetryCase = {
+  id: string; status: string; verdict: string | null; research_log_id: string | null; defects: unknown; metrics: unknown;
+};
+
+/**
+ * Read everything the audit-only retry gate needs and apply it. Shared by the
+ * owner route (before a workflow starts) and the durable preparation step.
+ */
+export async function loadShadowAuditRetryAdmission(input: {
+  admin: ReturnType<typeof createAdminClient>;
+  organizationId: string;
+  campaign: { id: string; status: string };
+  item: ShadowRetryCase;
+}) {
+  const { admin, organizationId, item } = input;
+  if (!item.research_log_id) throw new Error("Hardening case has no research log");
+  const [{ data: log, error: logError }, { count: activeCases, error: activeError },
+    { data: shadowOperations, error: shadowError }] = await Promise.all([
+    admin.from("research_logs").select("id,status,is_evaluation,accounting_version,cost_limit_microusd,config_used,requested_by_user_id")
+      .eq("id", item.research_log_id).eq("organization_id", organizationId).single(),
+    admin.from("research_hardening_cases").select("id", { count: "exact", head: true })
+      .eq("campaign_id", input.campaign.id).eq("organization_id", organizationId).eq("status", "running"),
+    admin.from("research_paid_operations").select("id,reserved_microusd,settled_microusd,usage")
+      .eq("research_log_id", item.research_log_id).eq("organization_id", organizationId).eq("stage", "shadow"),
+  ]);
+  if (logError || !log) throw logError || new Error("Hardening research log not found");
+  if (activeError || shadowError) throw activeError || shadowError;
+  const priorShadow = shadowOperations || [];
+  let reconciledShadowRejections = 0;
+  if (priorShadow.length > 0) {
+    // Only an append-only, owner-evidenced reconciliation record counts; a
+    // ledger value changed any other way never re-opens the audit.
+    const { data: reconciliations, error: reconciliationError } = await admin
+      .from("research_paid_operation_reconciliations")
+      .select("operation_id,kind,settled_microusd")
+      .eq("organization_id", organizationId)
+      .in("operation_id", priorShadow.map((operation) => operation.id));
+    if (reconciliationError) throw reconciliationError;
+    const recorded = new Set((reconciliations || [])
+      .filter((row) => row.kind === "pre_inference_rejection" && Number(row.settled_microusd) === 0)
+      .map((row) => row.operation_id));
+    reconciledShadowRejections = priorShadow.filter((operation) => recorded.has(operation.id)
+      && operation.settled_microusd !== null && Number(operation.settled_microusd) === 0
+      && object(operation.usage).billingBasis === "reconciled_pre_inference_rejection").length;
+  }
+  const priorRetries = integer(object(item.metrics).shadowAuditRetryCount);
+  const path: ShadowAuditRetryPath = assertShadowAuditRetryAdmission({
+    campaignStatus: input.campaign.status, caseStatus: item.status, verdict: item.verdict,
+    researchStatus: log.status, researchIsEvaluation: log.is_evaluation === true && log.accounting_version === "operations_v1",
+    defectSummaries: array(item.defects).map((entry) => String(object(entry).summary || "")),
+    priorRetries,
+    activeCases: activeCases || 0, priorShadowOperations: priorShadow.length,
+    reconciledShadowRejections,
+    unresolvedCriticalDefects: array(item.defects).filter((entry) =>
+      object(entry).severity === "critical" && object(entry).resolved !== true).length,
+  });
+  const largestPriorReservation = Math.max(0, ...priorShadow.map((operation) => integer(operation.reserved_microusd)));
+  return {
+    path,
+    priorRetries,
+    requiredHeadroomMicrousd: Math.max(SHADOW_RETRY_MINIMUM_HEADROOM_MICROUSD,
+      Math.ceil(largestPriorReservation * SHADOW_RETRY_HEADROOM_FACTOR)),
+    log,
+  };
+}
+
+/** Owner-route check: refuse before starting a workflow when no retry path applies. */
+export async function assertShadowAuditRetryRequestable(input: { organizationId: string; campaignId: string; caseId: string }) {
+  const admin = createAdminClient({ disableRealtime: true });
+  const [{ data: campaign, error: campaignError }, { data: item, error: caseError }] = await Promise.all([
+    admin.from("research_hardening_campaigns").select("id,status")
+      .eq("id", input.campaignId).eq("organization_id", input.organizationId).single(),
+    admin.from("research_hardening_cases").select("id,status,verdict,research_log_id,defects,metrics")
+      .eq("id", input.caseId).eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId).single(),
+  ]);
+  if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
+  if (caseError || !item) throw caseError || new Error("Hardening case not found");
+  return (await loadShadowAuditRetryAdmission({ admin, organizationId: input.organizationId, campaign, item })).path;
+}
+
 export async function prepareHardeningShadowRetry(input: HardeningCampaignWorkflowInput & { caseId: string }): Promise<PreparedHardeningCase> {
   "use step";
   const admin = createAdminClient({ disableRealtime: true });
@@ -654,50 +795,41 @@ export async function prepareHardeningShadowRetry(input: HardeningCampaignWorkfl
   if (campaignError || !campaign) throw campaignError || new Error("Hardening campaign not found");
   if (caseError || !item?.research_log_id) throw caseError || new Error("Hardening case has no research log");
   assertAuthorizedHardeningCampaign(campaign);
-  const models = await resolveHardeningModelSnapshot();
-  if (models.officialModel !== campaign.official_model_id || models.challenger.model !== campaign.challenger_model_id) {
-    throw new Error("The frozen model route changed; do not replay the shadow audit");
+  // An audit-only retry calls only the Opus challenger; the Sonnet scores are
+  // frozen in the completed log. Require the exact frozen challenger route and
+  // do not let a newer Sonnet release (never invoked here) block the audit.
+  const challenger = await resolveLatestOpusChallenger();
+  const frozenChallenger = object(object(campaign.model_route_snapshot).challenger);
+  if (challenger.model !== campaign.challenger_model_id || frozenChallenger.model !== challenger.model) {
+    throw new Error("The frozen Opus challenger route changed; do not replay the shadow audit");
   }
-  const [{ data: log, error: logError }, { count: activeCases, error: activeError },
-    { count: shadowOperations, error: shadowError }] = await Promise.all([
-    admin.from("research_logs").select("id,status,is_evaluation,accounting_version,cost_limit_microusd,config_used,requested_by_user_id")
-      .eq("id", item.research_log_id).eq("organization_id", input.organizationId).single(),
-    admin.from("research_hardening_cases").select("id", { count: "exact", head: true })
-      .eq("campaign_id", input.campaignId).eq("organization_id", input.organizationId).eq("status", "running"),
-    admin.from("research_paid_operations").select("id", { count: "exact", head: true })
-      .eq("research_log_id", item.research_log_id).eq("organization_id", input.organizationId).eq("stage", "shadow"),
-  ]);
-  if (logError || !log) throw logError || new Error("Hardening research log not found");
-  if (activeError || shadowError) throw activeError || shadowError;
-  assertShadowAuditRetryAdmission({
-    campaignStatus: campaign.status, caseStatus: item.status, verdict: item.verdict,
-    researchStatus: log.status, researchIsEvaluation: log.is_evaluation === true && log.accounting_version === "operations_v1",
-    defectSummaries: array(item.defects).map((entry) => String(object(entry).summary || "")),
-    priorRetries: integer(object(item.metrics).shadowAuditRetryCount),
-    activeCases: activeCases || 0, priorShadowOperations: shadowOperations || 0,
-    unresolvedCriticalDefects: array(item.defects).filter((entry) =>
-      object(entry).severity === "critical" && object(entry).resolved !== true).length,
-  });
+  const admission = await loadShadowAuditRetryAdmission({ admin, organizationId: input.organizationId, campaign, item });
   const [caseExposure, campaignExposure] = await Promise.all([
     operationExposure(admin, input.organizationId, input.campaignId, item.id),
     operationExposure(admin, input.organizationId, input.campaignId),
   ]);
-  const caseRemaining = integer(log.cost_limit_microusd) - caseExposure.exposureMicrousd;
+  const caseRemaining = integer(admission.log.cost_limit_microusd) - caseExposure.exposureMicrousd;
   const ordinaryRemaining = integer(campaign.preconfirmation_stop_microusd) - campaignExposure.exposureMicrousd;
-  if (caseRemaining < 250_000 || ordinaryRemaining < caseRemaining) {
-    throw new Error("The original case or ordinary campaign allowance cannot cover a bounded audit retry");
+  if (caseRemaining < admission.requiredHeadroomMicrousd || ordinaryRemaining < caseRemaining) {
+    throw new Error(`The original case or ordinary campaign allowance cannot cover a bounded audit retry `
+      + `(needs ${admission.requiredHeadroomMicrousd} microusd; case has ${caseRemaining})`);
   }
+  // Zero-cost: live price, bounded routing and the pinned endpoint's advertised
+  // parameters, checked before the retry claim is spent.
+  await assertOpenRouterRequestReady(OPENROUTER_CHAT_COMPLETIONS, buildOpusShadowRequest(challenger.model));
   const { data: claimed, error: claimError } = await admin.from("research_hardening_cases").update({
     status: "running", verdict: null, completed_at: null,
-    metrics: { ...object(item.metrics), shadowAuditRetryCount: 1 },
+    metrics: { ...object(item.metrics), shadowAuditRetryCount: admission.priorRetries + 1 },
   }).eq("id", item.id).eq("organization_id", input.organizationId)
-    .eq("status", "blocked").eq("verdict", "needs_fix").select("id").maybeSingle();
+    .eq("status", admission.path === "budget_hold" ? "blocked" : "completed").eq("verdict", "needs_fix")
+    .select("id").maybeSingle();
   if (claimError || !claimed) throw claimError || new Error("The audit retry was already claimed");
   const { error: reopenError } = await admin.from("research_hardening_campaigns").update({
     status: "running", error_message: null, completed_at: null,
   }).eq("id", input.campaignId).eq("organization_id", input.organizationId)
     .in("status", ["failed", "paused_budget", "running"]);
   if (reopenError) throw reopenError;
+  const log = admission.log;
   return {
     caseId: item.id, archetype: item.archetype as HardeningArchetype, sport: item.sport,
     stage: item.stage as HardeningStage, profileVariant: item.profile_variant === "guided" ? "guided" : "baseline",

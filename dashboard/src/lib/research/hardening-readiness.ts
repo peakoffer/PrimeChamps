@@ -83,7 +83,19 @@ export function canResolveCanaryTechnicalFailure(
     && correction.stage === "targeted_rerun" && correction.status === "completed" && correction.verdict === "passed";
 }
 
-/** Reuse a completed research log; never buy discovery again for an audit-only budget correction. */
+/** An audit-only case may be attempted at most this many times, whatever the path. */
+export const MAXIMUM_SHADOW_AUDIT_RETRIES = 2;
+
+export type ShadowAuditRetryPath = "budget_hold" | "reconciled_rejection";
+
+/**
+ * Reuse a completed research log; never buy discovery again for an audit-only
+ * correction. Two narrow, owner-approved paths exist:
+ * - budget_hold: the first audit never reserved because the case cap held it;
+ * - reconciled_rejection: every earlier Opus attempt was refused by the
+ *   provider before inference and settled at $0 by an append-only,
+ *   owner-evidenced reconciliation record (approved 2026-09-29).
+ */
 export function assertShadowAuditRetryAdmission(input: {
   campaignStatus: string;
   caseStatus: string;
@@ -94,16 +106,25 @@ export function assertShadowAuditRetryAdmission(input: {
   priorRetries: number;
   activeCases: number;
   priorShadowOperations: number;
+  reconciledShadowRejections?: number;
   unresolvedCriticalDefects: number;
-}) {
-  if (!["failed", "paused_budget", "running"].includes(input.campaignStatus)
-    || input.caseStatus !== "blocked" || input.verdict !== "needs_fix"
-    || input.researchStatus !== "completed" || !input.researchIsEvaluation
-    || input.priorRetries !== 0 || input.activeCases !== 0 || input.priorShadowOperations !== 0
-    || input.unresolvedCriticalDefects !== 0
-    || !input.defectSummaries.some((summary) => /Research case paid-operation budget exhausted/.test(summary))) {
-    throw new Error("Only one audit-only retry is allowed for a completed evaluation held by the case budget");
+}): ShadowAuditRetryPath {
+  const common = ["failed", "paused_budget", "running"].includes(input.campaignStatus)
+    && input.verdict === "needs_fix" && input.researchStatus === "completed" && input.researchIsEvaluation
+    && input.activeCases === 0 && input.unresolvedCriticalDefects === 0
+    && input.priorRetries < MAXIMUM_SHADOW_AUDIT_RETRIES;
+  if (common && input.caseStatus === "blocked" && input.priorRetries === 0 && input.priorShadowOperations === 0
+    && input.defectSummaries.some((summary) => /Research case paid-operation budget exhausted/.test(summary))) {
+    return "budget_hold";
   }
+  const reconciled = input.reconciledShadowRejections ?? 0;
+  if (common && input.caseStatus === "completed" && input.priorRetries === 1
+    && input.priorShadowOperations > 0 && reconciled === input.priorShadowOperations
+    && input.defectSummaries.length > 0
+    && input.defectSummaries.every((summary) => /shadow audit failed \(4\d\d\)/.test(summary))) {
+    return "reconciled_rejection";
+  }
+  throw new Error("An audit-only retry needs a case-budget hold, or $0-reconciled provider rejections of every earlier attempt");
 }
 
 export function canResolveRetiredOnlyFansActorFailure(input: {

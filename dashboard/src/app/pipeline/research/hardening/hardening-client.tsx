@@ -9,6 +9,7 @@ import { latestCompletedHardeningCases, NEXT_HARDENING_BUDGET_LIMIT_MICROUSD,
   NEXT_HARDENING_AUTHORIZATION_KEY,
   RESEARCH_HARDENING_MATRIX } from "@/lib/research/hardening";
 import DiscoveryCanaryPanel from "./discovery-canary-panel";
+import ProviderReconciliationPanel from "./provider-reconciliation-panel";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -328,6 +329,7 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-brand-muted">{paidReadiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
       </div>}
       {campaign && isOwner && <DiscoveryCanaryPanel key={campaign.id} campaignId={campaign.id} isOwner={isOwner} />}
+      {campaign && isOwner && <ProviderReconciliationPanel key={`reconcile:${campaign.id}`} campaignId={campaign.id} isOwner={isOwner} onReconciled={() => void load()} />}
       {campaign && !usesOperationLedger && <div className="border border-brand-ink/10 bg-brand-paper px-4 py-3 text-sm text-brand-ink">
         <p className="font-semibold">Historical campaign · reference only</p>
         <p className="mt-1">Past verdicts are preserved as development evidence, not certification for the current release. This campaign cannot resume paid work; new release testing requires a separate campaign with verified spending limits.</p>
@@ -471,9 +473,15 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
                 const defects = Array.isArray(item.defects) ? item.defects : [];
                 const unresolvedDefects = defects.filter((defect) => defect.resolved !== true);
                 const resolvedDefects = defects.length - unresolvedDefects.length;
-                const canRetryAudit = !active && item.status === "blocked" && item.verdict === "needs_fix"
-                  && Boolean(item.research_log_id) && metric(item.metrics, "shadowAuditRetryCount") === 0
+                // The server re-checks both paths, including that every earlier Opus
+                // rejection has a $0 reconciliation record before a second attempt.
+                const budgetHoldRetry = item.status === "blocked" && metric(item.metrics, "shadowAuditRetryCount") === 0
                   && unresolvedDefects.some((defect) => /Research case paid-operation budget exhausted/.test(String(defect.summary || "")));
+                const reconciledRejectionRetry = item.status === "completed" && metric(item.metrics, "shadowAuditRetryCount") === 1
+                  && unresolvedDefects.length > 0
+                  && unresolvedDefects.every((defect) => /shadow audit failed \(4\d\d\)/.test(String(defect.summary || "")));
+                const canRetryAudit = !active && item.verdict === "needs_fix" && Boolean(item.research_log_id)
+                  && (budgetHoldRetry || reconciledRejectionRetry);
                 const pending = campaign?.cases.filter((candidate) => candidate.archetype === item.archetype && candidate.sport === item.sport
                   && candidate.id !== item.id && ["queued", "running"].includes(candidate.status)) || [];
                 const canRerun = !active && !canRetryAudit && !legacyFastRoute && ["needs_fix", "source_inconclusive", "source_exhausted", "safety_stop", "technical_failure", "failed", "cancelled"].includes(item.verdict || item.status);

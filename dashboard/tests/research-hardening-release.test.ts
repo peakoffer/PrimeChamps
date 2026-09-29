@@ -115,6 +115,45 @@ test("audit-only retry admits exactly one completed evaluation after case-budget
   assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, defectSummaries: ["unsafe finalist"] }));
   assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, priorShadowOperations: 1 }));
   assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, unresolvedCriticalDefects: 1 }));
+  assert.equal(assertShadowAuditRetryAdmission(eligible), "budget_hold");
+});
+
+test("a second audit-only attempt needs every earlier Opus rejection settled at $0, and never a third", () => {
+  const rejection = "anthropic/claude-opus-5.5 shadow audit failed (404): No endpoints found that can handle the requested parameters";
+  const eligible = { campaignStatus: "failed", caseStatus: "completed", verdict: "needs_fix",
+    researchStatus: "completed", researchIsEvaluation: true, defectSummaries: [rejection],
+    priorRetries: 1, activeCases: 0, priorShadowOperations: 1, reconciledShadowRejections: 1, unresolvedCriticalDefects: 0 };
+  assert.equal(assertShadowAuditRetryAdmission(eligible), "reconciled_rejection");
+  // Unsettled or partly settled rejections keep the reservation and the gate closed.
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, reconciledShadowRejections: 0 }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, priorShadowOperations: 2, reconciledShadowRejections: 1 }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, reconciledShadowRejections: undefined }));
+  // Hard cap: two audit attempts in total.
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, priorRetries: 2 }));
+  // A challenger finding, a safety defect, or a non-rejection failure is investigated, not retried.
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, defectSummaries: [rejection, "Opus flagged an unsafe finalist"] }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, defectSummaries: ["anthropic/claude-opus-5.5 shadow audit failed (500): upstream"] }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, unresolvedCriticalDefects: 1 }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, activeCases: 1 }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, caseStatus: "blocked" }));
+  assert.throws(() => assertShadowAuditRetryAdmission({ ...eligible, researchIsEvaluation: false }));
+});
+
+test("the second audit path counts only append-only reconciliation records and checks the endpoint before claiming", () => {
+  const source = readFileSync(new URL("../src/lib/research/hardening-service.ts", import.meta.url), "utf8");
+  const loader = source.slice(source.indexOf("export async function loadShadowAuditRetryAdmission"), source.indexOf("export async function assertShadowAuditRetryRequestable"));
+  assert.match(loader, /from\("research_paid_operation_reconciliations"\)/);
+  assert.match(loader, /billingBasis === "reconciled_pre_inference_rejection"/);
+  const prepare = source.slice(source.indexOf("export async function prepareHardeningShadowRetry"));
+  const preflight = prepare.indexOf("await assertOpenRouterRequestReady(");
+  assert.ok(preflight > 0 && preflight < prepare.indexOf('from("research_hardening_cases").update('),
+    "the zero-cost endpoint check must precede the one-use claim");
+  assert.match(prepare, /shadowAuditRetryCount: admission\.priorRetries \+ 1/);
+  const migration = readFileSync(new URL("../../supabase/migrations/20260928223000_research_paid_operation_reconciliations.sql", import.meta.url), "utf8");
+  assert.match(migration, /before update or delete on public\.research_paid_operation_reconciliations/);
+  assert.match(migration, /No endpoints found/);
+  assert.match(migration, /m\.role = 'owner' and m\.status = 'active'/);
+  assert.match(migration, /observed_charge_usd', ''\) not in \('0', '0\.0', '0\.00'\)/);
 });
 
 test("retired OnlyFans Actor failure resolves only with a passing replacement receipt", () => {

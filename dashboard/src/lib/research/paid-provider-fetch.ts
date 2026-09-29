@@ -66,3 +66,19 @@ export async function researchPaidFetch(input: string | URL | Request, init?: Re
   return new Response(receipt.body, { status: receipt.status, statusText: receipt.statusText,
     headers: { "Content-Type": "application/json" } });
 }
+
+/**
+ * Run every zero-cost admission check a strict OpenRouter request would face:
+ * live price, bounded routing, and the pinned endpoint's advertised parameters.
+ * Nothing is reserved and no provider inference is requested.
+ */
+export async function assertOpenRouterRequestReady(url: string, request: Record<string, unknown>) {
+  if (paidHttpProvider(url) !== "openrouter") throw new ResearchPaidOperationError("Readiness checks apply only to strict OpenRouter requests");
+  try {
+    const payload = boundedHttpPayload(url, request, await routerPrice(String(request.model)));
+    assertOpenRouterEndpointSupports(payload, await routerEndpoints(String(request.model)));
+  } catch (error) {
+    throw error instanceof ResearchPaidOperationError ? error
+      : new ResearchPaidOperationError(error instanceof Error ? error.message : "The OpenRouter route is not ready");
+  }
+}
