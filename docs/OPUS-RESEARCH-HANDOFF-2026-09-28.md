@@ -8,6 +8,41 @@ Vercel production deployment `dpl_2DrLhBEfw83KPE2JqvZLk8JX7uSa` is READY and
 aliases `crm.prime-champs.com`. Start from a fresh `main` checkout; do not rely
 on an older Claude session's repository map.
 
+## Update - September 29, 2026 (read this first)
+
+Production `4b0523d` is READY and CI is green. No paid research has run since
+September 26; no outreach, athletes, or CRM changes were made.
+
+1. **$150 release campaign** (`391b4d6`). The owner directed a self-set
+   testing limit well below $500. Authorization key
+   `2026-09-29-cross-sport-150`: $150 total ($120 ordinary, $30 confirmation
+   reserve), $5 per case, one-use (unique index applied). One start runs all
+   13 archetypes once, soccer/figure skating/skiing canaries first and one at
+   a time, at development depth. After each batch a canary gate holds the
+   campaign (`paused`) unless every canary has an audited pass; queued wave
+   cases resume after a passing correction (up to two per canary, never after
+   a safety stop). The earlier $50 campaign keeps its own frozen limits via
+   `HARDENING_BUDGET_AUTHORIZATIONS`.
+2. **Identity yield** (`4b0523d`). In the Sept 26 soccer run, 16/18 real
+   athletes were lost to guessed handles. Replaying stored results showed
+   ranking defects discarding real accounts (Sara Wojdelko's labeled NIL
+   handle `sarawojoo`, Maya Le Tissier's profile penalized for captions,
+   Angel City FC's club account outranking Sarah Gorden). Fixed without
+   relaxing the two-signal gate; see `tests/research-identity-handle-sources.test.ts`.
+   Honest limit: many roster pages do not expose handles in snippets, so an
+   independent handle source is still the main constraint on yield.
+3. **Live research is mixed-gender and neutral** (`a6964ae`). Live runs
+   defaulted to a women-only evidence gate and female-only fallback prompts.
+4. **Still open:** live (outreach) runs do not use the hardened route or the
+   paid ledger at all; no live run has executed since Aug 7. Aligning them
+   (ledger for live runs with a bounded budget, durable per-candidate
+   scoring) is the next engineering task, after the release campaign shows
+   the hardened route works.
+
+**Next action:** the owner clicks "Set $150 evaluation ceiling", then
+"Start", on the Research Hardening scorecard. Watch the canaries; if one
+holds, inspect its defects before a targeted correction.
+
 ## Update - September 28, 2026 (Claude review and hardening pass)
 
 Read this first; the sections below it describe the state before this pass.
