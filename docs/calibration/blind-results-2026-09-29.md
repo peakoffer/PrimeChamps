@@ -42,3 +42,16 @@ Blind set: 30 decided records, 23 approved, 7 rejected. Base rate 77%.
 - Fee information in these dossiers comes from the pitch itself. The live
   research agent will not have it, so star-tier/price must be judged from public
   career tier.
+
+## Production encoding (2026-09-29)
+- `dashboard/src/lib/research/sponsor-approval-profile.ts` holds Arm B's wording,
+  the tiers (>=60 clear winner, 50-59 second tier) and the sponsor-reaction filter.
+- The live researcher and the benchmark researcher (prompt v18) now return a
+  separate `sponsor_approval_probability`, stored with the candidate/assessment
+  and shown on pipeline cards as "Clear winner" / "2nd tier".
+- It does **not** yet change gates, audit order or finalist selection. The blind
+  result was produced by Opus scorers on frozen dossiers; the production scorer
+  is Sonnet. A Sonnet benchmark run must reproduce the separation (AUC >= 0.65,
+  clear-winner precision above the base rate) before it drives ranking.
+- Benchmark dossiers now drop sponsor-reaction items (`sponsor_reaction_excluded`);
+  the pattern matches exactly the six such items in Dylan's 100 records.

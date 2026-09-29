@@ -5,6 +5,11 @@ import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
+  SPONSOR_APPROVAL_PROFILE_VERSION,
+  sponsorApprovalProbability,
+  sponsorApprovalTier,
+} from "@/lib/research/sponsor-approval-profile";
+import {
   calculateBenchmarkMetrics,
   auditPipelineCaughtResearcherFailure,
   evaluateBenchmarkReleaseReadiness,
@@ -83,6 +88,7 @@ const RESEARCHER_SCHEMA = {
     onlyfans_fit_score: { type: "number" },
     commercial_achievability_score: { type: "number" },
     research_confidence_score: { type: "number" },
+    sponsor_approval_probability: { type: "number" },
     fit_label: { type: "string", enum: ["fit", "not_fit", "uncertain"] },
     achievability_label: { type: "string", enum: ["high", "medium", "low", "uncertain"] },
     material_evidence_refs: {
@@ -95,7 +101,7 @@ const RESEARCHER_SCHEMA = {
   },
   required: [
     "identity_confirmed", "adult_eligibility_verified", "onlyfans_fit_score",
-    "commercial_achievability_score", "research_confidence_score", "fit_label",
+    "commercial_achievability_score", "research_confidence_score", "sponsor_approval_probability", "fit_label",
     "achievability_label", "material_evidence_refs", "critical_gaps", "limitations", "reasoning",
   ],
 } as const;
@@ -160,6 +166,7 @@ type ResearcherAssessment = {
   onlyfans_fit_score: number;
   commercial_achievability_score: number;
   research_confidence_score: number;
+  sponsor_approval_probability: number;
   fit_label: "fit" | "not_fit" | "uncertain";
   achievability_label: "high" | "medium" | "low" | "uncertain";
   material_evidence_refs: string[];
@@ -630,8 +637,8 @@ async function ensureBenchmarkArtifacts(input: {
     ensurePrompt({
       prompt_key: "research-v2-benchmark-researcher",
       role: "researcher",
-      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence, deterministic no-label gate summaries, and an immutable candidate-blind recruiting-thesis snapshot that defines business priorities but cannot prove candidate facts; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; no platform profile is neutral, an active exact profile is positive, and an explicitly inactive exact profile is a blocker; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying.",
-      content_hash: "research-v2-benchmark-researcher-v17",
+      content: "Blind point-in-time pre-outreach assessment using supplied public and authenticated internal pre-decision evidence, deterministic no-label gate summaries, and an immutable candidate-blind recruiting-thesis snapshot that defines business priorities but cannot prove candidate facts; labels and outcomes are withheld; the model selects immutable evidence references and application code emits exact claims and quotes; no platform profile is neutral, an active exact profile is positive, and an explicitly inactive exact profile is a blocker; platform willingness is not required or inferred; a smaller contextual audience is not automatically disqualifying; a separate sponsor_approval_probability applies the blind-validated sponsor approval profile, and sponsor-reaction items are excluded from the dossier.",
+      content_hash: "research-v2-benchmark-researcher-v18",
       output_schema: RESEARCHER_SCHEMA,
     }),
     ensurePrompt({
@@ -1288,6 +1295,11 @@ async function processBenchmarkCase(input: {
         recruiting_profile_version_id: run.metrics.recruiting_profile_version_id,
         recruiting_profile_hash: run.metrics.recruiting_profile_hash,
         researcher,
+        sponsor_approval: {
+          profile_version: SPONSOR_APPROVAL_PROFILE_VERSION,
+          probability: sponsorApprovalProbability(researcher.sponsor_approval_probability),
+          tier: sponsorApprovalTier(sponsorApprovalProbability(researcher.sponsor_approval_probability)),
+        },
         identity_gate: identityGate,
         adult_gate: adultGate,
       },

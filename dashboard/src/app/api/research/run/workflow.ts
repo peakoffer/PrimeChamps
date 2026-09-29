@@ -104,6 +104,13 @@ import {
 } from "@/lib/research/intelligence";
 import { sanitizeJsonForStorage, sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
+  SPONSOR_APPROVAL_PROFILE,
+  SPONSOR_APPROVAL_PROFILE_VERSION,
+  sponsorApprovalProbability,
+  sponsorApprovalTier,
+  type SponsorApprovalTier,
+} from "@/lib/research/sponsor-approval-profile";
+import {
   selectOnlyFansPlatformSignal,
   type OnlyFansPlatformSignal,
 } from "@/lib/research/onlyfans-platform-signal";
@@ -176,6 +183,7 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
     onlyfans_fit_score: { type: "number" },
     commercial_achievability_score: { type: "number" },
     research_confidence_score: { type: "number" },
+    sponsor_approval_probability: { type: "number" },
     score_breakdown: {
       type: "object",
       properties: {
@@ -221,7 +229,7 @@ const RESEARCH_SCORE_OUTPUT_SCHEMA = {
       },
     },
   },
-  required: ["score", "onlyfans_fit_score", "commercial_achievability_score", "research_confidence_score", "score_breakdown", "reasoning", "concerns", "is_minor", "career_stage", "objective_fit", "creator_signals", "momentum_evidence", "creator_evidence"],
+  required: ["score", "onlyfans_fit_score", "commercial_achievability_score", "research_confidence_score", "sponsor_approval_probability", "score_breakdown", "reasoning", "concerns", "is_minor", "career_stage", "objective_fit", "creator_signals", "momentum_evidence", "creator_evidence"],
   additionalProperties: false,
 } as const;
 
@@ -252,7 +260,7 @@ const RESEARCH_V2_RUBRIC_DEFINITION = {
   },
 } as const;
 
-const RESEARCHER_PROMPT_RECORD = "Research V2.4 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity, two independent agreeing sources proving 21+ eligibility, and a completed exact-match OnlyFans platform check with no inactive-profile contradiction. Audience windows shorter than 30 days are neutral.";
+const RESEARCHER_PROMPT_RECORD = "Research V2.4 researcher: produce separate OnlyFans fit, commercial achievability, research confidence, and exact dossier citations for current momentum and creator potential. Unsourced material claims do not score. A finalist requires corroborated Instagram identity, two independent agreeing sources proving 21+ eligibility, and a completed exact-match OnlyFans platform check with no inactive-profile contradiction. Audience windows shorter than 30 days are neutral. A separate sponsor_approval_probability applies the blind-validated sponsor approval profile.";
 const AUDITOR_PROMPT_RECORD = "Research V2.4 blind auditor: independently verify corroborated exact-person Instagram identity, two-source 21+ eligibility, current momentum, meaningful audience, creator potential, exact-match OnlyFans platform activity compatibility, source support, contradictions, and complete commercial constraints before viewing and reviewing the proposed score. Fully passing top-of-funnel evidence is calibrated into the qualified band without requiring owned media or private contract terms.";
 
 const RESEARCH_AUDIT_BLIND_SCHEMA = {
@@ -933,6 +941,11 @@ interface ScoredAthlete extends EnrichedAthlete {
   onlyfans_fit_score: number;
   commercial_achievability_score: number;
   research_confidence_score: number;
+  // Blind-validated sponsor-approval estimate, recorded beside the priority
+  // score. It does not change gates or ranking until a live Sonnet run confirms it.
+  sponsor_approval_probability?: number | null;
+  sponsor_approval_tier?: SponsorApprovalTier | null;
+  sponsor_approval_profile_version?: string;
   research_score_id?: string;
   researcher_input_tokens?: number;
   researcher_output_tokens?: number;
@@ -1044,7 +1057,7 @@ async function ensureResearchV2Artifacts(input: ResearchWorkflowInput, scoringMo
     return data.id as string;
   };
   const [researcherPromptVersionId, auditorPromptVersionId] = await Promise.all([
-    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.4-researcher-neutral-short-growth-v5"),
+    ensurePrompt("research-v2-researcher", "researcher", RESEARCHER_PROMPT_RECORD, "research-v2.4-researcher-sponsor-approval-v6"),
     ensurePrompt("research-v2-blind-auditor", "auditor", AUDITOR_PROMPT_RECORD, "research-v2.4-blind-auditor-qualified-band-social-blade-v5"),
   ]);
 
@@ -5402,6 +5415,9 @@ V2 SEPARATE JUDGMENTS:
 - OVERALL PRIORITY is calculated deterministically after your response. Do not inflate any dimension to fill the requested candidate count.
 - Historical OnlyFans outcomes are labels for offline evaluation only and must never be used as candidate research evidence.
 
+${SPONSOR_APPROVAL_PROFILE}
+Judge sponsor_approval_probability separately from the weighted score and the hard gates; do not copy the priority score into it.
+
 Score 0-100 where:
 - 0: MUST be given if athlete is under 18 or likely a minor
 - 80-84: Priority candidate for human review with every hard gate satisfied, one specific dated momentum signal, an in-range audience (or exceptional verified engagement), at least one concrete creator/business signal, and no major accessibility concern
@@ -5423,6 +5439,7 @@ Respond with ONLY valid JSON:
   "onlyfans_fit_score": <number 0-100>,
   "commercial_achievability_score": <number 0-100>,
   "research_confidence_score": <number 0-100>,
+  "sponsor_approval_probability": <number 0-100>,
   "score_breakdown": {
     "momentum": <0-100>,
     "brand_fit": <0-100>,
@@ -5509,6 +5526,7 @@ Respond with ONLY valid JSON:
           onlyfans_fit_score?: unknown;
           commercial_achievability_score?: unknown;
           research_confidence_score?: unknown;
+          sponsor_approval_probability?: unknown;
           score_breakdown?: unknown;
           reasoning?: unknown;
           concerns?: unknown;
@@ -5573,8 +5591,12 @@ Respond with ONLY valid JSON:
             unsupportedMaterialClaims: 0,
           });
           const usage = normalizedAnthropicUsage(data.usage);
+          const sponsorApproval = parsed.is_minor === true ? 0 : sponsorApprovalProbability(parsed.sponsor_approval_probability);
           return {
             ...athlete,
+            sponsor_approval_probability: sponsorApproval,
+            sponsor_approval_tier: sponsorApprovalTier(sponsorApproval),
+            sponsor_approval_profile_version: SPONSOR_APPROVAL_PROFILE_VERSION,
             score: applyResearchObjectiveScoreGuardrails({
               score: v2Score.priority,
               objective: config.partnershipGoal,
@@ -6830,6 +6852,8 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
             onlyfans_fit_score: a.onlyfans_fit_score,
             commercial_achievability_score: a.commercial_achievability_score,
             research_confidence_score: a.research_confidence_score,
+            sponsor_approval_probability: a.sponsor_approval_probability ?? null,
+            sponsor_approval_tier: a.sponsor_approval_tier ?? null,
             audit_verdict: a.audit_verdict,
             audit_summary: a.audit_summary,
             reasoning: a.reasoning,

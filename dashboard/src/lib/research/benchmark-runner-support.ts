@@ -3,6 +3,7 @@ import {
   preparedMomentumEffectiveAt,
 } from "./historical-evidence-preparation.ts";
 import { benchmarkSourceSupportsSport } from "./benchmark-sport-validation.ts";
+import { isSponsorReactionClaim, SPONSOR_APPROVAL_PROFILE } from "./sponsor-approval-profile.ts";
 
 export const BENCHMARK_OUTCOME_PROVIDERS = new Set([
   "gmail_mailbox_benchmark",
@@ -225,6 +226,7 @@ export function selectLeakageSafeBenchmarkEvidence(input: {
     else if (claim.support_status !== "supported") reason = "claim_not_supported";
     else if (source.source_type === "internal_record" || BENCHMARK_OUTCOME_PROVIDERS.has(source.provider.toLowerCase())) reason = "outcome_provider_excluded";
     else if (BENCHMARK_OUTCOME_CLAIM_TYPES.has(claim.claim_type.toLowerCase())) reason = "outcome_claim_excluded";
+    else if (isSponsorReactionClaim(claim.claim_text) || isSponsorReactionClaim(claim.source_excerpt)) reason = "sponsor_reaction_excluded";
     else if (!isWebUrl(source.canonical_url)) reason = "invalid_source_url";
     else if (!sourceEvidenceTime) reason = "missing_point_in_time_source_date";
     else if (sourceEvidenceTime > cutoff || (claimEffectiveTime !== null && claimEffectiveTime > cutoff)) reason = "after_evidence_cutoff";
@@ -970,9 +972,12 @@ SCORING
 - Return four to six distinct E-numbers in material_evidence_refs. Select the strongest frozen records that directly support identity, adult eligibility, momentum, audience/creator opportunity, and accessibility. Application code will create exact material claims and quotes from those immutable records; never invent an E-number.
 - Put only failed core gates in critical_gaps. Put optional missing amplifiers and unanswered non-blocking questions in limitations. Unsupported material claims are calculated deterministically from invalid or missing E-number citations.
 - Keep reasoning under 120 words and return no more than six material evidence references, five critical gaps, and five limitations.
-- Return exactly these keys and types: identity_confirmed (boolean), adult_eligibility_verified (boolean), onlyfans_fit_score (number), commercial_achievability_score (number), research_confidence_score (number), fit_label (fit, not_fit, or uncertain), achievability_label (high, medium, low, or uncertain), material_evidence_refs (string array), critical_gaps (string array), limitations (string array), reasoning (string). Do not rename or add fields.
+- Return exactly these keys and types: identity_confirmed (boolean), adult_eligibility_verified (boolean), onlyfans_fit_score (number), commercial_achievability_score (number), research_confidence_score (number), sponsor_approval_probability (number), fit_label (fit, not_fit, or uncertain), achievability_label (high, medium, low, or uncertain), material_evidence_refs (string array), critical_gaps (string array), limitations (string array), reasoning (string). Do not rename or add fields.
 
 ${BENCHMARK_PRE_OUTREACH_CALIBRATION}
+
+${SPONSOR_APPROVAL_PROFILE}
+sponsor_approval_probability is judged independently of the fit/achievability bands above and of the deterministic gates; do not copy the fit score into it.
 
 FROZEN EVIDENCE AVAILABLE BY THE CUTOFF
 ${dossier || "No eligible evidence."}

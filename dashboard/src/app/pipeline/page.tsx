@@ -8,6 +8,7 @@ import RejectionModal from "@/components/RejectionModal";
 import BulkActionBar from "@/components/BulkActionBar";
 import ImportModal from "@/components/ImportModal";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -23,6 +24,8 @@ interface Athlete {
   can_move?: boolean;
   candidate_key?: string;
   research_score?: number;
+  sponsor_approval_probability?: number | null;
+  sponsor_approval_tier?: "clear_winner" | "second_tier" | "unlikely" | null;
   research_reasoning?: string;
   disposition?: "approval" | "held" | "blocked" | "existing" | "skipped";
   disposition_reason?: string;
@@ -676,6 +679,19 @@ export default function PipelinePage() {
                                       {typeof athlete.research_score === "number" && (
                                         <span className="bg-brand-ink px-1.5 py-0.5 font-semibold text-brand-cyan">
                                           {athlete.research_score}
+                                        </span>
+                                      )}
+                                      {athlete.sponsor_approval_tier && athlete.sponsor_approval_tier !== "unlikely" && (
+                                        <span
+                                          className={cn(
+                                            "px-1.5 py-0.5 font-semibold",
+                                            athlete.sponsor_approval_tier === "clear_winner"
+                                              ? "bg-green-100 text-green-800"
+                                              : "bg-amber-50 text-amber-800"
+                                          )}
+                                          title={`Sponsor approval estimate ${athlete.sponsor_approval_probability ?? "?"}/100`}
+                                        >
+                                          {athlete.sponsor_approval_tier === "clear_winner" ? "Clear winner" : "2nd tier"}
                                         </span>
                                       )}
                                       {athlete.follower_count && (

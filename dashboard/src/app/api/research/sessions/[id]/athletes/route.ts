@@ -112,6 +112,8 @@ export async function GET(
       engagement_rate?: number;
       sport: string;
       score?: number;
+      sponsor_approval_probability?: number | null;
+      sponsor_approval_tier?: "clear_winner" | "second_tier" | "unlikely" | null;
       reasoning?: string;
       concerns?: string[];
       age_verified?: boolean;
@@ -166,6 +168,8 @@ export async function GET(
         engagement_rate: candidate.engagement_rate,
         pipeline_stage: actualStage || "research",
         research_score: candidate.score,
+        sponsor_approval_probability: typeof candidate.sponsor_approval_probability === "number" ? candidate.sponsor_approval_probability : null,
+        sponsor_approval_tier: candidate.sponsor_approval_tier ?? null,
         research_reasoning: candidate.reasoning,
         concerns: candidate.concerns || [],
         age_verified: candidate.age_verified === true,
