@@ -385,7 +385,7 @@ function usageFromRow(row: Record<string, unknown>): BenchmarkTokenUsage {
   };
 }
 
-class BenchmarkBudgetLedger {
+class BenchmarkBudgetLedger implements BenchmarkCallLedger {
   constructor(
     private readonly admin: AdminClient,
     private readonly run: RunRow,
@@ -438,13 +438,18 @@ class BenchmarkBudgetLedger {
   }
 }
 
-async function callStructuredSonnet<T>(input: {
+export interface BenchmarkCallLedger {
+  admit(prompt: string, maximumOutputTokens: number): void;
+  record(usage: BenchmarkTokenUsage, providerReportedCostMicrousd?: number | null): Promise<number>;
+}
+
+export async function callStructuredSonnet<T>(input: {
   prompt: string;
   schema: Record<string, unknown>;
   model: string;
   provider: BenchmarkModelProvider;
   maximumOutputTokens: number;
-  ledger: BenchmarkBudgetLedger;
+  ledger: BenchmarkCallLedger;
 }) {
   const apiKey = input.provider === "openrouter"
     ? process.env.OPENROUTER_API_KEY
@@ -692,7 +697,7 @@ function balancedCaseSelection<T extends { id: string; sport: string; fit_label:
   return [...fit, ...notFit, ...remainder].sort((left, right) => left.id.localeCompare(right.id));
 }
 
-async function loadEvidence(admin: AdminClient, organizationId: string, recordIds: string[]) {
+export async function loadEvidence(admin: AdminClient, organizationId: string, recordIds: string[]) {
   const [{ data: sources, error: sourceError }, { data: claims, error: claimError }] = await Promise.all([
     admin.from("research_evidence_sources").select(
       "id,golden_record_id,canonical_url,domain,title,publisher,source_type,provider,published_at,retrieved_at,historical_as_of,retrieval_status,eligible_before_cutoff,exclusion_reason"

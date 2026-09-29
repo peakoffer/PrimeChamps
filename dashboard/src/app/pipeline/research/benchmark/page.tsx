@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Upload,
 } from "lucide-react";
+import { SponsorApprovalCheckPanel } from "./sponsor-approval-check-panel";
 
 type GoldenRecord = {
   id: string;
@@ -1230,6 +1231,8 @@ export default function ResearchBenchmarkPage() {
             </button>
           </div>
         </header>
+
+        <SponsorApprovalCheckPanel />
 
         <section className="mb-6 grid gap-3 md:grid-cols-4">
           {[
