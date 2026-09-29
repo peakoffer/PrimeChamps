@@ -13,14 +13,18 @@ export async function POST(request: NextRequest) {
     }
     const body: unknown = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
-      return NextResponse.json({ error: "This authorization has a fixed $50 ceiling" }, { status: 400, headers });
+      return NextResponse.json({ error: "This authorization has a fixed ceiling and takes no parameters" }, { status: 400, headers });
     }
     return NextResponse.json(await createHardeningBudgetDraft({
       organizationId: user.organizationId, requestedByUserId: user.id,
     }), { headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not record the budget draft";
+    const message = error instanceof Error ? error.message
+      : error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message)
+        : "Could not record the budget draft";
     const status = message === "Not authenticated" ? 401 : message === "Forbidden" ? 403 : 400;
+    // The owner sees a generic message; keep the database reason in server logs.
+    if (status === 400) console.error("Research hardening budget draft failed:", message);
     return NextResponse.json({ error: status === 400 ? "Budget draft unavailable; inspect the existing authorization" : message },
       { status, headers });
   }

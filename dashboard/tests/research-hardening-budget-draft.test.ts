@@ -54,3 +54,10 @@ test("budget action records a draft only and cannot dispatch workflow or paid pr
   assert.match(service, /campaignType !== "cross_sport"/);
   assert.match(service, /\.eq\("status", "draft"\)/);
 });
+
+test("the database ceiling admits every owner authorization and nothing above the largest", () => {
+  const migration = readFileSync(new URL("../../supabase/migrations/20260929170000_research_hardening_budget_cap_150.sql", import.meta.url), "utf8");
+  const cap = Number(migration.match(/budget_limit_microusd <= (\d+)/)?.[1]);
+  assert.equal(cap, Math.max(...HARDENING_BUDGET_AUTHORIZATIONS.map((entry) => entry.budgetLimitMicrousd)));
+});
+
