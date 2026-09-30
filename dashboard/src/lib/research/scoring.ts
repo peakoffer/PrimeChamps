@@ -109,6 +109,9 @@ export function resolveResearchDisposition(input: {
   reasoning?: string | null;
   careerStage?: ResearchCareerStage | null;
   objectiveFit?: ResearchObjectiveFit | null;
+  // Research-run candidates below the sponsor-approval second tier are held
+  // for a human instead of entering Approval automatically.
+  sponsorApprovalTier?: "clear_winner" | "second_tier" | "unlikely" | null;
 }): ResearchDisposition {
   const reasoning = input.reasoning?.toLowerCase() || "";
   const likelyMinor = input.isMinor === true
@@ -124,6 +127,7 @@ export function resolveResearchDisposition(input: {
   if (input.objectiveFit === "weak") return "held";
   if (input.careerStage === "veteran") return "held";
   if (input.careerStage === "established" && input.objectiveFit !== "strong") return "held";
+  if (input.sponsorApprovalTier === "unlikely") return "held";
   if (input.score < 75) return "held";
   return "approval";
 }

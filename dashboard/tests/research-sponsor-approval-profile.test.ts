@@ -108,3 +108,34 @@ test("live and benchmark researchers must return the sponsor approval estimate",
   assert.match(runner, /"research_confidence_score", "sponsor_approval_probability", "fit_label"/);
   assert.match(runner, /research-v2-benchmark-researcher-v18/);
 });
+
+test("clear winners rank first, unknown estimates sit with the second tier, and score breaks ties", async () => {
+  const { compareBySponsorApproval } = await import("../src/lib/research/sponsor-approval-profile.ts");
+  const ranked = [
+    { name: "unlikely-high-score", sponsor_approval_tier: "unlikely" as const, score: 95 },
+    { name: "legacy", sponsor_approval_tier: null, score: 82 },
+    { name: "second", sponsor_approval_tier: "second_tier" as const, score: 88 },
+    { name: "winner-low", sponsor_approval_tier: "clear_winner" as const, score: 80 },
+    { name: "winner-high", sponsor_approval_tier: "clear_winner" as const, score: 90 },
+  ].sort(compareBySponsorApproval).map((item) => item.name);
+  assert.deepEqual(ranked, ["winner-high", "winner-low", "second", "legacy", "unlikely-high-score"]);
+});
+
+test("a research candidate below the second tier is held for a human, never auto-approved", async () => {
+  const { resolveResearchDisposition } = await import("../src/lib/research/scoring.ts");
+  const qualified = { score: 88, ageVerified: true, careerStage: "emerging" as const, objectiveFit: "strong" as const };
+  assert.equal(resolveResearchDisposition({ ...qualified, sponsorApprovalTier: "clear_winner" }), "approval");
+  assert.equal(resolveResearchDisposition({ ...qualified, sponsorApprovalTier: "second_tier" }), "approval");
+  assert.equal(resolveResearchDisposition({ ...qualified, sponsorApprovalTier: null }), "approval");
+  assert.equal(resolveResearchDisposition({ ...qualified, sponsorApprovalTier: "unlikely" }), "held");
+  // The estimate never overrides the minor-safety block or the age gate.
+  assert.equal(resolveResearchDisposition({ ...qualified, isMinor: true, sponsorApprovalTier: "clear_winner" }), "blocked");
+  assert.equal(resolveResearchDisposition({ ...qualified, ageVerified: false, sponsorApprovalTier: "clear_winner" }), "held");
+});
+
+test("the live workflow orders audits and finalists by sponsor tier and passes the tier to disposition", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /\.sort\(compareBySponsorApproval\)\n      \.slice\(0, config\.resultCount\)/);
+  assert.match(workflow, /compareBySponsorApproval\(left\.athlete as ScoredAthlete, right\.athlete as ScoredAthlete\)/);
+  assert.equal(workflow.match(/sponsorApprovalTier: athlete\.sponsor_approval_tier/g)?.length, 2);
+});

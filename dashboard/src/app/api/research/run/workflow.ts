@@ -104,8 +104,10 @@ import {
 } from "@/lib/research/intelligence";
 import { sanitizeJsonForStorage, sanitizeUnicodeForJson } from "@/lib/research/text-safety";
 import {
+  compareBySponsorApproval,
   SPONSOR_APPROVAL_PROFILE,
   SPONSOR_APPROVAL_PROFILE_VERSION,
+  SPONSOR_APPROVAL_SECOND_TIER_MIN,
   sponsorApprovalProbability,
   sponsorApprovalTier,
   type SponsorApprovalTier,
@@ -941,8 +943,9 @@ interface ScoredAthlete extends EnrichedAthlete {
   onlyfans_fit_score: number;
   commercial_achievability_score: number;
   research_confidence_score: number;
-  // Blind-validated sponsor-approval estimate, recorded beside the priority
-  // score. It does not change gates or ranking until a live Sonnet run confirms it.
+  // Blind-validated sponsor-approval estimate (confirmed on Sonnet 2026-09-30).
+  // It orders audits and finalists, and below the second tier it holds a
+  // candidate for human review instead of automatic Approval.
   sponsor_approval_probability?: number | null;
   sponsor_approval_tier?: SponsorApprovalTier | null;
   sponsor_approval_profile_version?: string;
@@ -1250,6 +1253,9 @@ function explainResearchHold(athlete: ScoredAthlete) {
   }
   if (athlete.career_stage === "veteran") {
     return "the profile is categorized as veteran/late-career rather than emerging talent";
+  }
+  if (athlete.sponsor_approval_tier === "unlikely") {
+    return `the sponsor approval estimate (${athlete.sponsor_approval_probability ?? "unknown"}/100) is below the ${SPONSOR_APPROVAL_SECOND_TIER_MIN}-point second tier`;
   }
   if (athlete.score < 75) {
     return `the evidence-backed objective score (${athlete.score}) is below the 75-point Approval threshold`;
@@ -4409,8 +4415,8 @@ async function scoreAthletes(
     });
   }
 
-  // Sort by score descending
-  scored.sort((a, b) => b.score - a.score);
+  // Clear winners first, then by priority score.
+  scored.sort(compareBySponsorApproval);
 
   return scored;
 }
@@ -6378,6 +6384,7 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
         auditorVerdict: athlete.audit_verdict || "fail",
         criticalGapCount: athlete.audit_critical_gap_count ?? 1,
       }))
+      .sort(compareBySponsorApproval)
       .slice(0, config.resultCount);
     log(`Quality audit: ${finalResults.length}/${qualityAudit.requestedCount} priority candidates passed the deterministic and independent audit gates`);
     await persistScoringAudit(input, auditedAthletes, scoringModel, qualityAudit);
@@ -6557,6 +6564,7 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
             reasoning: athlete.reasoning,
             careerStage: athlete.career_stage,
             objectiveFit: athlete.objective_fit,
+            sponsorApprovalTier: athlete.sponsor_approval_tier,
           });
           athlete.disposition_reason = athlete.disposition === "approval"
             ? "Simulation qualified — source-linked adult age and score passed the current objective gates; the live pipeline was not changed"
@@ -6653,6 +6661,7 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
           reasoning: athlete.reasoning,
           careerStage: athlete.career_stage,
           objectiveFit: athlete.objective_fit,
+          sponsorApprovalTier: athlete.sponsor_approval_tier,
         });
         const isLikelyMinor = resolvedDisposition === "blocked";
 
@@ -7278,7 +7287,8 @@ export async function prepareResearchAuditPlan(input: ResearchWorkflowInput, pla
     return (athlete.identity_confidence || 0) >= 70 && athlete.identity_corroborated === true
       && athlete.age_verified === true && athlete.age_corroborated === true && typeof athlete.age === "number" && athlete.age >= 21
       && evidence.currentMomentum && evidence.meaningfulAudience && evidence.creatorPotential;
-  }).sort((left, right) => Number(right.score) - Number(left.score))
+  }).sort((left, right) => compareBySponsorApproval(left.athlete as ScoredAthlete, right.athlete as ScoredAthlete)
+    || Number(right.score) - Number(left.score))
     .slice(0, plan.config.evaluationBudget?.maxAuditCandidates ?? Number.POSITIVE_INFINITY).map((row) => row.id);
 }
 prepareResearchAuditPlan.maxRetries = 1;

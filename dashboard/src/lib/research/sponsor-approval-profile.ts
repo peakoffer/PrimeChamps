@@ -35,6 +35,22 @@ export function sponsorApprovalTier(probability: number | null | undefined): Spo
   return "unlikely";
 }
 
+// Candidates without an estimate (older runs, or a missing field) rank as
+// second tier: unknown is neither promoted nor buried.
+export function sponsorApprovalRank(tier: SponsorApprovalTier | null | undefined) {
+  return tier === "clear_winner" ? 2 : tier === "unlikely" ? 0 : 1;
+}
+
+// Validated by the Sonnet check on 2026-09-30 (AUC 0.74, clear winners 12/13
+// approved against a 77% base rate): tier first, then the priority score.
+export function compareBySponsorApproval(
+  left: { sponsor_approval_tier?: SponsorApprovalTier | null; score?: number | null },
+  right: { sponsor_approval_tier?: SponsorApprovalTier | null; score?: number | null },
+) {
+  return sponsorApprovalRank(right.sponsor_approval_tier) - sponsorApprovalRank(left.sponsor_approval_tier)
+    || Number(right.score ?? 0) - Number(left.score ?? 0);
+}
+
 // Historical workbook detail sometimes restates the sponsor's reaction to the
 // pitch ("fee too high", "internal review found it too expensive", "described
 // as too small"). That is the outcome, not pre-decision evidence, and three
