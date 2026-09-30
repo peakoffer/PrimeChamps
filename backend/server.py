@@ -50,7 +50,17 @@ async def lifespan(app: FastAPI):
             logger.error("Failed to auto-start pipeline scheduler: %s", e)
     else:
         print("Pipeline scheduler autorun disabled (set PIPELINE_AUTORUN_ENABLED=true)")
+    from backend.services.instagram_sender import instagram_sender
+    if instagram_sender.start():
+        print("Instagram sender started (sends only when switched on in the dashboard)")
+    else:
+        print("Instagram sender off (set INSTAGRAM_DM_SENDING_ENABLED=true)")
     yield
+    try:
+        from backend.services.instagram_sender import instagram_sender
+        await instagram_sender.stop()
+    except Exception:
+        pass
     try:
         from backend.services.pipeline_scheduler import pipeline_scheduler
         await pipeline_scheduler.stop()

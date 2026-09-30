@@ -115,3 +115,26 @@ Marketing site stays on `prime-champs.com` (Lovable). The CRM lives on the
    `kill_switch` config stops all IG ops; `INSTAGRAM_DM_SENDING_ENABLED=false`
    blocks outbound DMs; `PIPELINE_AUTORUN_ENABLED=false` + redeploy stops
    scheduler autorun.
+
+## 6. Automated Instagram first DMs (owner decision, 2026-09-30)
+
+The owner chose automated first-contact DMs from the main Prime Champs
+account. This uses the unofficial Instagram API (instagrapi), which breaks
+Instagram's terms; the account can be restricted or banned. Limits keep
+volume low: approved messages only, one every 6–15 minutes, 9am–8pm New York
+time, 15 a day by default (hard cap 30).
+
+1. Deploy the backend (section 1) and set on Railway:
+   - `INSTAGRAM_DM_SENDING_ENABLED=true`
+   - `INSTAGRAM_SESSION_SECRET` and `INSTAGRAM_SESSION_SALT` (random values;
+     they encrypt the saved Instagram session)
+2. On Vercel, set `AGENT_SERVER_URL` (the Railway URL) and `BACKEND_API_KEY`.
+3. In the dashboard, open **Instagram**. As owner, log in the sending account
+   in the "Automatic first messages" panel (password is forwarded once, not stored).
+4. Approve messages in **Pipeline → Reach Out**. They line up under "To send".
+5. Click **Turn on** and confirm. **Pause** or **Turn off** stops sending at
+   the next tick; the backend kill switch stops it immediately.
+
+Sending never happens while any of these is off: the Railway flag, the
+dashboard switch, the pause, the kill switch, the sending hours, or the
+daily limit. Sent DMs move the athlete to Response.

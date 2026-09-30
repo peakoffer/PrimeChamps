@@ -142,7 +142,7 @@ function ChannelSetup() {
   const Icon = content.icon;
 
   return (
-    <div className="grid min-h-[610px] place-items-center rounded-2xl border border-slate-200 bg-white px-6 py-14 shadow-sm">
+    <div className="grid place-items-center border border-brand-ink/15 bg-brand-paper-bright px-6 py-10">
       <div className="max-w-xl text-center">
         <span className={`mx-auto grid h-14 w-14 place-items-center rounded-2xl ${content.iconClass}`}>
           <Icon className="h-6 w-6" />
@@ -169,7 +169,7 @@ function ChannelSetup() {
 }
 
 // Each channel has its own page; Instagram and email are never mixed in one list.
-export default function UnifiedInbox({ channel }: { channel: "email" | "instagram" }) {
+export default function UnifiedInbox({ channel, children }: { channel: "email" | "instagram"; children?: React.ReactNode }) {
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const activeChannel: WorkspaceChannel = channel;
   const [emailView, setEmailView] = useState<EmailView>("focused");
@@ -412,6 +412,10 @@ export default function UnifiedInbox({ channel }: { channel: "email" | "instagra
           </button>
         </div>
       </header>
+
+      {children}
+
+      {activeChannel === "instagram" && <h2 className="pc-section-heading">Conversations</h2>}
 
       {error ? (
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

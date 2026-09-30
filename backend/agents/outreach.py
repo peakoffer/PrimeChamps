@@ -246,7 +246,7 @@ Return ONLY the hook text, nothing else.
             self.log_info("Outreach paused via outreach_settings.pause_all_outreach")
             return {"sent": 0, "skipped": 0, "failed": 0, "paused": True}
 
-        daily_limit = int(self._get_setting("daily_dm_limit", 50))
+        daily_limit = min(30, int(self._get_setting("daily_dm_limit", 15)))
         already_today = self._dms_sent_today()
         remaining_today = max(0, daily_limit - already_today)
         if remaining_today == 0:
@@ -259,7 +259,7 @@ Return ONLY the hook text, nothing else.
             "approval_status", ApprovalStatus.APPROVED.value
         ).eq(
             "status", OutreachStatus.APPROVED.value
-        ).limit(send_budget).execute()
+        ).order("approved_at").limit(send_budget).execute()
 
         rows = approved.data or []
         if not rows:
@@ -274,6 +274,12 @@ Return ONLY the hook text, nothing else.
         for message in rows:
             athlete = message.get("athletes") or {}
             handle = athlete.get("instagram_handle")
+            # Only message athletes still waiting in Reach Out; anyone moved or
+            # removed since approval is skipped.
+            if athlete.get("pipeline_stage") != "reach_out":
+                self.log_info(f"Skipping {athlete.get('name')}: no longer in Reach Out")
+                results["skipped"] += 1
+                continue
             if not handle:
                 self.log_info(f"Skipping {athlete.get('name')}: no instagram_handle")
                 results["skipped"] += 1
@@ -285,7 +291,24 @@ Return ONLY the hook text, nothing else.
                 self.db.client.table("outreach_messages").update({
                     "status": OutreachStatus.SENT.value,
                     "sent_at": datetime.utcnow().isoformat(),
+                    "instagram_thread_id": send_result.get("thread_id"),
                 }).eq("id", message["id"]).execute()
+                try:
+                    self.db.client.table("touchpoints").insert({
+                        "athlete_id": athlete.get("id"),
+                        "touchpoint_type": "dm_sent",
+                        "channel": "instagram",
+                        "direction": "outbound",
+                        "reference_id": message["id"],
+                        "reference_table": "outreach_messages",
+                        "content_preview": (message.get("message_content") or "")[:100],
+                    }).execute()
+                    self.db.client.table("athletes").update({
+                        "pipeline_stage": "response",
+                        "last_touchpoint_at": datetime.utcnow().isoformat(),
+                    }).eq("id", athlete.get("id")).eq("pipeline_stage", "reach_out").execute()
+                except Exception:
+                    pass
                 try:
                     self.db.log_event(
                         event_type="outreach_sent",

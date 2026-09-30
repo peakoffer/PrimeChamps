@@ -318,3 +318,14 @@ async def deactivate_kill_switch():
         return {"success": True, "message": "Kill switch deactivated. Instagram operations can resume."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sender/status")
+async def sender_status():
+    """Automated first-DM sender state for the dashboard (no message content)."""
+    from backend.services.instagram_auth import instagram_auth
+    from backend.services.instagram_sender import instagram_sender
+    status = instagram_sender.status()
+    status["connected"] = instagram_auth.get_client() is not None
+    status["kill_switch_active"] = await instagram_auth.is_kill_switch_active()
+    return status

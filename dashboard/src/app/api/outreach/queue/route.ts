@@ -33,11 +33,8 @@ export async function GET(request: NextRequest) {
 
     if (type === "dms" || type === "sent") {
       // Fetch from outreach_messages
-      const statusFilter = type === "sent"
-        ? ["sent"]
-        : ["pending", "approved"];
-
-      const { data: messages, error } = await supabase
+      // Sent DMs are tracked by delivery status; the to-do queue by approval.
+      let messageQuery = supabase
         .from("outreach_messages")
         .select(`
           id,
@@ -56,8 +53,11 @@ export async function GET(request: NextRequest) {
             follower_count
           )
         `)
-        .eq("athletes.organization_id", user.organizationId)
-        .in("approval_status", statusFilter)
+        .eq("athletes.organization_id", user.organizationId);
+      messageQuery = type === "sent"
+        ? messageQuery.eq("status", "sent")
+        : messageQuery.in("approval_status", ["pending", "approved"]).neq("status", "sent");
+      const { data: messages, error } = await messageQuery
         .order("created_at", { ascending: false })
         .limit(50);
 
