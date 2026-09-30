@@ -55,3 +55,23 @@ Blind set: 30 decided records, 23 approved, 7 rejected. Base rate 77%.
   clear-winner precision above the base rate) before it drives ranking.
 - Benchmark dossiers now drop sponsor-reaction items (`sponsor_reaction_excluded`);
   the pattern matches exactly the six such items in Dylan's 100 records.
+
+## Sonnet confirmation (check 909f81bc, 2026-09-30, $1.00)
+
+Production model (Sonnet 5.5 via OpenRouter) scored all 100 records on the
+compact leakage-safe dossiers the benchmark uses. 98 decided (75 approved,
+23 rejected; base rate 77%).
+
+| Slice | AUC | >=60 approved / flagged | >=50 approved / flagged | rejections kept below 50 |
+|---|---|---|---|---|
+| All | 0.74 | 12/13 (92%) | 65/77 (84%) | 11/23 |
+| Calibration | 0.73 | 9/10 | 45/54 | 7/16 |
+| Blind 30 | 0.78 | 3/3 | 20/23 | 4/7 |
+
+**Passes the pre-registered rule** (AUC >= 0.65; clear-winner precision 92% > 77%).
+
+Honest reading: Sonnet is more conservative than the Opus scorers. Its
+estimates span 22-68, so only 13 records reach the clear-winner tier (it finds
+12 of 75 approvals there). The 50-59 band is broad. The one rejected clear
+winner was Murat Kazgan (60), rejected because his OnlyFans profile had gone
+inactive, which the compact dossier did not show.
