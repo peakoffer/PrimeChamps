@@ -254,8 +254,8 @@ export default function ResearchIntelligencePage() {
     <div className="space-y-6">
         <div className="pc-page-header !mb-0">
           <div>
-            <Link href="/pipeline/research" className="mb-4 inline-flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.06em] text-brand-blue hover:text-brand-ink">
-              <ArrowLeft className="h-4 w-4" /> Back to Research
+            <Link href="/admin/research-lab" className="mb-4 inline-flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.06em] text-brand-blue hover:text-brand-ink">
+              <ArrowLeft className="h-4 w-4" /> Research lab
             </Link>
             <p className="pc-eyebrow">Living recruiting thesis</p>
             <h1 className="pc-page-title">Recruiting intelligence</h1>

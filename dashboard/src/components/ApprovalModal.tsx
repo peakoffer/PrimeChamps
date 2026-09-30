@@ -1,7 +1,8 @@
 "use client";
-import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -54,10 +55,22 @@ const ENGAGEMENT_QUALITY = [
 ];
 
 const PRIORITY_LEVELS = [
-  { value: "high", label: "High Priority", description: "Reach out immediately", color: "bg-red-100 text-red-700" },
-  { value: "medium", label: "Medium Priority", description: "Standard outreach queue", color: "bg-yellow-100 text-yellow-700" },
-  { value: "low", label: "Low Priority", description: "When time permits", color: "bg-gray-100 text-gray-800" },
+  { value: "high", label: "High Priority", description: "Reach out immediately" },
+  { value: "medium", label: "Medium Priority", description: "Standard outreach queue" },
+  { value: "low", label: "Low Priority", description: "When time permits" },
 ];
+
+const optionClass = (selected: boolean) =>
+  cn(
+    "flex cursor-pointer items-start gap-2 border p-3",
+    selected ? "border-brand-ink bg-brand-cyan/10" : "border-brand-line bg-white hover:border-brand-ink"
+  );
+
+const segmentClass = (selected: boolean) =>
+  cn(
+    "flex-1 border px-3 py-2 text-center text-sm",
+    selected ? "border-brand-ink bg-brand-ink text-white" : "border-brand-line bg-white text-brand-ink hover:border-brand-ink"
+  );
 
 export default function ApprovalModal({ athlete, isOpen, onClose, onComplete }: ApprovalModalProps) {
   const [loading, setLoading] = useState(false);
@@ -165,221 +178,169 @@ export default function ApprovalModal({ athlete, isOpen, onClose, onComplete }: 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="p-6 border-b bg-green-50 sticky top-0">
-          <h2 className="text-lg font-semibold text-green-900">Approve Athlete</h2>
-          <p className="text-sm text-green-700 mt-1">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-ink/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="approve-title" className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-brand-line bg-brand-paper-bright">
+        <div className="border-b border-brand-line px-5 py-4">
+          <h2 id="approve-title" className="text-base font-semibold text-brand-ink">Approve Athlete</h2>
+          <p className="mt-1 text-sm text-brand-muted">
             Complete this form to move {athlete.name} to the outreach queue
           </p>
         </div>
 
-        {/* Athlete Info */}
-        <div className="p-6 border-b bg-gray-50">
-          <div className="flex items-center gap-4">
-            <AthleteAvatar
-              name={athlete.name}
-              profilePicUrl={athlete.profile_pic_url}
-              size="xl"
-            />
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex items-center gap-3 border-b border-brand-line px-5 py-4">
+            <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="xl" />
             <div>
-              <div className="font-semibold text-lg">{athlete.name}</div>
-              <div className="text-gray-800">{athlete.sport}</div>
-              <div className="text-sm text-gray-800">
-                @{athlete.instagram_handle} • {athlete.follower_count ? `${(athlete.follower_count / 1000).toFixed(0)}K followers` : "Unknown followers"}
+              <div className="font-semibold text-brand-ink">{athlete.name}</div>
+              <div className="text-sm text-brand-muted">{athlete.sport}</div>
+              <div className="text-sm text-brand-muted">
+                @{athlete.instagram_handle} · {athlete.follower_count ? `${(athlete.follower_count / 1000).toFixed(0)}K followers` : "Unknown followers"}
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Form */}
-        <div className="p-6 space-y-6">
-          {error && (
-            <div className="p-3 bg-red-100 text-red-700 rounded-lg text-sm">{error}</div>
-          )}
+          <div className="space-y-5 px-5 py-4">
+            {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
-          {/* Primary Reason */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Why is this a good fit? <span className="text-red-500">*</span>
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">
+                Why is this a good fit? <span className="text-red-700">*</span>
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {APPROVAL_REASONS.map((reason) => (
+                  <label key={reason.value} className={optionClass(primaryReason === reason.value)}>
+                    <input
+                      type="radio"
+                      name="primaryReason"
+                      value={reason.value}
+                      checked={primaryReason === reason.value}
+                      onChange={(e) => setPrimaryReason(e.target.value)}
+                      className="mt-0.5 accent-brand-blue"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-brand-ink">{reason.label}</div>
+                      <div className="text-xs text-brand-muted">{reason.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">
+                Follower Count Assessment <span className="text-red-700">*</span>
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {FOLLOWER_ASSESSMENT.map((option) => (
+                  <label key={option.value} className={optionClass(followerAssessment === option.value)}>
+                    <input
+                      type="radio"
+                      name="followerAssessment"
+                      value={option.value}
+                      checked={followerAssessment === option.value}
+                      onChange={(e) => setFollowerAssessment(e.target.value)}
+                      className="mt-0.5 accent-brand-blue"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-brand-ink">{option.label}</div>
+                      <div className="text-xs text-brand-muted">{option.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">
+                Content Quality <span className="text-red-700">*</span>
+              </legend>
+              <div className="flex gap-2">
+                {CONTENT_QUALITY.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setContentQuality(option.value)}
+                    aria-pressed={contentQuality === option.value}
+                    className={segmentClass(contentQuality === option.value)}
+                  >
+                    <div className="font-medium">{option.label}</div>
+                    <div className="text-xs opacity-70">{option.score}/5</div>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">
+                Engagement Quality <span className="text-red-700">*</span>
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {ENGAGEMENT_QUALITY.map((option) => (
+                  <label key={option.value} className={optionClass(engagementQuality === option.value)}>
+                    <input
+                      type="radio"
+                      name="engagementQuality"
+                      value={option.value}
+                      checked={engagementQuality === option.value}
+                      onChange={(e) => setEngagementQuality(e.target.value)}
+                      className="mt-0.5 accent-brand-blue"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-brand-ink">{option.label}</div>
+                      <div className="text-xs text-brand-muted">{option.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">Outreach Priority</legend>
+              <div className="flex gap-2">
+                {PRIORITY_LEVELS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setPriority(option.value)}
+                    aria-pressed={priority === option.value}
+                    title={option.description}
+                    className={segmentClass(priority === option.value)}
+                  >
+                    <span className="font-medium">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-brand-ink">Similar to which successful athletes? (optional)</span>
+              <input
+                type="text"
+                value={similarTo}
+                onChange={(e) => setSimilarTo(e.target.value)}
+                placeholder="e.g., @athlete1, @athlete2"
+                className="min-h-10 w-full border border-brand-chrome bg-white px-3 text-sm text-brand-ink"
+              />
+              <span className="mt-1 block text-xs text-brand-muted">Helps the AI find more athletes like your successful conversions</span>
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              {APPROVAL_REASONS.map((reason) => (
-                <label
-                  key={reason.value}
-                  className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    primaryReason === reason.value
-                      ? "border-green-500 bg-green-50"
-                      : "border-gray-200 hover:border-green-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="primaryReason"
-                    value={reason.value}
-                    checked={primaryReason === reason.value}
-                    onChange={(e) => setPrimaryReason(e.target.value)}
-                    className="mt-0.5 text-green-600"
-                  />
-                  <div>
-                    <div className="font-medium text-sm">{reason.label}</div>
-                    <div className="text-xs text-gray-800">{reason.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
 
-          {/* Follower Assessment */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Follower Count Assessment <span className="text-red-500">*</span>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-brand-ink">Additional Notes (optional)</span>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any other observations that would help the research agent..."
+                className="h-20 w-full resize-none border border-brand-chrome bg-white px-3 py-2 text-sm text-brand-ink"
+              />
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              {FOLLOWER_ASSESSMENT.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer ${
-                    followerAssessment === option.value ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="followerAssessment"
-                    value={option.value}
-                    checked={followerAssessment === option.value}
-                    onChange={(e) => setFollowerAssessment(e.target.value)}
-                    className="text-green-600"
-                  />
-                  <div>
-                    <div className="font-medium text-sm">{option.label}</div>
-                    <div className="text-xs text-gray-800">{option.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Content Quality */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Content Quality <span className="text-red-500">*</span>
-            </label>
-            <div className="flex gap-2">
-              {CONTENT_QUALITY.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setContentQuality(option.value)}
-                  className={`flex-1 py-3 px-4 rounded-lg border text-center transition-colors ${
-                    contentQuality === option.value
-                      ? "border-green-500 bg-green-50 text-green-700"
-                      : "border-gray-200 hover:border-green-300"
-                  }`}
-                >
-                  <div className="font-medium">{option.label}</div>
-                  <div className="text-xs text-gray-800">{option.score}/5</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Engagement Quality */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Engagement Quality <span className="text-red-500">*</span>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {ENGAGEMENT_QUALITY.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer ${
-                    engagementQuality === option.value ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="engagementQuality"
-                    value={option.value}
-                    checked={engagementQuality === option.value}
-                    onChange={(e) => setEngagementQuality(e.target.value)}
-                    className="text-green-600"
-                  />
-                  <div>
-                    <div className="font-medium text-sm">{option.label}</div>
-                    <div className="text-xs text-gray-800">{option.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Priority Level */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Outreach Priority
-            </label>
-            <div className="flex gap-2">
-              {PRIORITY_LEVELS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setPriority(option.value)}
-                  className={`flex-1 py-3 px-4 rounded-lg border text-center transition-colors ${
-                    priority === option.value
-                      ? `border-2 border-gray-900 ${option.color}`
-                      : "border-gray-200 hover:border-gray-400"
-                  }`}
-                >
-                  <div className="font-medium text-sm">{option.label}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Similar To */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Similar to which successful athletes? (optional)
-            </label>
-            <input
-              type="text"
-              value={similarTo}
-              onChange={(e) => setSimilarTo(e.target.value)}
-              placeholder="e.g., @athlete1, @athlete2"
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-            />
-            <p className="text-xs text-gray-800 mt-1">Helps the AI find more athletes like your successful conversions</p>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Additional Notes (optional)
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Any other observations that would help the research agent..."
-              className="w-full border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-            />
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-800 hover:text-gray-900"
-          >
+        <div className="flex justify-end gap-2 border-t border-brand-line px-5 py-4">
+          <button type="button" onClick={onClose} className="pc-button-secondary">
             Cancel
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading || !canSubmit}
-            className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+          <button type="button" onClick={handleSubmit} disabled={loading || !canSubmit} className="pc-button-primary">
             {loading ? "Approving..." : "Approve & Queue for Outreach"}
           </button>
         </div>

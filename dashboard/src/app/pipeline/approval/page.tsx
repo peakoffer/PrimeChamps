@@ -3,10 +3,12 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import ApprovalModal from "@/components/ApprovalModal";
 import RejectionModal from "@/components/RejectionModal";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -302,103 +304,80 @@ function ApprovalPageContent() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading...</div>
-      </div>
-    );
+    return <p className="p-6 text-sm text-brand-muted">Loading…</p>;
   }
 
+  const tabs: Array<{ id: TabType; label: string; count: number }> = [
+    { id: "athletes", label: "Pending", count: athletes.length },
+    { id: "messages", label: "Approved", count: approvedCount },
+    { id: "rejected", label: "Rejected", count: rejectedAthletes.length },
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* Stage Navigation */}
+    <div className="space-y-6">
       <PipelineStageNav currentStage="approval" />
 
-      {/* Header */}
-      <div className="flex justify-between items-center">
+      <header className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Approval Queue</h1>
-          <p className="text-sm text-gray-600 mt-1">Review candidates from research agent</p>
+          <h1 className="pc-page-title">Approval</h1>
+          <p className="pc-page-description">Approve or reject athletes found by research.</p>
         </div>
-        <button
-          onClick={fetchData}
-          className="text-sm text-blue-600 hover:text-blue-800"
-        >
-          Refresh
-        </button>
+        <div className="pc-header-actions">
+          <button type="button" onClick={fetchData} className="pc-button-secondary">
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <div role="tablist" aria-label="Approval views" className="flex border-b border-brand-line">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              "-mb-px border-b-2 px-4 py-2 text-sm font-medium",
+              activeTab === tab.id
+                ? "border-brand-ink text-brand-ink"
+                : "border-transparent text-brand-muted hover:text-brand-ink"
+            )}
+          >
+            {tab.label} <span className="text-brand-muted">({tab.count})</span>
+          </button>
+        ))}
       </div>
 
-      {/* Stats Cards - Clickable Tabs */}
-      <div className="grid grid-cols-3 gap-4">
-        <button
-          onClick={() => setActiveTab("athletes")}
-          className={`text-left rounded-lg p-4 border-2 transition-all ${
-            activeTab === "athletes"
-              ? "bg-blue-50 border-blue-500 ring-2 ring-blue-200"
-              : "bg-white border-gray-200 hover:border-blue-300"
-          }`}
-        >
-          <div className="text-3xl font-bold text-blue-700">{athletes.length}</div>
-          <div className="text-sm text-blue-600 font-medium">Pending Approval</div>
-        </button>
-        <button
-          onClick={() => setActiveTab("messages")}
-          className={`text-left rounded-lg p-4 border-2 transition-all ${
-            activeTab === "messages"
-              ? "bg-green-50 border-green-500 ring-2 ring-green-200"
-              : "bg-white border-gray-200 hover:border-green-300"
-          }`}
-        >
-          <div className="text-3xl font-bold text-green-700">{approvedCount}</div>
-          <div className="text-sm text-green-600 font-medium">Approved</div>
-        </button>
-        <button
-          onClick={() => setActiveTab("rejected")}
-          className={`text-left rounded-lg p-4 border-2 transition-all ${
-            activeTab === "rejected"
-              ? "bg-red-50 border-red-500 ring-2 ring-red-200"
-              : "bg-white border-gray-200 hover:border-red-300"
-          }`}
-        >
-          <div className="text-3xl font-bold text-red-700">{rejectedAthletes.length}</div>
-          <div className="text-sm text-red-600 font-medium">Rejected</div>
-        </button>
-      </div>
-
-      {/* Athletes Tab Content (Pending Approval) */}
+      {/* Pending approval */}
       {activeTab === "athletes" && (
         <>
           {athletes.length === 0 ? (
-            <div className="bg-white shadow rounded-lg p-12 text-center">
-              <div className="mb-4 font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Queue clear</div>
-              <div className="text-gray-800 text-lg mb-2">All caught up!</div>
-              <p className="text-gray-800 text-sm">
-                No athletes pending approval. Run the research agent to find more candidates.
+            <div className="pc-surface p-8 text-center">
+              <p className="text-base font-semibold text-brand-ink">All caught up</p>
+              <p className="mt-1 text-sm text-brand-muted">
+                Nothing waiting for approval. Find more athletes to fill the list.
               </p>
-              <Link
-                href="/pipeline/research"
-                className="inline-block mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-              >
-                Go to Research
+              <Link href="/pipeline/research" className="pc-button-primary mt-4">
+                Find athletes
               </Link>
             </div>
           ) : (
             <>
-              {/* Bulk Action Toolbar */}
-              <div className="bg-white shadow rounded-lg p-4 flex items-center justify-between">
+              <div className="pc-surface flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={selectedAthletes.size === athletes.length && athletes.length > 0}
                       onChange={selectAllAthletes}
-                      className="w-4 h-4 text-blue-600 rounded"
+                      className="h-4 w-4 accent-brand-blue"
                     />
-                    <span className="text-sm font-medium text-gray-800">
+                    <span className="text-sm font-medium text-brand-ink">
                       {selectedAthletes.size === athletes.length ? "Deselect All" : "Select All"}
                     </span>
                   </label>
-                  <span className="text-sm text-gray-800">
+                  <span className="text-sm text-brand-muted">
                     {selectedAthletes.size > 0 ? `${selectedAthletes.size} selected` : `${athletes.length} pending review`}
                   </span>
                 </div>
@@ -406,16 +385,18 @@ function ApprovalPageContent() {
                 {selectedAthletes.size > 0 && (
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={handleBulkApprove}
                       disabled={bulkActionLoading}
-                      className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      className="pc-button-primary"
                     >
                       {bulkActionLoading ? "Processing..." : `Approve Selected (${selectedAthletes.size})`}
                     </button>
                     <button
+                      type="button"
                       onClick={() => setShowBulkRejectModal(true)}
                       disabled={bulkActionLoading}
-                      className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      className="pc-button-secondary !text-red-700 hover:!border-red-700"
                     >
                       Reject Selected ({selectedAthletes.size})
                     </button>
@@ -423,8 +404,7 @@ function ApprovalPageContent() {
                 )}
               </div>
 
-              {/* Athletes Grid - Information Dense */}
-              <div className="grid gap-3">
+              <ul className="pc-surface divide-y divide-brand-ink/10">
                 {athletes.map((athlete) => {
                   const notes = parseNotes(athlete.notes);
                   const isExpanded = expandedCards.has(athlete.id);
@@ -432,431 +412,327 @@ function ApprovalPageContent() {
                   const score = notes.research_score || notes.score || 0;
 
                   return (
-                    <div
-                      key={athlete.id}
-                      className={`bg-white shadow rounded-lg overflow-hidden border-2 transition-colors ${
-                        isSelected ? "border-blue-500 bg-blue-50/30" : "border-transparent"
-                      }`}
-                    >
-                      {/* Card Header */}
-                      <div className="p-3">
-                        <div className="flex items-start gap-3">
-                          {/* Checkbox */}
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleAthleteSelection(athlete.id)}
-                            className="w-5 h-5 mt-1 text-blue-600 rounded cursor-pointer"
-                          />
+                    <li key={athlete.id} className={cn("px-4 py-3", isSelected && "bg-brand-cyan/10")}>
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleAthleteSelection(athlete.id)}
+                          aria-label={`Select ${athlete.name}`}
+                          className="mt-1 h-4 w-4 cursor-pointer accent-brand-blue"
+                        />
 
-                          {/* Profile Picture */}
-                          <Link href={`/athletes/${athlete.id}`} className="flex-shrink-0">
-                            <AthleteAvatar
-                              name={athlete.name}
-                              profilePicUrl={athlete.profile_pic_url}
-                              size="lg"
-                            />
-                          </Link>
+                        <Link href={`/athletes/${athlete.id}`} className="flex-shrink-0">
+                          <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
+                        </Link>
 
-                          {/* Main Info - Compact */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Link
-                                href={`/athletes/${athlete.id}`}
-                                className="font-semibold text-gray-900 hover:text-blue-600"
-                              >
-                                {athlete.name}
-                              </Link>
-                              {/* Score Badge - More Prominent */}
-                              <span
-                                className={`px-2 py-0.5 text-xs font-bold rounded-full ${
-                                  score >= 80
-                                    ? "bg-green-500 text-white"
-                                    : score >= 75
-                                    ? "bg-yellow-500 text-white"
-                                    : "bg-gray-400 text-white"
-                                }`}
-                              >
-                                {score}
-                              </span>
-                              {/* Follower Count Badge */}
-                              {athlete.follower_count && (
-                                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
-                                  {(athlete.follower_count / 1000).toFixed(0)}K
-                                </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link href={`/athletes/${athlete.id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
+                              {athlete.name}
+                            </Link>
+                            <span
+                              title="Research score"
+                              className={cn(
+                                "px-2 py-0.5 text-[11px] font-semibold",
+                                score >= 80
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : score >= 75
+                                  ? "bg-amber-50 text-amber-800"
+                                  : "bg-brand-ink/5 text-brand-muted"
                               )}
-                            </div>
+                            >
+                              {score}
+                            </span>
+                            {athlete.follower_count && (
+                              <span className="text-xs text-brand-muted">
+                                {(athlete.follower_count / 1000).toFixed(0)}K followers
+                              </span>
+                            )}
+                          </div>
 
-                            <div className="flex items-center gap-2 mt-1 text-sm">
-                              <span className="font-medium text-gray-700">{athlete.sport}</span>
-                              {athlete.instagram_handle && (
+                          <p className="mt-0.5 text-sm text-brand-muted">
+                            {athlete.sport}
+                            {athlete.instagram_handle && (
+                              <>
+                                {" · "}
                                 <a
                                   href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline"
+                                  className="text-brand-blue hover:underline"
                                 >
                                   @{athlete.instagram_handle}
                                 </a>
-                              )}
+                              </>
+                            )}
+                          </p>
+
+                          {notes.bio && <p className="mt-1 line-clamp-1 text-sm text-brand-ink/80">{notes.bio}</p>}
+
+                          {notes.concerns && notes.concerns.length > 0 && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              {notes.concerns.slice(0, 2).map((concern: string, i: number) => (
+                                <span key={i} className="bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">
+                                  {concern}
+                                </span>
+                              ))}
                             </div>
+                          )}
 
-                            {/* Bio preview - Always show truncated */}
-                            {notes.bio && (
-                              <p className="mt-1 text-sm text-gray-700 line-clamp-1">
-                                {notes.bio}
-                              </p>
-                            )}
-
-                            {/* Concerns - Quick View */}
-                            {notes.concerns && notes.concerns.length > 0 && (
-                              <div className="mt-1 flex items-center gap-1 flex-wrap">
-                                {notes.concerns.slice(0, 2).map((concern: string, i: number) => (
-                                  <span key={i} className="px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 rounded">
-                                    {concern}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Action Buttons - Compact */}
-                          <div className="flex flex-col gap-1">
+                          {(notes.research_reasoning || notes.reasoning) && (
                             <button
-                              onClick={() => openApproveModal(athlete)}
-                              disabled={actionLoading === athlete.id}
-                              className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 disabled:opacity-50"
+                              type="button"
+                              onClick={() => toggleCardExpansion(athlete.id)}
+                              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand-blue"
                             >
-                              Approve
+                              {isExpanded ? "Hide AI reasoning" : "Show AI reasoning"}
+                              <ChevronDown className={cn("h-3 w-3 transition", isExpanded && "rotate-180")} />
                             </button>
-                            <button
-                              onClick={() => openRejectModal(athlete)}
-                              disabled={actionLoading === athlete.id}
-                              className="px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded hover:bg-red-200 disabled:opacity-50"
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        </div>
+                          )}
 
-                        {/* Expand/Collapse for AI Reasoning */}
-                        {(notes.research_reasoning || notes.reasoning) && (
-                          <button
-                            onClick={() => toggleCardExpansion(athlete.id)}
-                            className="mt-2 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                          >
-                            {isExpanded ? "▼ Hide AI reasoning" : "▶ Show AI reasoning"}
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Expanded Details */}
-                      {isExpanded && (notes.research_reasoning || notes.reasoning) && (
-                        <div className="px-3 pb-3 border-t bg-gray-50">
-                          <div className="pt-3">
-                            <p className="text-sm text-gray-800 bg-white rounded p-2 border">
-                              {notes.research_reasoning || notes.reasoning}
-                            </p>
-                          </div>
-                          {notes.source && (
-                            <div className="mt-2">
-                              <span className="text-xs text-gray-800">Source: {notes.source}</span>
+                          {isExpanded && (notes.research_reasoning || notes.reasoning) && (
+                            <div className="mt-2 space-y-1 border-l-2 border-brand-line pl-3 text-sm text-brand-ink/80">
+                              <p>{notes.research_reasoning || notes.reasoning}</p>
+                              {notes.source && <p className="text-xs text-brand-muted">Source: {notes.source}</p>}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+
+                        <div className="flex shrink-0 flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openApproveModal(athlete)}
+                            disabled={actionLoading === athlete.id}
+                            className="pc-button-primary"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openRejectModal(athlete)}
+                            disabled={actionLoading === athlete.id}
+                            className="pc-button-secondary !text-red-700 hover:!border-red-700"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             </>
           )}
         </>
       )}
 
-      {/* Messages Tab Content (Approved - shows approved athletes in pipeline) */}
+      {/* Approved athletes (now in Reach Out) */}
       {activeTab === "messages" && (
         <>
-          {/* Recently Approved Banner (if applicable) */}
           {recentlyApproved.length > 0 && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="font-mono text-xs font-bold uppercase tracking-wide text-brand-blue">Approved</span>
-                <h3 className="font-semibold text-green-800">
-                  Just Approved: {recentlyApproved.length} Athlete{recentlyApproved.length > 1 ? "s" : ""}
-                </h3>
-              </div>
-              <div className="flex flex-wrap gap-2 mb-3">
+            <div className="border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-sm font-semibold text-emerald-800">
+                Just approved: {recentlyApproved.length} athlete{recentlyApproved.length > 1 ? "s" : ""}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
                 {recentlyApproved.map((athlete) => (
                   <Link
                     key={athlete.id}
                     href={`/athletes/${athlete.id}`}
-                    className="flex items-center gap-2 bg-white rounded-full px-3 py-1.5 border border-green-300 hover:bg-green-100 transition-colors"
+                    className="flex items-center gap-2 border border-emerald-200 bg-white px-2 py-1 hover:border-emerald-700"
                   >
                     <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="sm" />
-                    <span className="text-sm font-medium text-gray-900">{athlete.name}</span>
+                    <span className="text-sm font-medium text-brand-ink">{athlete.name}</span>
                   </Link>
                 ))}
               </div>
               <button
+                type="button"
                 onClick={() => setRecentlyApproved([])}
-                className="text-sm text-green-600 hover:text-green-800"
+                className="mt-3 text-xs font-medium text-emerald-800 hover:underline"
               >
                 Dismiss
               </button>
             </div>
           )}
 
-          {/* All Approved Athletes */}
           {approvedAthletes.length === 0 && recentlyApproved.length === 0 ? (
-            <div className="bg-white shadow rounded-lg p-12 text-center">
-              <div className="text-4xl mb-4">📋</div>
-              <div className="text-gray-800 text-lg mb-2">No athletes ready for outreach yet</div>
-              <p className="text-gray-800 text-sm">
-                Approve athletes from the pending queue to see them here.
-              </p>
-              <button
-                onClick={() => setActiveTab("athletes")}
-                className="inline-block mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
+            <div className="pc-surface p-8 text-center">
+              <p className="text-base font-semibold text-brand-ink">No athletes ready for outreach yet</p>
+              <p className="mt-1 text-sm text-brand-muted">Approve athletes from the pending queue to see them here.</p>
+              <button type="button" onClick={() => setActiveTab("athletes")} className="pc-button-primary mt-4">
                 Go to Pending Queue
               </button>
             </div>
           ) : (
-            <>
-              {/* Header */}
-              <div className="bg-white shadow rounded-lg p-4 flex items-center justify-between mb-4">
+            <section aria-labelledby="ready-heading">
+              <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <h3 className="font-semibold text-gray-900">{approvedCount} Athletes Ready for Outreach</h3>
-                  <p className="text-sm text-gray-600">These athletes have been approved and moved to reach_out stage</p>
+                  <h2 id="ready-heading" className="pc-section-heading">Ready for outreach</h2>
+                  <p className="mt-1 text-sm text-brand-muted">Approved athletes now in Reach Out.</p>
                 </div>
-                <Link
-                  href="/pipeline?stage=reach_out"
-                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-                >
+                <Link href="/pipeline?stage=reach_out" className="pc-button-secondary">
                   View in Pipeline
                 </Link>
               </div>
 
-              {/* Athletes Grid */}
-              <div className="grid gap-3">
-                {approvedAthletes.map((athlete) => {
-                  const notes = parseNotes(athlete.notes);
+              <ul className="pc-surface mt-4 divide-y divide-brand-ink/10">
+                {approvedAthletes.map((athlete) => (
+                  <li key={athlete.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    <Link href={`/athletes/${athlete.id}`}>
+                      <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
+                    </Link>
 
-                  return (
-                    <div
-                      key={athlete.id}
-                      className="bg-white shadow rounded-lg p-3 border-l-4 border-green-400"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Link href={`/athletes/${athlete.id}`}>
-                          <AthleteAvatar
-                            name={athlete.name}
-                            profilePicUrl={athlete.profile_pic_url}
-                            size="lg"
-                          />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link href={`/athletes/${athlete.id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
+                          {athlete.name}
                         </Link>
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Link
-                              href={`/athletes/${athlete.id}`}
-                              className="font-semibold text-gray-900 hover:text-blue-600"
-                            >
-                              {athlete.name}
-                            </Link>
-                            {athlete.follower_count && (
-                              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
-                                {(athlete.follower_count / 1000).toFixed(0)}K
-                              </span>
-                            )}
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700">
-                              Ready for Outreach
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2 mt-1 text-sm">
-                            <span className="font-medium text-gray-700">{athlete.sport}</span>
-                            {athlete.instagram_handle && (
-                              <a
-                                href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline"
-                              >
-                                @{athlete.instagram_handle}
-                              </a>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                          <Link
-                            href={`/athletes/${athlete.id}`}
-                            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200"
-                          >
-                            View Profile
-                          </Link>
-                          <Link
-                            href="/pipeline/reach-out"
-                            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700"
-                          >
-                            Generate Message
-                          </Link>
-                        </div>
+                        {athlete.follower_count && (
+                          <span className="text-xs text-brand-muted">{(athlete.follower_count / 1000).toFixed(0)}K followers</span>
+                        )}
+                        <span className="bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                          Ready for Outreach
+                        </span>
                       </div>
+                      <p className="mt-0.5 text-sm text-brand-muted">
+                        {athlete.sport}
+                        {athlete.instagram_handle && (
+                          <>
+                            {" · "}
+                            <a
+                              href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-blue hover:underline"
+                            >
+                              @{athlete.instagram_handle}
+                            </a>
+                          </>
+                        )}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
-            </>
+
+                    <div className="flex gap-2">
+                      <Link href={`/athletes/${athlete.id}`} className="pc-button-secondary">
+                        View Profile
+                      </Link>
+                      <Link href="/pipeline/reach-out" className="pc-button-primary">
+                        Generate Message
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </>
       )}
 
-      {/* Rejected Tab Content */}
+      {/* Rejected */}
       {activeTab === "rejected" && (
         <>
           {rejectedAthletes.length === 0 ? (
-            <div className="bg-white shadow rounded-lg p-12 text-center">
-              <div className="text-4xl mb-4">📋</div>
-              <div className="text-gray-800 text-lg mb-2">No rejected athletes</div>
-              <p className="text-gray-800 text-sm">
-                Athletes you reject will appear here for reference.
-              </p>
+            <div className="pc-surface p-8 text-center">
+              <p className="text-base font-semibold text-brand-ink">No rejected athletes</p>
+              <p className="mt-1 text-sm text-brand-muted">Athletes you reject will appear here for reference.</p>
             </div>
           ) : (
-            <div className="grid gap-4">
+            <ul className="pc-surface divide-y divide-brand-ink/10">
               {rejectedAthletes.map((athlete) => {
                 const notes = parseNotes(athlete.notes);
                 const isExpanded = expandedCards.has(athlete.id);
                 const reasonLabel = REJECTION_REASON_LABELS[athlete.rejection_reason || ""] || athlete.rejection_reason || "Unknown";
 
                 return (
-                  <div
-                    key={athlete.id}
-                    className="bg-white shadow rounded-lg overflow-hidden border-l-4 border-red-300"
-                  >
-                    {/* Card Header */}
-                    <div className="p-4">
-                      <div className="flex items-start gap-4">
-                        {/* Profile Picture */}
-                        <Link href={`/athletes/${athlete.id}`}>
-                          <AthleteAvatar
-                            name={athlete.name}
-                            profilePicUrl={athlete.profile_pic_url}
-                            size="lg"
-                            className="opacity-75"
-                          />
-                        </Link>
+                  <li key={athlete.id} className="px-4 py-3">
+                    <div className="flex items-start gap-3">
+                      <Link href={`/athletes/${athlete.id}`}>
+                        <AthleteAvatar
+                          name={athlete.name}
+                          profilePicUrl={athlete.profile_pic_url}
+                          size="lg"
+                          className="opacity-75"
+                        />
+                      </Link>
 
-                        {/* Main Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Link
-                              href={`/athletes/${athlete.id}`}
-                              className="font-semibold text-gray-800 hover:text-blue-600"
-                            >
-                              {athlete.name}
-                            </Link>
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700">
-                              {reasonLabel}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-3 mt-1 text-sm text-gray-800">
-                            <span>{athlete.sport}</span>
-                            {athlete.instagram_handle && (
-                              <a
-                                href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline"
-                              >
-                                @{athlete.instagram_handle}
-                              </a>
-                            )}
-                            {athlete.follower_count && (
-                              <span>{(athlete.follower_count / 1000).toFixed(0)}K followers</span>
-                            )}
-                          </div>
-
-                          {/* Rejection notes */}
-                          {athlete.rejection_notes && (
-                            <p className="mt-2 text-sm text-gray-800 bg-red-50 rounded px-2 py-1">
-                              <span className="font-medium">Notes:</span> {athlete.rejection_notes}
-                            </p>
-                          )}
-
-                          {/* Rejected date */}
-                          {athlete.rejected_at && (
-                            <p className="mt-2 text-xs text-gray-800">
-                              Rejected on {new Date(athlete.rejected_at).toLocaleDateString()}
-                            </p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link href={`/athletes/${athlete.id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
+                            {athlete.name}
+                          </Link>
+                          <span className="bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">{reasonLabel}</span>
+                          {notes.research_score && (
+                            <span className="text-xs text-brand-muted">Score {notes.research_score}</span>
                           )}
                         </div>
 
-                        {/* Score Badge */}
-                        {notes.research_score && (
-                          <div className="text-center">
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${
-                              notes.research_score >= 80
-                                ? "bg-green-100 text-green-700"
-                                : notes.research_score >= 75
-                                ? "bg-yellow-100 text-yellow-700"
-                                : "bg-gray-100 text-gray-800"
-                            }`}>
-                              {notes.research_score}
-                            </div>
-                            <span className="text-xs text-gray-800">Score</span>
+                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-brand-muted">
+                          <span>{athlete.sport}</span>
+                          {athlete.instagram_handle && (
+                            <a
+                              href={athlete.instagram_url || `https://instagram.com/${athlete.instagram_handle}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-blue hover:underline"
+                            >
+                              @{athlete.instagram_handle}
+                            </a>
+                          )}
+                          {athlete.follower_count && <span>{(athlete.follower_count / 1000).toFixed(0)}K followers</span>}
+                        </p>
+
+                        {athlete.rejection_notes && (
+                          <p className="mt-1 text-sm text-brand-ink/80">
+                            <span className="font-medium">Notes:</span> {athlete.rejection_notes}
+                          </p>
+                        )}
+
+                        {athlete.rejected_at && (
+                          <p className="mt-1 text-xs text-brand-muted">
+                            Rejected on {new Date(athlete.rejected_at).toLocaleDateString()}
+                          </p>
+                        )}
+
+                        {(notes.bio || notes.research_reasoning) && (
+                          <button
+                            type="button"
+                            onClick={() => toggleCardExpansion(athlete.id)}
+                            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand-blue"
+                          >
+                            {isExpanded ? "Hide details" : "Show more details"}
+                            <ChevronDown className={cn("h-3 w-3 transition", isExpanded && "rotate-180")} />
+                          </button>
+                        )}
+
+                        {isExpanded && (
+                          <div className="mt-2 space-y-2 border-l-2 border-brand-line pl-3 text-sm text-brand-ink/80">
+                            {notes.bio && (
+                              <div>
+                                <p className="text-xs font-medium text-brand-muted">Bio</p>
+                                <p>{notes.bio}</p>
+                              </div>
+                            )}
+                            {notes.research_reasoning && (
+                              <div>
+                                <p className="text-xs font-medium text-brand-muted">AI Reasoning</p>
+                                <p>{notes.research_reasoning}</p>
+                              </div>
+                            )}
+                            {notes.source && <p className="text-xs text-brand-muted">Source: {notes.source}</p>}
                           </div>
                         )}
                       </div>
-
-                      {/* Expand/Collapse Button */}
-                      {(notes.bio || notes.research_reasoning) && (
-                        <button
-                          onClick={() => toggleCardExpansion(athlete.id)}
-                          className="mt-3 text-sm text-gray-800 hover:text-gray-800 flex items-center gap-1"
-                        >
-                          {isExpanded ? "▼ Hide details" : "▶ Show more details"}
-                        </button>
-                      )}
                     </div>
-
-                    {/* Expanded Details */}
-                    {isExpanded && (
-                      <div className="px-4 pb-4 border-t bg-gray-50">
-                        {notes.bio && (
-                          <div className="pt-4">
-                            <h4 className="text-sm font-medium text-gray-800 mb-1">Bio:</h4>
-                            <p className="text-sm text-gray-800">{notes.bio}</p>
-                          </div>
-                        )}
-                        {notes.research_reasoning && (
-                          <div className="mt-3">
-                            <h4 className="text-sm font-medium text-gray-800 mb-1">AI Reasoning:</h4>
-                            <p className="text-sm text-gray-800 bg-white rounded p-3 border">
-                              {notes.research_reasoning}
-                            </p>
-                          </div>
-                        )}
-                        {notes.source && (
-                          <div className="mt-3">
-                            <span className="text-xs text-gray-800">Source: {notes.source}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           )}
         </>
       )}
 
-      {/* Comprehensive Approval Modal */}
       {selectedAthlete && (
         <ApprovalModal
           athlete={selectedAthlete}
@@ -866,7 +742,6 @@ function ApprovalPageContent() {
         />
       )}
 
-      {/* Comprehensive Rejection Modal */}
       {selectedAthlete && (
         <RejectionModal
           athlete={selectedAthlete}
@@ -876,26 +751,26 @@ function ApprovalPageContent() {
         />
       )}
 
-      {/* Bulk Reject Modal */}
+      {/* Bulk reject */}
       {showBulkRejectModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b bg-red-50">
-              <h2 className="text-lg font-semibold text-red-900">Bulk Reject Athletes</h2>
-              <p className="text-sm text-red-700 mt-1">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-ink/60 p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="bulk-reject-title" className="w-full max-w-md border border-brand-line bg-brand-paper-bright">
+            <div className="border-b border-brand-line px-5 py-4">
+              <h2 id="bulk-reject-title" className="text-base font-semibold text-brand-ink">Bulk Reject Athletes</h2>
+              <p className="mt-1 text-sm text-brand-muted">
                 Rejecting {selectedAthletes.size} athlete{selectedAthletes.size > 1 ? "s" : ""}
               </p>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-800 mb-2">
-                  Rejection Reason <span className="text-red-500">*</span>
-                </label>
+            <div className="space-y-4 px-5 py-4">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-brand-muted">
+                  Rejection Reason <span className="text-red-700">*</span>
+                </span>
                 <select
                   value={bulkRejectReason}
                   onChange={(e) => setBulkRejectReason(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  className="min-h-10 w-full border border-brand-chrome bg-white px-3 text-sm text-brand-ink"
                 >
                   <option value="">Select a reason...</option>
                   <option value="not_athlete">Not a Real Athlete</option>
@@ -911,49 +786,31 @@ function ApprovalPageContent() {
                   <option value="unlikely_convert">Unlikely to Convert</option>
                   <option value="other">Other</option>
                 </select>
-              </div>
+              </label>
 
-              {/* Avoid Similar Toggle */}
               <div>
-                <label className="block text-sm font-medium text-gray-800 mb-2">
-                  Should AI avoid similar profiles?
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setBulkAvoidSimilar("yes")}
-                    className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
-                      bulkAvoidSimilar === "yes"
-                        ? "border-red-500 bg-red-50 text-red-700"
-                        : "border-gray-200 text-gray-800 hover:border-red-300"
-                    }`}
-                  >
-                    Yes, avoid these
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBulkAvoidSimilar("no")}
-                    className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
-                      bulkAvoidSimilar === "no"
-                        ? "border-gray-500 bg-gray-50 text-gray-700"
-                        : "border-gray-200 text-gray-800 hover:border-gray-300"
-                    }`}
-                  >
-                    Case-by-case
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBulkAvoidSimilar("flag")}
-                    className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${
-                      bulkAvoidSimilar === "flag"
-                        ? "border-orange-500 bg-orange-50 text-orange-700"
-                        : "border-gray-200 text-gray-800 hover:border-orange-300"
-                    }`}
-                  >
-                    Flag pattern
-                  </button>
+                <span className="mb-1 block text-xs font-medium text-brand-muted">Should AI avoid similar profiles?</span>
+                <div className="grid grid-cols-3 border border-brand-chrome bg-white">
+                  {([
+                    ["yes", "Yes, avoid these"],
+                    ["no", "Case-by-case"],
+                    ["flag", "Flag pattern"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setBulkAvoidSimilar(value)}
+                      aria-pressed={bulkAvoidSimilar === value}
+                      className={cn(
+                        "min-h-10 px-2 text-sm",
+                        bulkAvoidSimilar === value ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-brand-paper"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <p className="text-xs text-gray-700 mt-1">
+                <p className="mt-1 text-xs text-brand-muted">
                   {bulkAvoidSimilar === "yes" && "AI will learn to filter out profiles like these"}
                   {bulkAvoidSimilar === "no" && "These specific profiles didn't work, but similar ones might"}
                   {bulkAvoidSimilar === "flag" && "AI will study these to recognize the pattern faster"}
@@ -961,21 +818,23 @@ function ApprovalPageContent() {
               </div>
             </div>
 
-            <div className="p-6 border-t bg-gray-50 flex justify-end gap-3">
+            <div className="flex justify-end gap-2 border-t border-brand-line px-5 py-4">
               <button
+                type="button"
                 onClick={() => {
                   setShowBulkRejectModal(false);
                   setBulkRejectReason("");
                   setBulkAvoidSimilar("yes");
                 }}
-                className="px-4 py-2 text-gray-800 hover:text-gray-900"
+                className="pc-button-secondary"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleBulkReject}
                 disabled={bulkActionLoading || !bulkRejectReason}
-                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="pc-button-primary !border-red-700 !bg-red-700 !text-white hover:!bg-red-800"
               >
                 {bulkActionLoading ? "Rejecting..." : `Reject ${selectedAthletes.size} Athletes`}
               </button>
@@ -989,7 +848,7 @@ function ApprovalPageContent() {
 
 export default function ApprovalPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="text-gray-800">Loading...</div></div>}>
+    <Suspense fallback={<p className="p-6 text-sm text-brand-muted">Loading…</p>}>
       <ApprovalPageContent />
     </Suspense>
   );

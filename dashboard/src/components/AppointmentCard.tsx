@@ -1,8 +1,9 @@
 "use client";
-import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import Link from "next/link";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -33,25 +34,17 @@ interface AppointmentCardProps {
 }
 
 const OUTCOME_OPTIONS = [
-  {
-    value: "converted",
-    label: "Interested - Move to Contract",
-    icon: "✅",
-    color: "bg-green-100 text-green-700 border-green-300",
-  },
-  {
-    value: "needs_followup",
-    label: "Needs Follow-up",
-    icon: "📅",
-    color: "bg-yellow-100 text-yellow-700 border-yellow-300",
-  },
-  {
-    value: "not_interested",
-    label: "Not Interested",
-    icon: "❌",
-    color: "bg-red-100 text-red-700 border-red-300",
-  },
+  { value: "converted", label: "Interested - Move to Contract" },
+  { value: "needs_followup", label: "Needs Follow-up" },
+  { value: "not_interested", label: "Not Interested" },
 ];
+
+const LOCATION_LABELS: Record<string, string> = {
+  zoom: "Zoom",
+  phone: "Phone Call",
+  in_person: "In Person",
+  google_meet: "Google Meet",
+};
 
 export default function AppointmentCard({
   appointment,
@@ -80,21 +73,6 @@ export default function AppointmentCard({
       hour: "numeric",
       minute: "2-digit",
     });
-  };
-
-  const getLocationIcon = (location?: string) => {
-    switch (location) {
-      case "zoom":
-        return "💻";
-      case "phone":
-        return "📞";
-      case "in_person":
-        return "🤝";
-      case "google_meet":
-        return "📹";
-      default:
-        return "📍";
-    }
   };
 
   const handleRecordOutcome = async () => {
@@ -144,130 +122,94 @@ export default function AppointmentCard({
     }
   };
 
+  const statusLabel =
+    appointment.status === "completed"
+      ? "Completed"
+      : appointment.status === "no_show"
+        ? "No Show"
+        : appointment.status === "cancelled"
+          ? "Cancelled"
+          : isUpcoming
+            ? "Upcoming"
+            : "Past Due";
+
   return (
-    <div
-      className={`bg-white rounded-lg shadow border p-4 ${
-        isPast ? "border-orange-300 bg-orange-50/30" : ""
-      }`}
-    >
-      {/* Athlete Info */}
-      <div className="flex items-start gap-4">
-        <AthleteAvatar
-          name={athlete?.name || "?"}
-          profilePicUrl={athlete?.profile_pic_url}
-          size="lg"
-        />
-        <div className="flex-1">
-          <Link
-            href={`/athletes/${appointment.athlete_id}`}
-            className="font-semibold text-gray-900 hover:text-orange-600"
-          >
+    <div className={cn("pc-surface p-4", isPast && "!border-amber-300")}>
+      <div className="flex items-start gap-3">
+        <AthleteAvatar name={athlete?.name || "?"} profilePicUrl={athlete?.profile_pic_url} size="lg" />
+        <div className="min-w-0 flex-1">
+          <Link href={`/athletes/${appointment.athlete_id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
             {athlete?.name || "Unknown Athlete"}
           </Link>
-          <div className="text-sm text-gray-800">{athlete?.sport}</div>
-          {athlete?.instagram_handle && (
-            <div className="text-sm text-blue-600">
-              @{athlete.instagram_handle}
-            </div>
-          )}
+          <p className="mt-0.5 text-sm text-brand-muted">
+            {athlete?.sport}
+            {athlete?.instagram_handle && <> · @{athlete.instagram_handle}</>}
+          </p>
         </div>
-        <div
-          className={`text-xs px-2 py-1 rounded ${
+        <span
+          className={cn(
+            "shrink-0 px-2 py-0.5 text-[11px] font-semibold",
             appointment.status === "completed"
-              ? "bg-green-100 text-green-700"
+              ? "bg-emerald-100 text-emerald-800"
               : appointment.status === "no_show"
-                ? "bg-red-100 text-red-700"
+                ? "bg-red-50 text-red-700"
                 : appointment.status === "cancelled"
-                  ? "bg-gray-100 text-gray-700"
+                  ? "bg-brand-ink/5 text-brand-muted"
                   : isUpcoming
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-orange-100 text-orange-700"
-          }`}
+                    ? "bg-brand-ink/5 text-brand-ink"
+                    : "bg-amber-50 text-amber-800"
+          )}
         >
-          {appointment.status === "completed"
-            ? "Completed"
-            : appointment.status === "no_show"
-              ? "No Show"
-              : appointment.status === "cancelled"
-                ? "Cancelled"
-                : isUpcoming
-                  ? "Upcoming"
-                  : "Past Due"}
-        </div>
+          {statusLabel}
+        </span>
       </div>
 
-      {/* Appointment Details */}
-      <div className="mt-4 pt-3 border-t">
-        <div className="flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-1.5">
-            <span>📅</span>
-            <span className="font-medium">{formatDate(scheduledDate)}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span>🕐</span>
-            <span className="font-medium">{formatTime(scheduledDate)}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span>{getLocationIcon(appointment.location)}</span>
-            <span className="capitalize">{appointment.location || "TBD"}</span>
-          </div>
-          <div className="text-gray-800">{appointment.duration_minutes} min</div>
-        </div>
+      <div className="mt-3 border-t border-brand-ink/10 pt-3">
+        <p className="text-sm text-brand-ink">
+          <span className="font-medium">{formatDate(scheduledDate)}</span>
+          {" · "}
+          <span className="font-medium">{formatTime(scheduledDate)}</span>
+          {" · "}
+          {appointment.location ? LOCATION_LABELS[appointment.location] || appointment.location : "TBD"}
+          {" · "}
+          <span className="text-brand-muted">{appointment.duration_minutes} min</span>
+        </p>
 
         {appointment.meeting_url && (
           <a
             href={appointment.meeting_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-block mt-2 text-sm text-blue-600 hover:underline"
+            className="mt-2 inline-block text-sm font-medium text-brand-blue hover:underline"
           >
             Join Meeting
           </a>
         )}
 
         {appointment.notes && (
-          <p className="mt-2 text-sm text-gray-800 bg-gray-50 p-2 rounded">
-            {appointment.notes}
-          </p>
+          <p className="mt-2 border-l-2 border-brand-line pl-3 text-sm text-brand-ink/80">{appointment.notes}</p>
         )}
 
-        {/* Outcome Display */}
         {appointment.outcome && (
-          <div className="mt-3 p-2 rounded bg-gray-50">
-            <div className="text-sm font-medium">
-              Outcome:{" "}
-              <span className="capitalize">
-                {appointment.outcome.replace("_", " ")}
-              </span>
-            </div>
-            {appointment.outcome_notes && (
-              <p className="text-sm text-gray-800 mt-1">
-                {appointment.outcome_notes}
-              </p>
-            )}
+          <div className="mt-3 text-sm">
+            <p className="font-medium text-brand-ink">
+              Outcome: <span className="capitalize">{appointment.outcome.replace("_", " ")}</span>
+            </p>
+            {appointment.outcome_notes && <p className="mt-1 text-brand-muted">{appointment.outcome_notes}</p>}
           </div>
         )}
 
-        {/* Actions for pending appointments */}
         {appointment.status === "scheduled" && !showOutcomeForm && (
           <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => setShowOutcomeForm(true)}
-              className="flex-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200"
-            >
+            <button type="button" onClick={() => setShowOutcomeForm(true)} className="pc-button-primary flex-1">
               Record Outcome
             </button>
-            <button
-              onClick={handleNoShow}
-              disabled={loading}
-              className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50"
-            >
+            <button type="button" onClick={handleNoShow} disabled={loading} className="pc-button-secondary">
               No Show
             </button>
           </div>
         )}
 
-        {/* Outcome Form */}
         {showOutcomeForm && (
           <div className="mt-3 space-y-3">
             <div className="space-y-2">
@@ -276,14 +218,15 @@ export default function AppointmentCard({
                   key={option.value}
                   type="button"
                   onClick={() => setSelectedOutcome(option.value)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+                  aria-pressed={selectedOutcome === option.value}
+                  className={cn(
+                    "w-full border px-3 py-2 text-left text-sm",
                     selectedOutcome === option.value
-                      ? option.color + " border-2"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
+                      ? "border-brand-ink bg-brand-ink text-white"
+                      : "border-brand-line bg-white text-brand-ink hover:border-brand-ink"
+                  )}
                 >
-                  <span>{option.icon}</span>
-                  <span>{option.label}</span>
+                  {option.label}
                 </button>
               ))}
             </div>
@@ -292,20 +235,18 @@ export default function AppointmentCard({
               onChange={(e) => setOutcomeNotes(e.target.value)}
               placeholder="Notes about the meeting..."
               rows={2}
-              className="w-full border rounded-lg px-3 py-2 text-sm"
+              className="w-full border border-brand-chrome bg-white px-3 py-2 text-sm text-brand-ink"
             />
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={handleRecordOutcome}
                 disabled={loading || !selectedOutcome}
-                className="flex-1 px-3 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 disabled:opacity-50"
+                className="pc-button-primary flex-1"
               >
                 {loading ? "Saving..." : "Save Outcome"}
               </button>
-              <button
-                onClick={() => setShowOutcomeForm(false)}
-                className="px-3 py-2 bg-gray-100 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-200"
-              >
+              <button type="button" onClick={() => setShowOutcomeForm(false)} className="pc-button-secondary">
                 Cancel
               </button>
             </div>

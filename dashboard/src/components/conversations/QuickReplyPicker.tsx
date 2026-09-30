@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Template {
   id: string;
@@ -125,42 +127,35 @@ export default function QuickReplyPicker({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1"
+        aria-expanded={isOpen}
+        className="flex items-center gap-1 border border-brand-line bg-brand-paper-bright px-2 py-1 text-xs font-medium text-brand-ink hover:border-brand-ink"
       >
-        <span>Templates</span>
-        <svg
-          className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        Templates
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-180")} />
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full mb-2 left-0 w-80 bg-white rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-y-auto z-50">
+        <div className="absolute bottom-full right-0 z-50 mb-2 max-h-96 w-80 overflow-y-auto border border-brand-line bg-brand-paper-bright">
           {loading ? (
-            <div className="p-4 text-center text-gray-500">Loading templates...</div>
+            <p className="p-4 text-center text-sm text-brand-muted">Loading templates...</p>
           ) : templates.length === 0 ? (
-            <div className="p-4 text-center text-gray-500">No templates available</div>
+            <p className="p-4 text-center text-sm text-brand-muted">No templates available</p>
           ) : (
-            <div className="py-2">
+            <div className="py-1">
               {Object.entries(groupedTemplates).map(([category, categoryTemplates]) => (
                 <div key={category}>
-                  <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase bg-gray-50">
+                  <div className="bg-brand-paper px-3 py-1 text-xs font-medium text-brand-muted">
                     {categoryLabels[category] || category}
                   </div>
                   {categoryTemplates.map((template) => (
                     <button
                       key={template.id}
+                      type="button"
                       onClick={() => handleSelect(template)}
-                      className="w-full px-3 py-2 text-left hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
+                      className="w-full border-b border-brand-ink/10 px-3 py-2 text-left last:border-b-0 hover:bg-brand-cyan/10"
                     >
-                      <div className="font-medium text-gray-900 text-sm">
-                        {template.name}
-                      </div>
-                      <div className="text-xs text-gray-500 line-clamp-2 mt-0.5">
+                      <div className="text-sm font-medium text-brand-ink">{template.name}</div>
+                      <div className="mt-0.5 line-clamp-2 text-xs text-brand-muted">
                         {personalizeTemplate(template.content)}
                       </div>
                     </button>

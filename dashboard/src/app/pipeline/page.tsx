@@ -467,10 +467,9 @@ export default function PipelinePage() {
       {/* Header */}
       <header className="pc-page-header !mb-0">
         <div>
-          <p className="pc-eyebrow">Partnership operations</p>
           <h1 className="pc-page-title">Pipeline</h1>
           <p className="pc-page-description">
-            {totalProspects} active prospects · {selectionMode ? "Click cards to select" : "Move qualified athletes forward one stage at a time"}
+            {totalProspects} active prospects · {selectionMode ? "Click cards to select" : "Drag an athlete to the next step when they're ready"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -584,7 +583,7 @@ export default function PipelinePage() {
               {isResearchColumn ? (
                 /* Research Sessions */
                 (!column.researchSessions || column.researchSessions.length === 0) ? (
-                  <div className="text-center text-gray-800 text-sm py-8">
+                  <div className="text-center text-brand-muted text-sm py-8">
                     No research sessions
                   </div>
                 ) : (
@@ -608,7 +607,7 @@ export default function PipelinePage() {
                           <div className="flex items-center gap-2">
                             {/* Expand/Collapse Arrow */}
                             <svg
-                              className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                              className={`w-4 h-4 text-brand-muted transition-transform ${isExpanded ? "rotate-90" : ""}`}
                               fill="none"
                               stroke="currentColor"
                               viewBox="0 0 24 24"
@@ -618,13 +617,13 @@ export default function PipelinePage() {
                             <span className={`h-2 w-2 ${
                               session.status === "completed" ? "bg-brand-cyan" :
                               session.status === "running" ? "animate-pulse bg-amber-500" :
-                              "bg-gray-400"
+                              "bg-brand-chrome"
                             }`} />
-                            <span className="font-medium text-gray-900 text-sm capitalize flex-1">
+                            <span className="font-medium text-brand-ink text-sm capitalize flex-1">
                               {session.config_used?.sportFocus || "Research"}
                             </span>
                           </div>
-                          <div className="mt-2 text-xs text-gray-800 pl-6">
+                          <div className="mt-2 text-xs text-brand-muted pl-6">
                             <div className="flex justify-between">
                               <span>{session.stats?.returned || 0} found</span>
                               <span>{new Date(session.created_at).toLocaleDateString()}</span>
@@ -643,9 +642,9 @@ export default function PipelinePage() {
                         {isExpanded && (
                           <div className="ml-4 space-y-1 border-l-2 border-brand-cyan pl-2">
                             {isLoading ? (
-                              <div className="text-xs text-gray-500 py-2 text-center">Loading athletes...</div>
+                              <div className="text-xs text-brand-muted py-2 text-center">Loading athletes...</div>
                             ) : athletes.length === 0 ? (
-                              <div className="text-xs text-gray-500 py-2 text-center">No athletes in this session</div>
+                              <div className="text-xs text-brand-muted py-2 text-center">No athletes in this session</div>
                             ) : (
                               athletes.map((athlete) => (
                                 <div
@@ -667,7 +666,7 @@ export default function PipelinePage() {
                                       size="sm"
                                     />
                                     <div className="flex-1 min-w-0">
-                                      <div className="font-medium text-gray-900 text-xs truncate">
+                                      <div className="font-medium text-brand-ink text-xs truncate">
                                         {athlete.name}
                                       </div>
                                     </div>
@@ -678,7 +677,7 @@ export default function PipelinePage() {
                                           className={cn(
                                             "px-1.5 py-0.5 font-semibold",
                                             athlete.sponsor_approval_tier === "clear_winner"
-                                              ? "bg-green-100 text-green-800"
+                                              ? "bg-emerald-100 text-emerald-800"
                                               : "bg-amber-50 text-amber-800"
                                           )}
                                         >
@@ -686,7 +685,7 @@ export default function PipelinePage() {
                                         </span>
                                       )}
                                       {athlete.follower_count && (
-                                        <span className="text-gray-700 font-medium">
+                                        <span className="text-brand-ink/80 font-medium">
                                           {athlete.follower_count >= 1000000
                                             ? `${(athlete.follower_count / 1000000).toFixed(1)}M`
                                             : `${(athlete.follower_count / 1000).toFixed(0)}K`}
@@ -697,12 +696,12 @@ export default function PipelinePage() {
                                   <div className="mt-2 flex items-center justify-between gap-2 border-t pt-1.5 text-[11px]">
                                     <span className={`border px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide ${
                                       athlete.pipeline_stage === "approval"
-                                        ? "bg-blue-100 text-blue-700"
+                                        ? "bg-brand-cyan/20 text-brand-blue"
                                         : athlete.disposition === "blocked"
                                           ? "bg-red-100 text-red-700"
                                           : athlete.disposition === "held"
                                             ? "bg-amber-100 text-amber-800"
-                                            : "bg-gray-100 text-gray-700"
+                                            : "bg-brand-ink/5 text-brand-ink/80"
                                     }`}>
                                       {athlete.pipeline_stage === "approval"
                                         ? "In Approval"
@@ -726,7 +725,7 @@ export default function PipelinePage() {
               ) : (
                 /* Athletes */
                 column.athletes.length === 0 ? (
-                  <div className="text-center text-gray-800 text-sm py-8">
+                  <div className="text-center text-brand-muted text-sm py-8">
                     No prospects
                   </div>
                 ) : (
@@ -766,14 +765,14 @@ export default function PipelinePage() {
                             size="md"
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 truncate">
+                            <div className="font-medium text-brand-ink truncate">
                               {athlete.name}
                             </div>
-                            <div className="text-xs text-gray-800 truncate">{athlete.sport}</div>
+                            <div className="text-xs text-brand-muted truncate">{athlete.sport}</div>
                           </div>
                         </div>
                         {(athlete.instagram_handle || athlete.follower_count) && (
-                          <div className="mt-2 flex items-center justify-between text-xs text-gray-800">
+                          <div className="mt-2 flex items-center justify-between text-xs text-brand-muted">
                             {athlete.instagram_handle && <span>@{athlete.instagram_handle}</span>}
                             {athlete.follower_count && (
                               <span>{(athlete.follower_count / 1000).toFixed(0)}K</span>

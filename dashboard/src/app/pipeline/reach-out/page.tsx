@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -326,93 +327,72 @@ export default function ReachOutStagePage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-600">Loading outreach queue...</div>
-      </div>
-    );
+    return <p className="p-6 text-sm text-brand-muted">Loading outreach queue…</p>;
   }
 
   return (
-    <div className="space-y-4">
-      {/* Stage Navigation */}
+    <div className="space-y-6">
       <PipelineStageNav currentStage="reach_out" />
 
-      {/* Header */}
-      <div className="pc-page-header !mb-0">
+      <header className="pc-page-header !mb-0">
         <div>
-          <p className="pc-eyebrow">Draft workspace</p>
-          <h1 className="pc-page-title">Outreach queue</h1>
-          <p className="pc-page-description">Generate, review, and save personal drafts. Nothing sends from this page.</p>
-        </div>
-        <button onClick={fetchAthletes} className="pc-button-secondary">Refresh</button>
-      </div>
-
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <strong>Draft-only safety lock:</strong> research and test runs cannot send DMs or comments. Open the provider yourself when you are ready, then record the manual touchpoint separately.
-      </div>
-      {savedNotice ? <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{savedNotice}</div> : null}
-
-      {/* Main Content */}
-      {athletes.length === 0 ? (
-        <div className="bg-white shadow rounded-lg p-12 text-center">
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No athletes in outreach queue</h3>
-          <p className="text-gray-600 mb-4">
-            Athletes will appear here automatically after approval
+          <h1 className="pc-page-title">Reach out</h1>
+          <p className="pc-page-description">
+            Write and save message drafts for approved athletes. Nothing sends from this page: send from Instagram
+            yourself and record the touchpoint separately.
           </p>
-          <Link
-            href="/pipeline/approval"
-            className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
+        </div>
+        <div className="pc-header-actions">
+          <button type="button" onClick={fetchAthletes} className="pc-button-secondary">Refresh</button>
+        </div>
+      </header>
+
+      {savedNotice ? <p role="status" className="text-sm text-emerald-700">{savedNotice}</p> : null}
+
+      {athletes.length === 0 ? (
+        <div className="pc-surface p-8 text-center">
+          <p className="text-base font-semibold text-brand-ink">No athletes in outreach queue</p>
+          <p className="mt-1 text-sm text-brand-muted">Athletes will appear here automatically after approval.</p>
+          <Link href="/pipeline/approval" className="pc-button-primary mt-4">
             Go to Approval Queue
           </Link>
         </div>
       ) : (
-        <div className="flex gap-4">
-          {/* Athlete List */}
-          <div className="w-80 flex-shrink-0 space-y-2">
+        <div className="flex flex-col gap-4 lg:flex-row">
+          {/* Athlete list */}
+          <ul className="pc-surface divide-y divide-brand-ink/10 lg:w-80 lg:self-start lg:flex-shrink-0">
             {athletes.map((athlete) => {
               const pkg = outreachPackages.get(athlete.id);
               const isSelected = selectedAthlete === athlete.id;
 
               return (
-                <button
-                  key={athlete.id}
-                  onClick={() => setSelectedAthlete(athlete.id)}
-                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
-                    isSelected
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 bg-white hover:border-blue-300"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <AthleteAvatar
-                      name={athlete.name}
-                      profilePicUrl={athlete.profile_pic_url}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 truncate">{athlete.name}</div>
-                      <div className="text-sm text-gray-500 truncate">
+                <li key={athlete.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAthlete(athlete.id)}
+                    aria-current={isSelected ? "true" : undefined}
+                    className={cn(
+                      "flex w-full items-center gap-3 border-l-2 px-3 py-3 text-left",
+                      isSelected ? "border-brand-ink bg-brand-cyan/10" : "border-transparent hover:bg-brand-paper"
+                    )}
+                  >
+                    <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium text-brand-ink">{athlete.name}</div>
+                      <div className="truncate text-xs text-brand-muted">
                         @{athlete.instagram_handle} · {formatNumber(athlete.follower_count)}
                       </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      {pkg?.generating && (
-                        <span className="text-xs text-purple-600 animate-pulse">Generating...</span>
-                      )}
-                      {pkg?.generated && !pkg.generating && (
-                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                      )}
-                    </div>
-                  </div>
-                </button>
+                    {pkg?.generating && <span className="text-xs text-brand-blue">Generating…</span>}
+                    {pkg?.generated && !pkg.generating && <span className="text-xs text-emerald-700">Drafted</span>}
+                  </button>
+                </li>
               );
             })}
-          </div>
+          </ul>
 
-          {/* Content Panel */}
-          <div className="flex-1 bg-white rounded-lg shadow overflow-hidden">
+          {/* Draft panel */}
+          <div className="pc-surface min-w-0 flex-1 overflow-hidden">
             {selectedAthlete ? (
               (() => {
                 const pkg = outreachPackages.get(selectedAthlete);
@@ -420,17 +400,17 @@ export default function ReachOutStagePage() {
                   const athlete = athletes.find((item) => item.id === selectedAthlete);
                   if (!athlete) return null;
                   return (
-                    <div className="grid h-full min-h-[520px] place-items-center p-8 text-center">
-                      <div className="max-w-md">
+                    <div className="grid min-h-[420px] place-items-center p-8 text-center">
+                      <div className="flex max-w-md flex-col items-center">
                         <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
-                        <h2 className="mt-4 text-xl font-semibold text-gray-950">Create drafts for {athlete.name}</h2>
-                        <p className="mt-2 text-sm leading-6 text-gray-600">
+                        <h2 className="mt-4 text-base font-semibold text-brand-ink">Create drafts for {athlete.name}</h2>
+                        <p className="mt-1 text-sm text-brand-muted">
                           Creates one personal DM draft plus comment drafts for up to three recent posts. It uses AI credits and sends nothing.
                         </p>
                         <button
                           type="button"
                           onClick={() => void generateOutreachPackage(athlete)}
-                          className="mt-5 rounded-lg bg-purple-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-800"
+                          className="pc-button-primary mt-4"
                         >
                           Generate AI drafts
                         </button>
@@ -440,68 +420,64 @@ export default function ReachOutStagePage() {
                 }
 
                 return (
-                  <div className="h-full flex flex-col">
-                    {/* Header */}
-                    <div className="p-4 border-b bg-gray-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <AthleteAvatar
-                            name={pkg.athlete.name}
-                            profilePicUrl={pkg.athlete.profile_pic_url}
-                            size="lg"
-                          />
-                          <div>
-                            <div className="font-semibold text-gray-900">{pkg.athlete.name}</div>
-                            <div className="text-sm text-gray-500">
-                              @{pkg.athlete.instagram_handle} · {pkg.athlete.sport}
-                            </div>
+                  <div className="flex h-full flex-col">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-line px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <AthleteAvatar name={pkg.athlete.name} profilePicUrl={pkg.athlete.profile_pic_url} size="lg" />
+                        <div>
+                          <div className="font-semibold text-brand-ink">{pkg.athlete.name}</div>
+                          <div className="text-sm text-brand-muted">
+                            @{pkg.athlete.instagram_handle} · {pkg.athlete.sport}
                           </div>
-                          {pkg.generated ? (
-                            <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
-                              {pkg.generationSource === "ai" ? "AI draft" : pkg.generationSource === "existing" ? "Saved draft" : "Playbook fallback"}
-                            </span>
-                          ) : null}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleRegenerate(selectedAthlete)}
-                            disabled={pkg.generating}
-                            className="px-3 py-1.5 text-sm bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 disabled:opacity-50"
-                          >
-                            {pkg.generating ? "Generating..." : "Regenerate All"}
-                          </button>
-                          <a
-                            href={`https://instagram.com/${pkg.athlete.instagram_handle}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-                          >
-                            View Profile
-                          </a>
-                        </div>
+                        {pkg.generated ? (
+                          <span className="bg-brand-ink/5 px-2 py-0.5 text-[11px] font-semibold text-brand-muted">
+                            {pkg.generationSource === "ai" ? "AI draft" : pkg.generationSource === "existing" ? "Saved draft" : "Playbook fallback"}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerate(selectedAthlete)}
+                          disabled={pkg.generating}
+                          className="pc-button-secondary"
+                        >
+                          {pkg.generating ? "Generating..." : "Regenerate All"}
+                        </button>
+                        <a
+                          href={`https://instagram.com/${pkg.athlete.instagram_handle}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="pc-button-secondary"
+                        >
+                          View Profile
+                        </a>
                       </div>
                     </div>
 
-                    {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                      {/* DM Section */}
-                      <div className="border rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="font-medium text-gray-900">Direct message draft</h3>
-                          <div className="flex items-center gap-2">
+                    <div className="flex-1 space-y-6 overflow-y-auto p-4">
+                      <section>
+                        <div className="mb-2 flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-brand-ink">Direct message draft</h3>
+                          <div className="flex items-center gap-3">
                             <button
+                              type="button"
                               onClick={() => handleCopy(pkg.dmMessage)}
-                              className="text-xs text-blue-600 hover:text-blue-800"
+                              className="text-xs font-medium text-brand-blue hover:underline"
                             >
                               Copy
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleToggleDmApproval(selectedAthlete)}
-                              className={`px-2 py-1 text-xs font-medium rounded ${
+                              aria-pressed={pkg.dmApproved}
+                              className={cn(
+                                "border px-2 py-1 text-xs font-medium",
                                 pkg.dmApproved
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-gray-100 text-gray-600"
-                              }`}
+                                  ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                                  : "border-brand-chrome bg-white text-brand-ink hover:border-brand-ink"
+                              )}
                             >
                               {pkg.dmApproved ? "Approved" : "Approve"}
                             </button>
@@ -510,130 +486,116 @@ export default function ReachOutStagePage() {
                         <textarea
                           value={pkg.dmMessage}
                           onChange={(e) => handleUpdateDm(selectedAthlete, e.target.value)}
-                          className="w-full h-24 p-3 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="h-24 w-full border border-brand-chrome bg-white px-3 py-2 text-sm text-brand-ink"
                           placeholder="Generated message will appear here..."
                         />
-                      </div>
+                      </section>
 
-                      {/* Comments Section */}
-                      <div className="border rounded-lg p-4">
-                        <h3 className="font-medium text-gray-900 flex items-center gap-2 mb-3">
-                          Comments on posts
-                          <span className="text-xs text-gray-500 font-normal">
+                      <section>
+                        <h3 className="mb-2 text-sm font-semibold text-brand-ink">
+                          Comments on posts{" "}
+                          <span className="text-xs font-normal text-brand-muted">
                             ({pkg.comments.filter((c) => c.approved).length}/{pkg.comments.length} approved)
                           </span>
                         </h3>
 
                         {pkg.comments.length === 0 ? (
-                          <p className="text-sm text-gray-500">No photos available for comments</p>
+                          <p className="text-sm text-brand-muted">No photos available for comments</p>
                         ) : (
-                          <div className="space-y-4">
+                          <ul className="divide-y divide-brand-ink/10 border-y border-brand-ink/10">
                             {pkg.comments.map((comment, index) => (
-                              <div key={comment.id} className="flex gap-3 p-3 bg-gray-50 rounded-lg">
-                                {/* Post thumbnail */}
-                                <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200">
+                              <li key={comment.id} className="flex gap-3 py-3">
+                                <div className="h-20 w-20 flex-shrink-0 overflow-hidden bg-brand-paper">
                                   {comment.postImage ? (
-                                    <img
-                                      src={comment.postImage}
-                                      alt=""
-                                      className="w-full h-full object-cover"
-                                    />
+                                    <img src={comment.postImage} alt="" className="h-full w-full object-cover" />
                                   ) : (
-                                    <div className="flex h-full w-full items-center justify-center px-2 text-center text-xs text-gray-400">
+                                    <div className="flex h-full w-full items-center justify-center px-2 text-center text-xs text-brand-muted">
                                       No image
                                     </div>
                                   )}
                                 </div>
 
-                                {/* Comment content */}
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between mb-2">
-                                    <span className="text-xs text-gray-500">
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-2 flex items-start justify-between">
+                                    <span className="text-xs text-brand-muted">
                                       Comment #{index + 1}
                                       {comment.postPublishedAt ? ` · Posted ${new Date(comment.postPublishedAt).toLocaleDateString()}` : ""}
                                     </span>
                                     <button
+                                      type="button"
                                       onClick={() => handleToggleCommentApproval(selectedAthlete, comment.id)}
-                                      className={`px-2 py-0.5 text-xs font-medium rounded ${
+                                      aria-pressed={comment.approved}
+                                      className={cn(
+                                        "border px-2 py-0.5 text-xs font-medium",
                                         comment.approved
-                                          ? "bg-green-100 text-green-700"
-                                          : "bg-gray-200 text-gray-600"
-                                      }`}
+                                          ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                                          : "border-brand-chrome bg-white text-brand-ink hover:border-brand-ink"
+                                      )}
                                     >
                                       {comment.approved ? "Approved" : "Approve"}
                                     </button>
                                   </div>
                                   <textarea
                                     value={comment.comment}
-                                    onChange={(e) =>
-                                      handleUpdateComment(selectedAthlete, comment.id, e.target.value)
-                                    }
-                                    className="w-full h-16 p-2 text-sm border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    onChange={(e) => handleUpdateComment(selectedAthlete, comment.id, e.target.value)}
+                                    className="h-16 w-full border border-brand-chrome bg-white px-2 py-1.5 text-sm text-brand-ink"
                                   />
-                                  <div className="flex items-center gap-2 mt-2">
-                                    <label className="text-xs text-gray-500">Manual send reminder:</label>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <label className="text-xs text-brand-muted">Manual send reminder:</label>
                                     <input
                                       type="datetime-local"
                                       value={comment.scheduledFor || ""}
-                                      onChange={(e) =>
-                                        handleScheduleComment(selectedAthlete, comment.id, e.target.value)
-                                      }
-                                      className="text-xs border rounded px-2 py-1"
+                                      onChange={(e) => handleScheduleComment(selectedAthlete, comment.id, e.target.value)}
+                                      className="border border-brand-chrome bg-white px-2 py-1 text-xs text-brand-ink"
                                     />
                                     <a
                                       href={comment.postUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-xs text-blue-600 hover:underline ml-auto"
+                                      className="ml-auto text-xs text-brand-blue hover:underline"
                                     >
                                       View post
                                     </a>
                                   </div>
                                 </div>
-                              </div>
+                              </li>
                             ))}
-                          </div>
+                          </ul>
                         )}
-                      </div>
+                      </section>
                     </div>
 
-                    {/* Footer Actions */}
-                    <div className="p-4 border-t bg-gray-50">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleSkip(selectedAthlete)}
-                          className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-                        >
-                          Skip
-                        </button>
-                        <div className="flex-1" />
-                        <a
-                          href="https://instagram.com/direct/inbox"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-4 py-2 text-sm bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:opacity-90"
-                        >
-                          Open Instagram
-                        </a>
-                        <button
-                          onClick={() => handleApproveAll(selectedAthlete)}
-                          disabled={!pkg.dmApproved}
-                          className="px-6 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Save Approved Drafts
-                        </button>
-                      </div>
+                    <div className="flex flex-wrap gap-2 border-t border-brand-line px-4 py-3">
+                      <button type="button" onClick={() => handleSkip(selectedAthlete)} className="pc-button-secondary">
+                        Skip
+                      </button>
+                      <div className="flex-1" />
+                      <a
+                        href="https://instagram.com/direct/inbox"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="pc-button-secondary"
+                      >
+                        Open Instagram
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleApproveAll(selectedAthlete)}
+                        disabled={!pkg.dmApproved}
+                        className="pc-button-primary"
+                      >
+                        Save Approved Drafts
+                      </button>
                     </div>
                   </div>
                 );
               })()
             ) : (
-              <div className="h-full flex items-center justify-center p-8">
-                <div className="text-center">
-                  <div className="text-6xl mb-4">👈</div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">Select an athlete</h3>
-                  <p className="text-gray-600">
-                    Choose an athlete from the list to review their outreach content
+              <div className="grid min-h-[420px] place-items-center p-8 text-center">
+                <div>
+                  <p className="text-base font-semibold text-brand-ink">Select an athlete</p>
+                  <p className="mt-1 text-sm text-brand-muted">
+                    Choose an athlete from the list to review their outreach content.
                   </p>
                 </div>
               </div>

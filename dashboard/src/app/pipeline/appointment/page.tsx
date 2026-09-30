@@ -6,6 +6,7 @@ import { PipelineStageNav } from "@/components/PipelineStageNav";
 import AppointmentModal from "@/components/AppointmentModal";
 import AppointmentCard from "@/components/AppointmentCard";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -120,87 +121,56 @@ export default function AppointmentStagePage() {
   );
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading...</div>
-      </div>
-    );
+    return <p className="p-6 text-sm text-brand-muted">Loading…</p>;
   }
 
+  const stats = [
+    { label: "In Stage", value: athletes.length },
+    { label: "Scheduled", value: appointments.length },
+    { label: "Today", value: todayAppointments.length },
+    { label: "This Week", value: thisWeekAppointments.length },
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* Stage Navigation */}
+    <div className="space-y-6">
       <PipelineStageNav currentStage="appointment" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <header className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            Appointments
-          </h1>
-          <p className="text-gray-600">
-            Schedule and manage meetings with prospects
-          </p>
+          <h1 className="pc-page-title">Appointments</h1>
+          <p className="pc-page-description">Schedule calls with interested athletes and record how they went.</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setView("list")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              view === "list"
-                ? "bg-orange-100 text-orange-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            List
-          </button>
-          <button
-            onClick={() => setView("calendar")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              view === "calendar"
-                ? "bg-orange-100 text-orange-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            Calendar
-          </button>
+        <div className="inline-flex border border-brand-chrome bg-white">
+          {(["list", "calendar"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setView(value)}
+              aria-pressed={view === value}
+              className={cn(
+                "min-h-10 px-4 text-sm",
+                view === value ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-brand-paper"
+              )}
+            >
+              {value === "list" ? "List" : "Calendar"}
+            </button>
+          ))}
         </div>
-      </div>
+      </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-orange-700">
-            {athletes.length}
+      <dl className="pc-surface grid grid-cols-2 divide-brand-ink/10 sm:grid-cols-4 sm:divide-x">
+        {stats.map((stat) => (
+          <div key={stat.label} className="px-4 py-3">
+            <dt className="text-xs text-brand-muted">{stat.label}</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-ink">{stat.value}</dd>
           </div>
-          <div className="text-sm text-orange-600">In Stage</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {appointments.length}
-          </div>
-          <div className="text-sm text-gray-800">Scheduled</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {todayAppointments.length}
-          </div>
-          <div className="text-sm text-gray-800">Today</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {thisWeekAppointments.length}
-          </div>
-          <div className="text-sm text-gray-800">This Week</div>
-        </div>
-      </div>
+        ))}
+      </dl>
 
       {view === "calendar" ? (
-        /* Calendar View */
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Upcoming Schedule
-          </h2>
-          <div className="grid grid-cols-7 gap-2">
+        <section aria-labelledby="calendar-heading">
+          <h2 id="calendar-heading" className="pc-section-heading">Upcoming Schedule</h2>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             {getNextDays(7).map((date) => {
               const dateKey = date.toDateString();
               const dayAppointments = appointmentsByDate[dateKey] || [];
@@ -209,13 +179,12 @@ export default function AppointmentStagePage() {
               return (
                 <div
                   key={dateKey}
-                  className={`border rounded-lg p-3 min-h-[150px] ${
-                    isToday ? "border-orange-300 bg-orange-50" : ""
-                  }`}
+                  className={cn(
+                    "min-h-[150px] border p-3",
+                    isToday ? "border-brand-ink bg-brand-cyan/10" : "border-brand-line bg-brand-paper-bright"
+                  )}
                 >
-                  <div
-                    className={`text-sm font-medium mb-2 ${isToday ? "text-orange-700" : "text-gray-800"}`}
-                  >
+                  <div className={cn("mb-2 text-sm font-medium", isToday ? "text-brand-ink" : "text-brand-muted")}>
                     {date.toLocaleDateString("en-US", {
                       weekday: "short",
                       month: "short",
@@ -226,7 +195,7 @@ export default function AppointmentStagePage() {
                     {dayAppointments.map((appt) => (
                       <div
                         key={appt.id}
-                        className="text-xs bg-blue-100 text-blue-800 rounded px-2 py-1 truncate"
+                        className="truncate bg-brand-ink/5 px-2 py-1 text-xs text-brand-ink"
                         title={`${appt.athletes?.name} - ${new Date(appt.scheduled_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
                       >
                         {new Date(appt.scheduled_at).toLocaleTimeString([], {
@@ -241,105 +210,65 @@ export default function AppointmentStagePage() {
               );
             })}
           </div>
-        </div>
+        </section>
       ) : null}
 
-      {/* Scheduled Appointments */}
       {appointments.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Scheduled Appointments
-          </h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section aria-labelledby="scheduled-heading">
+          <h2 id="scheduled-heading" className="pc-section-heading">Scheduled Appointments</h2>
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
             {appointments.map((appointment) => (
-              <AppointmentCard
-                key={appointment.id}
-                appointment={appointment}
-                onOutcomeRecorded={fetchData}
-              />
+              <AppointmentCard key={appointment.id} appointment={appointment} onOutcomeRecorded={fetchData} />
             ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Athletes Needing Scheduling */}
       {athletesWithoutAppointments.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Need to Schedule ({athletesWithoutAppointments.length})
+        <section aria-labelledby="to-schedule-heading">
+          <h2 id="to-schedule-heading" className="pc-section-heading">
+            Need to Schedule <span className="text-brand-muted">({athletesWithoutAppointments.length})</span>
           </h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ul className="pc-surface mt-4 divide-y divide-brand-ink/10">
             {athletesWithoutAppointments.map((athlete) => (
-              <div
-                key={athlete.id}
-                className="bg-white rounded-lg shadow border p-4"
-              >
-                <div className="flex items-start gap-4">
-                  <AthleteAvatar
-                    name={athlete.name}
-                    profilePicUrl={athlete.profile_pic_url}
-                    size="lg"
-                  />
-                  <div className="flex-1">
-                    <Link
-                      href={`/athletes/${athlete.id}`}
-                      className="font-semibold text-gray-900 hover:text-orange-600"
-                    >
+              <li key={athlete.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
+                  <div className="min-w-0">
+                    <Link href={`/athletes/${athlete.id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
                       {athlete.name}
                     </Link>
-                    <div className="text-sm text-gray-800">{athlete.sport}</div>
-                    {athlete.instagram_handle && (
-                      <div className="text-sm text-blue-600">
-                        @{athlete.instagram_handle}
-                      </div>
-                    )}
-                    {athlete.follower_count && (
-                      <div className="text-sm text-gray-800">
-                        {(athlete.follower_count / 1000).toFixed(0)}K followers
-                      </div>
-                    )}
+                    <p className="mt-0.5 text-sm text-brand-muted">
+                      {athlete.sport}
+                      {athlete.instagram_handle && <> · @{athlete.instagram_handle}</>}
+                      {athlete.follower_count && <> · {(athlete.follower_count / 1000).toFixed(0)}K followers</>}
+                    </p>
                   </div>
                 </div>
-                <div className="mt-4 flex gap-2">
-                  <button
-                    onClick={() => setSelectedAthlete(athlete)}
-                    className="flex-1 px-3 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200"
-                  >
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" onClick={() => setSelectedAthlete(athlete)} className="pc-button-primary">
                     Schedule meeting
                   </button>
-                  <button
-                    onClick={() => handleMoveToContract(athlete.id)}
-                    className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200"
-                  >
-                    → Contract
+                  <button type="button" onClick={() => handleMoveToContract(athlete.id)} className="pc-button-secondary">
+                    Move to Contract
                   </button>
                 </div>
-              </div>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </section>
       )}
 
-      {/* Empty State */}
       {athletes.length === 0 && appointments.length === 0 && (
-        <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="mb-3 font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Calendar clear</div>
-          <h3 className="font-semibold text-gray-800 mb-2">
-            No Pending Appointments
-          </h3>
-          <p className="text-sm text-gray-800">
-            Prospects with positive responses will appear here for scheduling.
-          </p>
-          <Link
-            href="/pipeline/response"
-            className="inline-block mt-4 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
-          >
+        <div className="pc-surface p-8 text-center">
+          <p className="text-base font-semibold text-brand-ink">No pending appointments</p>
+          <p className="mt-1 text-sm text-brand-muted">Prospects with positive responses will appear here for scheduling.</p>
+          <Link href="/pipeline/response" className="pc-button-primary mt-4">
             Go to Response Tracking
           </Link>
         </div>
       )}
 
-      {/* Appointment Modal */}
       {selectedAthlete && (
         <AppointmentModal
           athlete={selectedAthlete}

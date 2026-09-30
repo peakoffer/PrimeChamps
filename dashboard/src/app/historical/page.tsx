@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
-import { ImageDown, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -114,68 +115,69 @@ export default function HistoricalPage() {
   const sports = stats?.bySport ? Object.keys(stats.bySport).sort() : [];
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading historical data...</div>
-      </div>
-    );
+    return <p className="p-6 text-sm text-brand-muted">Loading historical data…</p>;
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-start">
+      <header className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Historical Success Stories</h1>
-          <p className="text-gray-600 mt-1">
-            Athletes already on OnlyFans - used as context for research agent
+          <h1 className="pc-page-title">Past signings</h1>
+          <p className="pc-page-description">
+            Athletes already on OnlyFans with us. They are not in the sales pipeline; the research agent uses them as
+            examples of a good prospect.
           </p>
         </div>
-        <button
-          onClick={fetchData}
-          className="text-sm text-blue-600 hover:text-blue-800"
-        >
-          Refresh
-        </button>
-      </div>
-
-      {/* Info Banner */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <div className="flex items-start gap-3">
-          <span className="text-2xl">📚</span>
-          <div>
-            <h3 className="font-semibold text-blue-800">Reference Data Only</h3>
-            <p className="text-sm text-blue-700 mt-1">
-              These {stats?.total || 0} athletes are success stories from our existing network.
-              They are NOT in the sales pipeline - they&apos;re used to train and inform our
-              research agent on what makes a good prospect.
-            </p>
-          </div>
+        <div className="pc-header-actions">
+          <button type="button" onClick={fetchData} className="pc-button-secondary">
+            Refresh
+          </button>
         </div>
-      </div>
+      </header>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      {stats && (
+        <dl className="pc-surface grid grid-cols-2 divide-brand-ink/10 md:grid-cols-4 md:divide-x">
+          <div className="px-4 py-3">
+            <dt className="text-xs text-brand-muted">Total Athletes</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-ink">{stats.total}</dd>
+          </div>
+          <div className="px-4 py-3">
+            <dt className="text-xs text-brand-muted">Sports</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-ink">{sports.length}</dd>
+          </div>
+          <div className="px-4 py-3">
+            <dt className="text-xs text-brand-muted">Enriched Profiles</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-ink">{stats.enriched}</dd>
+          </div>
+          <div className="px-4 py-3">
+            <dt className="text-xs text-brand-muted">Avg Followers</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-ink">
+              {stats.avgFollowers > 0 ? `${(stats.avgFollowers / 1000).toFixed(0)}K` : "-"}
+            </dd>
+          </div>
+        </dl>
+      )}
+
+      <section className="pc-surface p-4 sm:p-5" aria-labelledby="media-repair-heading">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="flex items-center gap-2 font-semibold text-gray-950">
-              <ImageDown className="h-5 w-5 text-blue-600" /> Historical media repair
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <h2 id="media-repair-heading" className="text-base font-semibold text-brand-ink">Historical media repair</h2>
+            <p className="mt-1 text-sm text-brand-muted">
               Replace expiring Instagram CDN links with permanent Supabase copies and refresh saved posts.
             </p>
             {backfillStatus && (
-              <p className="mt-2 text-xs text-gray-500">
+              <p className="mt-2 text-xs text-brand-muted">
                 {backfillStatus.eligible} eligible · {backfillStatus.queued} queued · {backfillStatus.complete} complete · {backfillStatus.failed} failed
               </p>
             )}
-            {backfillMessage && <p className="mt-2 text-sm text-blue-700">{backfillMessage}</p>}
+            {backfillMessage && <p role="status" className="mt-2 text-sm text-brand-ink">{backfillMessage}</p>}
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
               onClick={queueMediaRepair}
               disabled={backfillBusy || !backfillStatus?.eligible}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="pc-button-secondary"
             >
               Queue next 25
             </button>
@@ -183,118 +185,83 @@ export default function HistoricalPage() {
               type="button"
               onClick={processNextRepair}
               disabled={backfillBusy || !backfillStatus?.queued}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="pc-button-primary"
             >
               {backfillBusy && <Loader2 className="h-4 w-4 animate-spin" />}
               Repair next profile
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Stats Cards */}
-      {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white shadow rounded-lg p-4">
-            <div className="text-3xl font-bold text-gray-900">{stats.total}</div>
-            <div className="text-sm text-gray-800">Total Athletes</div>
-          </div>
-          <div className="bg-white shadow rounded-lg p-4">
-            <div className="text-3xl font-bold text-gray-900">{sports.length}</div>
-            <div className="text-sm text-gray-800">Sports</div>
-          </div>
-          <div className="bg-white shadow rounded-lg p-4">
-            <div className="text-3xl font-bold text-gray-900">{stats.enriched}</div>
-            <div className="text-sm text-gray-800">Enriched Profiles</div>
-          </div>
-          <div className="bg-white shadow rounded-lg p-4">
-            <div className="text-3xl font-bold text-gray-900">
-              {stats.avgFollowers > 0 ? `${(stats.avgFollowers / 1000).toFixed(0)}K` : "-"}
-            </div>
-            <div className="text-sm text-gray-800">Avg Followers</div>
-          </div>
-        </div>
-      )}
-
-      {/* Sport Breakdown */}
       {stats?.bySport && Object.keys(stats.bySport).length > 0 && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">By Sport</h2>
-          <div className="flex flex-wrap gap-2">
+        <section aria-labelledby="by-sport-heading">
+          <h2 id="by-sport-heading" className="pc-section-heading">By Sport</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
             {Object.entries(stats.bySport)
               .sort((a, b) => b[1] - a[1])
               .map(([sport, count]) => (
                 <button
                   key={sport}
+                  type="button"
                   onClick={() => setSelectedSport(sport === selectedSport ? "all" : sport)}
-                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                  aria-pressed={selectedSport === sport}
+                  className={cn(
+                    "border px-3 py-1.5 text-sm",
                     selectedSport === sport
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-800 hover:bg-gray-200"
-                  }`}
+                      ? "border-brand-ink bg-brand-ink text-white"
+                      : "border-brand-chrome bg-white text-brand-ink hover:border-brand-ink"
+                  )}
                 >
                   {sport} ({count})
                 </button>
               ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Search and Filter */}
-      <div className="flex gap-4">
+      <div className="flex gap-3">
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search athletes..."
-          className="flex-1 px-4 py-2 border rounded-lg"
+          className="min-h-10 flex-1 border border-brand-chrome bg-white px-3 text-sm text-brand-ink"
         />
         {selectedSport !== "all" && (
-          <button
-            onClick={() => setSelectedSport("all")}
-            className="px-4 py-2 text-sm text-gray-800 hover:text-gray-800"
-          >
+          <button type="button" onClick={() => setSelectedSport("all")} className="pc-button-secondary">
             Clear filter
           </button>
         )}
       </div>
 
-      {/* Athletes Grid */}
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b bg-gray-50 flex justify-between items-center">
-          <h3 className="font-medium text-gray-900">
-            {filteredAthletes.length} Athletes
-            {selectedSport !== "all" && ` in ${selectedSport}`}
-          </h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 max-h-[600px] overflow-y-auto">
+      <section className="pc-surface" aria-labelledby="athletes-heading">
+        <h2 id="athletes-heading" className="border-b border-brand-line px-4 py-3 text-sm font-semibold text-brand-ink">
+          {filteredAthletes.length} Athletes
+          {selectedSport !== "all" && ` in ${selectedSport}`}
+        </h2>
+        <div className="grid max-h-[600px] grid-cols-1 gap-2 overflow-y-auto p-3 md:grid-cols-2 lg:grid-cols-3">
           {filteredAthletes.map((athlete) => (
             <Link
               key={athlete.id}
               href={`/athletes/${athlete.id}`}
-              className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-3 border border-brand-line bg-white p-3 hover:border-brand-ink"
             >
-              <AthleteAvatar
-                name={athlete.name}
-                profilePicUrl={athlete.profile_pic_url}
-                size="lg"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-900 truncate">{athlete.name}</div>
-                <div className="text-sm text-gray-800 truncate">
+              <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-brand-ink">{athlete.name}</div>
+                <div className="truncate text-sm text-brand-muted">
                   {athlete.sport}
-                  {athlete.instagram_handle && ` • @${athlete.instagram_handle}`}
+                  {athlete.instagram_handle && ` · @${athlete.instagram_handle}`}
                 </div>
               </div>
               {athlete.follower_count && (
-                <div className="text-sm text-gray-800">
-                  {(athlete.follower_count / 1000).toFixed(0)}K
-                </div>
+                <div className="text-sm text-brand-muted">{(athlete.follower_count / 1000).toFixed(0)}K</div>
               )}
             </Link>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

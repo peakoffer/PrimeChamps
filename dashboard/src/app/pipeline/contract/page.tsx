@@ -6,6 +6,7 @@ import { PipelineStageNav } from "@/components/PipelineStageNav";
 import ContractModal from "@/components/ContractModal";
 import ContractCard from "@/components/ContractCard";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -112,259 +113,138 @@ export default function ContractStagePage() {
   ).length;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading...</div>
-      </div>
-    );
+    return <p className="p-6 text-sm text-brand-muted">Loading…</p>;
   }
 
+  const stats = [
+    { label: "In Stage", value: athletes.length },
+    { label: "Signed Contracts", value: signedContracts.length },
+    { label: "Guaranteed Value", value: `$${(guaranteedValue / 1000).toFixed(1)}K` },
+    { label: "Projected Value", value: `$${(signedContractValue / 1000).toFixed(1)}K` },
+    { label: "Actual Revenue", value: `$${(actualRevenue / 1000).toFixed(1)}K` },
+  ];
+
+  const filters = [
+    { id: "all", label: "Active", count: draftCount + sentCount + negotiatingCount },
+    { id: "draft", label: "Draft", count: draftCount },
+    { id: "sent", label: "Sent", count: sentCount },
+    { id: "negotiating", label: "Negotiating", count: negotiatingCount },
+    { id: "signed", label: "Signed", count: signedContracts.length },
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* Stage Navigation */}
+    <div className="space-y-6">
       <PipelineStageNav currentStage="contract" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <header className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-3xl">📝</span> Contracts
-          </h1>
-          <p className="text-gray-600">
-            Finalize deals and track signed athletes
-          </p>
+          <h1 className="pc-page-title">Contracts</h1>
+          <p className="pc-page-description">Create, track and sign athlete contracts.</p>
         </div>
-      </div>
+      </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-green-700">
-            {athletes.length}
+      <dl className="pc-surface grid grid-cols-2 divide-brand-ink/10 sm:grid-cols-3 lg:grid-cols-5 lg:divide-x">
+        {stats.map((stat) => (
+          <div key={stat.label} className="px-4 py-3">
+            <dt className="text-xs text-brand-muted">{stat.label}</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-ink">{stat.value}</dd>
           </div>
-          <div className="text-sm text-green-600">In Stage</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            {signedContracts.length}
-          </div>
-          <div className="text-sm text-gray-800">Signed Contracts</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            ${(guaranteedValue / 1000).toFixed(1)}K
-          </div>
-          <div className="text-sm text-gray-800">Guaranteed Value</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            ${(signedContractValue / 1000).toFixed(1)}K
-          </div>
-          <div className="text-sm text-gray-800">Projected Value</div>
-        </div>
-        <div className="bg-white border rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">
-            ${(actualRevenue / 1000).toFixed(1)}K
-          </div>
-          <div className="text-sm text-gray-800">Actual Revenue</div>
-        </div>
-      </div>
+        ))}
+      </dl>
 
-      {/* Success Banner */}
-      {athletes.length > 0 && (
-        <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg p-6 text-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold mb-1">Almost There!</h2>
-              <p className="text-green-100">
-                {athletes.length} athlete{athletes.length > 1 ? "s" : ""} ready
-                to sign contracts
-              </p>
-            </div>
-            <div className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Closed partnerships</div>
-          </div>
-        </div>
-      )}
-
-      {/* Filter Tabs */}
       {contracts.length > 0 && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => setFilter("all")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              filter === "all"
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            Active ({draftCount + sentCount + negotiatingCount})
-          </button>
-          <button
-            onClick={() => setFilter("draft")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              filter === "draft"
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            Draft ({draftCount})
-          </button>
-          <button
-            onClick={() => setFilter("sent")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              filter === "sent"
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            Sent ({sentCount})
-          </button>
-          <button
-            onClick={() => setFilter("negotiating")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              filter === "negotiating"
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            Negotiating ({negotiatingCount})
-          </button>
-          <button
-            onClick={() => setFilter("signed")}
-            className={`px-3 py-1.5 rounded text-sm ${
-              filter === "signed"
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-800"
-            }`}
-          >
-            Signed ({signedContracts.length})
-          </button>
+        <div className="inline-flex flex-wrap border border-brand-chrome bg-white">
+          {filters.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setFilter(item.id)}
+              aria-pressed={filter === item.id}
+              className={cn(
+                "min-h-10 px-4 text-sm",
+                filter === item.id ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-brand-paper"
+              )}
+            >
+              {item.label} ({item.count})
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Active Contracts */}
       {filteredContracts.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+        <section aria-labelledby="contracts-heading">
+          <h2 id="contracts-heading" className="pc-section-heading">
             {filter === "signed" ? "Signed Contracts" : "Active Contracts"}
           </h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
             {filteredContracts.map((contract) => (
-              <ContractCard
-                key={contract.id}
-                contract={contract}
-                onStatusChange={fetchData}
-              />
+              <ContractCard key={contract.id} contract={contract} onStatusChange={fetchData} />
             ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Athletes Needing Contracts */}
       {athletesWithoutContracts.length > 0 && filter === "all" && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Create Contract ({athletesWithoutContracts.length})
+        <section aria-labelledby="create-heading">
+          <h2 id="create-heading" className="pc-section-heading">
+            Create Contract <span className="text-brand-muted">({athletesWithoutContracts.length})</span>
           </h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ul className="pc-surface mt-4 divide-y divide-brand-ink/10">
             {athletesWithoutContracts.map((athlete) => (
-              <div
-                key={athlete.id}
-                className="bg-white rounded-lg shadow border-2 border-green-200 p-4"
-              >
-                <div className="flex items-start gap-4">
-                  <AthleteAvatar
-                    name={athlete.name}
-                    profilePicUrl={athlete.profile_pic_url}
-                    size="xl"
-                  />
-                  <div className="flex-1">
-                    <Link
-                      href={`/athletes/${athlete.id}`}
-                      className="font-bold text-gray-900 hover:text-green-600 text-lg"
-                    >
+              <li key={athlete.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="lg" />
+                  <div className="min-w-0">
+                    <Link href={`/athletes/${athlete.id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
                       {athlete.name}
                     </Link>
-                    <div className="text-sm text-gray-800">{athlete.sport}</div>
-                    {athlete.instagram_handle && (
-                      <div className="text-sm text-blue-600">
-                        @{athlete.instagram_handle}
-                      </div>
-                    )}
-                    {athlete.follower_count && (
-                      <div className="text-lg font-bold text-green-600 mt-1">
-                        {(athlete.follower_count / 1000).toFixed(0)}K followers
-                      </div>
-                    )}
+                    <p className="mt-0.5 text-sm text-brand-muted">
+                      {athlete.sport}
+                      {athlete.instagram_handle && <> · @{athlete.instagram_handle}</>}
+                      {athlete.follower_count && <> · {(athlete.follower_count / 1000).toFixed(0)}K followers</>}
+                    </p>
                   </div>
                 </div>
-                <div className="mt-4">
-                  <button
-                    onClick={() => setSelectedAthlete(athlete)}
-                    className="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700"
-                  >
-                    Create Contract
-                  </button>
-                </div>
-              </div>
+                <button type="button" onClick={() => setSelectedAthlete(athlete)} className="pc-button-primary shrink-0">
+                  Create Contract
+                </button>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </section>
       )}
 
-      {/* Empty State */}
       {athletes.length === 0 && contracts.length === 0 && (
-        <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="text-4xl mb-3">📝</div>
-          <h3 className="font-semibold text-gray-800 mb-2">
-            No Pending Contracts
-          </h3>
-          <p className="text-sm text-gray-800">
-            Successful meetings will move prospects here for contract
-            finalization.
-          </p>
-          <Link
-            href="/pipeline/appointment"
-            className="inline-block mt-4 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
-          >
+        <div className="pc-surface p-8 text-center">
+          <p className="text-base font-semibold text-brand-ink">No pending contracts</p>
+          <p className="mt-1 text-sm text-brand-muted">Successful meetings will move prospects here for contract finalization.</p>
+          <Link href="/pipeline/appointment" className="pc-button-primary mt-4">
             Go to Appointments
           </Link>
         </div>
       )}
 
-      {/* Recent Signings */}
       {signedContracts.length > 0 && filter !== "signed" && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Recent Success Stories ({signedContracts.length})
-          </h2>
-          <div className="flex flex-wrap gap-3">
+        <section aria-labelledby="signings-heading">
+          <h2 id="signings-heading" className="pc-section-heading">Recent signings</h2>
+          <div className="mt-4 flex flex-wrap gap-2">
             {signedContracts.slice(0, 5).map((contract) => (
-              <div
-                key={contract.id}
-                className="flex items-center gap-2 bg-green-50 rounded-full px-3 py-1.5"
-              >
+              <div key={contract.id} className="flex items-center gap-2 border border-brand-line bg-brand-paper-bright px-2 py-1">
                 <AthleteAvatar
                   name={contract.athletes?.name || "?"}
                   profilePicUrl={contract.athletes?.profile_pic_url}
                   size="xs"
                 />
-                <span className="text-sm font-medium text-green-800">
-                  {contract.athletes?.name}
-                </span>
+                <span className="text-sm font-medium text-brand-ink">{contract.athletes?.name}</span>
               </div>
             ))}
           </div>
-          <Link
-            href="/historical"
-            className="inline-block mt-4 text-sm text-green-600 hover:underline"
-          >
-            View all success stories →
+          <Link href="/historical" className="mt-3 inline-block text-xs font-medium text-brand-blue hover:underline">
+            View all signed athletes
           </Link>
-        </div>
+        </section>
       )}
 
-      {/* Contract Modal */}
       {selectedAthlete && (
         <ContractModal
           athlete={selectedAthlete}

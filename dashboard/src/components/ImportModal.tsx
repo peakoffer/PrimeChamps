@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { cn } from "@/lib/utils";
 
 interface ImportResult {
   success: boolean;
@@ -100,70 +101,54 @@ export default function ImportModal({ isOpen, onClose, onComplete }: ImportModal
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Import Athletes from CSV</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Upload a CSV file with athlete data
-          </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-ink/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="import-title" className="w-full max-w-lg border border-brand-line bg-brand-paper-bright">
+        <div className="border-b border-brand-line px-5 py-4">
+          <h2 id="import-title" className="text-base font-semibold text-brand-ink">Import Athletes from CSV</h2>
+          <p className="mt-1 text-sm text-brand-muted">Upload a CSV file with athlete data</p>
         </div>
 
-        <div className="p-6 space-y-4">
-          {/* File Upload Area */}
+        <div className="space-y-4 px-5 py-4">
           <div
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              file
-                ? "border-green-300 bg-green-50"
-                : "border-gray-300 hover:border-blue-400 hover:bg-blue-50"
-            }`}
+            className={cn(
+              "cursor-pointer border border-dashed p-6 text-center",
+              file ? "border-brand-ink bg-brand-cyan/10" : "border-brand-chrome bg-white hover:border-brand-ink"
+            )}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              onChange={handleFileChange}
-              className="hidden"
-            />
+            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
             {file ? (
               <div>
-                <div className="text-4xl mb-2">📄</div>
-                <div className="font-medium text-gray-900">{file.name}</div>
-                <div className="text-sm text-gray-600">
-                  {(file.size / 1024).toFixed(1)} KB
-                </div>
+                <div className="font-medium text-brand-ink">{file.name}</div>
+                <div className="text-sm text-brand-muted">{(file.size / 1024).toFixed(1)} KB</div>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setFile(null);
                     setResult(null);
                   }}
-                  className="mt-2 text-sm text-red-600 hover:text-red-800"
+                  className="mt-2 text-xs font-medium text-red-700 hover:underline"
                 >
                   Remove
                 </button>
               </div>
             ) : (
               <div>
-                <div className="text-4xl mb-2">📁</div>
-                <div className="font-medium text-gray-900">Drop CSV file here</div>
-                <div className="text-sm text-gray-600">or click to browse</div>
+                <div className="font-medium text-brand-ink">Drop CSV file here</div>
+                <div className="text-sm text-brand-muted">or click to browse</div>
               </div>
             )}
           </div>
 
-          {/* Default Stage Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Default Pipeline Stage
-            </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-brand-ink">Default Pipeline Stage</span>
             <select
               value={defaultStage}
               onChange={(e) => setDefaultStage(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="min-h-10 w-full border border-brand-chrome bg-white px-3 text-sm text-brand-ink"
             >
               {STAGES.map((stage) => (
                 <option key={stage.id} value={stage.id}>
@@ -171,52 +156,48 @@ export default function ImportModal({ isOpen, onClose, onComplete }: ImportModal
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-500 mt-1">
-              Used when pipeline_stage column is missing
+            <span className="mt-1 block text-xs text-brand-muted">Used when pipeline_stage column is missing</span>
+          </label>
+
+          <div className="border-l-2 border-brand-line pl-3 text-xs text-brand-muted">
+            <p className="mb-1 text-sm font-medium text-brand-ink">Expected CSV Format</p>
+            <p>
+              Required columns: <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">name</code>
+            </p>
+            <p className="mt-1">
+              Optional: <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">sport</code>,{" "}
+              <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">instagram_handle</code>,{" "}
+              <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">email</code>,{" "}
+              <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">follower_count</code>,{" "}
+              <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">country</code>,{" "}
+              <code className="bg-brand-ink/5 px-1 font-mono text-brand-ink">pipeline_stage</code>
             </p>
           </div>
 
-          {/* CSV Format Info */}
-          <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="text-sm font-medium text-gray-900 mb-2">Expected CSV Format</h4>
-            <p className="text-xs text-gray-600 mb-2">
-              Required columns: <code className="bg-gray-200 px-1 rounded">name</code>
-            </p>
-            <p className="text-xs text-gray-600">
-              Optional: <code className="bg-gray-200 px-1 rounded">sport</code>,{" "}
-              <code className="bg-gray-200 px-1 rounded">instagram_handle</code>,{" "}
-              <code className="bg-gray-200 px-1 rounded">email</code>,{" "}
-              <code className="bg-gray-200 px-1 rounded">follower_count</code>,{" "}
-              <code className="bg-gray-200 px-1 rounded">country</code>,{" "}
-              <code className="bg-gray-200 px-1 rounded">pipeline_stage</code>
-            </p>
-          </div>
-
-          {/* Import Result */}
           {result && (
             <div
-              className={`rounded-lg p-4 ${
-                result.success ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"
-              }`}
+              role="status"
+              className={cn(
+                "border p-3 text-sm",
+                result.success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"
+              )}
             >
               {result.success ? (
                 <div>
-                  <div className="font-medium text-green-800 mb-2">Import Complete</div>
-                  <div className="text-sm text-green-700">
-                    <div>Imported: {result.imported} athletes</div>
-                    <div>Skipped (duplicates): {result.skipped}</div>
-                  </div>
+                  <p className="font-medium">Import Complete</p>
+                  <p className="mt-1">Imported: {result.imported} athletes</p>
+                  <p>Skipped (duplicates): {result.skipped}</p>
                   {result.imported_names && result.imported_names.length > 0 && (
-                    <div className="mt-2 text-xs text-green-600">
+                    <p className="mt-1 text-xs">
                       e.g. {result.imported_names.slice(0, 3).join(", ")}
                       {result.imported > 3 && "..."}
-                    </div>
+                    </p>
                   )}
                 </div>
               ) : (
                 <div>
-                  <div className="font-medium text-red-800 mb-2">Import Failed</div>
-                  <div className="text-sm text-red-700">
+                  <p className="font-medium">Import Failed</p>
+                  <div className="mt-1">
                     {result.errors.map((err, i) => (
                       <div key={i}>
                         {err.row > 0 ? `Row ${err.row}: ` : ""}
@@ -230,19 +211,12 @@ export default function ImportModal({ isOpen, onClose, onComplete }: ImportModal
           )}
         </div>
 
-        <div className="p-6 border-t bg-gray-50 flex justify-end gap-3">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800"
-          >
+        <div className="flex justify-end gap-2 border-t border-brand-line px-5 py-4">
+          <button type="button" onClick={handleClose} className="pc-button-secondary">
             {result?.success ? "Close" : "Cancel"}
           </button>
           {!result?.success && (
-            <button
-              onClick={handleImport}
-              disabled={!file || loading}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <button type="button" onClick={handleImport} disabled={!file || loading} className="pc-button-primary">
               {loading ? "Importing..." : "Import Athletes"}
             </button>
           )}

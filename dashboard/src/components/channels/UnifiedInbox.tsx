@@ -144,25 +144,25 @@ function ChannelSetup() {
   return (
     <div className="grid place-items-center border border-brand-ink/15 bg-brand-paper-bright px-6 py-10">
       <div className="max-w-xl text-center">
-        <span className={`mx-auto grid h-14 w-14 place-items-center rounded-2xl ${content.iconClass}`}>
+        <span className={`mx-auto grid h-14 w-14 place-items-center ${content.iconClass}`}>
           <Icon className="h-6 w-6" />
         </span>
-        <p className="mt-6 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+        <p className="mt-6 text-xs font-semibold uppercase tracking-[0.18em] text-brand-blue">
           {content.eyebrow}
         </p>
-        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-brand-ink">
           {content.title}
         </h2>
-        <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600">
+        <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-brand-muted">
           {content.copy}
         </p>
         <Link
           href={content.href}
-          className="mt-7 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+          className="mt-7 inline-flex items-center gap-2 bg-brand-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-ink/90"
         >
           {content.action}
         </Link>
-        <p className="mt-4 text-xs text-slate-500">{content.note}</p>
+        <p className="mt-4 text-xs text-brand-muted">{content.note}</p>
       </div>
     </div>
   );
@@ -427,28 +427,28 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
         <ChannelSetup />
       ) : (
         <div className="grid min-h-[680px] overflow-hidden border border-brand-ink/15 bg-brand-paper-bright lg:grid-cols-[390px_minmax(0,1fr)]">
-          <aside className={`${selectedId ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-slate-200 bg-white`}>
-            <div className="border-b border-slate-200 px-4 pb-3 pt-4">
+          <aside className={`${selectedId ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-brand-line bg-white`}>
+            <div className="border-b border-brand-line px-4 pb-3 pt-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-950">
+                  <p className="text-sm font-semibold text-brand-ink">
                     {activeChannel === "email" ? "Email inbox" : "Direct messages"}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-brand-muted">
                     {activeChannel === "email"
                       ? `${emailAccounts[0]?.email || "Microsoft Exchange"} · ${visibleConversations.length} shown`
                       : `${visibleConversations.length} conversations`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="hidden text-[11px] text-slate-500 sm:inline">
+                  <span className="hidden text-[11px] text-brand-muted sm:inline">
                     Auto-updates{lastRefreshedAt ? ` · ${lastRefreshedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
                   </span>
                   <button
                     type="button"
                     aria-label="Refresh conversations"
                     onClick={() => void loadInbox()}
-                    className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                    className="rounded-lg border border-brand-line p-2 text-brand-muted transition hover:bg-brand-cyan/10 hover:text-brand-ink"
                   >
                     <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                   </button>
@@ -456,18 +456,18 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
               </div>
 
               <div className="relative mt-3">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-chrome" />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={activeChannel === "email" ? "Search mail" : "Search conversations"}
                   aria-label={activeChannel === "email" ? "Search mail" : "Search conversations"}
-                  className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                  className="w-full border border-brand-chrome py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-blue focus:ring-4 focus:ring-brand-cyan/20"
                 />
               </div>
 
               {activeChannel === "email" ? (
-                <div className="mt-3 grid grid-cols-3 rounded-lg bg-slate-100 p-1">
+                <div className="mt-3 grid grid-cols-3 bg-brand-ink/5 p-1">
                   {([
                     ["focused", "Focused", emailCounts.focused],
                     ["all", "All mail", emailCounts.all],
@@ -477,9 +477,9 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                       key={view}
                       type="button"
                       onClick={() => switchEmailView(view)}
-                      className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${emailView === view ? "bg-white text-slate-950 shadow-sm" : "text-slate-700 hover:text-slate-950"}`}
+                      className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${emailView === view ? "bg-white text-brand-ink" : "text-brand-ink/80 hover:text-brand-ink"}`}
                     >
-                      {label} <span className="ml-1 text-[10px] text-slate-600">{count}</span>
+                      {label} <span className="ml-1 text-[10px] text-brand-muted">{count}</span>
                     </button>
                   ))}
                 </div>
@@ -490,7 +490,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                   aria-label="Connected account"
                   value={accountId}
                   onChange={(event) => { setAccountId(event.target.value); setSelectedId(null); setDetail(null); }}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-2 text-xs text-slate-600 outline-none focus:border-blue-500"
+                  className="min-w-0 flex-1 border border-brand-line px-2.5 py-2 text-xs text-brand-muted outline-none focus:border-brand-blue"
                 >
                   <option value="">All my accounts</option>
                   {workspaceAccounts.map((account) => (
@@ -508,7 +508,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               {loading ? (
-                <div className="flex items-center justify-center gap-2 p-10 text-sm text-slate-500">
+                <div className="flex items-center justify-center gap-2 p-10 text-sm text-brand-muted">
                   <LoaderCircle className="h-4 w-4 animate-spin" />
                   Loading conversations…
                 </div>
@@ -522,31 +522,31 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                     type="button"
                     key={conversation.id}
                     onClick={() => selectConversation(conversation.id)}
-                    className={`w-full border-b border-slate-100 px-4 py-3.5 text-left transition ${active ? "bg-blue-50/80 shadow-[inset_3px_0_0_#2563eb]" : "hover:bg-slate-50"}`}
+                    className={`w-full border-b border-brand-line px-4 py-3.5 text-left transition ${active ? "bg-brand-cyan/10 shadow-[inset_3px_0_0_#2563eb]" : "hover:bg-brand-cyan/10"}`}
                   >
                     <div className="flex items-start gap-3">
                       {email ? (
-                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold ${conversation.unreadCount ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold ${conversation.unreadCount ? "bg-brand-blue text-white" : "bg-brand-ink/5 text-brand-muted"}`}>
                           {contactInitial(conversation)}
                         </span>
                       ) : (
-                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${conversation.provider === "instagram" ? "bg-fuchsia-50 text-fuchsia-700" : "bg-sky-50 text-sky-700"}`}>
+                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${conversation.provider === "instagram" ? "bg-fuchsia-50 text-fuchsia-700" : "bg-brand-cyan/10 text-brand-blue"}`}>
                           <ProviderIcon provider={conversation.provider} />
                         </span>
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-2">
-                          <p className={`truncate text-sm ${conversation.unreadCount ? "font-semibold text-slate-950" : "font-medium text-slate-800"}`}>
+                          <p className={`truncate text-sm ${conversation.unreadCount ? "font-semibold text-brand-ink" : "font-medium text-brand-ink"}`}>
                             {contactLabel(conversation)}
                           </p>
-                          <span className="shrink-0 text-[11px] text-slate-400">
+                          <span className="shrink-0 text-[11px] text-brand-chrome">
                             {formatListTime(conversation.lastMessageAt)}
                           </span>
                         </div>
-                        <p className={`mt-0.5 truncate text-xs ${conversation.unreadCount ? "font-semibold text-slate-800" : "font-medium text-slate-500"}`}>
+                        <p className={`mt-0.5 truncate text-xs ${conversation.unreadCount ? "font-semibold text-brand-ink" : "font-medium text-brand-muted"}`}>
                           {conversation.subject || conversation.accountLabel}
                         </p>
-                        <p className="mt-1 truncate text-xs leading-5 text-slate-500">
+                        <p className="mt-1 truncate text-xs leading-5 text-brand-muted">
                           {cleanMailText(conversation.lastMessagePreview) || "No preview available"}
                         </p>
                         <div className="mt-2 flex items-center gap-2">
@@ -561,7 +561,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                             </span>
                           ) : null}
                           {conversation.unreadCount ? (
-                            <span className="ml-auto h-2 w-2 rounded-full bg-blue-600" aria-label="Unread" />
+                            <span className="ml-auto h-2 w-2 rounded-full bg-brand-blue" aria-label="Unread" />
                           ) : null}
                         </div>
                       </div>
@@ -575,16 +575,16 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                   {activeChannel === "instagram" ? (
                     <Instagram className="mx-auto h-8 w-8 text-fuchsia-300" />
                   ) : (
-                    <Inbox className="mx-auto h-8 w-8 text-slate-300" />
+                    <Inbox className="mx-auto h-8 w-8 text-brand-chrome" />
                   )}
-                  <p className="mt-3 font-medium text-slate-700">
+                  <p className="mt-3 font-medium text-brand-ink/80">
                     {activeChannel === "instagram"
                       ? "Instagram is connected"
                       : activeChannel === "email" && emailView === "focused"
                       ? "No focused mail in this view"
                       : "No conversations found"}
                   </p>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                  <p className="mt-1 text-sm leading-6 text-brand-muted">
                     {activeChannel === "instagram"
                       ? syncStatus || "Import the conversations Meta makes available, or wait for the next inbound message to arrive through the live webhook."
                       : activeChannel === "email" && emailView === "focused"
@@ -596,7 +596,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                       type="button"
                       onClick={() => void syncInstagram(connectedInstagramAccount)}
                       disabled={syncingAccountId === connectedInstagramAccount.id}
-                      className="mt-5 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                      className="mt-5 inline-flex items-center gap-2 bg-brand-ink px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-ink/90 disabled:opacity-60"
                     >
                       <RefreshCw className={`h-4 w-4 ${syncingAccountId === connectedInstagramAccount.id ? "animate-spin" : ""}`} />
                       {syncingAccountId === connectedInstagramAccount.id ? "Syncing Instagram" : "Sync from Instagram"}
@@ -607,17 +607,17 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
             </div>
           </aside>
 
-          <section className={`${selectedId ? "flex" : "hidden lg:flex"} min-w-0 flex-col bg-slate-50/50`}>
+          <section className={`${selectedId ? "flex" : "hidden lg:flex"} min-w-0 flex-col bg-brand-paper`}>
             {!selected ? (
               <div className="grid flex-1 place-items-center p-8 text-center">
                 <div className="max-w-sm">
-                  <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm">
+                  <span className="mx-auto grid h-12 w-12 place-items-center border border-brand-line bg-white text-brand-muted">
                     {activeChannel === "email" ? <Mail className="h-5 w-5" /> : <Instagram className="h-5 w-5" />}
                   </span>
-                  <h2 className="mt-4 text-lg font-semibold text-slate-900">
+                  <h2 className="mt-4 text-lg font-semibold text-brand-ink">
                     {activeChannel === "email" ? "Choose an email to read" : "Choose a conversation"}
                   </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                  <p className="mt-2 text-sm leading-6 text-brand-muted">
                     {activeChannel === "email"
                       ? "Focused keeps obvious automated and financial notices out of the way. All mail is always one click away."
                       : "Pick a conversation on the left to read and reply."}
@@ -637,50 +637,50 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
               </div>
             ) : (
               <>
-                <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+                <div className="border-b border-brand-line bg-white px-4 py-4 sm:px-6">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex min-w-0 items-start gap-3">
                       <button
                         type="button"
                         aria-label="Back to conversations"
                         onClick={() => { setSelectedId(null); setDetail(null); }}
-                        className="mt-1 rounded-lg p-1 text-slate-500 hover:bg-slate-100 lg:hidden"
+                        className="mt-1 p-1 text-brand-muted hover:bg-brand-ink/5 lg:hidden"
                       >
                         <ChevronLeft className="h-5 w-5" />
                       </button>
-                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${isEmailThread ? "bg-blue-600 text-sm font-semibold text-white" : selected.provider === "instagram" ? "bg-fuchsia-50 text-fuchsia-700" : "bg-sky-50 text-sky-700"}`}>
+                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${isEmailThread ? "bg-brand-blue text-sm font-semibold text-white" : selected.provider === "instagram" ? "bg-fuchsia-50 text-fuchsia-700" : "bg-brand-cyan/10 text-brand-blue"}`}>
                         {isEmailThread ? contactInitial(selected) : <ProviderIcon provider={selected.provider} />}
                       </span>
                       <div className="min-w-0">
                         {isEmailThread ? (
                           <>
-                            <h2 className="truncate text-lg font-semibold tracking-tight text-slate-950">
+                            <h2 className="truncate text-lg font-semibold tracking-tight text-brand-ink">
                               {selected.subject || "(No subject)"}
                             </h2>
-                            <p className="mt-0.5 truncate text-sm text-slate-500">
+                            <p className="mt-0.5 truncate text-sm text-brand-muted">
                               {contactLabel(selected)}
                               {selected.participantAddress ? ` <${selected.participantAddress}>` : ""}
                             </p>
                           </>
                         ) : (
                           <>
-                            <h2 className="truncate font-semibold text-slate-950">{contactLabel(selected)}</h2>
-                            <p className="truncate text-sm text-slate-500">
+                            <h2 className="truncate font-semibold text-brand-ink">{contactLabel(selected)}</h2>
+                            <p className="truncate text-sm text-brand-muted">
                               {selected.accountLabel}{scope === "team" ? ` · ${accountOwners.get(selected.accountId) || "Team member"}` : ""}{selected.subject ? ` · ${selected.subject}` : ""}
                             </p>
                           </>
                         )}
                       </div>
                     </div>
-                    <span className="hidden rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize text-slate-600 sm:inline-flex">
+                    <span className="hidden rounded-full bg-brand-ink/5 px-2.5 py-1 text-xs font-medium capitalize text-brand-muted sm:inline-flex">
                       {selected.provider}
                     </span>
                   </div>
                 </div>
 
-                <div className={`min-h-0 flex-1 overflow-y-auto ${isEmailThread ? "bg-slate-100/70 px-4 py-5 sm:px-6" : "bg-slate-50/60 p-4 sm:p-6"}`}>
+                <div className={`min-h-0 flex-1 overflow-y-auto ${isEmailThread ? "bg-brand-ink/5 px-4 py-5 sm:px-6" : "bg-brand-paper p-4 sm:p-6"}`}>
                   {threadLoading ? (
-                    <div className="flex items-center justify-center gap-2 py-20 text-sm text-slate-500">
+                    <div className="flex items-center justify-center gap-2 py-20 text-sm text-brand-muted">
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                       Loading conversation…
                     </div>
@@ -695,26 +695,26 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                       ? message.recipients.join(", ") || selected.participantAddress || contactLabel(selected)
                       : detail.account.email || detail.account.account_label || "You";
                     return (
-                      <article key={message.id} className="mx-auto mb-4 max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                        <header className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                      <article key={message.id} className="mx-auto mb-4 max-w-4xl overflow-hidden border border-brand-line bg-white">
+                        <header className="flex flex-col gap-2 border-b border-brand-line px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                           <div className="flex min-w-0 items-start gap-3">
-                            <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold ${outbound ? "bg-slate-900 text-white" : "bg-blue-100 text-blue-700"}`}>
+                            <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold ${outbound ? "bg-brand-ink text-white" : "bg-brand-cyan/20 text-brand-blue"}`}>
                               {sender.trim().charAt(0).toUpperCase() || "?"}
                             </span>
                             <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-slate-900">{sender}</p>
-                              <p className="mt-0.5 truncate text-xs text-slate-500">to {recipients}</p>
+                              <p className="truncate text-sm font-semibold text-brand-ink">{sender}</p>
+                              <p className="mt-0.5 truncate text-xs text-brand-muted">to {recipients}</p>
                             </div>
                           </div>
-                          <time className="shrink-0 pl-12 text-xs text-slate-400 sm:pl-0">
+                          <time className="shrink-0 pl-12 text-xs text-brand-chrome sm:pl-0">
                             {formatMessageTime(message.sentAt || message.receivedAt || message.createdAt)}
                           </time>
                         </header>
                         <div className="px-5 py-6 sm:px-7">
                           {message.subject && detail.messages.length > 1 ? (
-                            <p className="mb-4 text-sm font-semibold text-slate-900">{message.subject}</p>
+                            <p className="mb-4 text-sm font-semibold text-brand-ink">{message.subject}</p>
                           ) : null}
-                          <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-800">
+                          <p className="whitespace-pre-wrap text-[15px] leading-7 text-brand-ink">
                             {cleanMailText(message.content)}
                           </p>
                         </div>
@@ -724,9 +724,9 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
 
                   {!threadLoading && !isEmailThread && detail?.messages.map((message) => (
                     <div key={message.id} className={`mb-4 flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-slate-950 text-white" : "rounded-bl-md border border-slate-200 bg-white text-slate-800"}`}>
+                      <div className={`max-w-[85%] px-4 py-3 sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-brand-ink text-white" : "rounded-bl-md border border-brand-line bg-white text-brand-ink"}`}>
                         <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
-                        <p className="mt-1.5 text-right text-[11px] text-slate-400">
+                        <p className="mt-1.5 text-right text-[11px] text-brand-chrome">
                           {formatListTime(message.sentAt || message.receivedAt || message.createdAt)}
                         </p>
                       </div>
@@ -734,26 +734,26 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                   ))}
                 </div>
 
-                <form onSubmit={sendReply} className="border-t border-slate-200 bg-white p-4 sm:p-5">
+                <form onSubmit={sendReply} className="border-t border-brand-line bg-white p-4 sm:p-5">
                   {!detail?.canDraft ? (
-                    <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <p className="mb-3 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       Team view is read-only. Only the person who connected this account can send from it.
                     </p>
                   ) : null}
                   {detail?.canDraft && !detail.canSend ? (
-                    <p className="mb-3 rounded-lg border border-brand-cyan/40 bg-brand-cyan/10 px-3 py-2 text-xs font-medium text-brand-ink">
+                    <p className="mb-3 border border-brand-cyan/40 bg-brand-cyan/10 px-3 py-2 text-xs font-medium text-brand-ink">
                       Draft-only mode. AI can prepare this reply, but no email or DM can be sent from Prime Champs.
                     </p>
                   ) : null}
                   {selected.provider === "instagram" ? (
-                    <p className="mb-3 text-xs text-slate-500">
+                    <p className="mb-3 text-xs text-brand-muted">
                       Instagram permits replies only after the contact messages the connected professional account, within Meta’s reply window.
                     </p>
                   ) : null}
-                  <div className={`overflow-hidden rounded-xl border border-slate-300 bg-white transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-100 ${isEmailThread ? "shadow-sm" : ""}`}>
+                  <div className={`overflow-hidden border border-brand-chrome bg-white transition focus-within:border-brand-blue focus-within:ring-4 focus-within:ring-brand-cyan/20 ${isEmailThread ? "shadow-sm" : ""}`}>
                     {isEmailThread ? (
-                      <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
-                        Reply to <span className="font-medium text-slate-700">{contactLabel(selected)}</span>
+                      <div className="border-b border-brand-line px-3 py-2 text-xs text-brand-muted">
+                        Reply to <span className="font-medium text-brand-ink/80">{contactLabel(selected)}</span>
                       </div>
                     ) : null}
                     <textarea
@@ -762,14 +762,14 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                       disabled={!detail?.canDraft || sending}
                       rows={isEmailThread ? 4 : 3}
                       placeholder={detail?.canDraft ? (isEmailThread ? "Draft an email reply…" : "Draft a reply…") : "Read-only team conversation"}
-                      className="block w-full resize-none border-0 px-3 py-3 text-sm leading-6 outline-none disabled:bg-slate-50"
+                      className="block w-full resize-none border-0 px-3 py-3 text-sm leading-6 outline-none disabled:bg-brand-paper"
                     />
-                    <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3 border-t border-brand-line px-3 py-2.5">
                       <button
                         type="button"
                         onClick={() => void draftReply()}
                         disabled={!detail?.canDraft || drafting}
-                        className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-brand-muted transition hover:bg-brand-cyan/10 disabled:opacity-50"
                       >
                         {drafting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
                         Draft with AI
@@ -777,7 +777,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                       <button
                         type="submit"
                         disabled={!detail?.canSend || sending || !composer.trim()}
-                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-2 bg-brand-blue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-ink disabled:opacity-50"
                       >
                         {sending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         {detail?.canSend ? (isEmailThread ? "Send email" : "Send reply") : "Sending off"}

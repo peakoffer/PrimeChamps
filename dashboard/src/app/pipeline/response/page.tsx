@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -20,7 +21,6 @@ type ResponseType = "positive" | "negative" | "question" | "no_response";
 export default function ResponseStagePage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<ResponseType | "all">("all");
 
   useEffect(() => {
     fetchAthletes();
@@ -68,141 +68,77 @@ export default function ResponseStagePage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-800">Loading...</div>
-      </div>
-    );
+    return <p className="p-6 text-sm text-brand-muted">Loading…</p>;
   }
 
   return (
-    <div className="space-y-4">
-      {/* Stage Navigation */}
+    <div className="space-y-6">
       <PipelineStageNav currentStage="response" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <header className="pc-page-header !mb-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            Response tracking
-          </h1>
-          <p className="text-gray-600">Monitor and categorize responses from outreach</p>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-yellow-700">{athletes.length}</div>
-          <div className="text-sm text-yellow-600">Awaiting Response</div>
-        </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-green-700">0</div>
-          <div className="text-sm text-green-600">Positive Today</div>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-blue-700">0</div>
-          <div className="text-sm text-blue-600">Questions</div>
-        </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <div className="text-3xl font-bold text-gray-800">0%</div>
-          <div className="text-sm text-gray-800">Response Rate</div>
-        </div>
-      </div>
-
-      {/* Filter Tabs */}
-      <div className="flex gap-2">
-        {[
-          { id: "all", label: "All", color: "gray" },
-          { id: "positive", label: "Positive", color: "green" },
-          { id: "question", label: "Questions", color: "blue" },
-          { id: "no_response", label: "No Response", color: "yellow" },
-          { id: "negative", label: "Declined", color: "red" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setFilter(tab.id as ResponseType | "all")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              filter === tab.id
-                ? `bg-${tab.color}-100 text-${tab.color}-700 border-2 border-${tab.color}-300`
-                : "bg-white text-gray-800 border border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Athletes List */}
-      {athletes.length === 0 ? (
-        <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-          <div className="mb-3 font-mono text-xs font-bold uppercase tracking-[0.16em] text-brand-blue">Inbox clear</div>
-          <h3 className="font-semibold text-gray-800 mb-2">No Prospects Awaiting Response</h3>
-          <p className="text-sm text-gray-800">
-            Send outreach messages to prospects to track their responses here.
+          <h1 className="pc-page-title">Responses</h1>
+          <p className="pc-page-description">
+            {athletes.length} {athletes.length === 1 ? "athlete is" : "athletes are"} waiting to reply. Mark how each one responded.
           </p>
-          <Link
-            href="/pipeline/reach-out"
-            className="inline-block mt-4 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700"
-          >
+        </div>
+      </header>
+
+      {athletes.length === 0 ? (
+        <div className="pc-surface p-8 text-center">
+          <p className="text-base font-semibold text-brand-ink">No prospects awaiting response</p>
+          <p className="mt-1 text-sm text-brand-muted">Send outreach messages to prospects to track their responses here.</p>
+          <Link href="/pipeline/reach-out" className="pc-button-primary mt-4">
             Go to Reach Out
           </Link>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="pc-surface overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b">
+            <thead className="border-b border-brand-line">
               <tr>
-                <th className="text-left px-4 py-3 text-sm font-medium text-gray-800">Prospect</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-gray-800">Sent</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-gray-800">Days Waiting</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-gray-800">Mark Response</th>
+                <th className="px-4 py-3 text-left">Prospect</th>
+                <th className="px-4 py-3 text-left">Mark Response</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-brand-ink/10">
               {athletes.map((athlete) => (
-                <tr key={athlete.id} className="hover:bg-gray-50">
+                <tr key={athlete.id} className="hover:bg-brand-paper">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <AthleteAvatar
-                        name={athlete.name}
-                        profilePicUrl={athlete.profile_pic_url}
-                        size="md"
-                      />
+                      <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="md" />
                       <div>
-                        <Link
-                          href={`/athletes/${athlete.id}`}
-                          className="font-medium text-gray-900 hover:text-yellow-600"
-                        >
+                        <Link href={`/athletes/${athlete.id}`} className="font-medium text-brand-ink hover:text-brand-blue">
                           {athlete.name}
                         </Link>
                         {athlete.instagram_handle && (
-                          <div className="text-sm text-gray-800">@{athlete.instagram_handle}</div>
+                          <div className="text-sm text-brand-muted">@{athlete.instagram_handle}</div>
                         )}
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-800">Today</td>
-                  <td className="px-4 py-3 text-sm text-gray-800">0 days</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => handleMarkResponse(athlete.id, "positive")}
-                        className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm hover:bg-green-200"
+                        className="pc-button-primary"
                         title="Move to Appointment"
                       >
                         Positive
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleMarkResponse(athlete.id, "question")}
-                        className="px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200"
+                        className="pc-button-secondary"
                         title="Has questions - needs follow-up"
                       >
                         Question
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleMarkResponse(athlete.id, "negative")}
-                        className="px-3 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200"
+                        className="pc-button-secondary !text-red-700 hover:!border-red-700"
                         title="Remove from pipeline"
                       >
                         Declined
@@ -216,16 +152,15 @@ export default function ResponseStagePage() {
         </div>
       )}
 
-      {/* Follow-up Reminder */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-        <h3 className="font-medium text-amber-800 mb-2">Follow-up Best Practices</h3>
-        <ul className="text-sm text-amber-700 space-y-1">
-          <li>• Wait 2-3 days before first follow-up</li>
-          <li>• Maximum 2-3 follow-up attempts</li>
-          <li>• Keep follow-ups short and value-focused</li>
-          <li>• If no response after 3 attempts, move on</li>
+      <section aria-labelledby="follow-up-heading" className="border-l-2 border-brand-line pl-4">
+        <h2 id="follow-up-heading" className="text-sm font-semibold text-brand-ink">Follow-up guidelines</h2>
+        <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-brand-muted">
+          <li>Wait 2-3 days before first follow-up</li>
+          <li>Maximum 2-3 follow-up attempts</li>
+          <li>Keep follow-ups short and value-focused</li>
+          <li>If no response after 3 attempts, move on</li>
         </ul>
-      </div>
+      </section>
     </div>
   );
 }

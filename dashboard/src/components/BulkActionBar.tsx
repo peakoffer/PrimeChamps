@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronDown, Download } from "lucide-react";
 
 interface BulkActionBarProps {
   count: number;
@@ -47,38 +48,26 @@ export default function BulkActionBar({
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700 p-4 z-50 shadow-lg">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
+    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/15 bg-brand-ink px-4 py-3">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="text-white font-medium">
+          <span className="text-sm font-medium text-white">
             {count} athlete{count !== 1 ? "s" : ""} selected
           </span>
-          <button
-            onClick={onClear}
-            className="text-gray-400 hover:text-white text-sm"
-            disabled={loading}
-          >
+          <button type="button" onClick={onClear} className="text-xs text-white/60 hover:text-white" disabled={loading}>
             Clear selection
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {allowedActions.includes("approve") && onApprove && (
-            <button
-              onClick={onApprove}
-              disabled={loading}
-              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
+            <button type="button" onClick={onApprove} disabled={loading} className="pc-button-primary">
               {loading ? "Processing..." : "Approve All"}
             </button>
           )}
 
           {allowedActions.includes("reject") && onReject && (
-            <button
-              onClick={onReject}
-              disabled={loading}
-              className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
+            <button type="button" onClick={onReject} disabled={loading} className="pc-button-secondary !text-red-700">
               Reject All
             </button>
           )}
@@ -86,23 +75,24 @@ export default function BulkActionBar({
           {allowedActions.includes("move") && onMove && stages && (
             <div className="relative">
               <button
+                type="button"
                 onClick={() => setShowMoveDropdown(!showMoveDropdown)}
                 disabled={loading}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                aria-expanded={showMoveDropdown}
+                className="pc-button-secondary"
               >
                 Move to...
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                <ChevronDown className="h-4 w-4" />
               </button>
 
               {showMoveDropdown && (
-                <div className="absolute bottom-full mb-2 right-0 bg-white rounded-lg shadow-xl border py-1 min-w-[180px]">
+                <div className="absolute bottom-full right-0 mb-2 min-w-[180px] border border-brand-line bg-brand-paper-bright py-1">
                   {stages.map((stage) => (
                     <button
                       key={stage.id}
+                      type="button"
                       onClick={() => handleMove(stage.id)}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="w-full px-4 py-2 text-left text-sm text-brand-ink hover:bg-brand-paper"
                     >
                       {stage.name}
                     </button>
@@ -113,14 +103,8 @@ export default function BulkActionBar({
           )}
 
           {allowedActions.includes("export") && onExport && (
-            <button
-              onClick={onExport}
-              disabled={loading}
-              className="px-4 py-2 bg-gray-700 text-white text-sm font-medium rounded-lg hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
+            <button type="button" onClick={onExport} disabled={loading} className="pc-button-secondary">
+              <Download className="h-4 w-4" />
               Export CSV
             </button>
           )}
@@ -129,25 +113,24 @@ export default function BulkActionBar({
             <div className="relative">
               {!showDeleteConfirm ? (
                 <button
+                  type="button"
                   onClick={() => setShowDeleteConfirm(true)}
                   disabled={loading}
-                  className="px-4 py-2 bg-red-800 text-white text-sm font-medium rounded-lg hover:bg-red-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="pc-button-secondary !text-red-700"
                 >
                   Delete
                 </button>
               ) : (
-                <div className="flex items-center gap-2 bg-red-900 rounded-lg px-3 py-1">
-                  <span className="text-white text-sm">Confirm?</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white">Confirm?</span>
                   <button
+                    type="button"
                     onClick={handleDelete}
-                    className="px-2 py-1 bg-red-600 text-white text-xs font-medium rounded hover:bg-red-500"
+                    className="pc-button-primary !border-red-700 !bg-red-700 !text-white hover:!bg-red-800"
                   >
                     Yes
                   </button>
-                  <button
-                    onClick={() => setShowDeleteConfirm(false)}
-                    className="px-2 py-1 bg-gray-600 text-white text-xs font-medium rounded hover:bg-gray-500"
-                  >
+                  <button type="button" onClick={() => setShowDeleteConfirm(false)} className="pc-button-secondary">
                     No
                   </button>
                 </div>

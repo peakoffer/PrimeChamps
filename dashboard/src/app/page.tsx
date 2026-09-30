@@ -10,7 +10,7 @@ import {
   Inbox,
   Network,
   Send,
-  Trophy,
+  Search,
   Users,
 } from "lucide-react";
 import type { Athlete } from "@/lib/supabase/types";
@@ -73,46 +73,32 @@ export default function Dashboard() {
 
   const statCards = [
     {
-      title: "Athlete records",
-      value: stats.totalAthletes,
-      subtitle: `${stats.enrichedAthletes} research-ready`,
-      href: "/athletes",
-      icon: Users,
-    },
-    {
-      title: "Needs enrichment",
-      value: stats.pendingEnrichment,
-      subtitle: "Profiles requiring data",
-      href: "/athletes?status=pending",
-      icon: FlaskConical,
-    },
-    {
       title: "Awaiting approval",
       value: stats.pendingApprovals,
-      subtitle: "Candidates and drafts",
+      subtitle: "Athletes ready for your yes or no",
       href: "/pipeline/approval",
       icon: CheckCircle2,
     },
     {
       title: "Messages sent",
       value: stats.messagesSent,
-      subtitle: `${stats.repliesReceived} replies received`,
+      subtitle: `${stats.repliesReceived} replies`,
       href: "/instagram",
       icon: Send,
     },
     {
-      title: "Response rate",
+      title: "Reply rate",
       value: responseRate,
-      subtitle: "Across active outreach",
+      subtitle: "Of messages sent",
       href: "/analytics",
       icon: Inbox,
     },
     {
-      title: "Sports covered",
-      value: stats.sportsCovered,
-      subtitle: "Active recruiting markets",
-      href: "/pipeline/research",
-      icon: Trophy,
+      title: "Athletes",
+      value: stats.totalAthletes,
+      subtitle: "In the CRM",
+      href: "/athletes",
+      icon: Users,
     },
   ];
 
@@ -120,11 +106,8 @@ export default function Dashboard() {
     <div>
       <header className="pc-page-header">
         <div>
-          <p className="pc-eyebrow">Operations overview</p>
-          <h1 className="pc-page-title">Command center</h1>
-          <p className="pc-page-description">
-            Move from sourced athlete to signed partnership without losing the evidence, conversation, or next action.
-          </p>
+          <h1 className="pc-page-title">Home</h1>
+          <p className="pc-page-description">Where things stand today.</p>
         </div>
         <div className="pc-header-actions">
           <Link href="/pipeline" className="pc-button-secondary">
@@ -132,13 +115,13 @@ export default function Dashboard() {
             Open pipeline
           </Link>
           <Link href="/pipeline/research" className="pc-button-primary">
-            <FlaskConical aria-hidden="true" className="h-4 w-4" />
-            Start research
+            <Search aria-hidden="true" className="h-4 w-4" />
+            Find athletes
           </Link>
         </div>
       </header>
 
-      <section aria-label="Key performance indicators" className="grid grid-cols-2 border-l border-t border-brand-ink/15 xl:grid-cols-3">
+      <section aria-label="Key performance indicators" className="grid grid-cols-2 border-l border-t border-brand-ink/15 xl:grid-cols-4">
         {statCards.map((stat) => (
           <DashboardMetric key={stat.title} {...stat} loading={loading} />
         ))}
@@ -147,11 +130,10 @@ export default function Dashboard() {
       <section className="pc-surface mt-7 overflow-hidden">
         <header className="flex flex-col gap-3 border-b border-brand-ink/15 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-brand-blue">Recently added</p>
-            <h2 className="pc-section-heading mt-1">Athlete activity</h2>
+            <h2 className="pc-section-heading">Recently added</h2>
           </div>
           <Link href="/athletes" className="inline-flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-brand-blue hover:text-brand-ink">
-            View athlete database <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+            All athletes <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
           </Link>
         </header>
 
@@ -160,11 +142,9 @@ export default function Dashboard() {
         ) : recentAthletes.length === 0 ? (
           <div className="px-6 py-16 text-center">
             <FlaskConical className="mx-auto h-7 w-7 text-brand-blue" aria-hidden="true" />
-            <h3 className="mt-4 font-display text-2xl font-bold uppercase text-brand-ink">No athletes in the workspace</h3>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-ink/60">
-              Run focused research to source qualified candidates and build the first review queue.
-            </p>
-            <Link href="/pipeline/research" className="pc-button-primary mt-5">Start research</Link>
+            <h3 className="mt-4 font-display text-2xl font-bold uppercase text-brand-ink">No athletes yet</h3>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-ink/60">Find athletes to fill your first review list.</p>
+            <Link href="/pipeline/research" className="pc-button-primary mt-5">Find athletes</Link>
           </div>
         ) : (
           <div className="divide-y divide-brand-ink/10">

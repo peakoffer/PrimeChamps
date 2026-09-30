@@ -399,8 +399,8 @@ function SegmentedChoice<T extends string>({
           onClick={() => onChange(option.value)}
           className={`rounded-lg border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
             value === option.value
-              ? "border-zinc-200 bg-zinc-100 text-zinc-950"
-              : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+              ? "border-brand-line bg-brand-cyan text-brand-ink"
+              : "border-brand-line bg-brand-paper-bright text-brand-muted hover:border-brand-ink hover:text-brand-ink"
           }`}
         >
           {option.label}
@@ -1190,26 +1190,26 @@ export default function ResearchBenchmarkPage() {
   );
 
   return (
-    <main className="min-h-screen bg-[#090909] text-zinc-100">
+    <main className="min-h-screen bg-brand-paper text-brand-ink">
       <div className="mx-auto max-w-[1500px] px-5 py-6 lg:px-8">
-        <header className="mb-6 flex flex-col gap-4 border-b border-zinc-800 pb-6 lg:flex-row lg:items-end lg:justify-between">
+        <header className="mb-6 flex flex-col gap-4 border-b border-brand-line pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <Link href="/pipeline/research" className="mb-4 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200">
-              <ArrowLeft className="h-4 w-4" /> Research
+            <Link href="/admin/research-lab" className="mb-4 inline-flex items-center gap-2 text-sm text-brand-muted hover:text-brand-ink">
+              <ArrowLeft className="h-4 w-4" /> Research lab
             </Link>
             <div className="flex items-center gap-3">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-2.5"><Database className="h-5 w-5" /></div>
+              <div className="rounded-xl border border-brand-line bg-white p-2.5"><Database className="h-5 w-5" /></div>
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight">Golden benchmark</h1>
-                <p className="mt-1 text-sm text-zinc-500">Fit first. Outcome second. Point-in-time evidence only.</p>
+                <h1 className="pc-page-title">Accuracy checks</h1>
+                <p className="pc-page-description">Test the research agent against past OnlyFans decisions, using only evidence from before each decision.</p>
               </div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/api/research/golden-records?format=csv-template" className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700">
+            <Link href="/api/research/golden-records?format=csv-template" className="inline-flex items-center gap-2 border border-brand-line px-3 py-2 text-sm text-brand-ink/80 hover:border-brand-ink">
               <Download className="h-4 w-4" /> CSV template
             </Link>
-            <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700 ${working ? "pointer-events-none opacity-50" : ""}`}>
+            <label className={`inline-flex cursor-pointer items-center gap-2 border border-brand-line px-3 py-2 text-sm text-brand-ink/80 hover:border-brand-ink ${working ? "pointer-events-none opacity-50" : ""}`}>
               <Upload className="h-4 w-4" /> Import CSV
               <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -1217,16 +1217,16 @@ export default function ResearchBenchmarkPage() {
                 event.currentTarget.value = "";
               }} />
             </label>
-            <button onClick={() => setShowNew(true)} className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700">
+            <button onClick={() => setShowNew(true)} className="inline-flex items-center gap-2 border border-brand-line px-3 py-2 text-sm text-brand-ink/80 hover:border-brand-ink">
               <Plus className="h-4 w-4" /> Add outcome
             </button>
-            <button disabled={working} onClick={() => void mutate({ action: "seed_historical", count: 40 })} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-50">
+            <button disabled={working} onClick={() => void mutate({ action: "seed_historical", count: 40 })} className="rounded-lg bg-brand-cyan px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-50">
               Seed signed sample
             </button>
-            <button disabled={working} onClick={() => void mutate({ action: "seed_challenge_set", count: 30 })} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-50">
+            <button disabled={working} onClick={() => void mutate({ action: "seed_challenge_set", count: 30 })} className="rounded-lg border border-brand-chrome px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-50">
               Seed challenge drafts
             </button>
-            <button disabled={working || summary.needsSportEnrichment === 0} onClick={() => void enrichMissingSports()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-50">
+            <button disabled={working || summary.needsSportEnrichment === 0} onClick={() => void enrichMissingSports()} className="rounded-lg border border-brand-chrome px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-50">
               Enrich missing sports
             </button>
           </div>
@@ -1241,21 +1241,21 @@ export default function ResearchBenchmarkPage() {
             { label: "Development archive", value: summary.development, detail: "Historical frozen cases across completed cohorts" },
             { label: "Held-out archive", value: summary.heldOut, detail: `${summary.lockedHeldOut} ever locked · ${summary.revealedHeldOut} revealed` },
           ].map((metric) => (
-            <div key={metric.label} className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{metric.label}</p>
+            <div key={metric.label} className="rounded-xl border border-brand-line bg-brand-paper-bright p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-brand-muted">{metric.label}</p>
               <p className="mt-2 text-2xl font-semibold">{metric.value}</p>
-              <p className="mt-1 text-xs text-zinc-600">{metric.detail}</p>
+              <p className="mt-1 text-xs text-brand-muted">{metric.detail}</p>
             </div>
           ))}
         </section>
 
-        <div className="mb-6 flex flex-col gap-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-4 text-sm text-amber-100/80 sm:flex-row sm:items-center sm:justify-between">
-          <p><strong className="font-medium text-amber-100">Dylan&apos;s 100-case outcome ledger is the benchmark source of truth.</strong> Signed and approved-but-not-signed are positive; rejected and stalled are negative. Outcomes stay out of every model prompt, and only dated pre-decision evidence is used as input.</p>
+        <div className="mb-6 flex flex-col gap-3 border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between">
+          <p><strong className="font-medium text-amber-800">Dylan&apos;s 100-case outcome ledger is the benchmark source of truth.</strong> Signed and approved-but-not-signed are positive; rejected and stalled are negative. Outcomes stay out of every model prompt, and only dated pre-decision evidence is used as input.</p>
           <div className="flex flex-wrap gap-2 sm:justify-end">
-            <Link href="/api/research/golden-records?format=blind-labeling-csv" className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100">
+            <Link href="/api/research/golden-records?format=blind-labeling-csv" className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800">
               Download blind worksheet
             </Link>
-            <label className={`whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 ${working ? "pointer-events-none opacity-40" : "cursor-pointer"}`}>
+            <label className={`whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 ${working ? "pointer-events-none opacity-40" : "cursor-pointer"}`}>
               Import blind labels
               <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -1263,7 +1263,7 @@ export default function ResearchBenchmarkPage() {
                 event.currentTarget.value = "";
               }} />
             </label>
-            <button disabled={working || evidenceSummary.readyFit < 8 || evidenceSummary.readyNotFit < 8 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.heldOut.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40">
+            <button disabled={working || evidenceSummary.readyFit < 8 || evidenceSummary.readyNotFit < 8 || summary.heldOutEligibleFit < 8 || summary.heldOutEligibleNotFit < 8 || benchmarkReadiness.activeCohortConflict || Boolean(benchmarkReadiness.heldOut.cohortVersion)} onClick={() => void mutate({ action: "assign_splits" })} className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 disabled:opacity-40">
               {evidenceSummary.readyFit >= 16 && evidenceSummary.readyNotFit >= 16
                 ? "Freeze full benchmark cohort"
                 : "Freeze 8 + 8 challenge set"}
@@ -1271,14 +1271,14 @@ export default function ResearchBenchmarkPage() {
             <button
               disabled={working || Boolean(activeEvidenceRun)}
               onClick={() => void reuseInstagramHistory()}
-              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+              className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 disabled:opacity-40"
             >
               Reuse Instagram history
             </button>
             <button
               disabled={working || Boolean(activeEvidenceRun) || !socialBladePlan.configured}
               onClick={() => void validateSocialBladeConnection()}
-              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+              className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 disabled:opacity-40"
             >
               Validate Social Blade (may use credits)
             </button>
@@ -1292,7 +1292,7 @@ export default function ResearchBenchmarkPage() {
                 : socialBladePlan.apifyPilotRecords.length === 0
                   ? "No remaining positive cutoff is inside the public 31-day window"
                   : undefined}
-              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+              className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 disabled:opacity-40"
             >
               {socialBladePlan.apifyPilotExhausted
                 ? "Public history pilot failed"
@@ -1314,7 +1314,7 @@ export default function ResearchBenchmarkPage() {
                       ? "No remaining positive has the identity, momentum, handle, and missing-audience combination required for a safe paid lookup"
                       : "Every currently eligible positive already has a checkpointed paid-history attempt"
                   : undefined}
-              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+              className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 disabled:opacity-40"
             >
               {loading
                 ? "Checking Social Blade…"
@@ -1331,7 +1331,7 @@ export default function ResearchBenchmarkPage() {
             <button
               disabled={working || Boolean(activeEvidenceRun) || archiveCoolingDown || excludedSignalRecoveryCount === 0 || nextExcludedSignalRecoveryRecords.length === 0}
               onClick={() => void recoverExcludedSignals()}
-              className="whitespace-nowrap rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-medium text-amber-100 disabled:opacity-40"
+              className="whitespace-nowrap border border-amber-300 px-3 py-2 text-xs font-medium text-amber-800 disabled:opacity-40"
             >
               {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
                 && activeEvidenceRun.checkpoint.benchmark_split === "excluded"
@@ -1342,7 +1342,7 @@ export default function ResearchBenchmarkPage() {
                     ? `Resume saved recovery (${nextExcludedSignalRecoveryRecords.length})`
                     : `Recover fresh positives (${nextExcludedSignalRecoveryRecords.length})`}
             </button>
-            <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
+            <button disabled={working || Boolean(activeEvidenceRun) || eligibleEvidenceRecords === 0} onClick={() => void prepareHistoricalEvidence()} className="whitespace-nowrap bg-amber-100 px-3 py-2 text-xs font-medium text-amber-950 disabled:opacity-40">
               {activeEvidenceRun
                 ? `Preparing ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
                 : evidencePreparationMode === "age_recovery"
@@ -1353,42 +1353,42 @@ export default function ResearchBenchmarkPage() {
         </div>
 
         {!loading && (!socialBladePlan.credentialStatus.usable || !socialBladePlan.apifyCredentialStatus.usable) && (
-          <div role="status" className="mb-6 rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3">
-            <p className="text-sm font-medium text-red-100">Historical audience providers need attention</p>
-            <div className="mt-2 grid gap-1 text-xs leading-5 text-red-200/70">
+          <div role="status" className="mb-6 border border-red-200 bg-red-50 px-4 py-3">
+            <p className="text-sm font-medium text-red-700">Historical audience providers need attention</p>
+            <div className="mt-2 grid gap-1 text-xs leading-5 text-red-700">
               {!socialBladePlan.credentialStatus.usable && (
-                <p><strong className="font-medium text-red-100">Social Blade:</strong> {socialBladePlan.credentialStatus.validationError}</p>
+                <p><strong className="font-medium text-red-700">Social Blade:</strong> {socialBladePlan.credentialStatus.validationError}</p>
               )}
               {!socialBladePlan.apifyCredentialStatus.usable && (
-                <p><strong className="font-medium text-red-100">Apify:</strong> {socialBladePlan.apifyCredentialStatus.validationError}</p>
+                <p><strong className="font-medium text-red-700">Apify:</strong> {socialBladePlan.apifyCredentialStatus.validationError}</p>
               )}
             </div>
-            <p className="mt-2 text-xs text-zinc-500">Lookup controls stay disabled. No provider request or credit charge will start until the credentials pass validation.</p>
+            <p className="mt-2 text-xs text-brand-muted">Lookup controls stay disabled. No provider request or credit charge will start until the credentials pass validation.</p>
           </div>
         )}
 
         {evidenceSummary.readyFit < 8 && evidenceSummary.readyNotFit >= 8 && (
-          <div className="mb-6 flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-6 flex flex-col gap-3 border border-brand-line bg-brand-paper-bright p-4 text-sm text-brand-ink/80 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-medium text-zinc-100">Benchmark blocked by historical evidence coverage</p>
-              <p className="mt-1 max-w-4xl text-zinc-500">
+              <p className="font-medium text-brand-ink">Benchmark blocked by historical evidence coverage</p>
+              <p className="mt-1 max-w-4xl text-brand-muted">
                 The negative side is ready, but only {evidenceSummary.readyFit} positive evidence packets pass every point-in-time gate. Broad provider searches are paused; recover the exact missing dated inputs from Dylan&apos;s emails and attachments instead.
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
               <Link
                 href="/api/research/golden-records?format=evidence-gap-csv"
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+                className="inline-flex items-center justify-center gap-2 border border-brand-chrome px-3 py-2 text-xs font-medium text-brand-ink hover:border-brand-ink"
               >
                 <Download className="h-4 w-4" /> Evidence gaps
               </Link>
               <Link
                 href="/api/research/golden-records?format=evidence-intake-csv"
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+                className="inline-flex items-center justify-center gap-2 border border-brand-chrome px-3 py-2 text-xs font-medium text-brand-ink hover:border-brand-ink"
               >
                 <Download className="h-4 w-4" /> Dated evidence worksheet
               </Link>
-              <label className={`inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-950 ${working ? "pointer-events-none opacity-40" : "cursor-pointer hover:bg-white"}`}>
+              <label className={`inline-flex items-center justify-center gap-2 bg-brand-cyan px-3 py-2 text-xs font-medium text-brand-ink ${working ? "pointer-events-none opacity-40" : "cursor-pointer hover:bg-white"}`}>
                 <Upload className="h-4 w-4" /> Import evidence
                 <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -1401,8 +1401,8 @@ export default function ResearchBenchmarkPage() {
         )}
 
         {latestEvidenceRun && (
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-500">
-            <span>Latest evidence run: <strong className="font-medium text-zinc-300">{titleize(latestEvidenceRun.status)}</strong> · {latestEvidenceRun.records_ready}/{latestEvidenceRun.records_processed} packets ready · {latestEvidenceRun.safe_claim_count} safe claims</span>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 border border-brand-line bg-brand-paper-bright px-4 py-3 text-xs text-brand-muted">
+            <span>Latest evidence run: <strong className="font-medium text-brand-ink/80">{titleize(latestEvidenceRun.status)}</strong> · {latestEvidenceRun.records_ready}/{latestEvidenceRun.records_processed} packets ready · {latestEvidenceRun.safe_claim_count} safe claims</span>
             <span>
               Discovery ceiling ${(latestEvidenceRun.max_apify_charge_microusd / 1_000_000).toFixed(2)} USD
               {latestEvidenceRun.checkpoint?.deep_discovery_model
@@ -1411,16 +1411,16 @@ export default function ResearchBenchmarkPage() {
               {latestEvidenceRun.checkpoint?.deep_discovery_error ? " · grounded search failed safely" : ""}
               {" · scoring tokens 0"}
             </span>
-            {latestEvidenceRun.error_message && <span className="w-full text-red-300/80">{latestEvidenceRun.error_message}</span>}
+            {latestEvidenceRun.error_message && <span className="w-full text-red-700">{latestEvidenceRun.error_message}</span>}
           </div>
         )}
 
-        <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+        <section className="mb-6 border border-brand-line bg-brand-paper-bright p-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">Development evaluation</p>
-              <h2 className="mt-2 text-base font-medium text-zinc-100">Latest Sonnet · bounded balanced runs · explicit cost ceilings</h2>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">
+              <p className="text-xs uppercase tracking-[0.18em] text-brand-muted">Development evaluation</p>
+              <h2 className="mt-2 text-base font-medium text-brand-ink">Latest Sonnet · bounded balanced runs · explicit cost ceilings</h2>
+              <p className="mt-1 text-xs leading-5 text-brand-muted">
                 {benchmarkReadiness.development.cohortVersion
                   ? benchmarkReadiness.development.replaySourceRunId
                     ? benchmarkReadiness.heldOut.total > 0
@@ -1434,7 +1434,7 @@ export default function ResearchBenchmarkPage() {
               <button
                 disabled={working || Boolean(activeEvidenceRun) || developmentSignalRecoveryCount === 0}
                 onClick={() => void recoverDevelopmentSignals()}
-                className="rounded-lg border border-amber-700/50 px-3 py-2 text-sm font-medium text-amber-100 disabled:opacity-40"
+                className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800 disabled:opacity-40"
               >
                 {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
                   ? `Recovering signals ${activeEvidenceRun.records_processed}/${activeEvidenceRun.record_ids.length}…`
@@ -1442,25 +1442,25 @@ export default function ResearchBenchmarkPage() {
               </button>
               {activeDevelopmentRun ? (
                 <>
-                  <button disabled={working || activeDevelopmentRun.status === "running"} onClick={() => void resumeDevelopmentBenchmark(activeDevelopmentRun.id)} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
+                  <button disabled={working || activeDevelopmentRun.status === "running"} onClick={() => void resumeDevelopmentBenchmark(activeDevelopmentRun.id)} className="rounded-lg border border-brand-chrome px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-40">
                     {activeDevelopmentRun.status === "failed" ? "Retry saved checkpoint" : "Score next case"}
                   </button>
                   {activeDevelopmentRun.status === "failed" && (
-                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg bg-brand-cyan px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-40">
                       Start fresh smoke test
                     </button>
                   )}
                 </>
               ) : (
                 <>
-                  <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 disabled:opacity-40">
+                  <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark()} className="rounded-lg border border-brand-chrome px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-40">
                     Start four-case smoke test
                   </button>
                   {(developmentSmokePassed || developmentSmokeSafeForFullCalibration)
                     && latestDevelopmentRun
                     && latestDevelopmentRun.result_count < benchmarkReadiness.development.total
                     && (
-                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(benchmarkReadiness.development.total, 1_500_000)} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">
+                    <button disabled={working || !benchmarkReadiness.canRunDevelopment} onClick={() => void startDevelopmentBenchmark(benchmarkReadiness.development.total, 1_500_000)} className="rounded-lg bg-brand-cyan px-3 py-2 text-sm font-medium text-brand-ink disabled:opacity-40">
                       {latestDevelopmentRun.calculated_metrics?.finalistsAbove80 === 0
                         ? `Expand to establish precision (${benchmarkReadiness.development.total})`
                         : latestDevelopmentRun.release_readiness.ready !== true
@@ -1475,7 +1475,7 @@ export default function ResearchBenchmarkPage() {
                   <button
                     disabled={working || Boolean(activeEvidenceRun)}
                     onClick={() => void recoverHeldOutSignals()}
-                    className="rounded-lg border border-amber-700/50 px-3 py-2 text-sm font-medium text-amber-100 disabled:opacity-40"
+                    className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800 disabled:opacity-40"
                   >
                     {activeEvidenceRun?.checkpoint?.preparation_mode === "signal_recovery"
                       && activeEvidenceRun.checkpoint.benchmark_split === "held_out"
@@ -1486,7 +1486,7 @@ export default function ResearchBenchmarkPage() {
                   <button
                     disabled={working || activeHeldOutRun.status === "running"}
                     onClick={() => void resumeHeldOutRelease(activeHeldOutRun.id)}
-                    className="rounded-lg border border-red-800 px-3 py-2 text-sm font-medium text-red-200 disabled:opacity-40"
+                    className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-40"
                   >
                     {activeHeldOutRun.status === "failed" ? "Retry held-out checkpoint" : "Score next held-out case"}
                   </button>
@@ -1494,7 +1494,7 @@ export default function ResearchBenchmarkPage() {
                   <button
                     disabled={working || !benchmarkReadiness.canRunHeldOut || latestDevelopmentRun?.release_readiness.ready !== true || heldOutSignalRecoveryCount > 0}
                     onClick={() => void startHeldOutRelease()}
-                    className="rounded-lg border border-red-800 px-3 py-2 text-sm font-medium text-red-200 disabled:opacity-40"
+                    className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-40"
                   >
                     Run one-time held-out release
                   </button>
@@ -1505,39 +1505,39 @@ export default function ResearchBenchmarkPage() {
               && latestDevelopmentRun?.status === "completed"
               && latestDevelopmentRun.release_readiness.ready !== true
               && (
-              <p className="mt-3 text-xs text-amber-300">
+              <p className="mt-3 text-xs text-amber-800">
                 Held-out remains locked: {latestDevelopmentRun.release_readiness.reasons.join("; ")}.
               </p>
             )}
           </div>
 
           {latestDevelopmentRun && (
-            <div className="mt-4 grid gap-3 border-t border-zinc-900 pt-4 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="mt-4 grid gap-3 border-t border-brand-line pt-4 sm:grid-cols-2 lg:grid-cols-6">
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Status</p>
-                <p className="mt-1 text-sm text-zinc-300">{titleize(latestDevelopmentRun.status)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-brand-muted">Status</p>
+                <p className="mt-1 text-sm text-brand-ink/80">{titleize(latestDevelopmentRun.status)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Progress</p>
-                <p className="mt-1 text-sm text-zinc-300">{latestDevelopmentRun.result_count} / {latestDevelopmentRun.metrics.case_ids?.length || 0}</p>
+                <p className="text-[11px] uppercase tracking-wide text-brand-muted">Progress</p>
+                <p className="mt-1 text-sm text-brand-ink/80">{latestDevelopmentRun.result_count} / {latestDevelopmentRun.metrics.case_ids?.length || 0}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Precision &gt;80</p>
-                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.precisionAbove80)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-brand-muted">Precision &gt;80</p>
+                <p className="mt-1 text-sm text-brand-ink/80">{percent(latestDevelopmentRun.calculated_metrics?.precisionAbove80)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Finalist audit</p>
-                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.finalistAuditPassRate)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-brand-muted">Finalist audit</p>
+                <p className="mt-1 text-sm text-brand-ink/80">{percent(latestDevelopmentRun.calculated_metrics?.finalistAuditPassRate)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Outcome agreement</p>
-                <p className="mt-1 text-sm text-zinc-300">{percent(latestDevelopmentRun.calculated_metrics?.outcomeAgreementRate)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-brand-muted">Outcome agreement</p>
+                <p className="mt-1 text-sm text-brand-ink/80">{percent(latestDevelopmentRun.calculated_metrics?.outcomeAgreementRate)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-600">Spend</p>
-                <p className="mt-1 text-sm text-zinc-300">${(latestDevelopmentRun.total_cost_microusd / 1_000_000).toFixed(3)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-brand-muted">Spend</p>
+                <p className="mt-1 text-sm text-brand-ink/80">${(latestDevelopmentRun.total_cost_microusd / 1_000_000).toFixed(3)}</p>
               </div>
-              <p className="sm:col-span-2 lg:col-span-6 text-xs text-zinc-600">
+              <p className="sm:col-span-2 lg:col-span-6 text-xs text-brand-muted">
                 {latestDevelopmentRun.metrics.provider && latestDevelopmentRun.metrics.model
                   ? `${titleize(latestDevelopmentRun.metrics.provider)} · ${latestDevelopmentRun.metrics.model}`
                   : "Model resolves when the run is created."}
@@ -1546,43 +1546,43 @@ export default function ResearchBenchmarkPage() {
             </div>
           )}
           {latestCompletedHeldOutRun?.calculated_metrics && (
-            <div className="mt-4 border-t border-zinc-900 pt-4">
+            <div className="mt-4 border-t border-brand-line pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">One-time held-out result</p>
-                  <p className="mt-1 text-sm font-medium text-emerald-300">
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">One-time held-out result</p>
+                  <p className="mt-1 text-sm font-medium text-emerald-700">
                     {latestCompletedHeldOutRun.release_readiness.ready ? "Production gates passed" : "Production gates not passed"}
                   </p>
                 </div>
-                <p className="text-xs text-zinc-600">Cohort is revealed and archive-only</p>
+                <p className="text-xs text-brand-muted">Cohort is revealed and archive-only</p>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Cases</p>
-                  <p className="mt-1 text-sm text-zinc-300">{latestCompletedHeldOutRun.result_count} / {latestCompletedHeldOutRun.metrics.case_ids?.length || 0}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">Cases</p>
+                  <p className="mt-1 text-sm text-brand-ink/80">{latestCompletedHeldOutRun.result_count} / {latestCompletedHeldOutRun.metrics.case_ids?.length || 0}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Finalists</p>
-                  <p className="mt-1 text-sm text-zinc-300">{latestCompletedHeldOutRun.calculated_metrics.finalistsAbove80}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">Finalists</p>
+                  <p className="mt-1 text-sm text-brand-ink/80">{latestCompletedHeldOutRun.calculated_metrics.finalistsAbove80}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Precision &gt;80</p>
-                  <p className="mt-1 text-sm text-zinc-300">{percent(latestCompletedHeldOutRun.calculated_metrics.precisionAbove80)}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">Precision &gt;80</p>
+                  <p className="mt-1 text-sm text-brand-ink/80">{percent(latestCompletedHeldOutRun.calculated_metrics.precisionAbove80)}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Finalist audit</p>
-                  <p className="mt-1 text-sm text-zinc-300">{percent(latestCompletedHeldOutRun.calculated_metrics.finalistAuditPassRate)}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">Finalist audit</p>
+                  <p className="mt-1 text-sm text-brand-ink/80">{percent(latestCompletedHeldOutRun.calculated_metrics.finalistAuditPassRate)}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Outcome agreement</p>
-                  <p className="mt-1 text-sm text-zinc-300">{percent(latestCompletedHeldOutRun.calculated_metrics.outcomeAgreementRate)}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">Outcome agreement</p>
+                  <p className="mt-1 text-sm text-brand-ink/80">{percent(latestCompletedHeldOutRun.calculated_metrics.outcomeAgreementRate)}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Spend</p>
-                  <p className="mt-1 text-sm text-zinc-300">${(latestCompletedHeldOutRun.total_cost_microusd / 1_000_000).toFixed(3)}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-brand-muted">Spend</p>
+                  <p className="mt-1 text-sm text-brand-ink/80">${(latestCompletedHeldOutRun.total_cost_microusd / 1_000_000).toFixed(3)}</p>
                 </div>
               </div>
-              <p className="mt-3 text-xs text-zinc-600">
+              <p className="mt-3 text-xs text-brand-muted">
                 {latestCompletedHeldOutRun.metrics.provider && latestCompletedHeldOutRun.metrics.model
                   ? `${titleize(latestCompletedHeldOutRun.metrics.provider)} · ${latestCompletedHeldOutRun.metrics.model}`
                   : "Model metadata unavailable."}
@@ -1592,22 +1592,22 @@ export default function ResearchBenchmarkPage() {
         </section>
 
         {showNew && (
-          <section className="mb-6 grid gap-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4 sm:grid-cols-[1fr_1fr_auto_auto]">
-            <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Athlete name" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500" />
-            <input value={newSport} onChange={(event) => setNewSport(event.target.value)} placeholder="Sport" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500" />
-            <button disabled={working || !newName.trim() || !newSport.trim()} onClick={() => void createManualRecord()} className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">Create</button>
-            <button onClick={() => setShowNew(false)} className="px-3 py-2 text-sm text-zinc-500">Cancel</button>
+          <section className="mb-6 grid gap-3 border border-brand-chrome bg-white p-4 sm:grid-cols-[1fr_1fr_auto_auto]">
+            <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Athlete name" className="rounded-lg border border-brand-chrome bg-brand-paper-bright px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+            <input value={newSport} onChange={(event) => setNewSport(event.target.value)} placeholder="Sport" className="rounded-lg border border-brand-chrome bg-brand-paper-bright px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+            <button disabled={working || !newName.trim() || !newSport.trim()} onClick={() => void createManualRecord()} className="rounded-lg bg-brand-cyan px-4 py-2 text-sm font-medium text-brand-ink disabled:opacity-40">Create</button>
+            <button onClick={() => setShowNew(false)} className="px-3 py-2 text-sm text-brand-muted">Cancel</button>
           </section>
         )}
 
-        {message && <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-300">{message}</div>}
+        {message && <div className="mb-4 border border-brand-line bg-brand-paper-bright px-4 py-3 text-sm text-brand-ink/80">{message}</div>}
 
         <div className="grid min-h-[620px] gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
-            <div className="border-b border-zinc-800 p-3">
-              <div className="grid grid-cols-5 gap-1 rounded-lg bg-zinc-900 p-1 text-xs">
+          <aside className="overflow-hidden border border-brand-line bg-brand-paper-bright">
+            <div className="border-b border-brand-line p-3">
+              <div className="grid grid-cols-5 gap-1 bg-white p-1 text-xs">
                 {(["needs_label", "conflicts", "ready", "usable", "all"] as const).map((value) => (
-                  <button key={value} onClick={() => setFilter(value)} className={`rounded-md px-2 py-1.5 ${filter === value ? "bg-zinc-700 text-white" : "text-zinc-500"}`}>
+                  <button key={value} onClick={() => setFilter(value)} className={`rounded-md px-2 py-1.5 ${filter === value ? "bg-brand-ink text-white" : "text-brand-muted"}`}>
                     {value === "needs_label" ? "Open" : titleize(value)}
                   </button>
                 ))}
@@ -1615,56 +1615,56 @@ export default function ResearchBenchmarkPage() {
             </div>
             <div className="max-h-[680px] overflow-y-auto">
               {loading ? (
-                <div className="flex items-center justify-center py-20 text-zinc-600"><RefreshCw className="h-5 w-5 animate-spin" /></div>
+                <div className="flex items-center justify-center py-20 text-brand-muted"><RefreshCw className="h-5 w-5 animate-spin" /></div>
               ) : visibleRecords.length === 0 ? (
-                <div className="p-8 text-center text-sm text-zinc-600">No records in this view.</div>
+                <div className="p-8 text-center text-sm text-brand-muted">No records in this view.</div>
               ) : visibleRecords.map((record) => (
-                <button key={record.id} onClick={() => setSelected(record)} className={`flex w-full items-center gap-3 border-b border-zinc-900 p-4 text-left ${selected?.id === record.id ? "bg-zinc-900" : "hover:bg-zinc-900/60"}`}>
+                <button key={record.id} onClick={() => setSelected(record)} className={`flex w-full items-center gap-3 border-b border-brand-line p-4 text-left ${selected?.id === record.id ? "bg-white" : "hover:bg-brand-cyan/10"}`}>
                   <span className={`h-2 w-2 rounded-full ${record.fit_label === "uncertain" ? "bg-amber-400" : record.benchmark_split === "excluded" ? "bg-blue-400" : "bg-emerald-400"}`} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{record.athlete_name}</span>
-                    <span className="mt-1 block truncate text-xs text-zinc-600">{record.sport} · {titleize(record.fit_label)}</span>
+                    <span className="mt-1 block truncate text-xs text-brand-muted">{record.sport} · {titleize(record.fit_label)}</span>
                   </span>
-                  <ChevronRight className="h-4 w-4 text-zinc-700" />
+                  <ChevronRight className="h-4 w-4 text-brand-muted" />
                 </button>
               ))}
             </div>
           </aside>
 
-          <section className="rounded-xl border border-zinc-800 bg-zinc-950">
+          <section className="rounded-xl border border-brand-line bg-brand-paper-bright">
             {!selected ? (
               <div className="flex min-h-[620px] flex-col items-center justify-center px-8 text-center">
-                <ShieldCheck className="h-8 w-8 text-zinc-700" />
+                <ShieldCheck className="h-8 w-8 text-brand-muted" />
                 <h2 className="mt-4 text-lg font-medium">Select a record to label</h2>
-                <p className="mt-2 max-w-md text-sm text-zinc-600">Complete fit and achievability before the outcome section appears. Use “Uncertain” when memory or point-in-time evidence is weak.</p>
+                <p className="mt-2 max-w-md text-sm text-brand-muted">Complete fit and achievability before the outcome section appears. Use “Uncertain” when memory or point-in-time evidence is weak.</p>
               </div>
             ) : (
               <div className="p-5 lg:p-7">
                 <div className="mb-7 flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">{selected.sport}</p>
+                    <p className="text-xs uppercase tracking-[0.18em] text-brand-muted">{selected.sport}</p>
                     <h2 className="mt-2 text-2xl font-semibold">{selected.athlete_name}</h2>
                   </div>
-                  <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-xs text-zinc-500">
+                  <span className="rounded-full border border-brand-line px-2.5 py-1 text-xs text-brand-muted">
                     {selectedLocked ? "Locked held out" : titleize(selected.benchmark_split)}
                   </span>
                 </div>
 
                 {selectedLocked && (
-                  <div className="mb-6 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4 text-sm text-emerald-100/80">
+                  <div className="mb-6 border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
                     This record is frozen in cohort {selected.benchmark_cohort_version || "unknown"}. Labels and evidence cannot be edited before the release evaluation is revealed.
                   </div>
                 )}
 
-                <div className={`mb-6 rounded-lg border p-4 text-sm ${selected.evidence_ready_for_freeze ? "border-emerald-900/50 bg-emerald-950/20 text-emerald-100/80" : "border-zinc-800 bg-zinc-900/50 text-zinc-400"}`}>
+                <div className={`mb-6 border p-4 text-sm ${selected.evidence_ready_for_freeze ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-brand-line bg-brand-paper text-brand-muted"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <strong className={selected.evidence_ready_for_freeze ? "font-medium text-emerald-100" : "font-medium text-zinc-200"}>
+                    <strong className={selected.evidence_ready_for_freeze ? "font-medium text-emerald-700" : "font-medium text-brand-ink"}>
                       {selected.evidence_ready_for_freeze ? "Point-in-time evidence packet ready" : "Point-in-time evidence packet not ready"}
                     </strong>
-                    <span className="text-xs text-zinc-500">{selected.safe_evidence_claim_count} claims · {selected.safe_evidence_source_count} independent sources</span>
+                    <span className="text-xs text-brand-muted">{selected.safe_evidence_claim_count} claims · {selected.safe_evidence_source_count} independent sources</span>
                   </div>
                   {!selected.evidence_ready_for_freeze && selected.evidence_blockers.length > 0 && (
-                    <p className="mt-2 text-xs leading-5 text-zinc-500">{selected.evidence_blockers.join(" · ")}</p>
+                    <p className="mt-2 text-xs leading-5 text-brand-muted">{selected.evidence_blockers.join(" · ")}</p>
                   )}
                 </div>
 
@@ -1697,20 +1697,20 @@ export default function ResearchBenchmarkPage() {
                     ]} />
                   </div>
 
-                  <div className="grid gap-4 border-t border-zinc-900 pt-6 md:grid-cols-2">
-                    <label className="text-sm text-zinc-400">Original decision date
-                      <input disabled={fitJudgmentLocked} type="date" value={dateValue(selected.decision_at)} onChange={(event) => setSelected({ ...selected, decision_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60" />
+                  <div className="grid gap-4 border-t border-brand-line pt-6 md:grid-cols-2">
+                    <label className="text-sm text-brand-muted">Original decision date
+                      <input disabled={fitJudgmentLocked} type="date" value={dateValue(selected.decision_at)} onChange={(event) => setSelected({ ...selected, decision_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink disabled:opacity-60" />
                     </label>
-                    <label className="text-sm text-zinc-400">Evidence cutoff
-                      <input disabled={fitJudgmentLocked} type="date" value={dateValue(selected.evidence_cutoff_at)} onChange={(event) => setSelected({ ...selected, evidence_cutoff_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60" />
+                    <label className="text-sm text-brand-muted">Evidence cutoff
+                      <input disabled={fitJudgmentLocked} type="date" value={dateValue(selected.evidence_cutoff_at)} onChange={(event) => setSelected({ ...selected, evidence_cutoff_at: event.target.value ? new Date(`${event.target.value}T12:00:00Z`).toISOString() : null })} className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink disabled:opacity-60" />
                     </label>
-                    <label className="text-sm text-zinc-400">Point-in-time reliability
-                      <select disabled={fitJudgmentLocked} value={selected.point_in_time_reliability} onChange={(event) => setSelected({ ...selected, point_in_time_reliability: event.target.value as GoldenRecord["point_in_time_reliability"] })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60">
+                    <label className="text-sm text-brand-muted">Point-in-time reliability
+                      <select disabled={fitJudgmentLocked} value={selected.point_in_time_reliability} onChange={(event) => setSelected({ ...selected, point_in_time_reliability: event.target.value as GoldenRecord["point_in_time_reliability"] })} className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink disabled:opacity-60">
                         <option value="unusable">Unusable</option><option value="partial">Partial</option><option value="strong">Strong</option>
                       </select>
                     </label>
-                    <label className="text-sm text-zinc-400">Decisive information publicly knowable?
-                      <select disabled={fitJudgmentLocked} value={selected.decisive_information_publicly_knowable === null ? "unknown" : String(selected.decisive_information_publicly_knowable)} onChange={(event) => setSelected({ ...selected, decisive_information_publicly_knowable: event.target.value === "unknown" ? null : event.target.value === "true" })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 disabled:opacity-60">
+                    <label className="text-sm text-brand-muted">Decisive information publicly knowable?
+                      <select disabled={fitJudgmentLocked} value={selected.decisive_information_publicly_knowable === null ? "unknown" : String(selected.decisive_information_publicly_knowable)} onChange={(event) => setSelected({ ...selected, decisive_information_publicly_knowable: event.target.value === "unknown" ? null : event.target.value === "true" })} className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink disabled:opacity-60">
                         <option value="unknown">Unknown</option><option value="true">Yes</option><option value="false">No</option>
                       </select>
                     </label>
@@ -1718,42 +1718,42 @@ export default function ResearchBenchmarkPage() {
 
                   {selected.outcome_masked ? (
                     selectedCanLockFit ? (
-                      <div className="flex flex-col gap-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-4 text-sm text-blue-100/80 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-3 border border-blue-900/50 bg-blue-950/20 p-4 text-sm text-blue-100/80 sm:flex-row sm:items-center sm:justify-between">
                         <p><strong className="font-medium text-blue-100">Fit assessment is ready to lock.</strong> This permanently freezes the pre-outcome judgment before revealing the historical result.</p>
-                        <button disabled={working} onClick={() => void lockFitAssessment()} className="whitespace-nowrap rounded-lg bg-blue-100 px-4 py-2 text-sm font-medium text-blue-950 disabled:opacity-40">
+                        <button disabled={working} onClick={() => void lockFitAssessment()} className="whitespace-nowrap bg-blue-100 px-4 py-2 text-sm font-medium text-blue-950 disabled:opacity-40">
                           Lock fit and reveal outcome
                         </button>
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-500">Complete fit, achievability, dates, public knowability, and point-in-time reliability before the outcome can be revealed.</div>
+                      <div className="rounded-lg border border-brand-line bg-brand-paper p-4 text-sm text-brand-muted">Complete fit, achievability, dates, public knowability, and point-in-time reliability before the outcome can be revealed.</div>
                     )
                   ) : (
-                    <div className="space-y-4 border-t border-zinc-900 pt-6">
-                      <div className="flex items-center gap-2 text-sm font-medium"><Check className="h-4 w-4 text-emerald-400" /> Fit judgment locked before outcome review.</div>
+                    <div className="space-y-4 border-t border-brand-line pt-6">
+                      <div className="flex items-center gap-2 text-sm font-medium"><Check className="h-4 w-4 text-emerald-700" /> Fit judgment locked before outcome review.</div>
                       <div className="grid gap-4 md:grid-cols-2">
-                        <label className="text-sm text-zinc-400">Final outcome
-                          <select value={selected.final_outcome || "unresolved"} onChange={(event) => setSelected({ ...selected, final_outcome: event.target.value as NonNullable<GoldenRecord["final_outcome"]> })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                        <label className="text-sm text-brand-muted">Final outcome
+                          <select value={selected.final_outcome || "unresolved"} onChange={(event) => setSelected({ ...selected, final_outcome: event.target.value as NonNullable<GoldenRecord["final_outcome"]> })} className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink">
                             {(["signed", "signed_underperformed", "non_signing", "onlyfans_rejected", "stalled", "unresolved"] as const).map((value) => <option key={value} value={value}>{titleize(value)}</option>)}
                           </select>
                         </label>
-                        <label className="text-sm text-zinc-400">Primary reason
-                          <select value={selected.primary_reason || "unknown"} onChange={(event) => setSelected({ ...selected, primary_reason: event.target.value })} className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+                        <label className="text-sm text-brand-muted">Primary reason
+                          <select value={selected.primary_reason || "unknown"} onChange={(event) => setSelected({ ...selected, primary_reason: event.target.value })} className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink">
                             {(["fit", "price_economics", "terms", "timing", "interest", "representation", "eligibility", "brand_risk", "performance", "reach", "other", "unknown"]).map((value) => <option key={value} value={value}>{titleize(value)}</option>)}
                           </select>
                         </label>
                       </div>
-                      <label className="block text-sm text-zinc-400">One-line explanation
-                        <textarea value={selected.explanation || ""} onChange={(event) => setSelected({ ...selected, explanation: event.target.value })} rows={3} placeholder="Why it worked or did not work, without rewriting the past from hindsight." className="mt-2 w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 outline-none focus:border-zinc-600" />
+                      <label className="block text-sm text-brand-muted">One-line explanation
+                        <textarea value={selected.explanation || ""} onChange={(event) => setSelected({ ...selected, explanation: event.target.value })} rows={3} placeholder="Why it worked or did not work, without rewriting the past from hindsight." className="mt-2 w-full resize-none border border-brand-line bg-white px-3 py-2 text-brand-ink outline-none focus:border-brand-blue" />
                       </label>
-                      <label className="block text-sm text-zinc-400">Supporting internal note or record
-                        <input value={selected.internal_record_reference || ""} onChange={(event) => setSelected({ ...selected, internal_record_reference: event.target.value })} placeholder="CRM note, shared document, email thread, or deal record reference" className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200 outline-none focus:border-zinc-600" />
+                      <label className="block text-sm text-brand-muted">Supporting internal note or record
+                        <input value={selected.internal_record_reference || ""} onChange={(event) => setSelected({ ...selected, internal_record_reference: event.target.value })} placeholder="CRM note, shared document, email thread, or deal record reference" className="mt-2 w-full border border-brand-line bg-white px-3 py-2 text-brand-ink outline-none focus:border-brand-blue" />
                       </label>
                     </div>
                   )}
 
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-900 pt-6">
-                    <button disabled={working || selectedLocked} onClick={() => void saveSelected(false)} className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 disabled:opacity-40">Save draft</button>
-                    <button disabled={working || !selectedCanComplete} onClick={() => void saveSelected(true)} className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40">Complete label</button>
+                  <div className="flex flex-wrap justify-end gap-2 border-t border-brand-line pt-6">
+                    <button disabled={working || selectedLocked} onClick={() => void saveSelected(false)} className="rounded-lg border border-brand-line px-4 py-2 text-sm text-brand-ink/80 disabled:opacity-40">Save draft</button>
+                    <button disabled={working || !selectedCanComplete} onClick={() => void saveSelected(true)} className="rounded-lg bg-brand-cyan px-4 py-2 text-sm font-medium text-brand-ink disabled:opacity-40">Complete label</button>
                   </div>
                 </fieldset>
               </div>

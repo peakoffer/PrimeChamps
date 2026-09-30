@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import QuickReplyPicker from "./QuickReplyPicker";
 
 interface AthleteData {
@@ -70,44 +72,34 @@ export default function ComposeBox({
   };
 
   return (
-    <div className="border-t bg-white p-4">
-      {/* Direction Toggle */}
-      <div className="flex items-center gap-4 mb-3">
-        <span className="text-sm text-gray-600">Log as:</span>
-        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setDirection("outbound")}
-            className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-              direction === "outbound"
-                ? "bg-blue-500 text-white"
-                : "bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            Sent
-          </button>
-          <button
-            type="button"
-            onClick={() => setDirection("inbound")}
-            className={`px-3 py-1.5 text-sm font-medium border-l transition-colors ${
-              direction === "inbound"
-                ? "bg-green-500 text-white"
-                : "bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            Received
-          </button>
+    <div className="border-t border-brand-line bg-brand-paper-bright p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <span className="text-xs font-medium text-brand-muted">Log as:</span>
+        <div className="inline-flex border border-brand-chrome bg-white">
+          {(["outbound", "inbound"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setDirection(value)}
+              aria-pressed={direction === value}
+              className={cn(
+                "px-3 py-1.5 text-sm",
+                direction === value ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-brand-paper"
+              )}
+            >
+              {value === "outbound" ? "Sent" : "Received"}
+            </button>
+          ))}
         </div>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-brand-muted">
           {direction === "outbound"
             ? "Message you sent to the athlete"
             : "Message received from the athlete"}
         </span>
       </div>
 
-      {/* Input Area */}
       <div className="flex items-end gap-2">
-        <div className="flex-1 relative">
+        <div className="relative flex-1">
           <textarea
             ref={textareaRef}
             value={message}
@@ -116,45 +108,22 @@ export default function ComposeBox({
             placeholder={placeholder}
             disabled={disabled || sending}
             rows={1}
-            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 pr-24 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+            className="w-full resize-none border border-brand-chrome bg-white px-3 py-2.5 pr-24 text-sm text-brand-ink disabled:cursor-not-allowed disabled:bg-brand-paper"
             style={{ minHeight: "44px" }}
           />
-          <div className="absolute right-2 bottom-2">
-            <QuickReplyPicker
-              onSelect={handleTemplateSelect}
-              athleteData={athleteData}
-            />
+          <div className="absolute bottom-2 right-2">
+            <QuickReplyPicker onSelect={handleTemplateSelect} athleteData={athleteData} />
           </div>
         </div>
 
         <button
+          type="button"
           onClick={handleSend}
           disabled={!message.trim() || disabled || sending}
-          className={`px-6 py-2.5 rounded-xl font-medium transition-colors ${
-            direction === "outbound"
-              ? "bg-blue-500 hover:bg-blue-600 text-white disabled:bg-blue-300"
-              : "bg-green-500 hover:bg-green-600 text-white disabled:bg-green-300"
-          } disabled:cursor-not-allowed`}
+          className="pc-button-primary min-h-[44px]"
         >
           {sending ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-            </span>
+            <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" />
           ) : direction === "outbound" ? (
             "Log Sent"
           ) : (
@@ -163,10 +132,7 @@ export default function ComposeBox({
         </button>
       </div>
 
-      {/* Help Text */}
-      <p className="text-xs text-gray-500 mt-2 text-center">
-        Press Enter to send, Shift+Enter for new line. Messages are logged for pattern analysis.
-      </p>
+      <p className="mt-2 text-xs text-brand-muted">Press Enter to log, Shift+Enter for a new line.</p>
     </div>
   );
 }

@@ -283,8 +283,8 @@ export default function HardeningClient({ isOwner }: { isOwner: boolean }) {
     <div className="space-y-5">
       <div className="pc-page-header !mb-0">
         <div>
-          <Link href="/pipeline/research" className="mb-3 inline-flex items-center gap-2 text-xs font-semibold text-brand-muted hover:text-brand-ink">
-            <ArrowLeft className="h-3.5 w-3.5" /> Research
+          <Link href="/admin/research-lab" className="mb-3 inline-flex items-center gap-2 text-xs font-semibold text-brand-muted hover:text-brand-ink">
+            <ArrowLeft className="h-3.5 w-3.5" /> Research lab
           </Link>
           <p className="pc-eyebrow">Owner controls · evaluation only</p>
           <h1 className="pc-page-title">Research Hardening</h1>

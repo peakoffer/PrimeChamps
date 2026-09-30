@@ -1,8 +1,9 @@
 "use client";
-import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
 import Link from "next/link";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -39,11 +40,11 @@ interface ContractCardProps {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  negotiating: "bg-yellow-100 text-yellow-700",
-  signed: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
+  draft: "bg-brand-ink/5 text-brand-muted",
+  sent: "bg-brand-ink/5 text-brand-ink",
+  negotiating: "bg-amber-50 text-amber-800",
+  signed: "bg-emerald-100 text-emerald-800",
+  rejected: "bg-red-50 text-red-700",
 };
 
 const STATUS_OPTIONS = [
@@ -113,171 +114,90 @@ export default function ContractCard({
     }).format(amount);
   };
 
+  const details: Array<[string, React.ReactNode]> = [["Type", <span key="type" className="capitalize">{contract.contract_type}</span>]];
+  if (contract.revenue_share_percent) details.push(["Revenue Share", `${contract.revenue_share_percent}%`]);
+  if (contract.monthly_guarantee) details.push(["Guarantee", `${formatCurrency(contract.monthly_guarantee)}/mo`]);
+  if (contract.total_contract_value != null) details.push(["Projected Value", formatCurrency(contract.total_contract_value)]);
+  if (contract.actual_revenue != null) details.push(["Actual Revenue", formatCurrency(contract.actual_revenue)]);
+  if (contract.renewal_date) details.push(["Renewal", new Date(contract.renewal_date).toLocaleDateString()]);
+  if (contract.contract_duration_months) details.push(["Duration", `${contract.contract_duration_months} months`]);
+  if (contract.start_date) details.push(["Start", new Date(contract.start_date).toLocaleDateString()]);
+  if (contract.signed_at) details.push(["Signed", new Date(contract.signed_at).toLocaleDateString()]);
+
   return (
-    <div
-      className={`bg-white rounded-lg shadow border-2 p-4 ${
-        contract.status === "signed" ? "border-green-300" : "border-gray-200"
-      }`}
-    >
-      {/* Header with athlete info */}
-      <div className="flex items-start gap-4">
-        <AthleteAvatar
-          name={athlete?.name || "?"}
-          profilePicUrl={athlete?.profile_pic_url}
-          size="xl"
-        />
-        <div className="flex-1">
-          <Link
-            href={`/athletes/${contract.athlete_id}`}
-            className="font-bold text-gray-900 hover:text-green-600 text-lg"
-          >
+    <div className={cn("pc-surface p-4", contract.status === "signed" && "!border-emerald-300")}>
+      <div className="flex items-start gap-3">
+        <AthleteAvatar name={athlete?.name || "?"} profilePicUrl={athlete?.profile_pic_url} size="lg" />
+        <div className="min-w-0 flex-1">
+          <Link href={`/athletes/${contract.athlete_id}`} className="font-semibold text-brand-ink hover:text-brand-blue">
             {athlete?.name || "Unknown Athlete"}
           </Link>
-          <div className="text-sm text-gray-800">{athlete?.sport}</div>
-          {athlete?.instagram_handle && (
-            <div className="text-sm text-blue-600">
-              @{athlete.instagram_handle}
-            </div>
-          )}
-          {athlete?.follower_count && (
-            <div className="text-lg font-bold text-green-600 mt-1">
-              {(athlete.follower_count / 1000).toFixed(0)}K followers
-            </div>
-          )}
+          <p className="mt-0.5 text-sm text-brand-muted">
+            {athlete?.sport}
+            {athlete?.instagram_handle && <> · @{athlete.instagram_handle}</>}
+            {athlete?.follower_count && <> · {(athlete.follower_count / 1000).toFixed(0)}K followers</>}
+          </p>
         </div>
         <span
-          className={`text-xs px-2 py-1 rounded capitalize ${
-            STATUS_COLORS[contract.status] || "bg-gray-100 text-gray-700"
-          }`}
+          className={cn(
+            "shrink-0 px-2 py-0.5 text-[11px] font-semibold capitalize",
+            STATUS_COLORS[contract.status] || "bg-brand-ink/5 text-brand-muted"
+          )}
         >
           {contract.status}
         </span>
       </div>
 
-      {/* Contract Details */}
-      <div className="mt-4 pt-4 border-t">
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <span className="text-gray-800">Type:</span>{" "}
-            <span className="font-medium capitalize">
-              {contract.contract_type}
-            </span>
-          </div>
-          {contract.revenue_share_percent && (
-            <div>
-              <span className="text-gray-800">Revenue Share:</span>{" "}
-              <span className="font-medium">
-                {contract.revenue_share_percent}%
-              </span>
+      <div className="mt-3 border-t border-brand-ink/10 pt-3">
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+          {details.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-xs text-brand-muted">{label}</dt>
+              <dd className="font-medium text-brand-ink">{value}</dd>
             </div>
-          )}
-          {contract.monthly_guarantee && (
-            <div>
-              <span className="text-gray-800">Guarantee:</span>{" "}
-              <span className="font-medium">
-                {formatCurrency(contract.monthly_guarantee)}/mo
-              </span>
-            </div>
-          )}
-          {contract.total_contract_value != null && (
-            <div>
-              <span className="text-gray-800">Projected Value:</span>{" "}
-              <span className="font-semibold text-green-700">{formatCurrency(contract.total_contract_value)}</span>
-            </div>
-          )}
-          {contract.actual_revenue != null && (
-            <div>
-              <span className="text-gray-800">Actual Revenue:</span>{" "}
-              <span className="font-medium">{formatCurrency(contract.actual_revenue)}</span>
-            </div>
-          )}
-          {contract.renewal_date && (
-            <div>
-              <span className="text-gray-800">Renewal:</span>{" "}
-              <span className="font-medium">{new Date(contract.renewal_date).toLocaleDateString()}</span>
-            </div>
-          )}
-          {contract.contract_duration_months && (
-            <div>
-              <span className="text-gray-800">Duration:</span>{" "}
-              <span className="font-medium">
-                {contract.contract_duration_months} months
-              </span>
-            </div>
-          )}
-          {contract.start_date && (
-            <div>
-              <span className="text-gray-800">Start:</span>{" "}
-              <span className="font-medium">
-                {new Date(contract.start_date).toLocaleDateString()}
-              </span>
-            </div>
-          )}
-          {contract.signed_at && (
-            <div>
-              <span className="text-gray-800">Signed:</span>{" "}
-              <span className="font-medium">
-                {new Date(contract.signed_at).toLocaleDateString()}
-              </span>
-            </div>
-          )}
-        </div>
+          ))}
+        </dl>
 
         {contract.notes && (
-          <p className="mt-3 text-sm text-gray-800 bg-gray-50 p-2 rounded">
-            {contract.notes}
-          </p>
+          <p className="mt-3 border-l-2 border-brand-line pl-3 text-sm text-brand-ink/80">{contract.notes}</p>
         )}
 
-        {/* Actions */}
         {contract.status !== "signed" && contract.status !== "rejected" && (
-          <div className="mt-4 space-y-2">
+          <div className="mt-4">
             {!showActions ? (
               <div className="flex gap-2">
-                <button
-                  onClick={handleSign}
-                  disabled={loading}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50"
-                >
+                <button type="button" onClick={handleSign} disabled={loading} className="pc-button-primary flex-1">
                   Mark as Signed
                 </button>
-                <button
-                  onClick={() => setShowActions(true)}
-                  className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg font-medium hover:bg-gray-200"
-                >
+                <button type="button" onClick={() => setShowActions(true)} className="pc-button-secondary">
                   Update Status
                 </button>
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="text-sm text-gray-800 font-medium">
-                  Update Status:
-                </div>
+                <p className="text-sm font-medium text-brand-ink">Update Status:</p>
                 <div className="flex flex-wrap gap-2">
-                  {STATUS_OPTIONS.filter(
-                    (opt) => opt.value !== contract.status
-                  ).map((option) => (
+                  {STATUS_OPTIONS.filter((opt) => opt.value !== contract.status).map((option) => (
                     <button
                       key={option.value}
+                      type="button"
                       onClick={() => handleStatusUpdate(option.value)}
                       disabled={loading}
-                      className="px-3 py-1.5 bg-gray-100 text-gray-800 rounded text-sm hover:bg-gray-200 disabled:opacity-50"
+                      className="pc-button-secondary"
                     >
                       {option.label}
                     </button>
                   ))}
                   <button
+                    type="button"
                     onClick={() => handleStatusUpdate("rejected")}
                     disabled={loading}
-                    className="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200 disabled:opacity-50"
+                    className="pc-button-secondary !text-red-700 hover:!border-red-700"
                   >
                     Rejected
                   </button>
                 </div>
-                <button
-                  onClick={() => setShowActions(false)}
-                  className="text-sm text-gray-800 hover:text-gray-900"
-                >
+                <button type="button" onClick={() => setShowActions(false)} className="text-xs font-medium text-brand-muted hover:text-brand-ink">
                   Cancel
                 </button>
               </div>

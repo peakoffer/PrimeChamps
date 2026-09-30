@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, CalendarClock, ExternalLink, Mail, Phone, RefreshCw, UserRound } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const stages = ["new", "reviewing", "qualified", "proposal", "won", "closed"] as const;
 type Stage = (typeof stages)[number];
@@ -79,74 +80,87 @@ function OpportunityCard({ opportunity, currentUserId, onSaved }: {
   };
 
   return (
-    <article id={opportunity.id} className="scroll-mt-24 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <article id={opportunity.id} className="pc-surface scroll-mt-24 p-4 sm:p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-semibold text-gray-950">{opportunity.company_name}</h2>
-            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+            <h2 className="text-lg font-semibold text-brand-ink">{opportunity.company_name}</h2>
+            <span className="bg-brand-ink/5 px-2 py-0.5 text-[11px] font-semibold text-brand-muted">
               {labelStage(opportunity.stage)}
             </span>
           </div>
-          <p className="mt-1 text-sm text-gray-600">
+          <p className="mt-0.5 text-xs text-brand-muted">
             Submitted {new Date(opportunity.created_at).toLocaleString()}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-brand-muted">
             {opportunity.owner_name ? `Owner: ${opportunity.owner_name}` : "Unassigned"}
           </span>
           {opportunity.owner_user_id === currentUserId ? (
-            <button onClick={() => update({ unassign: true })} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+            <button type="button" onClick={() => update({ unassign: true })} disabled={saving} className="pc-button-secondary">
               Unassign
             </button>
           ) : (
-            <button onClick={() => update({ assign_to_me: true })} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+            <button type="button" onClick={() => update({ assign_to_me: true })} disabled={saving} className="pc-button-secondary">
               Assign to me
             </button>
           )}
         </div>
       </div>
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="space-y-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-700">
-          <div className="flex items-start gap-2"><UserRound className="mt-0.5 h-4 w-4 text-gray-500" /><span><strong>{opportunity.contact_name}</strong>{opportunity.contact_role ? ` · ${opportunity.contact_role}` : ""}</span></div>
-          <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-gray-500" /><a className="text-blue-700 hover:underline" href={`mailto:${opportunity.contact_email}`}>{opportunity.contact_email}</a></div>
-          {opportunity.contact_phone && <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-gray-500" /><a className="text-blue-700 hover:underline" href={`tel:${opportunity.contact_phone}`}>{opportunity.contact_phone}</a></div>}
-          {opportunity.company_website && <div className="flex items-center gap-2"><Building2 className="h-4 w-4 text-gray-500" /><a className="inline-flex items-center gap-1 text-blue-700 hover:underline" href={opportunity.company_website} target="_blank" rel="noreferrer">Company site <ExternalLink className="h-3 w-3" /></a></div>}
-          <dl className="space-y-3 border-t border-gray-200 pt-4">
-            {opportunity.industry && <div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Industry</dt><dd className="mt-0.5">{opportunity.industry}</dd></div>}
-            {opportunity.target_sports && <div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Target sports</dt><dd className="mt-0.5 whitespace-pre-wrap">{opportunity.target_sports}</dd></div>}
-            {opportunity.target_audience && <div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Audience</dt><dd className="mt-0.5 whitespace-pre-wrap">{opportunity.target_audience}</dd></div>}
-            {opportunity.partnership_budget && <div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Budget</dt><dd className="mt-0.5">{opportunity.partnership_budget}</dd></div>}
-            {opportunity.partnership_timeline && <div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Timing</dt><dd className="mt-0.5">{opportunity.partnership_timeline}</dd></div>}
+      <div className="mt-4 grid gap-5 border-t border-brand-ink/10 pt-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="space-y-3 text-sm text-brand-ink">
+          <p>
+            <span className="font-semibold">{opportunity.contact_name}</span>
+            {opportunity.contact_role ? <span className="text-brand-muted"> · {opportunity.contact_role}</span> : null}
+          </p>
+          <div className="space-y-1">
+            <a className="block text-brand-blue hover:underline" href={`mailto:${opportunity.contact_email}`}>{opportunity.contact_email}</a>
+            {opportunity.contact_phone && <a className="block text-brand-blue hover:underline" href={`tel:${opportunity.contact_phone}`}>{opportunity.contact_phone}</a>}
+            {opportunity.company_website && (
+              <a className="inline-flex items-center gap-1 text-brand-blue hover:underline" href={opportunity.company_website} target="_blank" rel="noreferrer">
+                Company site <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+          <dl className="space-y-2 border-l-2 border-brand-line pl-3">
+            {opportunity.industry && <div><dt className="text-xs font-medium text-brand-muted">Industry</dt><dd>{opportunity.industry}</dd></div>}
+            {opportunity.target_sports && <div><dt className="text-xs font-medium text-brand-muted">Target sports</dt><dd className="whitespace-pre-wrap">{opportunity.target_sports}</dd></div>}
+            {opportunity.target_audience && <div><dt className="text-xs font-medium text-brand-muted">Audience</dt><dd className="whitespace-pre-wrap">{opportunity.target_audience}</dd></div>}
+            {opportunity.partnership_budget && <div><dt className="text-xs font-medium text-brand-muted">Budget</dt><dd>{opportunity.partnership_budget}</dd></div>}
+            {opportunity.partnership_timeline && <div><dt className="text-xs font-medium text-brand-muted">Timing</dt><dd>{opportunity.partnership_timeline}</dd></div>}
           </dl>
         </div>
 
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Campaign brief</p>
-          <p className="mt-2 whitespace-pre-wrap text-gray-800">{opportunity.campaign_goals || "No additional campaign detail provided."}</p>
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-medium text-gray-700">Stage
-              <select value={stage} onChange={(event) => setStage(event.target.value as Stage)} className="mt-1 block min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2">
+          <p className="text-xs font-medium text-brand-muted">Campaign brief</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-brand-ink/80">{opportunity.campaign_goals || "No additional campaign detail provided."}</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-brand-muted">Stage</span>
+              <select value={stage} onChange={(event) => setStage(event.target.value as Stage)} className="min-h-10 w-full border border-brand-chrome bg-white px-3 text-sm text-brand-ink">
                 {stages.map((item) => <option key={item} value={item}>{labelStage(item)}</option>)}
               </select>
             </label>
-            <label className="text-sm font-medium text-gray-700">Next action date
-              <input type="datetime-local" value={nextActionAt} onChange={(event) => setNextActionAt(event.target.value)} className="mt-1 block min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2" />
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-brand-muted">Next action date</span>
+              <input type="datetime-local" value={nextActionAt} onChange={(event) => setNextActionAt(event.target.value)} className="min-h-10 w-full border border-brand-chrome bg-white px-3 text-sm text-brand-ink" />
             </label>
           </div>
-          <label className="mt-4 block text-sm font-medium text-gray-700">Next action
-            <input value={nextAction} onChange={(event) => setNextAction(event.target.value)} placeholder="Example: Qualify budget and campaign timing" className="mt-1 block min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2" />
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-xs font-medium text-brand-muted">Next action</span>
+            <input value={nextAction} onChange={(event) => setNextAction(event.target.value)} placeholder="Example: Qualify budget and campaign timing" className="min-h-10 w-full border border-brand-chrome bg-white px-3 text-sm text-brand-ink" />
           </label>
-          <label className="mt-4 block text-sm font-medium text-gray-700">Internal notes
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2" />
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-xs font-medium text-brand-muted">Internal notes</span>
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full border border-brand-chrome bg-white px-3 py-2 text-sm text-brand-ink" />
           </label>
-          <div className="mt-4 flex items-center gap-3">
-            <button onClick={() => update()} disabled={saving} className="min-h-11 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+          <div className="mt-3 flex items-center gap-3">
+            <button type="button" onClick={() => update()} disabled={saving} className="pc-button-primary">
               {saving ? "Saving…" : "Save brief"}
             </button>
-            {message && <span className={`text-sm ${message === "Saved" ? "text-green-700" : "text-red-700"}`}>{message}</span>}
+            {message && <span role="status" className={cn("text-sm", message === "Saved" ? "text-emerald-700" : "text-red-700")}>{message}</span>}
           </div>
         </div>
       </div>
@@ -190,41 +204,52 @@ export default function BrandOpportunitiesPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <header className="pc-page-header !mb-0">
         <div>
-          <p className="text-sm font-medium uppercase tracking-wide text-blue-700">Inbound brands</p>
-          <h1 className="mt-1 text-3xl font-bold text-gray-950">Brand briefs</h1>
-          <p className="mt-2 max-w-2xl text-gray-600">Qualify website inquiries, assign an owner, and keep the next action visible.</p>
+          <h1 className="pc-page-title">Brand briefs</h1>
+          <p className="pc-page-description">Inquiries from brands on the website. Assign an owner and track the next step.</p>
         </div>
-        <button onClick={load} disabled={loading} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </button>
+        <div className="pc-header-actions">
+          <button type="button" onClick={load} disabled={loading} className="pc-button-secondary">
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /> Refresh
+          </button>
+        </div>
       </header>
 
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border bg-white p-4 shadow-sm"><div className="text-2xl font-bold text-gray-950">{stats.open}</div><div className="text-sm text-gray-600">Open</div></div>
-        <div className="rounded-xl border bg-white p-4 shadow-sm"><div className="text-2xl font-bold text-gray-950">{stats.qualified}</div><div className="text-sm text-gray-600">Qualified / proposal</div></div>
-        <div className="rounded-xl border bg-white p-4 shadow-sm"><div className="text-2xl font-bold text-gray-950">{stats.won}</div><div className="text-sm text-gray-600">Won</div></div>
+      <dl className="pc-surface grid grid-cols-3 divide-x divide-brand-ink/10">
+        <div className="px-4 py-3"><dt className="text-xs text-brand-muted">Open</dt><dd className="mt-1 text-2xl font-semibold text-brand-ink">{stats.open}</dd></div>
+        <div className="px-4 py-3"><dt className="text-xs text-brand-muted">Qualified / proposal</dt><dd className="mt-1 text-2xl font-semibold text-brand-ink">{stats.qualified}</dd></div>
+        <div className="px-4 py-3"><dt className="text-xs text-brand-muted">Won</dt><dd className="mt-1 text-2xl font-semibold text-brand-ink">{stats.won}</dd></div>
+      </dl>
+
+      <div className="flex overflow-x-auto">
+        <div className="inline-flex border border-brand-chrome bg-white">
+          {(["all", ...stages] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setFilter(item)}
+              aria-pressed={filter === item}
+              className={cn(
+                "min-h-10 whitespace-nowrap px-4 text-sm",
+                filter === item ? "bg-brand-ink text-white" : "text-brand-ink hover:bg-brand-paper"
+              )}
+            >
+              {labelStage(item)}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {(["all", ...stages] as const).map((item) => (
-          <button key={item} onClick={() => setFilter(item)} className={`min-h-11 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium ${filter === item ? "bg-blue-600 text-white" : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"}`}>
-            {labelStage(item)}
-          </button>
-        ))}
-      </div>
-
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}</div>}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {loading && !opportunities.length ? (
-        <div className="flex h-48 items-center justify-center text-gray-600"><RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading brand briefs…</div>
+        <p className="text-sm text-brand-muted">Loading brand briefs…</p>
       ) : filtered.length ? (
         <div className="space-y-4">{filtered.map((opportunity) => <OpportunityCard key={opportunity.id} opportunity={opportunity} currentUserId={currentUserId} onSaved={load} />)}</div>
       ) : (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
-          <CalendarClock className="mx-auto h-9 w-9 text-gray-400" />
-          <h2 className="mt-3 font-semibold text-gray-900">No brand briefs in this view</h2>
-          <p className="mt-1 text-sm text-gray-600">New brand submissions from prime-champs.com will appear here automatically.</p>
+        <div className="pc-surface p-8 text-center">
+          <p className="text-base font-semibold text-brand-ink">No brand briefs in this view</p>
+          <p className="mt-1 text-sm text-brand-muted">New brand submissions from prime-champs.com will appear here automatically.</p>
         </div>
       )}
     </div>

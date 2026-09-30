@@ -1,7 +1,8 @@
 "use client";
-import { AthleteAvatar } from "@/components/AthleteAvatar";
 
 import { useState } from "react";
+import { AthleteAvatar } from "@/components/AthleteAvatar";
+import { cn } from "@/lib/utils";
 
 interface Athlete {
   id: string;
@@ -54,6 +55,12 @@ const AVOID_SIMILAR = [
   { value: "no", label: "No, case-by-case basis", description: "This specific profile just wasn't right" },
   { value: "flag_pattern", label: "Flag as pattern to learn", description: "Help AI recognize this type faster" },
 ];
+
+const optionClass = (selected: boolean) =>
+  cn(
+    "flex cursor-pointer items-start gap-2 border p-3",
+    selected ? "border-brand-ink bg-brand-cyan/10" : "border-brand-line bg-white hover:border-brand-ink"
+  );
 
 export default function RejectionModal({ athlete, isOpen, onClose, onComplete }: RejectionModalProps) {
   const [loading, setLoading] = useState(false);
@@ -120,172 +127,125 @@ export default function RejectionModal({ athlete, isOpen, onClose, onComplete }:
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="p-6 border-b bg-red-50 sticky top-0">
-          <h2 className="text-lg font-semibold text-red-900">Reject Athlete</h2>
-          <p className="text-sm text-red-700 mt-1">
-            Help the research agent learn by explaining why {athlete.name} isn't a fit
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-ink/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="reject-title" className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-brand-line bg-brand-paper-bright">
+        <div className="border-b border-brand-line px-5 py-4">
+          <h2 id="reject-title" className="text-base font-semibold text-brand-ink">Reject Athlete</h2>
+          <p className="mt-1 text-sm text-brand-muted">
+            Help the research agent learn by explaining why {athlete.name} isn&apos;t a fit
           </p>
         </div>
 
-        {/* Athlete Info */}
-        <div className="p-6 border-b bg-gray-50">
-          <div className="flex items-center gap-4">
-            <AthleteAvatar
-              name={athlete.name}
-              profilePicUrl={athlete.profile_pic_url}
-              size="xl"
-              className="opacity-75"
-            />
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex items-center gap-3 border-b border-brand-line px-5 py-4">
+            <AthleteAvatar name={athlete.name} profilePicUrl={athlete.profile_pic_url} size="xl" className="opacity-75" />
             <div>
-              <div className="font-semibold text-lg text-gray-800">{athlete.name}</div>
-              <div className="text-gray-800">{athlete.sport}</div>
-              <div className="text-sm text-gray-800">
-                @{athlete.instagram_handle} • {athlete.follower_count ? `${(athlete.follower_count / 1000).toFixed(0)}K followers` : "Unknown followers"}
+              <div className="font-semibold text-brand-ink">{athlete.name}</div>
+              <div className="text-sm text-brand-muted">{athlete.sport}</div>
+              <div className="text-sm text-brand-muted">
+                @{athlete.instagram_handle} · {athlete.follower_count ? `${(athlete.follower_count / 1000).toFixed(0)}K followers` : "Unknown followers"}
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Form */}
-        <div className="p-6 space-y-6">
-          {error && (
-            <div className="p-3 bg-red-100 text-red-700 rounded-lg text-sm">{error}</div>
-          )}
+          <div className="space-y-5 px-5 py-4">
+            {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
-          {/* Primary Reason */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Primary Rejection Reason <span className="text-red-500">*</span>
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">
+                Primary Rejection Reason <span className="text-red-700">*</span>
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {REJECTION_REASONS.map((reason) => (
+                  <label key={reason.value} className={optionClass(primaryReason === reason.value)}>
+                    <input
+                      type="radio"
+                      name="primaryReason"
+                      value={reason.value}
+                      checked={primaryReason === reason.value}
+                      onChange={(e) => setPrimaryReason(e.target.value)}
+                      className="mt-0.5 accent-brand-blue"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-brand-ink">{reason.label}</div>
+                      <div className="text-xs text-brand-muted">{reason.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">Additional Issues (select all that apply)</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {SECONDARY_ISSUES.map((issue) => (
+                  <label key={issue.value} className={cn(optionClass(secondaryIssues.includes(issue.value)), "items-center")}>
+                    <input
+                      type="checkbox"
+                      checked={secondaryIssues.includes(issue.value)}
+                      onChange={() => toggleSecondaryIssue(issue.value)}
+                      className="accent-brand-blue"
+                    />
+                    <span className="text-sm text-brand-ink">{issue.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-brand-ink">Should the AI avoid similar profiles?</legend>
+              <div className="space-y-2">
+                {AVOID_SIMILAR.map((option) => (
+                  <label key={option.value} className={optionClass(avoidSimilar === option.value)}>
+                    <input
+                      type="radio"
+                      name="avoidSimilar"
+                      value={option.value}
+                      checked={avoidSimilar === option.value}
+                      onChange={(e) => setAvoidSimilar(e.target.value)}
+                      className="mt-0.5 accent-brand-blue"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-brand-ink">{option.label}</div>
+                      <div className="text-xs text-brand-muted">{option.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-brand-ink">What would make this profile approvable? (optional)</span>
+              <textarea
+                value={whatWouldHelp}
+                onChange={(e) => setWhatWouldHelp(e.target.value)}
+                placeholder="e.g., 'If they had more followers', 'If they were in a different sport', etc."
+                className="h-16 w-full resize-none border border-brand-chrome bg-white px-3 py-2 text-sm text-brand-ink"
+              />
+              <span className="mt-1 block text-xs text-brand-muted">Helps AI understand the threshold for approval</span>
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              {REJECTION_REASONS.map((reason) => (
-                <label
-                  key={reason.value}
-                  className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    primaryReason === reason.value
-                      ? "border-red-500 bg-red-50"
-                      : "border-gray-200 hover:border-red-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="primaryReason"
-                    value={reason.value}
-                    checked={primaryReason === reason.value}
-                    onChange={(e) => setPrimaryReason(e.target.value)}
-                    className="mt-0.5 text-red-600"
-                  />
-                  <div>
-                    <div className="font-medium text-sm">{reason.label}</div>
-                    <div className="text-xs text-gray-800">{reason.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
 
-          {/* Secondary Issues */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Additional Issues (select all that apply)
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-brand-ink">Additional Notes (optional)</span>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any other feedback for the research agent..."
+                className="h-20 w-full resize-none border border-brand-chrome bg-white px-3 py-2 text-sm text-brand-ink"
+              />
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              {SECONDARY_ISSUES.map((issue) => (
-                <label
-                  key={issue.value}
-                  className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    secondaryIssues.includes(issue.value)
-                      ? "border-red-400 bg-red-50"
-                      : "border-gray-200 hover:border-red-300"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={secondaryIssues.includes(issue.value)}
-                    onChange={() => toggleSecondaryIssue(issue.value)}
-                    className="text-red-600 rounded"
-                  />
-                  <span className="text-sm">{issue.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Avoid Similar */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Should the AI avoid similar profiles?
-            </label>
-            <div className="space-y-2">
-              {AVOID_SIMILAR.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    avoidSimilar === option.value
-                      ? "border-red-400 bg-red-50"
-                      : "border-gray-200 hover:border-red-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="avoidSimilar"
-                    value={option.value}
-                    checked={avoidSimilar === option.value}
-                    onChange={(e) => setAvoidSimilar(e.target.value)}
-                    className="mt-0.5 text-red-600"
-                  />
-                  <div>
-                    <div className="font-medium text-sm">{option.label}</div>
-                    <div className="text-xs text-gray-800">{option.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* What Would Help */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              What would make this profile approvable? (optional)
-            </label>
-            <textarea
-              value={whatWouldHelp}
-              onChange={(e) => setWhatWouldHelp(e.target.value)}
-              placeholder="e.g., 'If they had more followers', 'If they were in a different sport', etc."
-              className="w-full border rounded-lg px-3 py-2 text-sm h-16 resize-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-            />
-            <p className="text-xs text-gray-800 mt-1">Helps AI understand the threshold for approval</p>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-gray-800 mb-2">
-              Additional Notes (optional)
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Any other feedback for the research agent..."
-              className="w-full border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-            />
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-800 hover:text-gray-900"
-          >
+        <div className="flex justify-end gap-2 border-t border-brand-line px-5 py-4">
+          <button type="button" onClick={onClose} className="pc-button-secondary">
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={loading || !canSubmit}
-            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="pc-button-primary !border-red-700 !bg-red-700 !text-white hover:!bg-red-800"
           >
             {loading ? "Rejecting..." : "Reject Athlete"}
           </button>
