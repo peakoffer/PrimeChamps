@@ -432,12 +432,12 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-950">
-                    {activeChannel === "email" ? "Email inbox" : "All conversations"}
+                    {activeChannel === "email" ? "Email inbox" : "Direct messages"}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {activeChannel === "email"
                       ? `${emailAccounts[0]?.email || "Microsoft Exchange"} · ${visibleConversations.length} shown`
-                      : `${visibleConversations.length} conversations across channels`}
+                      : `${visibleConversations.length} conversations`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -620,7 +620,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                   <p className="mt-2 text-sm leading-6 text-slate-500">
                     {activeChannel === "email"
                       ? "Focused keeps obvious automated and financial notices out of the way. All mail is always one click away."
-                      : "Unified keeps the channel visible while bringing the full relationship into one place."}
+                      : "Pick a conversation on the left to read and reply."}
                   </p>
                   {activeChannel === "email" ? (
                     <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">

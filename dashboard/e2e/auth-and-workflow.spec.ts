@@ -124,6 +124,7 @@ test("durable research and draft-only outreach stay connected", async ({ page })
     }
 
     if (path === "/api/outreach/queue") {
+      if (url.searchParams.get("type") === "sent") return route.fulfill({ json: { items: [] } });
       return route.fulfill({
         json: {
           items: manuallyRecorded
@@ -141,6 +142,17 @@ test("durable research and draft-only outreach stay connected", async ({ page })
                 },
               ],
           stats: { pendingDms: manuallyRecorded ? 0 : 1, pendingComments: 0, sentToday: manuallyRecorded ? 1 : 0, responseRate: 0 },
+        },
+      });
+    }
+
+    if (path === "/api/outreach/auto-send") {
+      return route.fulfill({
+        json: {
+          settings: { autoSend: false, paused: false, dailyLimit: 15, windowStart: 9, windowEnd: 20, timezone: "America/New_York" },
+          sender: null,
+          queuedCount: 1,
+          canManage: true,
         },
       });
     }
@@ -173,14 +185,11 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   });
 
   await page.goto("/pipeline/research");
-  await expect(page.getByRole("tab", { name: /Runs/ })).toBeVisible();
-  await expect(page.getByRole("tab", { name: /Held prospects/ })).toBeVisible();
-  await page.getByText("Safety checks", { exact: true }).click();
-  await expect(page.getByText("Synthetic safety regressions")).toBeVisible();
-  await expect(page.getByText("100% passing")).toBeVisible();
-  await page.getByRole("button", { name: /Run research agent/i }).click();
-  await page.getByRole("button", { name: "Start research", exact: true }).last().click();
-  await expect(page.getByText("Research running in background")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find athletes", exact: true })).toBeVisible();
+  await expect(page.getByText("Nothing is sent to athletes")).toBeVisible();
+  await page.getByRole("button", { name: "Find athletes", exact: true }).click();
+  await expect(page.getByText("Search started")).toBeVisible();
+  await expect(page.getByText("Starting…")).toBeVisible();
   expect(researchQueued).toBe(true);
 
   const enrichment = await page.evaluate(async (athleteId) => {
@@ -193,21 +202,15 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   }, athlete.id);
   expect(enrichment.success).toBe(true);
 
-  await page.goto("/outreach");
-  await expect(page.getByText("Draft-only safety lock")).toBeVisible();
-  const queueItem = page.getByRole("button", { name: /Jordan Test Hi Jordan/ });
-  await queueItem.click();
-  await expect(page.getByText("Prime Champs will not send this automatically")).toBeVisible();
-  await page.getByRole("button", { name: "Save approved draft" }).click();
-  await queueItem.click();
-  await page.getByRole("button", { name: "I sent this manually" }).click();
+  approved = true;
+  await page.goto("/instagram");
+  await expect(page.getByText("Automatic first messages")).toBeVisible();
+  await expect(page.getByText("The sending service isn't connected yet")).toBeVisible();
+  await expect(page.getByText("Hi Jordan — would you be open to talking?")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
 
-  expect(calls).toEqual([
-    "research",
-    "enrichment",
-    "outreach-approval",
-    "manual-send-record",
-  ]);
+  // Nothing sends while the sending service is unavailable, even with an approved draft.
+  expect(calls).toEqual(["research", "enrichment"]);
 });
 
 test("completed research notifications open the exact run audit", async ({ page }) => {
@@ -272,7 +275,8 @@ test("completed research notifications open the exact run audit", async ({ page 
   await page.goto("/notifications");
   await page.getByRole("button", { name: /Research Complete.*Gymnastics research finished/ }).click();
   await expect(page).toHaveURL("/pipeline/research?session=run-e2e-1");
-  await expect(page.getByRole("heading", { name: "Research", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find athletes", exact: true })).toBeVisible();
+  await expect(page.getByText("0 found · 0 sent to Approval")).toBeVisible();
 });
 
 test("research run expansion only makes safe candidates movable", async ({ page }) => {
@@ -340,13 +344,13 @@ test("research run expansion only makes safe candidates movable", async ({ page 
   });
 
   await page.goto("/pipeline");
-  await page.getByRole("button", { name: /gymnastics 2 finalists/ }).click();
+  await page.getByRole("button", { name: /gymnastics 2 found/ }).click();
 
   const legacyCandidate = page.getByTestId("research-candidate-legacy_candidate");
   const blockedCandidate = page.getByTestId("research-candidate-blocked_candidate");
   await expect(legacyCandidate).toHaveAttribute("draggable", "true");
-  await expect(legacyCandidate).toContainText("Legacy hold");
-  await expect(legacyCandidate).toContainText("Drag → Approval");
+  await expect(legacyCandidate).toContainText("Needs review");
+  await expect(legacyCandidate).toContainText("Drag to Approval");
   await expect(blockedCandidate).toHaveAttribute("draggable", "false");
   await expect(blockedCandidate).toContainText("Safety blocked");
 });
