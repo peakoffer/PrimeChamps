@@ -42,6 +42,8 @@ export async function GET(request: NextRequest) {
         "id, created_at, completed_at, heartbeat_at, status, phase, workflow_run_id, profile_version_id, research_depth, prompt_version, scoring_model, is_evaluation, cancel_requested_at, config_used, context_summary, raw_results, scoring_details, final_results, stats, provider_costs, error_message"
       )
       .eq("organization_id", user.organizationId)
+      // live=1 hides evaluation runs from the operator page.
+      .in("is_evaluation", request.nextUrl.searchParams.get("live") === "1" ? [false] : [false, true])
       .order("created_at", { ascending: false })
       .limit(getLimit(request));
 

@@ -67,7 +67,8 @@ export async function POST(request: NextRequest) {
           .maybeSingle()
       : { data: null, error: null };
     if (profileError) throw profileError;
-    if (includeRecentGuidance && !activeProfile) {
+    // Only an explicit request for guidance fails without it; otherwise use the baseline.
+    if (submitted.includeRecentGuidance === true && !activeProfile) {
       return NextResponse.json(
         { error: "No approved weekly guidance is available. Publish it first or turn the guidance toggle off." },
         { status: 409 }
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest) {
       depth,
       marketOverride: marketOverride || undefined,
       customContext: marketOverride || undefined,
-      includeRecentGuidance,
+      includeRecentGuidance: Boolean(activeProfile),
       followerMin: Math.max(0, Number(profile.parameters.follower_min) || 30_000),
       followerMax: Math.max(1, Number(profile.parameters.follower_max) || 500_000),
       resultCount: evaluationBudget?.resultCount || (depth === "extended" ? 20 : 10),
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
             version: activeProfile.version,
             name: activeProfile.name,
           } : null,
-          recentGuidanceIncluded: includeRecentGuidance,
+          recentGuidanceIncluded: Boolean(activeProfile),
           safety: "draft-only; no outreach is sent by research",
           toolchain: [
             { step: "Discovery", provider: "OpenAI web search", purpose: "Live, citation-bound candidate discovery" },

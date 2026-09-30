@@ -6709,6 +6709,8 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
                 discovery_source: athlete.source,
                 discovered_at: new Date().toISOString(),
                 research_score: athlete.score,
+                sponsor_approval_probability: athlete.sponsor_approval_probability ?? null,
+                sponsor_approval_tier: athlete.sponsor_approval_tier ?? null,
                 research_reasoning: athlete.reasoning,
                 concerns: athlete.concerns,
                 verified: athlete.verified,

@@ -64,6 +64,13 @@ export async function GET(request: NextRequest) {
         age: typeof researchNotes.age === "number" ? researchNotes.age : undefined,
         age_source: typeof researchNotes.age_source === "string" ? researchNotes.age_source : undefined,
         is_minor: researchNotes.is_minor === true,
+        sponsor_approval_tier: ["clear_winner", "second_tier", "unlikely"].includes(String(researchNotes.sponsor_approval_tier))
+          ? researchNotes.sponsor_approval_tier as "clear_winner" | "second_tier" | "unlikely"
+          : null,
+        disposition_reason: typeof researchNotes.disposition_reason === "string" ? researchNotes.disposition_reason : undefined,
+        concerns: Array.isArray(researchNotes.concerns)
+          ? researchNotes.concerns.filter((concern): concern is string => typeof concern === "string")
+          : [],
       };
     });
 

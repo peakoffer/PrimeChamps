@@ -3,14 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AtSign,
   Bot,
   CheckCircle2,
   ChevronLeft,
   Inbox,
   Instagram,
-  Layers3,
-  Linkedin,
   LoaderCircle,
   Mail,
   RefreshCw,
@@ -46,21 +43,8 @@ type DetailResponse = {
   error?: string;
 };
 
-type WorkspaceChannel = "unified" | "email" | "instagram" | "linkedin" | "x";
+type WorkspaceChannel = "email" | "instagram";
 type EmailView = "focused" | "all" | "unread";
-
-const WORKSPACES: Array<{
-  id: WorkspaceChannel;
-  label: string;
-  description: string;
-  icon: typeof Mail;
-}> = [
-  { id: "unified", label: "Unified", description: "Every relationship", icon: Layers3 },
-  { id: "email", label: "Email", description: "Microsoft Exchange", icon: Mail },
-  { id: "instagram", label: "Instagram", description: "Direct messages", icon: Instagram },
-  { id: "linkedin", label: "LinkedIn", description: "Assisted outreach", icon: Linkedin },
-  { id: "x", label: "X", description: "Planned channel", icon: AtSign },
-];
 
 const AUTOMATED_MAIL_PATTERN = [
   /no-?reply/i,
@@ -88,14 +72,12 @@ const AUTOMATED_MAIL_PATTERN = [
 
 const MAIL_ARTIFACT_PATTERN = /(?:&#65279;|[\u00ad\u034f\u200b-\u200f\u2060\ufeff])/gi;
 
-function cleanMailText(value: string | null) {
-  return value?.replace(MAIL_ARTIFACT_PATTERN, "").replace(/\s+/g, " ").trim() || "";
+function ProviderIcon({ provider }: { provider: string }) {
+  return provider === "instagram" ? <Instagram className="h-4 w-4" /> : <Mail className="h-4 w-4" />;
 }
 
-function ProviderIcon({ provider }: { provider: string }) {
-  if (provider === "instagram") return <Instagram className="h-4 w-4" />;
-  if (provider === "linkedin") return <Linkedin className="h-4 w-4" />;
-  return <Mail className="h-4 w-4" />;
+function cleanMailText(value: string | null) {
+  return value?.replace(MAIL_ARTIFACT_PATTERN, "").replace(/\s+/g, " ").trim() || "";
 }
 
 function formatListTime(value: string | null) {
@@ -146,39 +128,17 @@ function isFocusedEmail(conversation: ChannelConversationDTO) {
   return true;
 }
 
-function ChannelSetup({ channel }: { channel: Exclude<WorkspaceChannel, "email" | "unified"> }) {
+function ChannelSetup() {
   const content = {
-    instagram: {
-      eyebrow: "Highest-priority next connection",
-      title: "Bring Instagram conversations into Prime Champs",
-      copy: "Connect Zac’s professional Instagram account to sync eligible DMs, reply from the CRM, and connect conversations to athlete records.",
-      icon: Instagram,
-      action: "Connect Instagram",
-      href: "/api/providers/instagram/connect",
-      note: "Meta allows replies to user-initiated conversations within its messaging window.",
-      iconClass: "bg-fuchsia-50 text-fuchsia-700",
-    },
-    linkedin: {
-      eyebrow: "Assisted workflow",
-      title: "Prepare LinkedIn outreach without risky automation",
-      copy: "Prime Champs can research the contact, write the message, and track the touchpoint while the account owner completes the send on LinkedIn.",
-      icon: Linkedin,
-      action: "Review connections",
-      href: "/connections",
-      note: "Direct LinkedIn messaging APIs require restricted partner access.",
-      iconClass: "bg-sky-50 text-sky-700",
-    },
-    x: {
-      eyebrow: "Planned channel",
-      title: "X conversations will live here",
-      copy: "This workspace is reserved for future X account connection, message tracking, and cross-channel relationship history.",
-      icon: AtSign,
-      action: "Review roadmap",
-      href: "/connections",
-      note: "No X account is connected yet.",
-      iconClass: "bg-slate-100 text-slate-800",
-    },
-  }[channel];
+    eyebrow: "Connect Instagram",
+    title: "Bring Instagram messages into Prime Champs",
+    copy: "Connect the professional Instagram account to see DMs here and reply from the CRM.",
+    icon: Instagram,
+    action: "Connect Instagram",
+    href: "/api/providers/instagram/connect",
+    note: "Replies sync from Instagram once an athlete messages the account.",
+    iconClass: "bg-fuchsia-50 text-fuchsia-700",
+  };
   const Icon = content.icon;
 
   return (
@@ -208,9 +168,10 @@ function ChannelSetup({ channel }: { channel: Exclude<WorkspaceChannel, "email" 
   );
 }
 
-export default function UnifiedInbox() {
+// Each channel has its own page; Instagram and email are never mixed in one list.
+export default function UnifiedInbox({ channel }: { channel: "email" | "instagram" }) {
   const [scope, setScope] = useState<"mine" | "team">("mine");
-  const [activeChannel, setActiveChannel] = useState<WorkspaceChannel>("unified");
+  const activeChannel: WorkspaceChannel = channel;
   const [emailView, setEmailView] = useState<EmailView>("focused");
   const [accountId, setAccountId] = useState("");
   const [query, setQuery] = useState("");
@@ -298,14 +259,6 @@ export default function UnifiedInbox() {
     };
   }, [loadInbox]);
 
-  const channelCounts = useMemo(() => ({
-    email: conversations.filter((conversation) => conversation.channel === "email").length,
-    instagram: conversations.filter((conversation) => conversation.channel === "instagram").length,
-    linkedin: conversations.filter((conversation) => conversation.channel === "linkedin").length,
-    x: 0,
-    unified: conversations.length,
-  }), [conversations]);
-
   const emailCounts = useMemo(() => {
     const email = conversations.filter((conversation) => conversation.channel === "email");
     return {
@@ -318,10 +271,7 @@ export default function UnifiedInbox() {
   const visibleConversations = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return conversations.filter((conversation) => {
-      if (activeChannel !== "unified") {
-        const expectedChannel = activeChannel === "x" ? "manual" : activeChannel;
-        if (conversation.channel !== expectedChannel) return false;
-      }
+      if (conversation.channel !== activeChannel) return false;
       if (activeChannel === "email") {
         if (emailView === "focused" && !isFocusedEmail(conversation)) return false;
         if (emailView === "unread" && conversation.unreadCount === 0) return false;
@@ -341,16 +291,6 @@ export default function UnifiedInbox() {
     () => conversations.find((conversation) => conversation.id === selectedId) || null,
     [conversations, selectedId]
   );
-
-  const switchChannel = (channel: WorkspaceChannel) => {
-    setActiveChannel(channel);
-    setAccountId("");
-    setSelectedId(null);
-    setDetail(null);
-    setComposer("");
-    setQuery("");
-    setSyncStatus(null);
-  };
 
   const switchEmailView = (view: EmailView) => {
     setEmailView(view);
@@ -436,7 +376,6 @@ export default function UnifiedInbox() {
 
   const emailAccounts = accounts.filter((account) => account.provider === "outlook" || account.provider === "gmail");
   const workspaceAccounts = accounts.filter((account) => {
-    if (activeChannel === "unified") return true;
     if (activeChannel === "email") return account.provider === "outlook" || account.provider === "gmail";
     return account.provider === activeChannel;
   });
@@ -450,10 +389,9 @@ export default function UnifiedInbox() {
     <div className="space-y-5 pb-8">
       <header className="pc-page-header !mb-0">
         <div>
-          <p className="pc-eyebrow">Outreach command center</p>
-          <h1 className="pc-page-title">Conversations</h1>
+          <h1 className="pc-page-title">{activeChannel === "instagram" ? "Instagram" : "Email"}</h1>
           <p className="pc-page-description">
-            Work each channel in its native rhythm, then use Unified to see the whole relationship.
+            {activeChannel === "instagram" ? "Direct messages with athletes." : "Email conversations with athletes and their teams."}
           </p>
         </div>
         <div className="inline-flex self-start border border-brand-ink/20 bg-brand-paper-bright p-1 lg:self-auto">
@@ -475,41 +413,6 @@ export default function UnifiedInbox() {
         </div>
       </header>
 
-      <nav aria-label="Outreach channels" className="overflow-x-auto border border-brand-ink/15 bg-brand-paper-bright">
-        <div className="flex min-w-max">
-          {WORKSPACES.map((workspace) => {
-            const Icon = workspace.icon;
-            const active = activeChannel === workspace.id;
-            return (
-              <button
-                key={workspace.id}
-                type="button"
-                onClick={() => switchChannel(workspace.id)}
-                className={`group relative flex min-w-[158px] items-center gap-3 border-r border-brand-ink/10 px-3 py-3 text-left transition ${active ? "bg-brand-ink text-white" : "text-brand-ink/60 hover:bg-brand-cyan/10"}`}
-              >
-                <span className={`grid h-8 w-8 shrink-0 place-items-center border ${active ? "border-brand-cyan bg-brand-cyan text-brand-ink" : "border-brand-ink/15 bg-brand-paper text-brand-ink/60"}`}>
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold">{workspace.label}</span>
-                    {channelCounts[workspace.id] ? (
-                      <span className={`text-xs ${active ? "text-slate-300" : "text-slate-600"}`}>
-                        {channelCounts[workspace.id]}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className={`mt-0.5 block text-[11px] ${active ? "text-slate-300" : "text-slate-600"}`}>
-                    {workspace.description}
-                  </span>
-                  {active && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand-cyan" />}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
       {error ? (
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -517,11 +420,7 @@ export default function UnifiedInbox() {
       ) : null}
 
       {activeChannel === "instagram" && !accounts.some((account) => account.provider === "instagram" && account.status === "connected") ? (
-        <ChannelSetup channel="instagram" />
-      ) : activeChannel === "linkedin" ? (
-        <ChannelSetup channel="linkedin" />
-      ) : activeChannel === "x" ? (
-        <ChannelSetup channel="x" />
+        <ChannelSetup />
       ) : (
         <div className="grid min-h-[680px] overflow-hidden border border-brand-ink/15 bg-brand-paper-bright lg:grid-cols-[390px_minmax(0,1fr)]">
           <aside className={`${selectedId ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-slate-200 bg-white`}>
@@ -657,12 +556,6 @@ export default function UnifiedInbox() {
                               Athlete · {conversation.athlete.sport}
                             </span>
                           ) : null}
-                          {activeChannel === "unified" ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-600">
-                              <ProviderIcon provider={conversation.provider} />
-                              {conversation.provider}
-                            </span>
-                          ) : null}
                           {conversation.unreadCount ? (
                             <span className="ml-auto h-2 w-2 rounded-full bg-blue-600" aria-label="Unread" />
                           ) : null}
@@ -715,7 +608,7 @@ export default function UnifiedInbox() {
               <div className="grid flex-1 place-items-center p-8 text-center">
                 <div className="max-w-sm">
                   <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm">
-                    {activeChannel === "email" ? <Mail className="h-5 w-5" /> : <Layers3 className="h-5 w-5" />}
+                    {activeChannel === "email" ? <Mail className="h-5 w-5" /> : <Instagram className="h-5 w-5" />}
                   </span>
                   <h2 className="mt-4 text-lg font-semibold text-slate-900">
                     {activeChannel === "email" ? "Choose an email to read" : "Choose a conversation"}

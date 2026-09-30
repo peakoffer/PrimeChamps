@@ -97,7 +97,7 @@ export default function Dashboard() {
       title: "Messages sent",
       value: stats.messagesSent,
       subtitle: `${stats.repliesReceived} replies received`,
-      href: "/inbox",
+      href: "/instagram",
       icon: Send,
     },
     {

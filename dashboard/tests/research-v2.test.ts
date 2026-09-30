@@ -1972,7 +1972,7 @@ test("active benchmark cohort ignores revealed archives and fails closed on conf
 
 test("benchmark workbench allows a fresh freeze beside a revealed development replay", () => {
   const page = readFileSync(
-    new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url),
+    new URL("../src/app/pipeline/research/benchmark/benchmark-client.tsx", import.meta.url),
     "utf8"
   );
   assert.match(
@@ -2701,16 +2701,16 @@ test("live research evaluation exits before athlete writes and suppresses notifi
   assert.ok(!workflow.includes("AVOID: athletes already on OnlyFans"));
 });
 
-test("owner-run research defaults to an isolated bounded evaluation path", () => {
+test("evaluation runs stay owner-gated while Find athletes runs live and hides test runs", () => {
   const route = readFileSync(new URL("../src/app/api/research/run/route.ts", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/app/pipeline/research/page.tsx", import.meta.url), "utf8");
   assert.match(route, /const evaluationMode = submitted\.evaluationMode === true/);
   assert.match(route, /if \(evaluationMode\) await requireOrganizationRole\(\["owner", "admin"\]\)/);
   assert.match(route, /getResearchEvaluationBudget\(requestedDepth === "extended" \? "development" : "smoke"\)/);
   assert.match(route, /evaluationBudget: evaluationBudget \|\| undefined/);
-  assert.match(page, /evaluationMode: true/);
-  assert.match(page, /No athletes, notifications, drafts, messages, or outreach are created/);
-  assert.match(page, /if \(!config\.evaluationMode\) fetch\("\/api\/notifications"/);
+  assert.doesNotMatch(page, /evaluationMode/);
+  assert.match(page, /\/api\/research\/logs\?limit=10&live=1/);
+  assert.match(page, /Nothing is sent to athletes/);
 });
 
 test("evidence set hashes are order-independent but content-sensitive", () => {
@@ -4910,7 +4910,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
   const instagramHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/reuse-instagram-history/route.ts", import.meta.url), "utf8");
   const socialBladeHistoryRoute = readFileSync(new URL("../src/app/api/research/golden-records/social-blade-history/route.ts", import.meta.url), "utf8");
   const instagramHistoryScript = readFileSync(new URL("../scripts/reuse-instagram-history.ts", import.meta.url), "utf8");
-  const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
+  const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/benchmark-client.tsx", import.meta.url), "utf8");
   const migration = readFileSync(new URL("../../supabase/migrations/20260811230420_add_research_evidence_preparation_runs.sql", import.meta.url), "utf8");
   const socialBladeAttemptMigration = readFileSync(new URL("../../supabase/migrations/20260813213119_lock_social_blade_paid_attempts.sql", import.meta.url), "utf8");
   assert.match(workflow, /"use workflow"/);
@@ -5133,7 +5133,7 @@ test("evidence preparation is durable, replay-safe, zero-scoring, and isolated f
 test("fresh cohort assignment supports a locked 8+8 challenge after a revealed development replay", () => {
   const route = readFileSync(new URL("../src/app/api/research/golden-records/route.ts", import.meta.url), "utf8");
   const benchmarkRoute = readFileSync(new URL("../src/app/api/research/benchmarks/route.ts", import.meta.url), "utf8");
-  const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/page.tsx", import.meta.url), "utf8");
+  const benchmarkPage = readFileSync(new URL("../src/app/pipeline/research/benchmark/benchmark-client.tsx", import.meta.url), "utf8");
   const runner = readFileSync(new URL("../src/lib/research/benchmark-runner.ts", import.meta.url), "utf8");
   assert.match(route, /const challengeMode = perLabel < 16/);
   assert.match(route, /if \(perLabel < 8\)/);

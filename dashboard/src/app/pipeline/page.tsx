@@ -67,7 +67,7 @@ interface PipelineColumn {
 }
 
 const STAGES = [
-  { id: "research", name: "Research", description: "Audits and held candidates", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "01", href: "/pipeline/research" },
+  { id: "research", name: "Research", description: "Recent searches", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "01", href: "/pipeline/research" },
   { id: "approval", name: "Approval", description: "Pending review", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "02", href: "/pipeline/approval" },
   { id: "reach_out", name: "Reach Out", description: "Ready to contact", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "03", href: "/pipeline/reach-out" },
   { id: "response", name: "Response", description: "Awaiting reply", color: "border-brand-cyan", bgColor: "bg-brand-ink", icon: "04", href: "/pipeline/response" },
@@ -198,9 +198,6 @@ export default function PipelinePage() {
   };
 
   // Handle double-click to navigate to specific research session
-  const handleSessionDoubleClick = (sessionId: string) => {
-    router.push(`/pipeline/research?session=${sessionId}`);
-  };
 
   const handleDragStart = (e: DragEvent, athlete: Athlete) => {
     setDraggedAthlete(athlete);
@@ -577,7 +574,7 @@ export default function PipelinePage() {
               </div>
               {isResearchColumn && (
                 <p className="mt-1.5 font-mono text-[9px] uppercase tracking-wide text-brand-muted">
-                  {column.athletes.length} held · {column.researchSessions?.length || 0} recent runs
+                  {column.athletes.length} need review
                 </p>
               )}
             </Link>
@@ -602,7 +599,6 @@ export default function PipelinePage() {
                         <button
                           type="button"
                           onClick={() => toggleSessionExpand(session.id)}
-                          onDoubleClick={() => handleSessionDoubleClick(session.id)}
                           className={`w-full cursor-pointer border bg-white p-3 text-left transition-all ${
                             isExpanded
                               ? "border-brand-blue bg-brand-cyan/10 ring-1 ring-brand-cyan/30"
@@ -630,16 +626,17 @@ export default function PipelinePage() {
                           </div>
                           <div className="mt-2 text-xs text-gray-800 pl-6">
                             <div className="flex justify-between">
-                              <span>{session.stats?.returned || 0} finalists</span>
+                              <span>{session.stats?.returned || 0} found</span>
                               <span>{new Date(session.created_at).toLocaleDateString()}</span>
                             </div>
-                            {session.status === "completed" && (
-                              <div className="mt-1 text-[11px] text-gray-600">
-                                {session.stats?.discovered || 0} discovered · {session.stats?.added || 0} approval · {session.stats?.held || 0} held · {session.stats?.blocked || 0} blocked
-                              </div>
-                            )}
                           </div>
                         </button>
+                        <Link
+                          href={`/pipeline/research?session=${session.id}`}
+                          className="block pl-9 text-[11px] font-medium text-brand-blue hover:underline"
+                        >
+                          Open search
+                        </Link>
 
                         {/* Expanded candidate audit. Held Research candidates can
                             be dragged one lane forward into Approval. */}
@@ -676,11 +673,6 @@ export default function PipelinePage() {
                                     </div>
                                     {/* Key Metrics */}
                                     <div className="flex items-center gap-2 text-xs flex-shrink-0">
-                                      {typeof athlete.research_score === "number" && (
-                                        <span className="bg-brand-ink px-1.5 py-0.5 font-semibold text-brand-cyan">
-                                          {athlete.research_score}
-                                        </span>
-                                      )}
                                       {athlete.sponsor_approval_tier && athlete.sponsor_approval_tier !== "unlikely" && (
                                         <span
                                           className={cn(
@@ -689,9 +681,8 @@ export default function PipelinePage() {
                                               ? "bg-green-100 text-green-800"
                                               : "bg-amber-50 text-amber-800"
                                           )}
-                                          title={`Sponsor approval estimate ${athlete.sponsor_approval_probability ?? "?"}/100`}
                                         >
-                                          {athlete.sponsor_approval_tier === "clear_winner" ? "Clear winner" : "2nd tier"}
+                                          {athlete.sponsor_approval_tier === "clear_winner" ? "Strong match" : "Possible match"}
                                         </span>
                                       )}
                                       {athlete.follower_count && (
@@ -699,11 +690,6 @@ export default function PipelinePage() {
                                           {athlete.follower_count >= 1000000
                                             ? `${(athlete.follower_count / 1000000).toFixed(1)}M`
                                             : `${(athlete.follower_count / 1000).toFixed(0)}K`}
-                                        </span>
-                                      )}
-                                      {(athlete as Athlete & { engagement_rate?: number }).engagement_rate && (
-                                        <span className="font-medium text-brand-blue">
-                                          {((athlete as Athlete & { engagement_rate?: number }).engagement_rate! * 100).toFixed(1)}%
                                         </span>
                                       )}
                                     </div>
@@ -722,13 +708,11 @@ export default function PipelinePage() {
                                         ? "In Approval"
                                         : athlete.disposition === "blocked"
                                           ? "Safety blocked"
-                                          : athlete.disposition === "held" && athlete.persisted === false
-                                            ? "Legacy hold"
                                           : athlete.disposition === "held"
-                                            ? "Held in Research"
+                                            ? "Needs review"
                                             : athlete.pipeline_stage.replaceAll("_", " ")}
                                     </span>
-                                    {athlete.can_move && <span className="font-mono text-[9px] font-semibold uppercase text-brand-blue">Drag → Approval</span>}
+                                    {athlete.can_move && <span className="font-mono text-[9px] font-semibold uppercase text-brand-blue">Drag to Approval</span>}
                                   </div>
                                 </div>
                               ))

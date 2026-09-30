@@ -1,5 +1,6 @@
-import UnifiedInbox from "@/components/channels/UnifiedInbox";
+import { redirect } from "next/navigation";
 
+// Instagram and email now live on their own pages.
 export default function InboxPage() {
-  return <UnifiedInbox />;
+  redirect("/instagram");
 }
