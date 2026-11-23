@@ -2,7 +2,6 @@ import os
 
 os.environ["BACKEND_API_KEY"] = "prime-champs-e2e-api-key"
 os.environ["PIPELINE_AUTORUN_ENABLED"] = "false"
-os.environ["INSTAGRAM_DM_SENDING_ENABLED"] = "false"
 
 from fastapi.testclient import TestClient
 

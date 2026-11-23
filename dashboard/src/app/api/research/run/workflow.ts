@@ -949,6 +949,9 @@ interface ScoredAthlete extends EnrichedAthlete {
   sponsor_approval_probability?: number | null;
   sponsor_approval_tier?: SponsorApprovalTier | null;
   sponsor_approval_profile_version?: string;
+  // Cleared every safety check but not the automatic-Approval bar: saved for
+  // the owner under "Needs your review", never placed in Approval by the run.
+  review_only?: boolean;
   research_score_id?: string;
   researcher_input_tokens?: number;
   researcher_output_tokens?: number;
@@ -1259,6 +1262,9 @@ function explainResearchHold(athlete: ScoredAthlete) {
   }
   if (athlete.score < 75) {
     return `the evidence-backed objective score (${athlete.score}) is below the 75-point Approval threshold`;
+  }
+  if (athlete.review_only) {
+    return "it cleared the identity and 21+ checks but did not meet every requirement for automatic Approval";
   }
   return "the profile requires manual review before Approval";
 }
@@ -6350,8 +6356,10 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
       };
     });
 
-    // Never pad a run with weak candidates just to hit a requested count. The
-    // deterministic V1 gates and the independent V2 audit both have veto power.
+    // Never pad a run with weak candidates just to hit a requested count.
+    // Safety checks have veto power over everyone. The stricter score and
+    // independent-audit gate only decides who may go straight to Approval;
+    // safe candidates that miss it are kept for the owner to review.
     const qualityAudit = auditResearchResults({
       requestedSport: config.sportFocus,
       requestedCount: config.resultCount,
@@ -6364,7 +6372,7 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
     );
     const finalResults = auditedAthletes
       .filter((athlete) => athlete.instagram_handle && qualifiedHandles.has(athlete.instagram_handle.toLowerCase()))
-      .filter((athlete) => passesResearchV2FinalGate({
+      .map((athlete) => ({ ...athlete, review_only: !passesResearchV2FinalGate({
         priority: athlete.score,
         onlyfansFit: athlete.onlyfans_fit_score,
         commercialAchievability: athlete.commercial_achievability_score,
@@ -6383,10 +6391,11 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
         materialClaimsVerified: athlete.audit_material_claims_verified === true,
         auditorVerdict: athlete.audit_verdict || "fail",
         criticalGapCount: athlete.audit_critical_gap_count ?? 1,
-      }))
-      .sort(compareBySponsorApproval)
+      }) }))
+      // Fully verified candidates first, then sponsor tier, then score.
+      .sort((left, right) => Number(left.review_only) - Number(right.review_only) || compareBySponsorApproval(left, right))
       .slice(0, config.resultCount);
-    log(`Quality audit: ${finalResults.length}/${qualityAudit.requestedCount} priority candidates passed the deterministic and independent audit gates`);
+    log(`Quality audit: ${finalResults.filter((athlete) => !athlete.review_only).length} fully verified and ${finalResults.filter((athlete) => athlete.review_only).length} for owner review, of ${qualityAudit.requestedCount} requested`);
     await persistScoringAudit(input, auditedAthletes, scoringModel, qualityAudit);
     await updateResearchProgress(researchLogId, "saving_candidates", {
       sourced: allDiscoveredAthletes.length,
@@ -6566,6 +6575,7 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
             objectiveFit: athlete.objective_fit,
             sponsorApprovalTier: athlete.sponsor_approval_tier,
           });
+          if (athlete.review_only && athlete.disposition === "approval") athlete.disposition = "held";
           athlete.disposition_reason = athlete.disposition === "approval"
             ? "Simulation qualified — source-linked adult age and score passed the current objective gates; the live pipeline was not changed"
             : athlete.disposition === "blocked"
@@ -6679,7 +6689,7 @@ async function executeResearchRun(input: ResearchWorkflowInput): Promise<Researc
           continue;
         }
 
-        const destinationStage = resolvedDisposition === "approval" ? "approval" : "research";
+        const destinationStage = resolvedDisposition === "approval" && !athlete.review_only ? "approval" : "research";
         if (destinationStage === "research") {
           athlete.disposition = "held";
           athlete.disposition_reason = `Held for manual review because ${explainResearchHold(athlete)}`;

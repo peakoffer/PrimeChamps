@@ -619,7 +619,8 @@ export async function syncAllInstagramAccounts() {
     .from("channel_accounts")
     .select("*")
     .eq("provider", "instagram")
-    .eq("status", "connected")
+    // "error" is a failed sync, not a lost sign-in, so the next run tries again.
+    .in("status", ["connected", "error"])
     .eq("sync_enabled", true)
     .limit(20);
   if (error) throw error;

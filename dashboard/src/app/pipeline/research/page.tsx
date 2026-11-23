@@ -374,8 +374,8 @@ function FindAthletes() {
         <div>
           <h1 className="pc-page-title">Find athletes</h1>
           <p className="pc-page-description">
-            The research agent searches for athletes who fit an OnlyFans sponsorship. Strong, verified matches go
-            straight to Approval; the rest wait below for you. Nothing is sent to athletes.
+            The research agent searches for athletes who fit an OnlyFans sponsorship. Fully verified
+            matches go straight to Approval; others that pass the identity and 21+ checks wait below for you. Nothing is sent to athletes.
           </p>
         </div>
       </header>
@@ -389,7 +389,7 @@ function FindAthletes() {
             </select>
           </label>
           <div className="text-sm">
-            <span className="mb-1 block text-xs font-medium text-brand-muted">How many</span>
+            <span className="mb-1 block text-xs font-medium text-brand-muted">Up to</span>
             <div className="inline-flex border border-brand-chrome bg-white">
               {(["standard", "extended"] as const).map((value) => (
                 <button key={value} type="button" onClick={() => setCount(value)} aria-pressed={count === value}
@@ -416,7 +416,7 @@ function FindAthletes() {
             + Add a focus
           </button>
         )}
-        {anyActive && <p className="mt-3 text-xs text-brand-muted">A search is running. It usually takes 10–20 minutes.</p>}
+        {anyActive && <p className="mt-3 text-xs text-brand-muted">A search is running. It can take 20–45 minutes; you can leave this page.</p>}
         {notice && <p role="status" className={cn("mt-3 text-sm", notice.error ? "text-red-700" : "text-emerald-700")}>{notice.text}</p>}
       </section>
 

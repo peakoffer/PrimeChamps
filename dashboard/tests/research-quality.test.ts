@@ -27,7 +27,7 @@ import {
   scoreInstagramProfileIdentity,
 } from "../src/lib/research/instagram-identity.ts";
 import { buildAthleteAgeSearchQueries } from "../src/lib/research/age-evidence.ts";
-import { auditResearchResults } from "../src/lib/research/run-audit.ts";
+import { auditResearchResults, researchSafetyFailures, RESEARCH_MINIMUM_ADULT_AGE } from "../src/lib/research/run-audit.ts";
 import {
   ageEvidenceNamesAthlete,
   isCredibleAgeSourceUrl,
@@ -970,25 +970,32 @@ test("Instagram-native search isolates batched queries and still requires athlet
   }).confidence >= 70);
 });
 
+const SAFE_CANDIDATE = {
+  name: "Safe Athlete",
+  sport: "volleyball",
+  instagram_handle: "safe_athlete",
+  score: 82,
+  age: 24,
+  age_verified: true,
+  age_corroborated: true,
+  age_source: "https://volleyballworld.com/athletes/safe/bio",
+  is_minor: false,
+  is_private: false,
+  account_active: true,
+  identity_confidence: 90,
+  identity_corroborated: true,
+  discovery_verification: { passed: true },
+  evidence: [{ url: "https://volleyballworld.com/athletes/safe" }],
+};
+
 test("run audit never pads a short list with an unqualified candidate", () => {
   const candidates = Array.from({ length: 10 }, (_, index) => ({
+    ...SAFE_CANDIDATE,
     name: `Athlete ${index}`,
-    sport: "volleyball",
     instagram_handle: `athlete_${index}`,
-    score: 82,
-    age: 24,
-    age_verified: true,
-    age_source: `https://volleyballworld.com/athletes/${index}/bio`,
-    is_private: false,
-    account_active: true,
-    identity_confidence: 90,
-    discovery_verification: { passed: true },
-    evidence: [{ url: `https://volleyballworld.com/athletes/${index}` }],
-    career_stage: "emerging",
-    objective_fit: "strong",
   }));
   assert.equal(auditResearchResults({ requestedSport: "volleyball", requestedCount: 10, candidates }).passed, true);
-  candidates[9].score = 79;
+  candidates[9].score = 69;
   const short = auditResearchResults({ requestedSport: "volleyball", requestedCount: 10, candidates });
   assert.equal(short.passed, true);
   assert.equal(short.targetMet, false);
@@ -997,32 +1004,44 @@ test("run audit never pads a short list with an unqualified candidate", () => {
   assert.equal(short.returnedCount, 9);
 });
 
-test("an independently audited V2 finalist is not vetoed by a stale subjective objective-fit label", () => {
+test("a safe candidate scoring 70-79 is kept for owner review instead of dropped", () => {
   const result = auditResearchResults({
     requestedSport: "volleyball",
-    requestedCount: 1,
-    candidates: [{
-      name: "Audited Athlete",
-      sport: "volleyball",
-      instagram_handle: "audited_athlete",
-      score: 82,
-      age: 24,
-      age_verified: true,
-      age_source: "https://example.com/age",
-      is_private: false,
-      account_active: true,
-      identity_confidence: 90,
-      discovery_verification: { passed: true },
-      evidence: [{ url: "https://example.com/momentum" }],
-      career_stage: "emerging",
-      objective_fit: "possible",
-      audit_verdict: "corrected",
-      audit_critical_gap_count: 0,
-      audit_material_claims_verified: true,
-    }],
+    requestedCount: 2,
+    candidates: [{ ...SAFE_CANDIDATE, score: 74 }, { ...SAFE_CANDIDATE, instagram_handle: "second", score: 69 }],
   });
-  assert.equal(result.qualifiedCount, 1);
   assert.equal(result.candidates[0].passed, true);
+  assert.deepEqual(result.candidates[1].failures, ["score below 70"]);
+});
+
+test("no score rescues a candidate who fails an age, identity or OnlyFans safety check", () => {
+  const unsafe: Array<[string, Partial<typeof SAFE_CANDIDATE> & Record<string, unknown>]> = [
+    ["age 20", { age: 20 }],
+    ["flagged minor", { is_minor: true }],
+    ["one age source", { age_corroborated: false }],
+    ["age not verified", { age_verified: false }],
+    ["age unknown", { age: undefined }],
+    ["no age source link", { age_source: "team bio" }],
+    ["identity not corroborated", { identity_corroborated: false }],
+    ["low identity confidence", { identity_confidence: 60 }],
+    ["private account", { is_private: true }],
+    ["inactive account", { account_active: false }],
+    ["abandoned OnlyFans page", { onlyfans_profile_exact_match: true, onlyfans_platform_status: "inactive" }],
+  ];
+  for (const [label, change] of unsafe) {
+    const candidate = { ...SAFE_CANDIDATE, score: 100, ...change };
+    assert.notDeepEqual(researchSafetyFailures(candidate), [], label);
+    const result = auditResearchResults({ requestedSport: "volleyball", requestedCount: 1, candidates: [candidate] });
+    assert.equal(result.qualifiedCount, 0, label);
+  }
+  assert.deepEqual(researchSafetyFailures(SAFE_CANDIDATE), []);
+  assert.equal(RESEARCH_MINIMUM_ADULT_AGE, 21);
+});
+
+test("the live run sends only fully verified candidates to Approval and holds the rest for review", () => {
+  const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflow, /review_only: !passesResearchV2FinalGate\(/);
+  assert.match(workflow, /resolvedDisposition === "approval" && !athlete\.review_only \? "approval" : "research"/);
 });
 
 test("weighted research score is deterministic and rejects incomplete dimensions", () => {

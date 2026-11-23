@@ -278,11 +278,10 @@ def show_leads(
 @app.command("outreach")
 def run_outreach(
     generate: bool = typer.Option(False, "--generate", help="Generate new messages"),
-    send: bool = typer.Option(False, "--send", help="Send approved messages"),
     athlete_id: Optional[str] = typer.Option(None, help="Generate for specific athlete")
 ):
     """Manage outreach messages."""
-    if not generate and not send:
+    if not generate:
         # Show pending approvals
         pending = db.get_pending_approvals()
 
@@ -316,14 +315,6 @@ def run_outreach(
 
         console.print(f"\n[bold]Generation Results:[/bold]")
         console.print(f"  Generated: {results['generated']}")
-        console.print(f"  Failed: {results.get('failed', 0)}")
-
-    if send:
-        with console.status("[bold green]Sending approved messages..."):
-            results = asyncio.run(agent.send_approved_messages())
-
-        console.print(f"\n[bold]Send Results:[/bold]")
-        console.print(f"  Sent: {results['sent']}")
         console.print(f"  Failed: {results.get('failed', 0)}")
 
 

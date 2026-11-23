@@ -169,13 +169,14 @@ function ChannelSetup() {
 }
 
 // Each channel has its own page; Instagram and email are never mixed in one list.
-export default function UnifiedInbox({ channel, children }: { channel: "email" | "instagram"; children?: React.ReactNode }) {
+export default function UnifiedInbox({ channel }: { channel: "email" | "instagram" }) {
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const activeChannel: WorkspaceChannel = channel;
   const [emailView, setEmailView] = useState<EmailView>("focused");
   const [accountId, setAccountId] = useState("");
   const [query, setQuery] = useState("");
   const [accounts, setAccounts] = useState<ChannelAccountDTO[]>([]);
+  const [accountsLoadedAt, setAccountsLoadedAt] = useState(0);
   const [conversations, setConversations] = useState<ChannelConversationDTO[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailResponse | null>(null);
@@ -213,6 +214,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
       }
       setError("");
       setAccounts(accountsData.accounts || []);
+      setAccountsLoadedAt(Date.now());
       setConversations(conversationsData.conversations || []);
       setLastRefreshedAt(new Date());
     } catch (loadError) {
@@ -346,7 +348,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
     }
   };
 
-  const syncInstagram = async (account: ChannelAccountDTO) => {
+  const syncAccount = async (account: ChannelAccountDTO) => {
     setSyncingAccountId(account.id);
     setSyncStatus(null);
     setError("");
@@ -358,8 +360,9 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
         result?: { conversationsWritten?: number; messagesSeen?: number };
         error?: string;
       };
-      if (!response.ok) throw new Error(data.error || "Instagram sync failed");
+      if (!response.ok) throw new Error(data.error || "Sync failed");
       await loadInbox();
+      if (account.provider !== "instagram") return;
       const conversations = data.result?.conversationsWritten || 0;
       const messages = data.result?.messagesSeen || 0;
       setSyncStatus(
@@ -368,7 +371,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
           : "Instagram is connected, but Meta returned no eligible conversations. Confirm access to messages is enabled, then send a new inbound test DM."
       );
     } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "Instagram sync failed");
+      setError(syncError instanceof Error ? syncError.message : "Sync failed");
     } finally {
       setSyncingAccountId(null);
     }
@@ -379,6 +382,12 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
     if (activeChannel === "email") return account.provider === "outlook" || account.provider === "gmail";
     return account.provider === activeChannel;
   });
+  // An email account is only "synced" if its last successful sync is recent.
+  const staleEmailAccount = emailAccounts.find((account) =>
+    account.status !== "connected"
+    || !account.lastSyncAt
+    || accountsLoadedAt - new Date(account.lastSyncAt).getTime() > 36 * 60 * 60 * 1000
+  );
   const connectedInstagramAccount = accounts.find(
     (account) => account.provider === "instagram" && account.status === "connected"
   );
@@ -413,13 +422,32 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
         </div>
       </header>
 
-      {children}
-
-      {activeChannel === "instagram" && <h2 className="pc-section-heading">Conversations</h2>}
-
       {error ? (
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      ) : null}
+
+      {activeChannel === "email" && staleEmailAccount ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>
+            <span className="font-semibold">Email is not up to date.</span>{" "}
+            {staleEmailAccount.lastSyncAt
+              ? `New mail stopped arriving after ${new Date(staleEmailAccount.lastSyncAt).toLocaleDateString(undefined, { day: "numeric", month: "long" })}.`
+              : "This mailbox has never synced."}
+          </p>
+          {staleEmailAccount.status === "reauthorization_required" || staleEmailAccount.status === "disconnected" ? (
+            <Link href="/connections" className="pc-button-primary">Reconnect email</Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void syncAccount(staleEmailAccount)}
+              disabled={syncingAccountId === staleEmailAccount.id}
+              className="pc-button-primary"
+            >
+              {syncingAccountId === staleEmailAccount.id ? "Syncing…" : "Sync now"}
+            </button>
+          )}
         </div>
       ) : null}
 
@@ -594,7 +622,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                   {activeChannel === "instagram" && connectedInstagramAccount ? (
                     <button
                       type="button"
-                      onClick={() => void syncInstagram(connectedInstagramAccount)}
+                      onClick={() => void syncAccount(connectedInstagramAccount)}
                       disabled={syncingAccountId === connectedInstagramAccount.id}
                       className="mt-5 inline-flex items-center gap-2 bg-brand-ink px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-ink/90 disabled:opacity-60"
                     >
@@ -622,7 +650,7 @@ export default function UnifiedInbox({ channel, children }: { channel: "email" |
                       ? "Focused keeps obvious automated and financial notices out of the way. All mail is always one click away."
                       : "Pick a conversation on the left to read and reply."}
                   </p>
-                  {activeChannel === "email" ? (
+                  {activeChannel === "email" && emailAccounts.length > 0 && !staleEmailAccount ? (
                     <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       Exchange synced

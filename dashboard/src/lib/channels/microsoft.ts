@@ -158,19 +158,31 @@ async function graphRequest<T>(
   const url = pathOrUrl.startsWith("http")
     ? pathOrUrl
     : `https://graph.microsoft.com/v1.0${pathOrUrl}`;
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Prefer: 'IdType="ImmutableId", odata.maxpagesize=50',
-      ...init.headers,
-    },
-    signal: AbortSignal.timeout(30_000),
-  });
+  // Microsoft Graph has brief outages (502/503/504) and throttles (429). One
+  // retry keeps a passing hiccup from marking the whole mailbox as broken.
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Prefer: 'IdType="ImmutableId", odata.maxpagesize=50',
+          ...init.headers,
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.status !== 429 && response.status < 500) break;
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  if (!response) throw new Error("Microsoft Graph request failed");
 
   if (response.status === 204 || response.status === 202) return undefined as T;
-  const payload = (await response.json()) as T & {
+  const payload = (await response.json().catch(() => ({}))) as T & {
     error?: { code?: string; message?: string };
   };
   if (!response.ok) {
@@ -588,7 +600,8 @@ export async function syncAllMicrosoftAccounts(triggeredBy: "cron" | "webhook" =
     .from("channel_accounts")
     .select("*")
     .eq("provider", "outlook")
-    .eq("status", "connected")
+    // "error" is a failed sync, not a lost sign-in, so the next run tries again.
+    .in("status", ["connected", "error"])
     .eq("sync_enabled", true)
     .limit(20);
   if (error) throw error;

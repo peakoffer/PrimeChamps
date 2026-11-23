@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
         .from("outreach_messages")
         .select("*")
         .eq("athlete_id", athleteId)
-        .eq("approval_status", "pending")
+        .neq("status", "sent")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -205,25 +205,33 @@ Return only JSON:
       };
     }
 
-    // Save the generated message
-    const { data: savedMessage, error: saveError } = await supabase
+    // Save the generated message. A rewrite replaces the existing unsent draft
+    // instead of piling up rows.
+    const draftFields = {
+      message_content: generatedMessage,
+      personalization_data: personalizationContext,
+      ai_personalization_context: {
+        source,
+        generated_at: new Date().toISOString(),
+        safety_mode: "draft_only",
+        ...generationMetadata,
+        athlete_context: personalizationContext,
+      },
+      approval_status: "pending",
+      status: "draft",
+    };
+    const { data: unsentDraft } = await supabase
       .from("outreach_messages")
-      .insert({
-        athlete_id: athleteId,
-        message_content: generatedMessage,
-        personalization_data: personalizationContext,
-        ai_personalization_context: {
-          source,
-          generated_at: new Date().toISOString(),
-          safety_mode: "draft_only",
-          ...generationMetadata,
-          athlete_context: personalizationContext,
-        },
-        approval_status: "pending",
-        status: "draft",
-      })
-      .select()
-      .single();
+      .select("id")
+      .eq("athlete_id", athleteId)
+      .neq("status", "sent")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const { data: savedMessage, error: saveError } = await (unsentDraft
+      ? supabase.from("outreach_messages").update(draftFields).eq("id", unsentDraft.id)
+      : supabase.from("outreach_messages").insert({ athlete_id: athleteId, ...draftFields })
+    ).select().single();
 
     if (saveError) {
       console.error("Error saving message:", saveError);

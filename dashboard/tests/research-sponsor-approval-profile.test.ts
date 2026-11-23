@@ -135,7 +135,7 @@ test("a research candidate below the second tier is held for a human, never auto
 
 test("the live workflow orders audits and finalists by sponsor tier and passes the tier to disposition", () => {
   const workflow = readFileSync(new URL("../src/app/api/research/run/workflow.ts", import.meta.url), "utf8");
-  assert.match(workflow, /\.sort\(compareBySponsorApproval\)\n      \.slice\(0, config\.resultCount\)/);
+  assert.match(workflow, /Number\(left\.review_only\) - Number\(right\.review_only\) \|\| compareBySponsorApproval\(left, right\)\)\n      \.slice\(0, config\.resultCount\)/);
   assert.match(workflow, /compareBySponsorApproval\(left\.athlete as ScoredAthlete, right\.athlete as ScoredAthlete\)/);
   assert.equal(workflow.match(/sponsorApprovalTier: athlete\.sponsor_approval_tier/g)?.length, 2);
 });

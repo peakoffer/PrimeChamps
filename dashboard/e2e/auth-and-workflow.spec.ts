@@ -44,7 +44,6 @@ test("durable research and draft-only outreach stay connected", async ({ page })
 
   const calls: string[] = [];
   let researchQueued = false;
-  let approved = false;
   let manuallyRecorded = false;
 
   await page.route("**/api/**", async (route) => {
@@ -110,55 +109,15 @@ test("durable research and draft-only outreach stay connected", async ({ page })
       return route.fulfill({ json: { success: true, data: { message: "Enriched" } } });
     }
 
-    if (path === "/api/outreach/approve") {
-      approved = true;
-      calls.push("outreach-approval");
-      return route.fulfill({ json: { success: true } });
-    }
-
-    if (path === "/api/outreach/send") {
-      expect(approved).toBe(true);
-      manuallyRecorded = true;
-      calls.push("manual-send-record");
-      return route.fulfill({ json: { success: true, sent: false, recordedOnly: true } });
-    }
-
-    if (path === "/api/outreach/queue") {
-      if (url.searchParams.get("type") === "sent") return route.fulfill({ json: { items: [] } });
+    if (path === "/api/outreach/draft") {
+      if (request.method() === "POST") {
+        manuallyRecorded = true;
+        calls.push("manual-send-record");
+        return route.fulfill({ json: { success: true, recordedOnly: true } });
+      }
       return route.fulfill({
-        json: {
-          items: manuallyRecorded
-            ? []
-            : [
-                {
-                  id: "queue-e2e-1",
-                  athlete_id: athlete.id,
-                  queue_type: "dm",
-                  content_preview: "Hi Jordan — would you be open to talking?",
-                  approval_status: approved ? "approved" : "pending",
-                  auto_approved: false,
-                  created_at: "2026-08-05T12:00:00Z",
-                  athlete,
-                },
-              ],
-          stats: { pendingDms: manuallyRecorded ? 0 : 1, pendingComments: 0, sentToday: manuallyRecorded ? 1 : 0, responseRate: 0 },
-        },
+        json: { drafts: { [athlete.id]: { id: "draft-e2e-1", content: "Hi Jordan — would you be open to talking?" } } },
       });
-    }
-
-    if (path === "/api/outreach/auto-send") {
-      return route.fulfill({
-        json: {
-          settings: { autoSend: false, paused: false, dailyLimit: 15, windowStart: 9, windowEnd: 20, timezone: "America/New_York" },
-          sender: null,
-          queuedCount: 1,
-          canManage: true,
-        },
-      });
-    }
-
-    if (path === "/api/outreach/settings") {
-      return route.fulfill({ json: { settings: { approval_mode: "manual" } } });
     }
 
     if (path === `/api/athletes/${athlete.id}`) {
@@ -169,12 +128,9 @@ test("durable research and draft-only outreach stay connected", async ({ page })
       return route.fulfill({ json: { photos: [] } });
     }
 
-    if (path === "/api/outreach/touchpoints") {
-      return route.fulfill({ json: { touchpoints: [] } });
-    }
-
     if (path === "/api/pipeline/athletes") {
-      return route.fulfill({ json: { athletes: [] } });
+      const waiting = url.searchParams.get("stage") === "reach_out" && !manuallyRecorded;
+      return route.fulfill({ json: { athletes: waiting ? [athlete] : [] } });
     }
 
     if (path === "/api/historical") {
@@ -202,15 +158,14 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   }, athlete.id);
   expect(enrichment.success).toBe(true);
 
-  approved = true;
-  await page.goto("/instagram");
-  await expect(page.getByText("Automatic first messages")).toBeVisible();
-  await expect(page.getByText("The sending service isn't connected yet")).toBeVisible();
-  await expect(page.getByText("Hi Jordan — would you be open to talking?")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
-
-  // Nothing sends while the sending service is unavailable, even with an approved draft.
-  expect(calls).toEqual(["research", "enrichment"]);
+  // Nothing is sent by the app: the owner sends by hand and records it.
+  await page.goto("/pipeline/reach-out");
+  await expect(page.getByText("Nothing is sent from this page")).toBeVisible();
+  await expect(page.getByLabel("First message")).toHaveValue("Hi Jordan — would you be open to talking?");
+  await expect(page.getByRole("button", { name: "Copy and open Instagram" })).toBeVisible();
+  await page.getByRole("button", { name: "I sent it" }).click();
+  await expect(page.getByText("moved to Response")).toBeVisible();
+  expect(calls).toEqual(["research", "enrichment", "manual-send-record"]);
 });
 
 test("completed research notifications open the exact run audit", async ({ page }) => {
