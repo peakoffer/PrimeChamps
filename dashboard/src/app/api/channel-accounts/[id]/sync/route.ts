@@ -18,7 +18,11 @@ export async function POST(
     let result: unknown = { checked: true };
     if (account.provider === "outlook") {
       result = await syncMicrosoftAccount(account, "manual");
-      await ensureMicrosoftSubscription(account);
+      // The mail is already in. A problem renewing instant notifications must
+      // not make a successful sync look failed; the daily sync still runs.
+      await ensureMicrosoftSubscription(account).catch((error) => {
+        console.error("Microsoft subscription renewal failed after a successful sync", error);
+      });
     } else if (account.provider === "instagram") {
       await subscribeInstagramAccount(account);
       result = await syncInstagramAccount(account, "manual");

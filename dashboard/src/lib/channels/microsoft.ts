@@ -555,24 +555,30 @@ export async function ensureMicrosoftSubscription(account: ChannelAccountRecord)
     return { configured: true as const, renewed: false as const };
   }
 
-  if (existing?.provider_subscription_id) {
+  const createSubscription = () => graphRequest<GraphSubscription>(account, "/subscriptions", {
+    method: "POST",
+    body: JSON.stringify({
+      changeType: "created,updated,deleted",
+      notificationUrl: `${appUrl}/api/webhooks/microsoft`,
+      resource,
+      expirationDateTime,
+      clientState,
+      latestSupportedTlsVersion: "v1_2",
+    }),
+  });
+  // Microsoft deletes a subscription once it expires, so renewing one that
+  // lapsed fails with "object not found". Create a fresh one in that case.
+  const stillAlive = Boolean(
+    existing?.provider_subscription_id && existing.expires_at && new Date(existing.expires_at).getTime() > Date.now()
+  );
+  if (stillAlive) {
     subscription = await graphRequest<GraphSubscription>(
       account,
-      `/subscriptions/${encodeURIComponent(existing.provider_subscription_id)}`,
+      `/subscriptions/${encodeURIComponent(existing!.provider_subscription_id!)}`,
       { method: "PATCH", body: JSON.stringify({ expirationDateTime }) }
-    );
+    ).catch(createSubscription);
   } else {
-    subscription = await graphRequest<GraphSubscription>(account, "/subscriptions", {
-      method: "POST",
-      body: JSON.stringify({
-        changeType: "created,updated,deleted",
-        notificationUrl: `${appUrl}/api/webhooks/microsoft`,
-        resource,
-        expirationDateTime,
-        clientState,
-        latestSupportedTlsVersion: "v1_2",
-      }),
-    });
+    subscription = await createSubscription();
   }
 
   const { error } = await admin.from("channel_webhook_subscriptions").upsert(
