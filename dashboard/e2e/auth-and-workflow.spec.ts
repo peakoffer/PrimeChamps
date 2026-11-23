@@ -109,6 +109,10 @@ test("durable research and draft-only outreach stay connected", async ({ page })
       return route.fulfill({ json: { success: true, data: { message: "Enriched" } } });
     }
 
+    if (path === "/api/outreach/brief") {
+      return route.fulfill({ json: { brief: "We are Prime Champs, a sports sponsorship agency.", canEdit: true } });
+    }
+
     if (path === "/api/outreach/draft") {
       if (request.method() === "POST") {
         manuallyRecorded = true;
@@ -162,6 +166,8 @@ test("durable research and draft-only outreach stay connected", async ({ page })
   await page.goto("/pipeline/reach-out");
   await expect(page.getByText("Nothing is sent from this page")).toBeVisible();
   await expect(page.getByLabel("First message")).toHaveValue("Hi Jordan — would you be open to talking?");
+  await expect(page.getByRole("button", { name: "Edit brief" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rewrite with AI" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Copy and open Instagram" })).toBeVisible();
   await page.getByRole("button", { name: "I sent it" }).click();
   await expect(page.getByText("moved to Response")).toBeVisible();

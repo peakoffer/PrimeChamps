@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PipelineStageNav } from "@/components/PipelineStageNav";
 import { AthleteAvatar } from "@/components/AthleteAvatar";
 import { cn } from "@/lib/utils";
+import { MessageBrief } from "./message-brief";
 
 interface Athlete {
   id: string;
@@ -44,6 +45,8 @@ export default function ReachOutStagePage() {
   const [busy, setBusy] = useState<Busy>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [briefReady, setBriefReady] = useState(false);
+  const [checks, setChecks] = useState<Record<string, string[]>>({});
 
   const load = useCallback(async () => {
     try {
@@ -107,7 +110,7 @@ export default function ReachOutStagePage() {
     const content: string = data.message?.content || "";
     setDrafts((current) => ({ ...current, [target.id]: content }));
     setSaved((current) => ({ ...current, [target.id]: content.trim() }));
-    if (data.source === "template") setNotice("The AI writer was unavailable, so this is a basic starting point. Edit it before sending.");
+    setChecks((current) => ({ ...current, [target.id]: Array.isArray(data.checkBeforeSending) ? data.checkBeforeSending : [] }));
   });
 
   const copyAndOpen = (target: Athlete) => run("saving", async () => {
@@ -146,6 +149,8 @@ export default function ReachOutStagePage() {
 
       {notice ? <p role="status" className="text-sm text-emerald-700">{notice}</p> : null}
       {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+
+      <MessageBrief onReady={setBriefReady} />
 
       {athletes.length === 0 ? (
         <div className="pc-surface p-8 text-center">
@@ -198,10 +203,11 @@ export default function ReachOutStagePage() {
                 <button
                   type="button"
                   onClick={() => void writeDraft(athlete, Boolean(text.trim()))}
-                  disabled={busy !== null}
+                  disabled={busy !== null || !briefReady}
+                  title={briefReady ? undefined : "Save your message brief first"}
                   className="pc-button-secondary"
                 >
-                  {busy === "writing" ? "Writing…" : text.trim() ? "Rewrite with AI" : "Write a draft with AI"}
+                  {busy === "writing" ? "Writing… (about a minute)" : text.trim() ? "Rewrite with AI" : "Write a draft with AI"}
                 </button>
               </div>
 
@@ -216,6 +222,14 @@ export default function ReachOutStagePage() {
                 placeholder="Write the message here, or let AI write a first draft."
               />
               <p className="mt-1 text-xs text-brand-muted">Your edits are saved automatically.</p>
+              {(checks[athlete.id] || []).length > 0 ? (
+                <div className="mt-3 border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p className="font-semibold">Check before sending</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {checks[athlete.id].map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              ) : null}
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <button type="button" onClick={() => void notNow(athlete)} disabled={busy !== null} className="pc-button-secondary">
